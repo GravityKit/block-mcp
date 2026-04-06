@@ -1,0 +1,45 @@
+{
+  "name": "@gravitykit/block-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for WordPress block-level content management with preference-aware editing",
+  "main": "dist/index.cjs",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs",
+    "start": "node dist/index.cjs",
+    "dev": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --watch",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.cjs"
+  },
+  "keywords": [
+    "mcp",
+    "wordpress",
+    "blocks",
+    "gutenberg",
+    "content-management",
+    "gravitykit"
+  ],
+  "author": "GravityKit",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.7.9"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    ".env.example"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
