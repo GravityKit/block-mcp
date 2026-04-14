@@ -51,6 +51,13 @@ class REST_Controller {
 	private $block_crud;
 
 	/**
+	 * Block mutator instance.
+	 *
+	 * @var Block_Mutator
+	 */
+	private $block_mutator;
+
+	/**
 	 * Usage stats instance.
 	 *
 	 * @var Usage_Stats
@@ -64,17 +71,20 @@ class REST_Controller {
 	 * @param Pattern_Manager $pattern_manager Pattern manager.
 	 * @param Block_CRUD      $block_crud      Block CRUD.
 	 * @param Usage_Stats     $usage_stats     Usage stats.
+	 * @param Block_Mutator   $block_mutator   Block mutator.
 	 */
 	public function __construct(
 		Block_Registry $block_registry,
 		Pattern_Manager $pattern_manager,
 		Block_CRUD $block_crud,
-		Usage_Stats $usage_stats
+		Usage_Stats $usage_stats,
+		Block_Mutator $block_mutator
 	) {
 		$this->block_registry  = $block_registry;
 		$this->pattern_manager = $pattern_manager;
 		$this->block_crud      = $block_crud;
 		$this->usage_stats     = $usage_stats;
+		$this->block_mutator   = $block_mutator;
 	}
 
 	/**
@@ -424,6 +434,34 @@ class REST_Controller {
 					'count' => array(
 						'type'    => 'integer',
 						'default' => 1,
+					),
+					'dry_run' => array(
+						'type'        => 'boolean',
+						'default'     => false,
+						'description' => 'Validate and simulate the mutation without saving. Returns what would happen.',
+					),
+				),
+			)
+		);
+
+		// Revert to revision.
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)/revert',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'revert_to_revision' ),
+				'permission_callback' => array( $this, 'check_edit_permissions' ),
+				'args'                => array(
+					'id' => array(
+						'type'              => 'integer',
+						'required'          => true,
+						'sanitize_callback' => 'absint',
+					),
+					'revision_id' => array(
+						'type'     => 'integer',
+						'required' => true,
+						'sanitize_callback' => 'absint',
 					),
 				),
 			)
@@ -1008,7 +1046,39 @@ class REST_Controller {
 				$params['before'] = array_map( 'intval', $params['before'] );
 			}
 
-			$result = $this->block_crud->mutate_block_tree( $post_id, $op, $path, $params );
+			$dry_run = (bool) $request->get_param( 'dry_run' );
+			$result  = $this->block_mutator->mutate( $post_id, $op, $path, $params, $dry_run );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /posts/{id}/revert
+	 *
+	 * Revert a post to a specific revision.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function revert_to_revision( $request ) {
+		try {
+			$post_id     = (int) $request->get_param( 'id' );
+			$revision_id = (int) $request->get_param( 'revision_id' );
+
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$result = $this->block_crud->revert_to_revision( $post_id, $revision_id );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;

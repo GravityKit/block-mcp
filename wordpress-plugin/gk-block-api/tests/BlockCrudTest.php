@@ -1,0 +1,507 @@
+<?php
+/**
+ * Tests for the Block_CRUD class.
+ *
+ * Covers format_blocks, validate_block_def, get_blocks, update_block,
+ * insert_blocks, delete_blocks, replace_all_blocks, save_post_content,
+ * and rate limiting.
+ *
+ * @package GravityKit\BlockAPI\Tests
+ */
+
+use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Preferences;
+use GravityKit\BlockAPI\Block_Safety;
+use GravityKit\BlockAPI\HTML_Transformer;
+
+class BlockCrudTest extends \PHPUnit\Framework\TestCase {
+
+	/** @var Block_CRUD */
+	private $crud;
+
+	/** @var int */
+	private $post_id = 99201;
+
+	protected function setUp(): void {
+		// Register blocks used in tests.
+		$registry = \WP_Block_Type_Registry::get_instance();
+		foreach ( array(
+			'core/paragraph',
+			'core/heading',
+			'core/group',
+			'core/list',
+			'core/image',
+			'core/block',
+			'stackable/heading',
+			'ugb/text',
+		) as $name ) {
+			if ( ! $registry->get_registered( $name ) ) {
+				$registry->register( $name );
+			}
+		}
+
+		$this->crud = new Block_CRUD(
+			new Preferences(),
+			new Block_Safety(),
+			new HTML_Transformer()
+		);
+
+		$this->make_post( array() );
+		$GLOBALS['_gk_test_transients'] = array();
+	}
+
+	// ── Helpers ────────────────────────────────────────────────────
+
+	private function make_post( array $blocks ): void {
+		$post                = new \stdClass();
+		$post->ID            = $this->post_id;
+		$post->post_type     = 'page';
+		$post->post_status   = 'publish';
+		$post->post_title    = 'Test Post';
+		$post->post_content  = json_encode( $blocks );
+		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+	}
+
+	private function current_blocks(): array {
+		$content = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
+		$decoded = json_decode( $content, true );
+		return is_array( $decoded ) ? $decoded : array();
+	}
+
+	private function block( string $name, array $attrs = array(), string $html = '', array $children = array() ): array {
+		if ( ! empty( $children ) ) {
+			$opening = $html !== '' ? $html : '<div>';
+			$closing = '</div>';
+			$content = array( $opening );
+			foreach ( $children as $_ ) {
+				$content[] = null;
+			}
+			$content[] = $closing;
+			return array(
+				'blockName'    => $name,
+				'attrs'        => $attrs,
+				'innerHTML'    => $opening . $closing,
+				'innerContent' => $content,
+				'innerBlocks'  => $children,
+			);
+		}
+		return array(
+			'blockName'    => $name,
+			'attrs'        => $attrs,
+			'innerHTML'    => $html,
+			'innerContent' => $html !== '' ? array( $html ) : array(),
+			'innerBlocks'  => array(),
+		);
+	}
+
+	// ── format_blocks ──────────────────────────────────────────────
+
+	public function test_format_blocks_includes_path_and_index() {
+		$blocks = array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+
+		$this->assertCount( 2, $formatted );
+		$this->assertEquals( 0, $formatted[0]['index'] );
+		$this->assertEquals( array( 0 ), $formatted[0]['path'] );
+		$this->assertEquals( 'core/paragraph', $formatted[0]['name'] );
+		$this->assertEquals( 1, $formatted[1]['index'] );
+		$this->assertEquals( array( 1 ), $formatted[1]['path'] );
+	}
+
+	public function test_format_blocks_skips_empty_blocks() {
+		// Whitespace-only block has empty blockName.
+		$blocks = array(
+			array( 'blockName' => null, 'attrs' => array(), 'innerHTML' => "\n\n", 'innerContent' => array( "\n\n" ), 'innerBlocks' => array() ),
+			$this->block( 'core/paragraph', array(), '<p>Real</p>' ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+
+		$this->assertCount( 1, $formatted );
+		$this->assertEquals( 'core/paragraph', $formatted[0]['name'] );
+		// Path preserves raw indices — skipped block is still at raw position 0.
+		$this->assertEquals( array( 1 ), $formatted[0]['path'] );
+	}
+
+	public function test_format_blocks_nested_paths() {
+		$blocks = array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>Child</p>' ),
+				$this->block( 'core/paragraph', array(), '<p>Child 2</p>' ),
+			) ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+
+		$this->assertEquals( array( 0 ), $formatted[0]['path'] );
+		$this->assertCount( 2, $formatted[0]['innerBlocks'] );
+		$this->assertEquals( array( 0, 0 ), $formatted[0]['innerBlocks'][0]['path'] );
+		$this->assertEquals( array( 0, 1 ), $formatted[0]['innerBlocks'][1]['path'] );
+		// Flat index continues across depth.
+		$this->assertEquals( 0, $formatted[0]['index'] );
+		$this->assertEquals( 1, $formatted[0]['innerBlocks'][0]['index'] );
+		$this->assertEquals( 2, $formatted[0]['innerBlocks'][1]['index'] );
+	}
+
+	public function test_format_blocks_includes_section_name_from_metadata() {
+		$blocks = array(
+			$this->block( 'core/group', array( 'metadata' => array( 'name' => 'Hero' ) ), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>X</p>' ),
+			) ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertEquals( 'Hero', $formatted[0]['section'] );
+	}
+
+	public function test_format_blocks_includes_dynamic_flag() {
+		$blocks = array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) );
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayHasKey( 'dynamic', $formatted[0] );
+		$this->assertFalse( $formatted[0]['dynamic'] );
+	}
+
+	public function test_format_blocks_synced_pattern_ref() {
+		$pattern             = new \stdClass();
+		$pattern->ID         = 777;
+		$pattern->post_type  = 'wp_block';
+		$pattern->post_title = 'Pattern Seven';
+		$pattern->post_content = '';
+		$GLOBALS['_gk_test_posts'][777] = $pattern;
+
+		$blocks = array(
+			array(
+				'blockName'    => 'core/block',
+				'attrs'        => array( 'ref' => 777 ),
+				'innerHTML'    => '',
+				'innerContent' => array(),
+				'innerBlocks'  => array(),
+			),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+
+		$this->assertArrayHasKey( 'pattern_ref', $formatted[0] );
+		$this->assertEquals( 777, $formatted[0]['pattern_ref']['id'] );
+		$this->assertEquals( 'Pattern Seven', $formatted[0]['pattern_ref']['name'] );
+	}
+
+	public function test_format_blocks_empty_returns_empty_array() {
+		$this->assertEquals( array(), $this->crud->format_blocks( array() ) );
+	}
+
+	// ── validate_block_def ─────────────────────────────────────────
+
+	public function test_validate_block_def_empty_name_no_error() {
+		$result = $this->crud->validate_block_def( '' );
+		$this->assertNull( $result['error'] );
+		$this->assertEmpty( $result['warnings'] );
+	}
+
+	public function test_validate_block_def_core_passes_silently() {
+		$result = $this->crud->validate_block_def( 'core/paragraph' );
+		$this->assertNull( $result['error'] );
+		$this->assertEmpty( $result['warnings'] );
+	}
+
+	public function test_validate_block_def_unregistered_errors() {
+		$result = $this->crud->validate_block_def( 'totally/nonexistent-block' );
+		$this->assertInstanceOf( \WP_Error::class, $result['error'] );
+		$this->assertEquals( 'invalid_block', $result['error']->get_error_code() );
+	}
+
+	public function test_validate_block_def_legacy_errors() {
+		$result = $this->crud->validate_block_def( 'ugb/text' );
+		$this->assertInstanceOf( \WP_Error::class, $result['error'] );
+		$this->assertEquals( 'legacy_block', $result['error']->get_error_code() );
+		// Error message should mention replacement.
+		$this->assertStringContainsString( 'core/paragraph', $result['error']->get_error_message() );
+	}
+
+	public function test_validate_block_def_avoid_warns() {
+		$result = $this->crud->validate_block_def( 'stackable/heading' );
+		$this->assertNull( $result['error'] );
+		$this->assertNotEmpty( $result['warnings'] );
+		$this->assertEquals( 'stackable/heading', $result['warnings'][0]['block'] );
+		$this->assertEquals( 'core/heading', $result['warnings'][0]['suggested_replacement'] );
+	}
+
+	// ── get_blocks ─────────────────────────────────────────────────
+
+	public function test_get_blocks_returns_formatted_blocks() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>Hi</p>' ),
+		) );
+		$result = $this->crud->get_blocks( $this->post_id );
+		$this->assertIsArray( $result );
+		$this->assertCount( 1, $result );
+		$this->assertEquals( 'core/paragraph', $result[0]['name'] );
+	}
+
+	public function test_get_blocks_post_not_found() {
+		$result = $this->crud->get_blocks( 999999 );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'post_not_found', $result->get_error_code() );
+	}
+
+	public function test_get_blocks_empty_content_returns_empty() {
+		$post                = new \stdClass();
+		$post->ID            = 99299;
+		$post->post_type     = 'page';
+		$post->post_status   = 'publish';
+		$post->post_content  = '';
+		$GLOBALS['_gk_test_posts'][99299] = $post;
+
+		$result = $this->crud->get_blocks( 99299 );
+		$this->assertEquals( array(), $result );
+	}
+
+	// ── update_block ───────────────────────────────────────────────
+
+	public function test_update_block_merges_attributes() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array( 'align' => 'left' ), '<p>A</p>' ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 0, array( 'fontSize' => 'large' ), null );
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( 'left', $saved[0]['attrs']['align'] );
+		$this->assertEquals( 'large', $saved[0]['attrs']['fontSize'] );
+	}
+
+	public function test_update_block_replaces_inner_html() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>Old</p>' ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 0, array(), '<p>New</p>' );
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( '<p>New</p>', $saved[0]['innerHTML'] );
+	}
+
+	public function test_update_block_invalid_index_error() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 99, array( 'align' => 'left' ), null );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_index', $result->get_error_code() );
+	}
+
+	public function test_update_block_post_not_found() {
+		$result = $this->crud->update_block( 999999, 0, array( 'a' => 'b' ), null );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'post_not_found', $result->get_error_code() );
+	}
+
+	public function test_update_block_uses_flat_index_for_nested() {
+		// Flat index 1 should target the nested child.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>Child</p>' ),
+			) ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 1, array(), '<p>Changed</p>' );
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( '<p>Changed</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
+	}
+
+	// ── insert_blocks ──────────────────────────────────────────────
+
+	public function test_insert_blocks_appends_when_position_is_null() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( '<p>NEW</p>', $saved[1]['innerHTML'] );
+	}
+
+	public function test_insert_blocks_at_start() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			'start',
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( '<p>NEW</p>', $saved[0]['innerHTML'] );
+		$this->assertEquals( '<p>A</p>', $saved[1]['innerHTML'] );
+	}
+
+	public function test_insert_blocks_legacy_rejected() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'ugb/text', 'innerHTML' => '<p>x</p>' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'legacy_block', $result->get_error_code() );
+	}
+
+	public function test_insert_blocks_avoid_produces_warning() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'stackable/heading', 'innerHTML' => '<h2>X</h2>' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$this->assertNotEmpty( $result['warnings'] );
+	}
+
+	public function test_insert_blocks_unregistered_block_error() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'nonexistent/block' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_block', $result->get_error_code() );
+	}
+
+	// ── delete_blocks ──────────────────────────────────────────────
+
+	public function test_delete_blocks_removes_at_index() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>C</p>' ),
+		) );
+		$result = $this->crud->delete_blocks( $this->post_id, 1, 1 );
+		$this->assertTrue( $result['success'] );
+		$this->assertEquals( 1, $result['deleted_count'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( '<p>A</p>', $saved[0]['innerHTML'] );
+		$this->assertEquals( '<p>C</p>', $saved[1]['innerHTML'] );
+	}
+
+	public function test_delete_blocks_invalid_index_error() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->delete_blocks( $this->post_id, 10, 1 );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_index', $result->get_error_code() );
+	}
+
+	public function test_delete_blocks_count_caps_at_available() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+		) );
+		$result = $this->crud->delete_blocks( $this->post_id, 0, 99 );
+		$this->assertTrue( $result['success'] );
+		$this->assertEquals( 2, $result['deleted_count'] );
+		$this->assertCount( 0, $this->current_blocks() );
+	}
+
+	// ── replace_all_blocks ─────────────────────────────────────────
+
+	public function test_replace_all_blocks_rewrites_content() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>Old A</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>Old B</p>' ),
+		) );
+		$result = $this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array( 'name' => 'core/heading', 'innerHTML' => '<h2>Title</h2>' ),
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Body</p>' ),
+			)
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( 'core/heading', $saved[0]['blockName'] );
+		$this->assertEquals( 'core/paragraph', $saved[1]['blockName'] );
+	}
+
+	public function test_replace_all_blocks_legacy_rejected() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->replace_all_blocks(
+			$this->post_id,
+			array( array( 'name' => 'ugb/text' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'legacy_block', $result->get_error_code() );
+	}
+
+	public function test_replace_all_blocks_empty_array() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->replace_all_blocks( $this->post_id, array() );
+		$this->assertTrue( $result['success'] );
+		$this->assertCount( 0, $this->current_blocks() );
+	}
+
+	// ── Rate limiting ──────────────────────────────────────────────
+
+	public function test_rate_limit_passes_when_empty() {
+		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		$this->assertTrue( $result );
+	}
+
+	public function test_rate_limit_records_writes() {
+		$this->crud->record_rate_limit( $this->post_id, 'write' );
+		$this->crud->record_rate_limit( $this->post_id, 'write' );
+		$data = get_transient( 'gk_block_api_rate_' . $this->post_id );
+		$this->assertCount( 2, $data['writes'] );
+	}
+
+	public function test_rate_limit_exceeded_after_max_writes() {
+		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_WRITES; $i++ ) {
+			$this->crud->record_rate_limit( $this->post_id, 'write' );
+		}
+		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'rate_limit_exceeded', $result->get_error_code() );
+	}
+
+	public function test_rate_limit_put_separate_bucket() {
+		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_PUT; $i++ ) {
+			$this->crud->record_rate_limit( $this->post_id, 'put' );
+		}
+		$result = $this->crud->check_rate_limit( $this->post_id, 'put' );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'rate_limit_exceeded', $result->get_error_code() );
+	}
+
+	public function test_rate_limit_old_entries_expire() {
+		// Manually plant ancient timestamps (outside the 60s window).
+		$old = time() - 120;
+		$GLOBALS['_gk_test_transients'][ 'gk_block_api_rate_' . $this->post_id ] = array(
+			'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES + 5, $old ),
+			'puts'   => array(),
+		);
+		// Stale entries should be filtered; check should pass.
+		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		$this->assertTrue( $result );
+	}
+
+	// ── save_post_content ──────────────────────────────────────────
+
+	public function test_save_post_content_updates_post_content() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>Old</p>' ) ) );
+		$new_content = json_encode( array( $this->block( 'core/paragraph', array(), '<p>New</p>' ) ) );
+		$result = $this->crud->save_post_content( $this->post_id, $new_content );
+		$this->assertIsArray( $result );
+		$this->assertArrayHasKey( 'before_revision_id', $result );
+		$this->assertArrayHasKey( 'revision_id', $result );
+		$saved_post = get_post( $this->post_id );
+		$this->assertEquals( $new_content, $saved_post->post_content );
+	}
+}

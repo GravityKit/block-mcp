@@ -250,22 +250,26 @@ export class WordPressBlockClient {
    * Get all blocks on a page as structured JSON.
    *
    * @param postId - WordPress post/page ID
-   * @param fields - Optional comma-separated list of fields to include (e.g. "path,name,attributes")
+   * @param params - Optional query parameters (fields, render, search, block_name)
    * @returns Array of parsed blocks
    */
-  async getPageBlocks(postId: number, fields?: string): Promise<PageBlocksResponse> {
+  async getPageBlocks(
+    postId: number,
+    params?: { fields?: string; render?: boolean; search?: string; block_name?: string }
+  ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
       throw new Error('Post ID is required');
     }
 
-    const params: Record<string, string> = {};
-    if (fields) {
-      params.fields = fields;
-    }
+    const queryParams: Record<string, string> = {};
+    if (params?.fields) queryParams.fields = params.fields;
+    if (params?.render) queryParams.render = 'true';
+    if (params?.search) queryParams.search = params.search;
+    if (params?.block_name) queryParams.block_name = params.block_name;
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,
-      { params }
+      { params: queryParams }
     );
     return response.data;
   }
@@ -403,6 +407,25 @@ export class WordPressBlockClient {
       `/posts/${postId}/mutate`,
       data
     );
+    return response.data;
+  }
+
+  // ============================================
+  // Revert Operations
+  // ============================================
+
+  /**
+   * Revert a post to a specific revision.
+   *
+   * @param postId - WordPress post/page ID
+   * @param revisionId - Revision ID to restore
+   * @returns Revert result with revision IDs
+   */
+  async revertToRevision(postId: number, revisionId: number): Promise<unknown> {
+    if (postId === undefined || postId === null) {
+      throw new Error('Post ID is required');
+    }
+    const response = await this.client.post(`/posts/${postId}/revert`, { revision_id: revisionId });
     return response.data;
   }
 

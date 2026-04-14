@@ -20,7 +20,9 @@ export const READ_TOOLS = [
       'Each block includes its index, name, attributes, and innerHTML. ' +
       'Legacy blocks are annotated with warnings and suggested replacements. ' +
       'Use block indices from this response when calling update_block, delete_block, or insert_blocks. ' +
-      'Use fields param (e.g. "path,name,attributes") for lightweight reads that skip innerHTML.',
+      'Use fields param (e.g. "path,name,attributes") for lightweight reads that skip innerHTML. ' +
+      'Use render to include rendered output for dynamic blocks. ' +
+      'Use search to filter blocks by text content, or block_name to filter by block type.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -32,6 +34,18 @@ export const READ_TOOLS = [
           type: 'string',
           description: 'Comma-separated list of fields to include (e.g. "path,name,attributes"). ' +
             'Omit for all fields. Use for lightweight reads when you only need block structure.',
+        },
+        render: {
+          type: 'boolean',
+          description: 'Include rendered output for dynamic blocks, expand shortcodes, resolve synced pattern content, and mark blocks as dynamic/static.',
+        },
+        search: {
+          type: 'string',
+          description: 'Filter blocks by text content (searches innerHTML). Returns flat list of matches with match_count.',
+        },
+        block_name: {
+          type: 'string',
+          description: 'Filter blocks by block name (e.g. "core/button"). Returns flat list of matches with match_count.',
         },
       },
       required: ['post_id'],
@@ -56,11 +70,14 @@ export async function handleReadTool(
     case 'get_page_blocks': {
       const postId = args.post_id as number;
       const fields = args.fields as string | undefined;
+      const render = args.render as boolean | undefined;
+      const search = args.search as string | undefined;
+      const blockName = args.block_name as string | undefined;
       if (postId === undefined || postId === null) {
         throw new Error('post_id is required');
       }
 
-      const response = await client.getPageBlocks(postId, fields);
+      const response = await client.getPageBlocks(postId, { fields, render, search, block_name: blockName });
       const enriched = enrichBlockList(response.blocks);
 
       return {

@@ -53,18 +53,21 @@ spl_autoload_register( function ( $class ) {
  */
 add_action( 'rest_api_init', function () {
 	try {
-		$preferences     = new Preferences();
-		$usage_stats     = new Usage_Stats();
-		$block_registry  = new Block_Registry( $preferences, $usage_stats );
-		$pattern_manager = new Pattern_Manager( $preferences );
-		$block_safety    = new Block_Safety();
-		$block_crud      = new Block_CRUD( $preferences, $block_safety );
+		$preferences      = new Preferences();
+		$usage_stats      = new Usage_Stats();
+		$block_registry   = new Block_Registry( $preferences, $usage_stats );
+		$pattern_manager  = new Pattern_Manager( $preferences );
+		$block_safety     = new Block_Safety();
+		$html_transformer = new HTML_Transformer();
+		$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer );
+		$block_mutator    = new Block_Mutator( $block_crud, $preferences, $block_safety, $html_transformer );
 
 		$controller = new REST_Controller(
 			$block_registry,
 			$pattern_manager,
 			$block_crud,
-			$usage_stats
+			$usage_stats,
+			$block_mutator
 		);
 
 		$controller->register_routes();

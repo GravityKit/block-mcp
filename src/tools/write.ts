@@ -171,6 +171,26 @@ export const WRITE_TOOLS = [
       required: ['post_id', 'blocks'],
     },
   },
+  {
+    name: 'revert_to_revision',
+    description:
+      'Revert a post to a previous revision. Use the revision_id from a prior ' +
+      "write operation's before_revision_id or revision_id field to undo changes.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        post_id: {
+          type: 'number',
+          description: 'WordPress post or page ID.',
+        },
+        revision_id: {
+          type: 'number',
+          description: 'The revision ID to restore (from a previous write response).',
+        },
+      },
+      required: ['post_id', 'revision_id'],
+    },
+  },
 ];
 
 /**
@@ -280,6 +300,15 @@ export async function handleWriteTool(
         };
       }
 
+      return result;
+    }
+
+    case 'revert_to_revision': {
+      const postId = args.post_id as number;
+      const revisionId = args.revision_id as number;
+      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (revisionId === undefined || revisionId === null) throw new Error('revision_id is required');
+      const result = await client.revertToRevision(postId, revisionId);
       return result;
     }
 
