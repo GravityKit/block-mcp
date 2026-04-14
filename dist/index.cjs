@@ -36375,6 +36375,24 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Resolve a URL or path to a WordPress post ID.
+   *
+   * Accepts any URL on the site (full URL or path). Handles all post types,
+   * permalinks, and pretty URLs via url_to_postid().
+   *
+   * @param url - Full URL or path (e.g. "/products/gravityedit/")
+   * @returns Post ID, type, title, status, slug, and edit URL
+   */
+  async resolveUrl(url3) {
+    if (!url3) {
+      throw new Error("URL is required");
+    }
+    const response = await this.client.get("/resolve", {
+      params: { url: url3 }
+    });
+    return response.data;
+  }
+  /**
    * Get site-wide block and pattern usage statistics.
    *
    * @param refresh - If true, bust the transient cache and regenerate stats
@@ -36786,6 +36804,20 @@ var DISCOVERY_TOOLS = [
         }
       }
     }
+  },
+  {
+    name: "resolve_url",
+    description: "Resolve a URL or path to a WordPress post ID. Accepts full URLs (https://site.com/path/) or paths (/path/). Handles all post types and pretty permalinks. Use this before any get_page_blocks / update / mutate call when you only have a URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: 'Full URL or site-relative path (e.g. "/products/gravityedit/").'
+        }
+      },
+      required: ["url"]
+    }
   }
 ];
 async function handleDiscoveryTool(toolName, args, client2) {
@@ -36829,6 +36861,13 @@ async function handleDiscoveryTool(toolName, args, client2) {
       const usage = await client2.getSiteUsage(args.refresh);
       return usage;
     }
+    case "resolve_url": {
+      const url3 = args.url;
+      if (typeof url3 !== "string" || url3.length === 0) {
+        throw new Error("url is required");
+      }
+      return await client2.resolveUrl(url3);
+    }
     default:
       throw new Error(`Unknown discovery tool: ${toolName}`);
   }
@@ -36838,13 +36877,17 @@ async function handleDiscoveryTool(toolName, args, client2) {
 var READ_TOOLS = [
   {
     name: "get_page_blocks",
-    description: "Get a post's blocks. Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
+    description: "Get a post's blocks. Pass either post_id OR url (full URL or site-relative path \u2014 resolved server-side; do NOT shell out to curl/wp-json to look up IDs). Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
     inputSchema: {
       type: "object",
       properties: {
         post_id: {
           type: "number",
-          description: "Post ID."
+          description: "Post ID. Provide either this or url."
+        },
+        url: {
+          type: "string",
+          description: "Full URL (https://site.com/path/) or site-relative path (/path/). Resolved via url_to_postid. Provide either this or post_id."
         },
         fields: {
           type: "string",
@@ -36870,23 +36913,27 @@ var READ_TOOLS = [
           type: "boolean",
           description: "Return only the summary object (no blocks). Fastest page inspection."
         }
-      },
-      required: ["post_id"]
+      }
     }
   }
 ];
 async function handleReadTool(toolName, args, client2) {
   switch (toolName) {
     case "get_page_blocks": {
-      const postId = args.post_id;
+      let postId = args.post_id;
+      const url3 = args.url;
       const fields = args.fields;
       const render = args.render;
       const search = args.search;
       const blockName = args.block_name;
       const outline = args.outline;
       const summaryOnly = args.summary_only;
+      if ((postId === void 0 || postId === null) && !url3) {
+        throw new Error("Either post_id or url is required");
+      }
       if (postId === void 0 || postId === null) {
-        throw new Error("post_id is required");
+        const resolved = await client2.resolveUrl(url3);
+        postId = resolved.post_id;
       }
       const response = await client2.getPageBlocks(postId, {
         fields,
@@ -37459,7 +37506,17 @@ var server = new Server(
     capabilities: {
       tools: {},
       resources: {}
-    }
+    },
+    instructions: `Block-level WordPress CRUD for gravitykit.com.
+
+URL \u2192 post ID: when the user gives you a URL (e.g. https://www.gravitykit.com/products/gravityedit/), DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
+
+- get_page_blocks accepts \`url\` as an alternative to \`post_id\` \u2014 the server resolves it internally.
+- For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
+
+Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) \u2192 update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
+
+Block preferences (read the block-mcp://block-preferences resource for details): prefer \`filter/\` and \`core/\`; never insert \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks.`
   }
 );
 var ALL_TOOLS = [
@@ -37475,7 +37532,19 @@ var WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
 var PATTERN_TOOL_NAMES = new Set(PATTERN_TOOLS.map((t) => t.name));
 var MUTATE_TOOL_NAMES = new Set(MUTATE_TOOLS.map((t) => t.name));
 var BLOCK_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-var BLOCK_PREFERENCES_CONTENT = `# GravityKit Block Preferences
+var BLOCK_PREFERENCES_CONTENT = `# GravityKit Block MCP \u2014 Agent Guide
+
+## URL \u2192 post ID resolution
+
+NEVER run curl, wget, or any bash/shell command to hit wp-json or resolve a URL to a post ID.
+The MCP does this for you:
+
+- \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
+- For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
+
+If the user says "change X on https://www.gravitykit.com/products/gravityedit/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
+
+## Block preferences
 
 When editing pages on gravitykit.com:
 

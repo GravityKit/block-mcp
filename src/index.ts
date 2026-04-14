@@ -73,6 +73,16 @@ const server = new Server(
       tools: {},
       resources: {},
     },
+    instructions: `Block-level WordPress CRUD for gravitykit.com.
+
+URL → post ID: when the user gives you a URL (e.g. https://www.gravitykit.com/products/gravityedit/), DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
+
+- get_page_blocks accepts \`url\` as an alternative to \`post_id\` — the server resolves it internally.
+- For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
+
+Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) → update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
+
+Block preferences (read the block-mcp://block-preferences resource for details): prefer \`filter/\` and \`core/\`; never insert \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks.`,
   }
 );
 
@@ -109,7 +119,19 @@ const MUTATE_TOOL_NAMES = new Set(MUTATE_TOOLS.map((t) => t.name));
 
 const BLOCK_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
 
-const BLOCK_PREFERENCES_CONTENT = `# GravityKit Block Preferences
+const BLOCK_PREFERENCES_CONTENT = `# GravityKit Block MCP — Agent Guide
+
+## URL → post ID resolution
+
+NEVER run curl, wget, or any bash/shell command to hit wp-json or resolve a URL to a post ID.
+The MCP does this for you:
+
+- \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
+- For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
+
+If the user says "change X on https://www.gravitykit.com/products/gravityedit/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` — not a shell command.
+
+## Block preferences
 
 When editing pages on gravitykit.com:
 

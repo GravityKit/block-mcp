@@ -92,6 +92,21 @@ export const DISCOVERY_TOOLS = [
       },
     },
   },
+  {
+    name: 'resolve_url',
+    description:
+      'Resolve a URL or path to a WordPress post ID. Accepts full URLs (https://site.com/path/) or paths (/path/). Handles all post types and pretty permalinks. Use this before any get_page_blocks / update / mutate call when you only have a URL.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Full URL or site-relative path (e.g. "/products/gravityedit/").',
+        },
+      },
+      required: ['url'],
+    },
+  },
 ];
 
 /**
@@ -153,6 +168,14 @@ export async function handleDiscoveryTool(
     case 'get_site_usage': {
       const usage = await client.getSiteUsage(args.refresh as boolean | undefined);
       return usage;
+    }
+
+    case 'resolve_url': {
+      const url = args.url;
+      if (typeof url !== 'string' || url.length === 0) {
+        throw new Error('url is required');
+      }
+      return await client.resolveUrl(url);
     }
 
     default:

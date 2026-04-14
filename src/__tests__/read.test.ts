@@ -17,13 +17,48 @@ const mockClient = {
       max_path_depth: 0,
     },
   }),
+  resolveUrl: vi.fn().mockResolvedValue({
+    post_id: 532208,
+    post_type: 'download',
+    title: 'GravityEdit',
+    status: 'publish',
+    slug: 'gravityedit',
+    edit_url: 'https://example.com/wp-admin/post.php?post=532208&action=edit',
+  }),
 } as any;
 
 describe('handleReadTool', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('requires post_id', async () => {
-    await expect(handleReadTool('get_page_blocks', {}, mockClient)).rejects.toThrow('post_id');
+  it('requires post_id or url', async () => {
+    await expect(handleReadTool('get_page_blocks', {}, mockClient)).rejects.toThrow(/post_id or url/);
+  });
+
+  // ── url resolution ────────────────────────────────────────────
+  it('resolves url to post_id and calls getPageBlocks', async () => {
+    const result = await handleReadTool(
+      'get_page_blocks',
+      { url: 'https://www.gravitykit.com/products/gravityedit/' },
+      mockClient
+    ) as any;
+    expect(mockClient.resolveUrl).toHaveBeenCalledWith('https://www.gravitykit.com/products/gravityedit/');
+    expect(mockClient.getPageBlocks).toHaveBeenCalledWith(532208, expect.any(Object));
+    expect(result.post_id).toBe(532208);
+  });
+
+  it('does not call resolveUrl when post_id is provided', async () => {
+    await handleReadTool('get_page_blocks', { post_id: 42 }, mockClient);
+    expect(mockClient.resolveUrl).not.toHaveBeenCalled();
+  });
+
+  it('prefers post_id over url when both are provided', async () => {
+    await handleReadTool(
+      'get_page_blocks',
+      { post_id: 42, url: 'https://example.com/other/' },
+      mockClient
+    );
+    expect(mockClient.resolveUrl).not.toHaveBeenCalled();
+    expect(mockClient.getPageBlocks).toHaveBeenCalledWith(42, expect.any(Object));
   });
 
   it('calls client with post_id only', async () => {

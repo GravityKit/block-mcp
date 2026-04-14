@@ -19,6 +19,7 @@ import type {
   PatternInsertResponse,
   MutationRequest,
   MutationResponse,
+  ResolveUrlResponse,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -224,6 +225,26 @@ export class WordPressBlockClient {
 
     const response = await this.client.get<PatternsResponse>('/patterns/search', {
       params: { q: query },
+    });
+    return response.data;
+  }
+
+  /**
+   * Resolve a URL or path to a WordPress post ID.
+   *
+   * Accepts any URL on the site (full URL or path). Handles all post types,
+   * permalinks, and pretty URLs via url_to_postid().
+   *
+   * @param url - Full URL or path (e.g. "/products/gravityedit/")
+   * @returns Post ID, type, title, status, slug, and edit URL
+   */
+  async resolveUrl(url: string): Promise<ResolveUrlResponse> {
+    if (!url) {
+      throw new Error('URL is required');
+    }
+
+    const response = await this.client.get<ResolveUrlResponse>('/resolve', {
+      params: { url },
     });
     return response.data;
   }

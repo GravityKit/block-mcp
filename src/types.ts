@@ -174,6 +174,16 @@ export interface BlockDeleteResponse {
   revision_id: number;
 }
 
+/** Response from URL resolution (GET /resolve). */
+export interface ResolveUrlResponse {
+  post_id: number;
+  post_type: string;
+  title: string;
+  status: string;
+  slug: string;
+  edit_url: string;
+}
+
 /** Response from pattern insertion (POST /posts/{id}/insert-pattern). */
 export interface PatternInsertResponse {
   success: boolean;

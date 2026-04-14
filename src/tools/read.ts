@@ -16,13 +16,17 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      "Get a post's blocks. Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
+      "Get a post's blocks. Pass either post_id OR url (full URL or site-relative path — resolved server-side; do NOT shell out to curl/wp-json to look up IDs). Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'Post ID.',
+          description: 'Post ID. Provide either this or url.',
+        },
+        url: {
+          type: 'string',
+          description: 'Full URL (https://site.com/path/) or site-relative path (/path/). Resolved via url_to_postid. Provide either this or post_id.',
         },
         fields: {
           type: 'string',
@@ -49,7 +53,6 @@ export const READ_TOOLS = [
           description: 'Return only the summary object (no blocks). Fastest page inspection.',
         },
       },
-      required: ['post_id'],
     },
   },
 ];
@@ -69,15 +72,22 @@ export async function handleReadTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'get_page_blocks': {
-      const postId = args.post_id as number;
+      let postId = args.post_id as number | undefined;
+      const url = args.url as string | undefined;
       const fields = args.fields as string | undefined;
       const render = args.render as boolean | undefined;
       const search = args.search as string | undefined;
       const blockName = args.block_name as string | undefined;
       const outline = args.outline as boolean | undefined;
       const summaryOnly = args.summary_only as boolean | undefined;
+
+      if ((postId === undefined || postId === null) && !url) {
+        throw new Error('Either post_id or url is required');
+      }
+
       if (postId === undefined || postId === null) {
-        throw new Error('post_id is required');
+        const resolved = await client.resolveUrl(url as string);
+        postId = resolved.post_id;
       }
 
       const response = await client.getPageBlocks(postId, {
