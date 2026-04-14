@@ -15,41 +15,29 @@ export const PATTERN_TOOLS = [
   {
     name: 'insert_pattern',
     description:
-      'Insert a WordPress block pattern into a page. ' +
-      'By default, inserts as a synced reference (core/block) so it stays linked ' +
-      'to the source pattern — changes to the pattern update all pages. ' +
-      'Set synced: false to inline the pattern blocks for per-page customization. ' +
-      'Use list_patterns and get_pattern first to find the right pattern.',
+      'Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID to insert the pattern into.',
+          description: 'Post ID.',
         },
         pattern_id: {
           type: ['number', 'string'],
-          description:
-            'Pattern to insert — numeric post ID for synced patterns, ' +
-            'or registered pattern name.',
+          description: 'Numeric post ID (synced) or registered pattern name.',
         },
         after: {
           type: 'number',
-          description:
-            'Insert after this block index (0-based). ' +
-            'Use -1 or omit to append at the end of the page.',
+          description: 'Insert after index. -1/omit = append.',
         },
         before: {
           type: 'number',
-          description:
-            'Insert before this block index (alternative to "after").',
+          description: 'Insert before index (alternative to after).',
         },
         synced: {
           type: 'boolean',
-          description:
-            'If true (default), insert as a synced core/block reference. ' +
-            'If false, inline the pattern blocks as an independent copy ' +
-            'that can be edited per-page without affecting other pages.',
+          description: 'true (default) = synced reference; false = inline copy.',
         },
       },
       required: ['post_id', 'pattern_id'],

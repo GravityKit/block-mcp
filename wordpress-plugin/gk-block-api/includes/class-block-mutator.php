@@ -113,18 +113,42 @@ class Block_Mutator {
 			$segment = $path[ $i ];
 
 			if ( ! isset( $parent[ $segment ] ) ) {
+				$valid_range = count( $parent ) > 0 ? '[0..' . ( count( $parent ) - 1 ) . ']' : '(empty)';
+				$partial_path = array_slice( $path, 0, $i );
 				return new \WP_Error(
 					'invalid_path',
-					sprintf( __( 'Path segment %1$d (index %2$d) is out of bounds.', 'gk-block-api' ), $i, $segment ),
-					array( 'status' => 400 )
+					sprintf(
+						/* translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path */
+						__( 'Path segment %1$d (index %2$d) is out of bounds. Valid indices at this level: %3$s. Partial path up to failure: [%4$s]. Run GET /posts/{id}/blocks?outline=true to see the page structure.', 'gk-block-api' ),
+						$i,
+						$segment,
+						$valid_range,
+						implode( ', ', $partial_path )
+					),
+					array(
+						'status'       => 400,
+						'valid_range'  => $valid_range,
+						'partial_path' => $partial_path,
+					)
 				);
 			}
 
 			if ( empty( $parent[ $segment ]['innerBlocks'] ) ) {
+				$block_name   = isset( $parent[ $segment ]['blockName'] ) ? $parent[ $segment ]['blockName'] : 'unknown';
+				$partial_path = array_slice( $path, 0, $i + 1 );
 				return new \WP_Error(
 					'invalid_path',
-					sprintf( __( 'Block at path segment %d has no inner blocks.', 'gk-block-api' ), $i ),
-					array( 'status' => 400 )
+					sprintf(
+						/* translators: 1: block name, 2: partial path */
+						__( 'Block "%1$s" at [%2$s] has no inner blocks. Cannot traverse into it. Use update-attrs/update-html on this block directly, or wrap-in-group to add children.', 'gk-block-api' ),
+						$block_name,
+						implode( ', ', $partial_path )
+					),
+					array(
+						'status'       => 400,
+						'block_name'   => $block_name,
+						'partial_path' => $partial_path,
+					)
 				);
 			}
 
@@ -138,10 +162,19 @@ class Block_Mutator {
 		$target_index = end( $path );
 
 		if ( ! isset( $parent[ $target_index ] ) ) {
+			$valid_range = count( $parent ) > 0 ? '[0..' . ( count( $parent ) - 1 ) . ']' : '(empty)';
 			return new \WP_Error(
 				'invalid_path',
-				sprintf( __( 'Target block at index %d not found.', 'gk-block-api' ), $target_index ),
-				array( 'status' => 400 )
+				sprintf(
+					/* translators: 1: requested target index, 2: valid range */
+					__( 'Target block at index %1$d not found. Valid indices at this level: %2$s. Run GET /posts/{id}/blocks?outline=true to see the page structure.', 'gk-block-api' ),
+					$target_index,
+					$valid_range
+				),
+				array(
+					'status'      => 400,
+					'valid_range' => $valid_range,
+				)
 			);
 		}
 

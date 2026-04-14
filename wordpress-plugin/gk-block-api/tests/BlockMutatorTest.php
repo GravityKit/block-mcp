@@ -834,4 +834,96 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$saved = $this->current_blocks();
 		$this->assertEquals( '<p>Changed</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
 	}
+
+	// ── Enhanced error messages ────────────────────────────────────
+
+	public function test_invalid_path_error_includes_valid_range() {
+		// Target out-of-bounds at root level: single block, try path [5].
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 5 ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_path', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'valid_range', $data );
+		// Single block: valid range is [0..0].
+		$this->assertEquals( '[0..0]', $data['valid_range'] );
+		// Error message should include the range as well.
+		$this->assertStringContainsString( '[0..0]', $result->get_error_message() );
+		$this->assertStringContainsString( 'outline=true', $result->get_error_message() );
+	}
+
+	public function test_invalid_path_error_includes_partial_path_on_traversal() {
+		// Traversal failure: path [0, 0, 5] where [0,0] is valid container but 5 is out of bounds.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/group', array(), '<div></div>', array(
+					$this->block( 'core/paragraph', array(), '<p>Only child</p>' ),
+				) ),
+			) ),
+		) );
+		// Path [0, 7, 0] — segment 1 (index 7) is out of bounds; partial_path = [0].
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 0, 7, 0 ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'partial_path', $data );
+		$this->assertEquals( array( 0 ), $data['partial_path'] );
+		$this->assertArrayHasKey( 'valid_range', $data );
+		// At [0]'s innerBlocks level there's one child (the inner group), so range is [0..0].
+		$this->assertEquals( '[0..0]', $data['valid_range'] );
+		// Message mentions outline=true guidance.
+		$this->assertStringContainsString( 'outline=true', $result->get_error_message() );
+	}
+
+	public function test_path_with_no_inner_blocks_error_includes_block_name() {
+		// Try to traverse into a paragraph (no inner blocks).
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>Leaf</p>' ),
+		) );
+		// Path [0, 0] — paragraph has no innerBlocks.
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 0, 0 ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_path', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'block_name', $data );
+		$this->assertEquals( 'core/paragraph', $data['block_name'] );
+		$this->assertArrayHasKey( 'partial_path', $data );
+		$this->assertEquals( array( 0 ), $data['partial_path'] );
+		// Message names the block.
+		$this->assertStringContainsString( 'core/paragraph', $result->get_error_message() );
+	}
+
+	public function test_target_out_of_bounds_error_message_includes_range() {
+		// Target out of bounds (last segment) inside a valid container.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+				$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+			) ),
+		) );
+		// Path [0, 5] — container exists, but index 5 is out of range (only 0,1 exist).
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 0, 5 ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_path', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'valid_range', $data );
+		$this->assertEquals( '[0..1]', $data['valid_range'] );
+		$this->assertStringContainsString( '[0..1]', $result->get_error_message() );
+	}
+
+	public function test_invalid_path_empty_parent_valid_range() {
+		// No blocks in post at all — any target should fail with "(empty)" range.
+		$this->make_post( array() );
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 0 ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'valid_range', $data );
+		$this->assertEquals( '(empty)', $data['valid_range'] );
+	}
 }

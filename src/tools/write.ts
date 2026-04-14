@@ -16,34 +16,25 @@ export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
-      "Update a single block's attributes and/or HTML content. " +
-      'Use get_page_blocks first to find the block index. ' +
-      'Attributes are merged (partial update); innerHTML is replaced entirely. ' +
-      'Creates a WordPress revision for every change.',
+      "Update a block's attributes and/or innerHTML. Attributes merge; innerHTML replaces. Creates a revision.",
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID containing the block.',
+          description: 'Post ID.',
         },
         block_index: {
           type: 'number',
-          description:
-            'Zero-based index of the block to update ' +
-            '(from get_page_blocks response).',
+          description: 'Zero-based flat index from get_page_blocks.',
         },
         attributes: {
           type: 'object',
-          description:
-            'Partial attribute update. Keys are merged with existing attributes. ' +
-            'Example: { "content": "New text", "level": 2 }',
+          description: 'Partial attributes to merge.',
         },
         innerHTML: {
           type: 'string',
-          description:
-            "Replacement HTML for the block's inner content. " +
-            'Replaces the entire innerHTML (not merged).',
+          description: 'Replacement innerHTML (not merged).',
         },
       },
       required: ['post_id', 'block_index'],
@@ -52,47 +43,39 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert one or more blocks at a specific position on a page. ' +
-      'Specify either "after" (insert after index) or "before" (insert before index). ' +
-      'Use after: -1 or omit to append at the end. ' +
-      'Warns if any inserted blocks are from legacy namespaces. ' +
-      'Always check list_block_types and list_patterns before inserting.',
+      'Insert blocks at a position. Use after/before index; omit or after:-1 to append. Legacy namespaces are rejected.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID.',
+          description: 'Post ID.',
         },
         after: {
           type: ['number', 'string'],
-          description:
-            'Insert after this block index (0-based). ' +
-            'Use -1 or omit to append at end. Use "start" to prepend.',
+          description: 'Insert after index. -1/omit = append, "start" = prepend.',
         },
         before: {
           type: 'number',
-          description:
-            'Insert before this block index (alternative to "after").',
+          description: 'Insert before index (alternative to after).',
         },
         blocks: {
           type: 'array',
-          description: 'Array of blocks to insert.',
+          description: 'Blocks to insert.',
           items: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description:
-                  'Fully-qualified block name (e.g. "core/heading", "filter/testimonial-wall").',
+                description: 'Fully-qualified block name (e.g. "core/heading").',
               },
               attributes: {
                 type: 'object',
-                description: 'Block attributes (e.g. { "level": 2, "content": "Title" }).',
+                description: 'Block attributes.',
               },
               innerHTML: {
                 type: 'string',
-                description: 'Optional raw HTML content for the block.',
+                description: 'Raw HTML content.',
               },
             },
             required: ['name'],
@@ -105,26 +88,21 @@ export const WRITE_TOOLS = [
   {
     name: 'delete_block',
     description:
-      'Remove a block (or consecutive blocks) from a page. ' +
-      'Use get_page_blocks first to find the correct index. ' +
-      'If the block is a synced pattern reference (core/block), this removes ' +
-      'the reference — it does NOT delete the pattern itself.',
+      'Remove block(s) at index. For core/block, removes the reference only, not the source pattern.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID.',
+          description: 'Post ID.',
         },
         block_index: {
           type: 'number',
-          description: 'Zero-based index of the block to remove.',
+          description: 'Zero-based index.',
         },
         count: {
           type: 'number',
-          description:
-            'Number of consecutive blocks to remove starting at block_index. ' +
-            'Default: 1. Use for removing a group of related blocks.',
+          description: 'Consecutive blocks to remove. Default 1.',
         },
       },
       required: ['post_id', 'block_index'],
@@ -133,21 +111,17 @@ export const WRITE_TOOLS = [
   {
     name: 'replace_all_blocks',
     description:
-      'Full page rewrite — replaces ALL blocks on a page. ' +
-      'Creates a revision before overwriting so changes can be reverted. ' +
-      'Validates all block names against the registry. ' +
-      'Use this for major page restructuring; prefer update_block/insert_blocks ' +
-      'for surgical edits.',
+      'Replace ALL blocks on a page. Creates a revision. Use for major restructuring; prefer update_block/insert_blocks for edits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID.',
+          description: 'Post ID.',
         },
         blocks: {
           type: 'array',
-          description: 'Complete array of blocks for the page (replaces everything).',
+          description: 'Complete blocks array (replaces all).',
           items: {
             type: 'object',
             properties: {
@@ -161,7 +135,7 @@ export const WRITE_TOOLS = [
               },
               innerHTML: {
                 type: 'string',
-                description: 'Raw HTML content for the block.',
+                description: 'Raw HTML content.',
               },
             },
             required: ['name'],
@@ -174,18 +148,17 @@ export const WRITE_TOOLS = [
   {
     name: 'revert_to_revision',
     description:
-      'Revert a post to a previous revision. Use the revision_id from a prior ' +
-      "write operation's before_revision_id or revision_id field to undo changes.",
+      'Revert a post to a revision ID returned by a prior write response.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID.',
+          description: 'Post ID.',
         },
         revision_id: {
           type: 'number',
-          description: 'The revision ID to restore (from a previous write response).',
+          description: 'Revision ID to restore.',
         },
       },
       required: ['post_id', 'revision_id'],

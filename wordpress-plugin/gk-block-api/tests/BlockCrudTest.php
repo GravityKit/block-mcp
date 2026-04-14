@@ -189,6 +189,80 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( array(), $this->crud->format_blocks( array() ) );
 	}
 
+	// ── text_preview ───────────────────────────────────────────────
+
+	public function test_text_preview_stripped_tags() {
+		$blocks = array(
+			$this->block( 'core/paragraph', array(), '<p><strong>Hello</strong> world</p>' ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayHasKey( 'text_preview', $formatted[0] );
+		$this->assertEquals( 'Hello world', $formatted[0]['text_preview'] );
+	}
+
+	public function test_text_preview_decoded_entities() {
+		$blocks = array(
+			$this->block(
+				'core/paragraph',
+				array(),
+				'<p>Tom &amp; Jerry&nbsp;say&#8217;hi</p>'
+			),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayHasKey( 'text_preview', $formatted[0] );
+		// &amp; → &, &nbsp; → non-breaking space (normalized to space), &#8217; → ’
+		$this->assertStringContainsString( 'Tom & Jerry', $formatted[0]['text_preview'] );
+		$this->assertStringContainsString( "\xE2\x80\x99", $formatted[0]['text_preview'] ); // right single quote
+	}
+
+	public function test_text_preview_truncated_to_100_chars() {
+		$long = str_repeat( 'a', 250 );
+		$blocks = array(
+			$this->block( 'core/paragraph', array(), '<p>' . $long . '</p>' ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayHasKey( 'text_preview', $formatted[0] );
+		$this->assertEquals( 100, mb_strlen( $formatted[0]['text_preview'] ) );
+	}
+
+	public function test_text_preview_not_present_for_empty_innerHTML() {
+		// core/block with empty innerHTML
+		$blocks = array(
+			array(
+				'blockName'    => 'core/paragraph',
+				'attrs'        => array(),
+				'innerHTML'    => '',
+				'innerContent' => array(),
+				'innerBlocks'  => array(),
+			),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayNotHasKey( 'text_preview', $formatted[0] );
+	}
+
+	public function test_text_preview_collapses_whitespace() {
+		$multiline = "<p>Line one\n\nLine two\t\tLine\tthree</p>";
+		$blocks = array(
+			$this->block( 'core/paragraph', array(), $multiline ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		$this->assertArrayHasKey( 'text_preview', $formatted[0] );
+		// Whitespace runs collapsed to single spaces.
+		$this->assertEquals( 'Line one Line two Line three', $formatted[0]['text_preview'] );
+		// No newlines or tabs remain.
+		$this->assertDoesNotMatchRegularExpression( '/[\r\n\t]/', $formatted[0]['text_preview'] );
+	}
+
+	public function test_text_preview_not_present_when_only_whitespace() {
+		// innerHTML that produces empty preview after stripping/trimming.
+		$blocks = array(
+			$this->block( 'core/paragraph', array(), '<p>   </p>' ),
+		);
+		$formatted = $this->crud->format_blocks( $blocks );
+		// Preview is empty after strip → trim, so key is not set.
+		$this->assertArrayNotHasKey( 'text_preview', $formatted[0] );
+	}
+
 	// ── validate_block_def ─────────────────────────────────────────
 
 	public function test_validate_block_def_empty_name_no_error() {

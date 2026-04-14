@@ -16,36 +16,37 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      'Get all blocks on a WordPress page as structured JSON. ' +
-      'Each block includes its index, name, attributes, and innerHTML. ' +
-      'Legacy blocks are annotated with warnings and suggested replacements. ' +
-      'Use block indices from this response when calling update_block, delete_block, or insert_blocks. ' +
-      'Use fields param (e.g. "path,name,attributes") for lightweight reads that skip innerHTML. ' +
-      'Use render to include rendered output for dynamic blocks. ' +
-      'Use search to filter blocks by text content, or block_name to filter by block type.',
+      "Get a post's blocks. Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: {
           type: 'number',
-          description: 'WordPress post or page ID to read blocks from.',
+          description: 'Post ID.',
         },
         fields: {
           type: 'string',
-          description: 'Comma-separated list of fields to include (e.g. "path,name,attributes"). ' +
-            'Omit for all fields. Use for lightweight reads when you only need block structure.',
+          description: 'Comma-separated fields (e.g. "path,name,text_preview"). Omit for all.',
         },
         render: {
           type: 'boolean',
-          description: 'Include rendered output for dynamic blocks, expand shortcodes, resolve synced pattern content, and mark blocks as dynamic/static.',
+          description: 'Expand shortcodes, resolve synced patterns, mark dynamic/static.',
         },
         search: {
           type: 'string',
-          description: 'Filter blocks by text content (searches innerHTML). Returns flat list of matches with match_count.',
+          description: 'Filter by text in innerHTML. Returns flat matches.',
         },
         block_name: {
           type: 'string',
-          description: 'Filter blocks by block name (e.g. "core/button"). Returns flat list of matches with match_count.',
+          description: 'Filter by block name (e.g. "core/button"). Returns flat matches.',
+        },
+        outline: {
+          type: 'boolean',
+          description: 'Return only headings and named sections as a flat outline. Fast page structure view.',
+        },
+        summary_only: {
+          type: 'boolean',
+          description: 'Return only the summary object (no blocks). Fastest page inspection.',
         },
       },
       required: ['post_id'],
@@ -73,19 +74,32 @@ export async function handleReadTool(
       const render = args.render as boolean | undefined;
       const search = args.search as string | undefined;
       const blockName = args.block_name as string | undefined;
+      const outline = args.outline as boolean | undefined;
+      const summaryOnly = args.summary_only as boolean | undefined;
       if (postId === undefined || postId === null) {
         throw new Error('post_id is required');
       }
 
-      const response = await client.getPageBlocks(postId, { fields, render, search, block_name: blockName });
-      const enriched = enrichBlockList(response.blocks);
+      const response = await client.getPageBlocks(postId, {
+        fields, render, search, block_name: blockName, outline, summary_only: summaryOnly,
+      });
+
+      // summary_only mode: return server summary as-is.
+      if (summaryOnly) {
+        return {
+          post_id: postId,
+          summary: (response as { summary?: unknown }).summary,
+        };
+      }
+
+      const enriched = enrichBlockList(response.blocks || []);
 
       return {
         post_id: postId,
+        summary: (response as { summary?: unknown }).summary,
         blocks: enriched.blocks,
         block_count: enriched.blocks.length,
         warnings: enriched.warnings,
-        summary: enriched.summary,
       };
     }
 

@@ -893,6 +893,15 @@ class Block_CRUD {
 				}
 
 				$data['innerHTML'] = $html;
+
+				// Add text_preview: stripped, decoded, truncated content for quick scanning.
+				// Lets AI agents identify blocks without regex parsing innerHTML.
+				$preview = wp_strip_all_tags( $html );
+				$preview = html_entity_decode( $preview, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+				$preview = preg_replace( '/\s+/', ' ', trim( $preview ) );
+				if ( ! empty( $preview ) ) {
+					$data['text_preview'] = mb_substr( $preview, 0, 100 );
+				}
 			}
 
 			// For dynamic blocks in render mode, include the server-rendered output.

@@ -31,43 +31,38 @@ const VALID_OPS: Set<MutationOp> = new Set([
 export const MUTATE_TOOLS = [{
   name: 'mutate_block_tree',
   description:
-    'Perform a single structural operation on a nested block tree using path-based addressing. ' +
-    'Supports: update-attrs, update-html, replace-block, remove-block, wrap-in-group, ' +
-    'unwrap-group, insert-child, duplicate, move. ' +
-    'Use get_page_blocks first to find block paths. Each call creates a WordPress revision. ' +
-    'Paths are integer arrays like [0, 2, 1] meaning "block 0 → innerBlock 2 → innerBlock 1". ' +
-    'For move: use "before" to specify where blocks should go (pre-move path), and "count" to move multiple consecutive blocks as a section.',
+    'Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Paths are integer arrays ([0,2,1] = block 0 > innerBlock 2 > innerBlock 1) from get_page_blocks. Creates a revision.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       post_id: {
         type: 'number',
-        description: 'WordPress post or page ID.',
+        description: 'Post ID.',
       },
       op: {
         type: 'string',
         enum: ['update-attrs', 'update-html', 'replace-block', 'remove-block',
                'wrap-in-group', 'unwrap-group', 'insert-child', 'duplicate', 'move'],
-        description: 'The mutation operation to perform.',
+        description: 'Operation to perform.',
       },
       path: {
         type: 'array',
         items: { type: 'integer' },
-        description: 'Path to the target block as array of indices, e.g. [0, 2, 1]. Get paths from get_page_blocks response.',
+        description: 'Target block path, e.g. [0,2,1].',
       },
       attributes: {
         type: 'object',
-        description: 'For update-attrs: attributes to merge into the block.',
+        description: 'update-attrs: attributes to merge.',
       },
       innerHTML: {
         type: 'string',
-        description: 'For update-html: replacement HTML for the block inner content.',
+        description: 'update-html: replacement innerHTML.',
       },
       block: {
         type: 'object',
-        description: 'For replace-block/insert-child: the new block definition { name, attributes?, innerHTML?, innerBlocks? }.',
+        description: 'replace-block/insert-child: { name, attributes?, innerHTML?, innerBlocks? }.',
         properties: {
-          name: { type: 'string', description: 'Fully-qualified block name (e.g. "core/heading").' },
+          name: { type: 'string', description: 'Fully-qualified block name.' },
           attributes: { type: 'object' },
           innerHTML: { type: 'string' },
           innerBlocks: { type: 'array' },
@@ -75,29 +70,29 @@ export const MUTATE_TOOLS = [{
       },
       wrapper: {
         type: 'object',
-        description: 'For wrap-in-group: optional wrapper block. Defaults to core/group.',
+        description: 'wrap-in-group: optional wrapper block. Default core/group.',
         properties: {
-          name: { type: 'string', description: 'Wrapper block name. Default: "core/group".' },
+          name: { type: 'string', description: 'Wrapper name. Default "core/group".' },
           attributes: { type: 'object' },
         },
       },
       position: {
         type: ['integer', 'string'],
-        description: 'For insert-child: position in innerBlocks. Use integer index, "start", or "end" (default).',
+        description: 'insert-child: index, "start", or "end" (default).',
       },
       destination: {
         type: 'array',
         items: { type: 'integer' },
-        description: 'For move: destination path where the block should be placed.',
+        description: 'move: destination path.',
       },
       before: {
         type: 'array',
         items: { type: 'integer' },
-        description: 'For move: path of the block to insert BEFORE (uses pre-move indexing). Alias for destination.',
+        description: 'move: path to insert BEFORE (pre-move indexing). Alias for destination.',
       },
       count: {
         type: 'integer',
-        description: 'For move: number of consecutive blocks to move. Default: 1. Use for moving sections.',
+        description: 'move: consecutive blocks to move. Default 1.',
       },
     },
     required: ['post_id', 'op', 'path'],

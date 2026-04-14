@@ -18,27 +18,21 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_block_types',
     description:
-      'List available WordPress block types with preference scores and tier guidance. ' +
-      'Returns blocks grouped by preference tier (preferred, standard, acceptable, avoid, legacy). ' +
-      'Use this to understand what blocks are available before inserting content.',
+      'List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         namespace: {
           type: 'string',
-          description:
-            'Filter by block namespace (e.g. "core", "filter" (theme), "stackable"). ' +
-            'Omit to list all namespaces.',
+          description: 'Filter by namespace (e.g. "core", "filter", "stackable").',
         },
         category: {
           type: 'string',
-          description: 'Filter by block category (e.g. "text", "media", "design").',
+          description: 'Filter by category (e.g. "text", "media", "design").',
         },
         preferred_only: {
           type: 'boolean',
-          description:
-            'If true, only return blocks with preference score >= 50 ' +
-            '(preferred and acceptable tiers).',
+          description: 'If true, only blocks with score >= 50.',
         },
       },
     },
@@ -46,32 +40,25 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_patterns',
     description:
-      'Browse WordPress block patterns with preference scoring. ' +
-      'Patterns are pre-sorted by preference score (best first). ' +
-      'Includes a natural-language summary of recommended vs. legacy patterns. ' +
-      'Always check patterns before building content from scratch.',
+      'List block patterns sorted by preference score. Check before building from scratch.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         search: {
           type: 'string',
-          description: 'Search patterns by name or keyword.',
+          description: 'Search by name or keyword.',
         },
         synced: {
           type: 'boolean',
-          description:
-            'Filter by sync status. true = synced (wp_block) only, ' +
-            'false = registered only, omit for all.',
+          description: 'true = synced only, false = registered only, omit for all.',
         },
         min_score: {
           type: 'number',
-          description:
-            'Minimum preference score to include. Use positive values ' +
-            'to filter out legacy patterns (e.g. 0 excludes negative scores).',
+          description: 'Minimum score; use 0 to exclude legacy.',
         },
         limit: {
           type: 'number',
-          description: 'Maximum number of patterns to return (default: 20).',
+          description: 'Max results (default 20).',
         },
       },
     },
@@ -79,16 +66,13 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'get_pattern',
     description:
-      "Get a single pattern's full block content, metadata, and preference details. " +
-      'Use this after list_patterns to inspect a specific pattern before inserting it.',
+      "Get a pattern's full block content and metadata. Use after list_patterns.",
     inputSchema: {
       type: 'object' as const,
       properties: {
         pattern_id: {
           type: ['number', 'string'],
-          description:
-            'Pattern ID — numeric post ID for synced patterns, ' +
-            'or registered pattern name.',
+          description: 'Numeric post ID (synced) or registered pattern name.',
         },
       },
       required: ['pattern_id'],
@@ -97,17 +81,13 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'get_site_usage',
     description:
-      'Get block and pattern usage statistics across the entire site. ' +
-      'Shows which blocks are most used, namespace totals, pattern reference counts, ' +
-      'and identifies legacy patterns with zero references (candidates for cleanup).',
+      'Get site-wide block/pattern usage stats. Identifies legacy patterns with zero references.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         refresh: {
           type: 'boolean',
-          description:
-            'If true, bust the server-side cache and regenerate stats fresh. ' +
-            'Stats are cached for 1 hour by default.',
+          description: 'Bust the 1-hour cache and regenerate.',
         },
       },
     },

@@ -255,7 +255,14 @@ export class WordPressBlockClient {
    */
   async getPageBlocks(
     postId: number,
-    params?: { fields?: string; render?: boolean; search?: string; block_name?: string }
+    params?: {
+      fields?: string;
+      render?: boolean;
+      search?: string;
+      block_name?: string;
+      outline?: boolean;
+      summary_only?: boolean;
+    }
   ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
       throw new Error('Post ID is required');
@@ -266,6 +273,8 @@ export class WordPressBlockClient {
     if (params?.render) queryParams.render = 'true';
     if (params?.search) queryParams.search = params.search;
     if (params?.block_name) queryParams.block_name = params.block_name;
+    if (params?.outline) queryParams.outline = 'true';
+    if (params?.summary_only) queryParams.summary_only = 'true';
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,

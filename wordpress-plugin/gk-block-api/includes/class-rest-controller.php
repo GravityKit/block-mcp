@@ -233,7 +233,17 @@ class REST_Controller {
 						'render' => array(
 							'type'        => 'boolean',
 							'default'     => false,
-							'description' => 'Include rendered output for dynamic blocks, expand shortcodes, resolve synced pattern content, and mark blocks as dynamic/static.',
+							'description' => 'Include rendered output for dynamic blocks, expand shortcodes, resolve synced pattern content.',
+						),
+						'outline' => array(
+							'type'        => 'boolean',
+							'default'     => false,
+							'description' => 'Return only headings and section markers as a flat outline for fast page structure scanning.',
+						),
+						'summary_only' => array(
+							'type'        => 'boolean',
+							'default'     => false,
+							'description' => 'Return only the top-level summary object (no blocks array). Useful for quick page inspection.',
 						),
 					),
 				),
@@ -759,6 +769,9 @@ class REST_Controller {
 				return $blocks;
 			}
 
+			// Build summary BEFORE search/filter so it reflects the whole page.
+			$summary = $this->build_blocks_summary( $blocks );
+
 			// Search/filter runs FIRST on full data (needs innerHTML to search).
 			$search     = $request->get_param( 'search' );
 			$block_name = $request->get_param( 'block_name' );
@@ -768,6 +781,18 @@ class REST_Controller {
 				$blocks = $this->search_blocks( $blocks, $search ?: '', $block_name ?: '' );
 			}
 
+			// Outline mode: flatten to just headings with section names.
+			$outline_mode = (bool) $request->get_param( 'outline' );
+			if ( $outline_mode ) {
+				$blocks = $this->extract_outline( $blocks );
+			}
+
+			// Summary-only mode: skip the blocks payload entirely.
+			$summary_only = (bool) $request->get_param( 'summary_only' );
+			if ( $summary_only ) {
+				return new \WP_REST_Response( array( 'summary' => $summary ), 200 );
+			}
+
 			// Fields filter runs AFTER search to strip unneeded data.
 			$fields = $request->get_param( 'fields' );
 			if ( ! empty( $fields ) ) {
@@ -775,7 +800,10 @@ class REST_Controller {
 				$blocks  = $this->filter_block_fields( $blocks, $allowed );
 			}
 
-			$response = array( 'blocks' => $blocks );
+			$response = array(
+				'summary' => $summary,
+				'blocks'  => $blocks,
+			);
 			if ( $is_search ) {
 				$response['match_count'] = count( $blocks );
 			}
@@ -783,6 +811,141 @@ class REST_Controller {
 			return new \WP_REST_Response( $response, 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * Build a compact summary of a block tree.
+	 *
+	 * Provides AI agents a quick overview: total blocks, block type counts,
+	 * named sections with their paths, and warning counts. Avoids the need
+	 * to walk the full tree manually for basic page inspection.
+	 *
+	 * @param array $blocks Formatted blocks (from get_blocks).
+	 *
+	 * @return array Summary data.
+	 */
+	private function build_blocks_summary( $blocks ) {
+		$summary = array(
+			'total_blocks'     => 0,
+			'top_level_blocks' => count( $blocks ),
+			'block_types'      => array(),
+			'sections'         => array(),
+			'headings'         => array(),
+			'legacy_blocks'    => array(),
+			'max_path_depth'   => 0,
+		);
+
+		$this->walk_blocks_for_summary( $blocks, $summary, 0 );
+
+		// Sort block_types by count descending.
+		arsort( $summary['block_types'] );
+		$summary['block_types'] = array_map( 'intval', $summary['block_types'] );
+
+		return $summary;
+	}
+
+	/**
+	 * Recursive walker for build_blocks_summary.
+	 *
+	 * @param array $blocks  Blocks to walk.
+	 * @param array &$summary Summary accumulator (by reference).
+	 * @param int   $depth   Current depth for max_path_depth tracking.
+	 */
+	private function walk_blocks_for_summary( $blocks, &$summary, $depth ) {
+		foreach ( $blocks as $block ) {
+			$summary['total_blocks']++;
+			$summary['max_path_depth'] = max( $summary['max_path_depth'], $depth );
+
+			$name = isset( $block['name'] ) ? $block['name'] : '';
+			if ( $name ) {
+				if ( ! isset( $summary['block_types'][ $name ] ) ) {
+					$summary['block_types'][ $name ] = 0;
+				}
+				$summary['block_types'][ $name ]++;
+			}
+
+			// Track sections (group blocks with metadata.name).
+			if ( ! empty( $block['section'] ) ) {
+				$summary['sections'][] = array(
+					'name' => $block['section'],
+					'path' => isset( $block['path'] ) ? $block['path'] : array(),
+				);
+			}
+
+			// Track headings.
+			if ( 'core/heading' === $name ) {
+				$level = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
+				$text  = isset( $block['text_preview'] ) ? $block['text_preview'] : '';
+				$summary['headings'][] = array(
+					'path'  => isset( $block['path'] ) ? $block['path'] : array(),
+					'level' => $level,
+					'text'  => $text,
+				);
+			}
+
+			// Track legacy blocks.
+			if ( $name && 0 !== strpos( $name, 'core/' ) ) {
+				$namespace = explode( '/', $name )[0];
+				if ( in_array( $namespace, array( 'stackable', 'ugb', 'jetpack' ), true ) ) {
+					$summary['legacy_blocks'][] = array(
+						'name' => $name,
+						'path' => isset( $block['path'] ) ? $block['path'] : array(),
+					);
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) ) {
+				$this->walk_blocks_for_summary( $block['innerBlocks'], $summary, $depth + 1 );
+			}
+		}
+	}
+
+	/**
+	 * Extract an outline (flat list of headings and sections) from a block tree.
+	 *
+	 * @param array $blocks Formatted blocks.
+	 *
+	 * @return array Flat list of heading/section entries with path, level, text, section_name.
+	 */
+	private function extract_outline( $blocks ) {
+		$outline = array();
+		$this->walk_blocks_for_outline( $blocks, $outline );
+		return $outline;
+	}
+
+	/**
+	 * Recursive walker for extract_outline.
+	 */
+	private function walk_blocks_for_outline( $blocks, &$outline ) {
+		foreach ( $blocks as $block ) {
+			$name = isset( $block['name'] ) ? $block['name'] : '';
+			$path = isset( $block['path'] ) ? $block['path'] : array();
+
+			// Section marker (any block with metadata.name).
+			if ( ! empty( $block['section'] ) ) {
+				$outline[] = array(
+					'type'         => 'section',
+					'path'         => $path,
+					'section_name' => $block['section'],
+					'block_name'   => $name,
+				);
+			}
+
+			// Heading.
+			if ( 'core/heading' === $name ) {
+				$level = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
+				$outline[] = array(
+					'type'  => 'heading',
+					'path'  => $path,
+					'level' => $level,
+					'text'  => isset( $block['text_preview'] ) ? $block['text_preview'] : '',
+				);
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) ) {
+				$this->walk_blocks_for_outline( $block['innerBlocks'], $outline );
+			}
 		}
 	}
 
