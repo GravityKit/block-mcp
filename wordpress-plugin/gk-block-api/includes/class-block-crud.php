@@ -233,10 +233,16 @@ class Block_CRUD {
 			$all_existing_blocks = array();
 		}
 
-		// Filter out empty blocks so indices match what format_blocks() returns.
-		$existing_blocks = array_values( array_filter( $all_existing_blocks, function ( $block ) {
-			return ! empty( $block['blockName'] );
-		} ) );
+		// Build a map from filtered (visible) index to raw index in the full array.
+		// This preserves whitespace blocks during serialization while letting
+		// the API consumer use the same indices as format_blocks().
+		$visible_to_raw = array();
+		foreach ( $all_existing_blocks as $raw_idx => $blk ) {
+			if ( ! empty( $blk['blockName'] ) ) {
+				$visible_to_raw[] = $raw_idx;
+			}
+		}
+		$visible_count = count( $visible_to_raw );
 
 		$warnings   = array();
 		$new_blocks = array();
@@ -299,26 +305,34 @@ class Block_CRUD {
 			);
 		}
 
-		// Determine insertion index.
-		$insert_at = count( $existing_blocks ); // Default: append.
+		// Determine insertion index (visible index), then map to raw position.
+		$visible_insert = $visible_count; // Default: append.
 
 		if ( 'start' === $position ) {
-			$insert_at = 0;
+			$visible_insert = 0;
 		} elseif ( is_numeric( $position ) ) {
 			$pos = (int) $position;
 			if ( -1 === $pos ) {
-				$insert_at = count( $existing_blocks );
+				$visible_insert = $visible_count;
 			} else {
-				// "after" index: insert at index + 1.
-				$insert_at = min( $pos + 1, count( $existing_blocks ) );
+				$visible_insert = min( $pos + 1, $visible_count );
 			}
 		}
 
-		// Splice new blocks into the array.
-		array_splice( $existing_blocks, $insert_at, 0, $new_blocks );
+		// Map visible index to raw array position (preserving whitespace blocks).
+		if ( $visible_insert >= $visible_count ) {
+			$raw_insert = count( $all_existing_blocks );
+		} elseif ( $visible_insert <= 0 ) {
+			$raw_insert = 0;
+		} else {
+			$raw_insert = $visible_to_raw[ $visible_insert ];
+		}
+
+		// Splice into the FULL array (preserving whitespace blocks).
+		array_splice( $all_existing_blocks, $raw_insert, 0, $new_blocks );
 
 		// Serialize and save.
-		$new_content = serialize_blocks( $existing_blocks );
+		$new_content = serialize_blocks( $all_existing_blocks );
 		$result      = $this->save_post_content( $post_id, $new_content );
 
 		if ( is_wp_error( $result ) ) {
@@ -331,7 +345,7 @@ class Block_CRUD {
 		$inserted = array();
 		foreach ( $new_blocks as $i => $block ) {
 			$inserted[] = array(
-				'index' => $insert_at + $i,
+				'index' => $visible_insert + $i,
 				'name'  => $block['blockName'],
 			);
 		}
@@ -374,12 +388,15 @@ class Block_CRUD {
 			$all_blocks = array();
 		}
 
-		// Filter out empty blocks so indices match what format_blocks() returns.
-		$blocks = array_values( array_filter( $all_blocks, function ( $block ) {
-			return ! empty( $block['blockName'] );
-		} ) );
+		// Build visible-to-raw index map to preserve whitespace blocks.
+		$vis_to_raw = array();
+		foreach ( $all_blocks as $raw_idx => $blk ) {
+			if ( ! empty( $blk['blockName'] ) ) {
+				$vis_to_raw[] = $raw_idx;
+			}
+		}
 
-		if ( $index < 0 || $index >= count( $blocks ) ) {
+		if ( $index < 0 || $index >= count( $vis_to_raw ) ) {
 			return new \WP_Error(
 				'invalid_index',
 				__( 'Block index out of range.', 'gk-block-api' ),
@@ -389,15 +406,16 @@ class Block_CRUD {
 
 		$count = max( 1, (int) $count );
 
-		if ( ( $index + $count ) > count( $blocks ) ) {
-			$count = count( $blocks ) - $index;
+		if ( ( $index + $count ) > count( $vis_to_raw ) ) {
+			$count = count( $vis_to_raw ) - $index;
 		}
 
 		// Check for synced pattern references being deleted.
 		$warnings = array();
 		for ( $i = $index; $i < $index + $count; $i++ ) {
-			if ( isset( $blocks[ $i ] ) && 'core/block' === $blocks[ $i ]['blockName'] ) {
-				$ref_id  = isset( $blocks[ $i ]['attrs']['ref'] ) ? $blocks[ $i ]['attrs']['ref'] : 0;
+			$raw_idx = $vis_to_raw[ $i ];
+			if ( isset( $all_blocks[ $raw_idx ] ) && 'core/block' === $all_blocks[ $raw_idx ]['blockName'] ) {
+				$ref_id  = isset( $all_blocks[ $raw_idx ]['attrs']['ref'] ) ? $all_blocks[ $raw_idx ]['attrs']['ref'] : 0;
 				$pattern = $ref_id ? get_post( $ref_id ) : null;
 
 				$warnings[] = array(
@@ -410,11 +428,19 @@ class Block_CRUD {
 			}
 		}
 
-		// Splice out the block(s).
-		array_splice( $blocks, $index, $count );
+		// Remove blocks from the FULL array (preserving whitespace blocks).
+		// Map the visible index range to raw indices and remove them.
+		$raw_indices_to_remove = array();
+		for ( $i = $index; $i < $index + $count; $i++ ) {
+			$raw_indices_to_remove[] = $vis_to_raw[ $i ];
+		}
+		// Remove in reverse order to preserve indices.
+		foreach ( array_reverse( $raw_indices_to_remove ) as $rm_idx ) {
+			array_splice( $all_blocks, $rm_idx, 1 );
+		}
 
 		// Serialize and save.
-		$new_content = serialize_blocks( $blocks );
+		$new_content = serialize_blocks( $all_blocks );
 		$result      = $this->save_post_content( $post_id, $new_content );
 
 		if ( is_wp_error( $result ) ) {
@@ -1133,27 +1159,45 @@ class Block_CRUD {
 					array_splice( $parent[ $target_index ]['innerBlocks'], $pos, 0, array( $child_block ) );
 				}
 
-				// Insert a null placeholder for the new child in innerContent,
-				// preserving any existing wrapper HTML (string entries).
+				// Insert a null placeholder for the new child in innerContent.
+				// innerContent for a container looks like: ['<div>', null, null, '</div>']
+				// Nulls go BETWEEN string entries, not before the first or after the last.
+				$ic = &$parent[ $target_index ]['innerContent'];
+
 				if ( 'start' === $position ) {
-					array_unshift( $parent[ $target_index ]['innerContent'], null );
+					// Insert after the first string entry (opening tag).
+					$insert_at = 0;
+					foreach ( $ic as $ic_idx => $ic_val ) {
+						if ( is_string( $ic_val ) ) {
+							$insert_at = $ic_idx + 1;
+							break;
+						}
+					}
+					array_splice( $ic, $insert_at, 0, array( null ) );
 				} elseif ( 'end' === $position || null === $position ) {
-					$parent[ $target_index ]['innerContent'][] = null;
+					// Insert before the last string entry (closing tag).
+					$insert_at = count( $ic );
+					for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
+						if ( is_string( $ic[ $ri ] ) ) {
+							$insert_at = $ri;
+							break;
+						}
+					}
+					array_splice( $ic, $insert_at, 0, array( null ) );
 				} else {
-					// Find the Nth null in innerContent (corresponding to the Nth innerBlock position)
-					// and insert a null before it.
-					$null_count         = 0;
-					$insert_pos_in_content = count( $parent[ $target_index ]['innerContent'] );
-					foreach ( $parent[ $target_index ]['innerContent'] as $ic_idx => $ic_val ) {
+					// Numeric position: find the Nth null and insert before it.
+					$null_count    = 0;
+					$insert_pos_ic = count( $ic );
+					foreach ( $ic as $ic_idx => $ic_val ) {
 						if ( null === $ic_val ) {
 							if ( $null_count === $pos ) {
-								$insert_pos_in_content = $ic_idx;
+								$insert_pos_ic = $ic_idx;
 								break;
 							}
 							$null_count++;
 						}
 					}
-					array_splice( $parent[ $target_index ]['innerContent'], $insert_pos_in_content, 0, array( null ) );
+					array_splice( $ic, $insert_pos_ic, 0, array( null ) );
 				}
 
 				$result_block = array(
@@ -1306,6 +1350,33 @@ class Block_CRUD {
 				// Extract source blocks.
 				$moved_blocks = array_splice( $parent, $target_index, $count );
 
+				// Update source parent's innerContent: remove $count nulls at the source position.
+				// This only matters for nested moves (source is inside a container).
+				if ( count( $path ) > 1 ) {
+					$src_gp_path  = array_slice( $path, 0, -2 );
+					$src_pi       = $path[ count( $path ) - 2 ];
+					$src_gp       = &$blocks;
+					foreach ( $src_gp_path as $seg ) {
+						$src_gp = &$src_gp[ $seg ]['innerBlocks'];
+					}
+					if ( isset( $src_gp[ $src_pi ]['innerContent'] ) ) {
+						$null_seen = 0;
+						$to_remove = array();
+						foreach ( $src_gp[ $src_pi ]['innerContent'] as $ic_idx => $ic_val ) {
+							if ( null === $ic_val ) {
+								if ( $null_seen >= $target_index && $null_seen < $target_index + $count ) {
+									$to_remove[] = $ic_idx;
+								}
+								$null_seen++;
+							}
+						}
+						// Remove in reverse order to preserve indices.
+						foreach ( array_reverse( $to_remove ) as $rm_idx ) {
+							array_splice( $src_gp[ $src_pi ]['innerContent'], $rm_idx, 1 );
+						}
+					}
+				}
+
 				// Navigate to destination parent.
 				if ( empty( $dest_parent_path ) ) {
 					// Top-level destination.
@@ -1325,6 +1396,30 @@ class Block_CRUD {
 					}
 					$dest_index = max( 0, min( $dest_index, count( $dest_parent ) ) );
 					array_splice( $dest_parent, $dest_index, 0, $moved_blocks );
+
+					// Update destination parent's innerContent: insert $count nulls.
+					$dest_container_idx = end( $dest_parent_path );
+					$dest_gp            = &$blocks;
+					for ( $di = 0; $di < count( $dest_parent_path ) - 1; $di++ ) {
+						$dest_gp = &$dest_gp[ $dest_parent_path[ $di ] ]['innerBlocks'];
+					}
+					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
+						// Find the insertion point: after the Nth null corresponding to dest_index.
+						$null_seen = 0;
+						$ic_insert = count( $dest_gp[ $dest_container_idx ]['innerContent'] );
+						foreach ( $dest_gp[ $dest_container_idx ]['innerContent'] as $ic_idx => $ic_val ) {
+							if ( null === $ic_val ) {
+								if ( $null_seen === $dest_index ) {
+									$ic_insert = $ic_idx;
+									break;
+								}
+								$null_seen++;
+							}
+						}
+						// Insert $count nulls.
+						$nulls = array_fill( 0, $count, null );
+						array_splice( $dest_gp[ $dest_container_idx ]['innerContent'], $ic_insert, 0, $nulls );
+					}
 				}
 
 				$first = $moved_blocks[0];
@@ -1564,6 +1659,36 @@ class Block_CRUD {
 		}
 
 		// ── 4. Text content transforms (regex — processor can't edit text) ──
+
+		// core/heading, core/paragraph, core/button, core/code, core/preformatted,
+		// core/verse: `content` attr replaces the element's inner text.
+		// The content may contain inline HTML (links, bold, etc.) so we use wp_kses_post.
+		$content_blocks = array( 'core/heading', 'core/paragraph', 'core/code', 'core/preformatted', 'core/verse' );
+		if ( in_array( $block_name, $content_blocks, true )
+			&& array_key_exists( 'content', $changed_attrs )
+		) {
+			$new_content = wp_kses_post( $changed_attrs['content'] );
+			// Replace inner text between the first opening tag and last closing tag.
+			$html = preg_replace_callback(
+				'/^(\s*<[^>]+>)(.*?)(<\/[^>]+>\s*)$/is',
+				function ( $matches ) use ( $new_content ) {
+					return $matches[1] . $new_content . $matches[3];
+				},
+				$html
+			);
+		}
+
+		// core/button: `text` attr replaces the <a> inner text.
+		if ( 'core/button' === $block_name && array_key_exists( 'text', $changed_attrs ) ) {
+			$new_text = wp_kses_post( $changed_attrs['text'] );
+			$html     = preg_replace_callback(
+				'/(<a[^>]*>)(.*?)(<\/a>)/is',
+				function ( $matches ) use ( $new_text ) {
+					return $matches[1] . $new_text . $matches[3];
+				},
+				$html
+			);
+		}
 
 		// core/quote, core/pullquote: `citation` updates <cite> text.
 		// Uses preg_replace_callback to avoid backreference injection if citation
@@ -1821,7 +1946,7 @@ class Block_CRUD {
 				$html = $block['innerHTML'];
 
 				// Expand shortcodes in rendered mode.
-				if ( $render && has_shortcode( $html, '' ) || ( $render && false !== strpos( $html, '[' ) ) ) {
+				if ( $render && false !== strpos( $html, '[' ) && preg_match( '/\[[\w-]+/', $html ) ) {
 					$data['innerHTML_rendered'] = do_shortcode( $html );
 				}
 
