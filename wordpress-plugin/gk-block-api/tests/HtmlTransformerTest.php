@@ -130,6 +130,19 @@ class HtmlTransformerTest extends \PHPUnit\Framework\TestCase {
 		$this->assertStringNotContainsString( '50px', $result );
 	}
 
+	public function test_height_does_not_match_compound_properties() {
+		// Regression: when `line-height` precedes `height` in the style attribute,
+		// a naive regex without a word boundary rewrites `line-height` (first match)
+		// and leaves the real `height` stale.
+		$this->require_tag_processor();
+		$t = $this->get_transformer();
+		$html = '<div style="line-height: 1.5; height: 50px;" class="wp-block-spacer"></div>';
+		$result = $t->auto_transform_html( 'core/spacer', array( 'height' => '100px' ), $html );
+		$this->assertStringContainsString( 'line-height: 1.5', $result, 'line-height must not be rewritten.' );
+		$this->assertStringContainsString( 'height:100px', $result, 'height must be rewritten to the new value.' );
+		$this->assertStringNotContainsString( '50px', $result );
+	}
+
 	public function test_details_open() {
 		$this->require_tag_processor();
 		$t = $this->get_transformer();

@@ -206,8 +206,10 @@ class HTML_Transformer {
 			if ( $processor->next_tag() ) {
 				$style = $processor->get_attribute( 'style' );
 				if ( null !== $style && false !== strpos( $style, $css_prop ) ) {
+					// Negative lookbehind on [-\w] ensures we don't match inside
+					// compound properties like line-height, min-width, max-height.
 					$new_style = preg_replace(
-						'/' . preg_quote( $css_prop, '/' ) . '\s*:\s*[^;"]+(;?)/',
+						'/(?<![-\w])' . preg_quote( $css_prop, '/' ) . '\s*:\s*[^;"]+(;?)/',
 						$css_prop . ':' . $new_val . '$1',
 						$style
 					);

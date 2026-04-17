@@ -333,6 +333,32 @@ class Block_Mutator {
 
 				// Remove from parent array and re-index.
 				array_splice( $parent, $target_index, 1 );
+
+				// If nested, also remove the matching null placeholder from the
+				// grandparent's innerContent so the null count stays aligned with
+				// innerBlocks. Otherwise serialize_block() pops a non-existent
+				// innerBlock index and produces corrupt post_content.
+				if ( count( $path ) > 1 ) {
+					$gp_path = array_slice( $path, 0, -2 );
+					$pi      = $path[ count( $path ) - 2 ];
+					$gp      = &$blocks;
+					foreach ( $gp_path as $seg ) {
+						$gp = &$gp[ $seg ]['innerBlocks'];
+					}
+					if ( isset( $gp[ $pi ]['innerContent'] ) ) {
+						$null_seen = 0;
+						foreach ( $gp[ $pi ]['innerContent'] as $ic_idx => $ic_val ) {
+							if ( null === $ic_val ) {
+								if ( $null_seen === $target_index ) {
+									array_splice( $gp[ $pi ]['innerContent'], $ic_idx, 1 );
+									break;
+								}
+								$null_seen++;
+							}
+						}
+					}
+					unset( $gp );
+				}
 				break;
 
 			case 'wrap-in-group':
@@ -511,8 +537,11 @@ class Block_Mutator {
 					array_splice( $ic, $insert_at, 0, array( null ) );
 				} else {
 					// Numeric position: find the Nth null and insert before it.
+					// If no such null exists (pos >= null count, i.e. numeric append),
+					// fall back to the same backward-scan used by 'end' so the new
+					// null lands before the closing-tag string, not after it.
 					$null_count    = 0;
-					$insert_pos_ic = count( $ic );
+					$insert_pos_ic = null;
 					foreach ( $ic as $ic_idx => $ic_val ) {
 						if ( null === $ic_val ) {
 							if ( $null_count === $pos ) {
@@ -520,6 +549,15 @@ class Block_Mutator {
 								break;
 							}
 							$null_count++;
+						}
+					}
+					if ( null === $insert_pos_ic ) {
+						$insert_pos_ic = count( $ic );
+						for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
+							if ( is_string( $ic[ $ri ] ) ) {
+								$insert_pos_ic = $ri;
+								break;
+							}
 						}
 					}
 					array_splice( $ic, $insert_pos_ic, 0, array( null ) );

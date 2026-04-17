@@ -409,6 +409,37 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertStringContainsString( 'My Pattern', $result['warnings'][0]['message'] );
 	}
 
+	public function test_remove_block_nested_cleans_grandparent_inner_content() {
+		// Group containing three paragraphs. Removing the middle child must
+		// drop one null placeholder from the group's innerContent so that
+		// innerBlocks count matches null count.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div>', array(
+				$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+				$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+				$this->block( 'core/paragraph', array(), '<p>C</p>' ),
+			) ),
+		) );
+
+		$result = $this->mutator->mutate( $this->post_id, 'remove-block', array( 0, 1 ) );
+		$this->assertTrue( $result['success'] );
+
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved[0]['innerBlocks'] );
+
+		$null_count = 0;
+		foreach ( $saved[0]['innerContent'] as $piece ) {
+			if ( null === $piece ) {
+				$null_count++;
+			}
+		}
+		$this->assertSame(
+			count( $saved[0]['innerBlocks'] ),
+			$null_count,
+			'innerContent null count must match innerBlocks count after nested remove-block.'
+		);
+	}
+
 	// ── wrap-in-group ──────────────────────────────────────────────
 
 	public function test_wrap_in_group_default_wrapper() {
@@ -580,6 +611,44 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( '<p>A</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
 		$this->assertEquals( '<p>NEW</p>', $saved[0]['innerBlocks'][1]['innerHTML'] );
 		$this->assertEquals( '<p>B</p>', $saved[0]['innerBlocks'][2]['innerHTML'] );
+	}
+
+	public function test_insert_child_at_numeric_append_position() {
+		// Numeric position equal to current child count (append): the Nth null
+		// does not exist, so the new placeholder must fall back to the 'end'
+		// scan and land before the closing-tag string — not after it.
+		$this->make_post( array(
+			$this->block(
+				'core/group',
+				array(),
+				'<div></div>',
+				array(
+					$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+					$this->block( 'core/paragraph', array(), '<p>B</p>' ),
+				)
+			),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0 ),
+			array(
+				'block'    => array( 'name' => 'core/paragraph', 'innerHTML' => '<p>END</p>' ),
+				'position' => 2, // equal to current child count
+			)
+		);
+
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 3, $saved[0]['innerBlocks'] );
+		$this->assertEquals( '<p>END</p>', $saved[0]['innerBlocks'][2]['innerHTML'] );
+
+		// The new null must appear BEFORE the closing-tag string.
+		$ic      = $saved[0]['innerContent'];
+		$last_ix = count( $ic ) - 1;
+		$this->assertIsString( $ic[ $last_ix ], 'Closing tag must remain the last innerContent entry.' );
+		$this->assertNull( $ic[ $last_ix - 1 ], 'New null placeholder must sit before the closing tag.' );
 	}
 
 	public function test_insert_child_missing_block_error() {
