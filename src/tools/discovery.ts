@@ -107,6 +107,35 @@ export const DISCOVERY_TOOLS = [
       required: ['url'],
     },
   },
+  {
+    name: 'find_posts',
+    description:
+      'Search posts by title/content. Returns stubs (id, title, slug, post_type, post_status, post_url, modified). Use instead of wp post list / wp-json.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        search:      { type: 'string', description: 'Free-text across title + content. Omit to list by filters alone.' },
+        post_type:   { type: 'string', description: 'Single or comma-separated. Default: public types.' },
+        post_status: { type: 'string', description: 'publish | draft | private | any | comma-separated. Default: publish.' },
+        per_page:    { type: 'number', description: 'Default 20, max 100.' },
+        page:        { type: 'number', description: 'Default 1.' },
+      },
+    },
+  },
+  {
+    name: 'post_info',
+    description:
+      'Look up post metadata by post_id, url, or slug+post_type. Returns title, status, post_url, edit_url, modified, parent_id, author. Replaces wp eval / get_permalink() shell-outs.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        post_id:   { type: 'number', description: 'One of post_id, url, or slug.' },
+        url:       { type: 'string', description: 'Full URL or path. Resolved via url_to_postid.' },
+        slug:      { type: 'string', description: 'post_name. Combine with post_type for uniqueness.' },
+        post_type: { type: 'string', description: 'Scope a slug lookup. Default: any.' },
+      },
+    },
+  },
 ];
 
 /**
@@ -176,6 +205,35 @@ export async function handleDiscoveryTool(
         throw new Error('url is required');
       }
       return await client.resolveUrl(url);
+    }
+
+    case 'find_posts': {
+      return await client.findPosts({
+        search:      args.search as string | undefined,
+        post_type:   args.post_type as string | undefined,
+        post_status: args.post_status as string | undefined,
+        per_page:    args.per_page as number | undefined,
+        page:        args.page as number | undefined,
+      });
+    }
+
+    case 'post_info': {
+      const postId = args.post_id;
+      const url    = args.url;
+      const slug   = args.slug;
+      if (
+        (postId === undefined || postId === null) &&
+        (typeof url !== 'string' || url.length === 0) &&
+        (typeof slug !== 'string' || slug.length === 0)
+      ) {
+        throw new Error('post_info requires one of: post_id, url, or slug');
+      }
+      return await client.getPostInfo({
+        post_id:   typeof postId === 'number' ? postId : undefined,
+        url:       typeof url === 'string' ? url : undefined,
+        slug:      typeof slug === 'string' ? slug : undefined,
+        post_type: args.post_type as string | undefined,
+      });
     }
 
     default:

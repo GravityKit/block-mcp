@@ -184,6 +184,64 @@ export interface ResolveUrlResponse {
   edit_url: string;
 }
 
+/** Single post stub returned by GET /find-posts. */
+export interface PostStub {
+  post_id: number;
+  title: string;
+  slug: string;
+  post_type: string;
+  post_status: string;
+  post_url: string;
+  modified: string;
+}
+
+/** Response from GET /find-posts. */
+export interface FindPostsResponse {
+  posts: PostStub[];
+  count: number;
+  total: number;
+  total_pages: number;
+  page: number;
+  per_page: number;
+}
+
+/** Query params for GET /find-posts. */
+export interface FindPostsParams {
+  search?: string;
+  post_type?: string;
+  post_status?: string;
+  per_page?: number;
+  page?: number;
+}
+
+/** Response from GET /post-info. */
+export interface PostInfoResponse {
+  post_id: number;
+  title: string;
+  slug: string;
+  post_type: string;
+  post_status: string;
+  post_url: string;
+  edit_url: string;
+  modified: string;
+  created: string;
+  parent_id: number;
+  author: {
+    id: number;
+    display_name: string;
+  };
+  mime_type: string;
+  comment_count: number;
+}
+
+/** Query params for GET /post-info — provide one of {post_id, url, slug+post_type}. */
+export interface PostInfoParams {
+  post_id?: number;
+  url?: string;
+  slug?: string;
+  post_type?: string;
+}
+
 /** Response from pattern insertion (POST /posts/{id}/insert-pattern). */
 export interface PatternInsertResponse {
   success: boolean;

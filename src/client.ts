@@ -283,6 +283,7 @@ export class WordPressBlockClient {
       block_name?: string;
       outline?: boolean;
       summary_only?: boolean;
+      include_legacy_paths?: boolean;
     }
   ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
@@ -296,9 +297,62 @@ export class WordPressBlockClient {
     if (params?.block_name) queryParams.block_name = params.block_name;
     if (params?.outline) queryParams.outline = 'true';
     if (params?.summary_only) queryParams.summary_only = 'true';
+    if (params?.include_legacy_paths) queryParams.include_legacy_paths = 'true';
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,
+      { params: queryParams }
+    );
+    return response.data;
+  }
+
+  /**
+   * Search posts by title/content with filters. Cheap WP_Query lookup —
+   * returns post stubs with no block parsing.
+   */
+  async findPosts(
+    params?: import('./types.js').FindPostsParams
+  ): Promise<import('./types.js').FindPostsResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params?.search) queryParams.search = params.search;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.post_status) queryParams.post_status = params.post_status;
+    if (params?.per_page !== undefined) queryParams.per_page = String(params.per_page);
+    if (params?.page !== undefined) queryParams.page = String(params.page);
+
+    const response = await this.client.get<import('./types.js').FindPostsResponse>(
+      '/find-posts',
+      { params: queryParams }
+    );
+    return response.data;
+  }
+
+  /**
+   * Look up a single post's metadata by post_id, url, or slug+post_type.
+   * Returns title, status, permalink, modified, parent, author, etc.
+   * No block parsing — cheap.
+   */
+  async getPostInfo(
+    params: import('./types.js').PostInfoParams
+  ): Promise<import('./types.js').PostInfoResponse> {
+    if (
+      (params.post_id === undefined || params.post_id === null) &&
+      !params.url &&
+      !params.slug
+    ) {
+      throw new Error('post_info requires one of: post_id, url, or slug');
+    }
+
+    const queryParams: Record<string, string> = {};
+    if (params.post_id !== undefined && params.post_id !== null) {
+      queryParams.post_id = String(params.post_id);
+    }
+    if (params.url) queryParams.url = params.url;
+    if (params.slug) queryParams.slug = params.slug;
+    if (params.post_type) queryParams.post_type = params.post_type;
+
+    const response = await this.client.get<import('./types.js').PostInfoResponse>(
+      '/post-info',
       { params: queryParams }
     );
     return response.data;

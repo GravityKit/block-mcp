@@ -245,6 +245,11 @@ class REST_Controller {
 							'default'     => false,
 							'description' => 'Return only the top-level summary object (no blocks array). Useful for quick page inspection.',
 						),
+						'include_legacy_paths' => array(
+							'type'        => 'boolean',
+							'default'     => false,
+							'description' => 'Add summary.legacy_blocks.paths. Aggregate counts always included.',
+						),
 					),
 				),
 				// POST — insert blocks.
@@ -396,6 +401,80 @@ class REST_Controller {
 						'required'          => true,
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'URL path or full URL to resolve (e.g. "/products/gravityedit/" or "https://www.gravitykit.com/products/gravityedit/")',
+					),
+				),
+			)
+		);
+
+		// Search posts by title/slug/content with filters.
+		register_rest_route(
+			self::NAMESPACE,
+			'/find-posts',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'find_posts' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'search' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Free-text across title + content.',
+					),
+					'post_type' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Single or comma-separated. Default: public types.',
+					),
+					'post_status' => array(
+						'type'              => 'string',
+						'default'           => 'publish',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'publish | draft | private | any | comma-separated.',
+					),
+					'per_page' => array(
+						'type'              => 'integer',
+						'default'           => 20,
+						'sanitize_callback' => 'absint',
+						'description'       => 'Capped at 100.',
+					),
+					'page' => array(
+						'type'              => 'integer',
+						'default'           => 1,
+						'sanitize_callback' => 'absint',
+					),
+				),
+			)
+		);
+
+		// Single-post metadata lookup (post_id | url | slug+post_type).
+		register_rest_route(
+			self::NAMESPACE,
+			'/post-info',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'post_info' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'post_id' => array(
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
+						'description'       => 'One of post_id, url, or slug.',
+					),
+					'url' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Full URL or path. Resolved via url_to_postid.',
+					),
+					'slug' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'post_name. Combine with post_type for uniqueness.',
+					),
+					'post_type' => array(
+						'type'              => 'string',
+						'default'           => 'any',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Scope a slug lookup. Default: any.',
 					),
 				),
 			)
@@ -742,6 +821,160 @@ class REST_Controller {
 		}
 	}
 
+	/**
+	 * GET /find-posts
+	 *
+	 * Cheap WP_Query-backed search. Returns a flat list of post stubs
+	 * (id, title, slug, post_type, post_status, post_url, modified)
+	 * — no block parsing, no full content. Use this before drilling
+	 * into a specific post via /post-info or /posts/{id}/blocks.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function find_posts( $request ) {
+		try {
+			$search      = $request->get_param( 'search' );
+			$post_type   = $request->get_param( 'post_type' );
+			$post_status = $request->get_param( 'post_status' );
+			$per_page    = (int) $request->get_param( 'per_page' );
+			$page        = (int) $request->get_param( 'page' );
+
+			$per_page = max( 1, min( 100, $per_page ?: 20 ) );
+			$page     = max( 1, $page ?: 1 );
+
+			$pt_param = $post_type
+				? array_filter( array_map( 'trim', explode( ',', $post_type ) ) )
+				: get_post_types( array( 'public' => true ), 'names' );
+
+			$ps_param = $post_status
+				? array_filter( array_map( 'trim', explode( ',', $post_status ) ) )
+				: array( 'publish' );
+			if ( in_array( 'any', $ps_param, true ) ) {
+				$ps_param = 'any';
+			}
+
+			$args = array(
+				'post_type'           => array_values( $pt_param ),
+				'post_status'         => $ps_param,
+				'posts_per_page'      => $per_page,
+				'paged'               => $page,
+				'orderby'             => 'modified',
+				'order'               => 'DESC',
+				'ignore_sticky_posts' => true,
+				'no_found_rows'       => false,
+				'suppress_filters'    => false,
+			);
+			if ( ! empty( $search ) ) {
+				$args['s'] = $search;
+			}
+
+			$query = new \WP_Query( $args );
+			$out   = array();
+			foreach ( $query->posts as $p ) {
+				$out[] = array(
+					'post_id'     => (int) $p->ID,
+					'title'       => $p->post_title,
+					'slug'        => $p->post_name,
+					'post_type'   => $p->post_type,
+					'post_status' => $p->post_status,
+					'post_url'    => get_permalink( $p ),
+					'modified'    => $p->post_modified_gmt . 'Z',
+				);
+			}
+
+			return new \WP_REST_Response( array(
+				'posts'       => $out,
+				'count'       => count( $out ),
+				'total'       => (int) $query->found_posts,
+				'total_pages' => (int) $query->max_num_pages,
+				'page'        => $page,
+				'per_page'    => $per_page,
+			), 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /post-info
+	 *
+	 * Single-post metadata lookup. Resolves a post via post_id, url,
+	 * or (slug + post_type) — whichever is supplied first wins.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function post_info( $request ) {
+		try {
+			$post_id   = (int) $request->get_param( 'post_id' );
+			$url       = $request->get_param( 'url' );
+			$slug      = $request->get_param( 'slug' );
+			$post_type = $request->get_param( 'post_type' ) ?: 'any';
+
+			$post = null;
+			if ( $post_id > 0 ) {
+				$post = get_post( $post_id );
+			} elseif ( ! empty( $url ) ) {
+				$path     = false !== strpos( $url, '://' ) ? wp_parse_url( $url, PHP_URL_PATH ) : $url;
+				$resolved = url_to_postid( home_url( $path ) );
+				if ( $resolved ) {
+					$post = get_post( $resolved );
+				}
+			} elseif ( ! empty( $slug ) ) {
+				$found = get_posts( array(
+					'name'           => $slug,
+					'post_type'      => $post_type,
+					'post_status'    => array( 'publish', 'draft', 'private', 'pending', 'future' ),
+					'posts_per_page' => 1,
+					'no_found_rows'  => true,
+				) );
+				if ( ! empty( $found ) ) {
+					$post = $found[0];
+				}
+			} else {
+				return new \WP_Error(
+					'missing_lookup',
+					__( 'Provide one of: post_id, url, or slug.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+
+			if ( ! $post ) {
+				return new \WP_Error(
+					'not_found',
+					__( 'No post matched the lookup.', 'gk-block-api' ),
+					array( 'status' => 404 )
+				);
+			}
+
+			$author = get_userdata( (int) $post->post_author );
+
+			return new \WP_REST_Response( array(
+				'post_id'      => (int) $post->ID,
+				'title'        => $post->post_title,
+				'slug'         => $post->post_name,
+				'post_type'    => $post->post_type,
+				'post_status'  => $post->post_status,
+				'post_url'     => get_permalink( $post ),
+				'edit_url'     => get_edit_post_link( $post->ID, 'raw' ),
+				'modified'     => $post->post_modified_gmt . 'Z',
+				'created'      => $post->post_date_gmt . 'Z',
+				'parent_id'    => (int) $post->post_parent,
+				'author'       => array(
+					'id'           => (int) $post->post_author,
+					'display_name' => $author ? $author->display_name : '',
+				),
+				'mime_type'    => $post->post_mime_type,
+				'comment_count' => (int) $post->comment_count,
+			), 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
 	// =========================================================================
 	// Post Block Endpoints
 	// =========================================================================
@@ -770,7 +1003,8 @@ class REST_Controller {
 			}
 
 			// Build summary BEFORE search/filter so it reflects the whole page.
-			$summary = $this->build_blocks_summary( $blocks );
+			$include_legacy_paths = (bool) $request->get_param( 'include_legacy_paths' );
+			$summary              = $this->build_blocks_summary( $blocks, $include_legacy_paths );
 
 			// Search/filter runs FIRST on full data (needs innerHTML to search).
 			$search     = $request->get_param( 'search' );
@@ -825,22 +1059,42 @@ class REST_Controller {
 	 *
 	 * @return array Summary data.
 	 */
-	private function build_blocks_summary( $blocks ) {
+	private function build_blocks_summary( $blocks, $include_legacy_paths = false ) {
 		$summary = array(
 			'total_blocks'     => 0,
 			'top_level_blocks' => count( $blocks ),
 			'block_types'      => array(),
 			'sections'         => array(),
 			'headings'         => array(),
-			'legacy_blocks'    => array(),
+			// Aggregate counters: small payload by default. Pass
+			// `include_legacy_paths=true` to also surface the per-block
+			// path list (`legacy_blocks.paths`), which is useful for
+			// migration audits but heavy on Stackable-rich pages.
+			'legacy_blocks'    => array(
+				'total'         => 0,
+				'by_namespace'  => array(
+					'stackable' => 0,
+					'ugb'       => 0,
+					'jetpack'   => 0,
+				),
+				'by_block_name' => array(),
+			),
 			'max_path_depth'   => 0,
 		);
 
-		$this->walk_blocks_for_summary( $blocks, $summary, 0 );
+		if ( $include_legacy_paths ) {
+			$summary['legacy_blocks']['paths'] = array();
+		}
+
+		$this->walk_blocks_for_summary( $blocks, $summary, 0, $include_legacy_paths );
 
 		// Sort block_types by count descending.
 		arsort( $summary['block_types'] );
 		$summary['block_types'] = array_map( 'intval', $summary['block_types'] );
+
+		// Sort by_block_name descending too — most-used legacy block first.
+		arsort( $summary['legacy_blocks']['by_block_name'] );
+		$summary['legacy_blocks']['by_block_name'] = array_map( 'intval', $summary['legacy_blocks']['by_block_name'] );
 
 		return $summary;
 	}
@@ -852,7 +1106,7 @@ class REST_Controller {
 	 * @param array &$summary Summary accumulator (by reference).
 	 * @param int   $depth   Current depth for max_path_depth tracking.
 	 */
-	private function walk_blocks_for_summary( $blocks, &$summary, $depth ) {
+	private function walk_blocks_for_summary( $blocks, &$summary, $depth, $include_legacy_paths = false ) {
 		foreach ( $blocks as $block ) {
 			$summary['total_blocks']++;
 			$summary['max_path_depth'] = max( $summary['max_path_depth'], $depth );
@@ -884,19 +1138,28 @@ class REST_Controller {
 				);
 			}
 
-			// Track legacy blocks.
+			// Track legacy blocks (aggregate counts by default; full
+			// path list only when `include_legacy_paths` is requested).
 			if ( $name && 0 !== strpos( $name, 'core/' ) ) {
 				$namespace = explode( '/', $name )[0];
 				if ( in_array( $namespace, array( 'stackable', 'ugb', 'jetpack' ), true ) ) {
-					$summary['legacy_blocks'][] = array(
-						'name' => $name,
-						'path' => isset( $block['path'] ) ? $block['path'] : array(),
-					);
+					$summary['legacy_blocks']['total']++;
+					$summary['legacy_blocks']['by_namespace'][ $namespace ]++;
+					if ( ! isset( $summary['legacy_blocks']['by_block_name'][ $name ] ) ) {
+						$summary['legacy_blocks']['by_block_name'][ $name ] = 0;
+					}
+					$summary['legacy_blocks']['by_block_name'][ $name ]++;
+					if ( $include_legacy_paths ) {
+						$summary['legacy_blocks']['paths'][] = array(
+							'name' => $name,
+							'path' => isset( $block['path'] ) ? $block['path'] : array(),
+						);
+					}
 				}
 			}
 
 			if ( ! empty( $block['innerBlocks'] ) ) {
-				$this->walk_blocks_for_summary( $block['innerBlocks'], $summary, $depth + 1 );
+				$this->walk_blocks_for_summary( $block['innerBlocks'], $summary, $depth + 1, $include_legacy_paths );
 			}
 		}
 	}

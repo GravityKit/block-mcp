@@ -158,23 +158,41 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( 2, $summary['headings'][0]['level'] );
 	}
 
-	public function test_summary_legacy_blocks_flags_stackable_ugb_jetpack() {
+	public function test_summary_legacy_blocks_aggregates_by_namespace_and_name() {
 		$blocks = array(
 			array( 'name' => 'core/paragraph',     'path' => array( 0 ) ),
 			array( 'name' => 'stackable/heading',  'path' => array( 1 ) ),
-			array( 'name' => 'ugb/text',           'path' => array( 2 ) ),
-			array( 'name' => 'jetpack/contact',    'path' => array( 3 ) ),
-			array( 'name' => 'gravityforms/form',  'path' => array( 4 ) ), // not legacy
+			array( 'name' => 'stackable/heading',  'path' => array( 2 ) ),
+			array( 'name' => 'ugb/text',           'path' => array( 3 ) ),
+			array( 'name' => 'jetpack/contact',    'path' => array( 4 ) ),
+			array( 'name' => 'gravityforms/form',  'path' => array( 5 ) ), // not legacy
 		);
 		$summary = $this->callPrivate( 'build_blocks_summary', array( $blocks ) );
 
-		$names = array_map( static fn( $b ) => $b['name'], $summary['legacy_blocks'] );
-		$this->assertContains( 'stackable/heading', $names );
-		$this->assertContains( 'ugb/text', $names );
-		$this->assertContains( 'jetpack/contact', $names );
-		$this->assertNotContains( 'core/paragraph', $names );
-		$this->assertNotContains( 'gravityforms/form', $names );
-		$this->assertCount( 3, $summary['legacy_blocks'] );
+		$this->assertEquals( 4, $summary['legacy_blocks']['total'] );
+		$this->assertEquals( 2, $summary['legacy_blocks']['by_namespace']['stackable'] );
+		$this->assertEquals( 1, $summary['legacy_blocks']['by_namespace']['ugb'] );
+		$this->assertEquals( 1, $summary['legacy_blocks']['by_namespace']['jetpack'] );
+		$this->assertEquals( 2, $summary['legacy_blocks']['by_block_name']['stackable/heading'] );
+		$this->assertEquals( 1, $summary['legacy_blocks']['by_block_name']['ugb/text'] );
+		$this->assertEquals( 1, $summary['legacy_blocks']['by_block_name']['jetpack/contact'] );
+		$this->assertArrayNotHasKey( 'core/paragraph', $summary['legacy_blocks']['by_block_name'] );
+		$this->assertArrayNotHasKey( 'gravityforms/form', $summary['legacy_blocks']['by_block_name'] );
+		// Paths only present when explicitly opted in.
+		$this->assertArrayNotHasKey( 'paths', $summary['legacy_blocks'] );
+	}
+
+	public function test_summary_legacy_blocks_paths_opt_in() {
+		$blocks = array(
+			array( 'name' => 'stackable/heading',  'path' => array( 0 ) ),
+			array( 'name' => 'ugb/text',           'path' => array( 1 ) ),
+		);
+		$summary = $this->callPrivate( 'build_blocks_summary', array( $blocks, true ) );
+
+		$this->assertArrayHasKey( 'paths', $summary['legacy_blocks'] );
+		$this->assertCount( 2, $summary['legacy_blocks']['paths'] );
+		$this->assertEquals( 'stackable/heading', $summary['legacy_blocks']['paths'][0]['name'] );
+		$this->assertEquals( array( 0 ), $summary['legacy_blocks']['paths'][0]['path'] );
 	}
 
 	public function test_summary_max_path_depth_tracks_deepest_nesting() {
@@ -235,7 +253,9 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( array(), $summary['block_types'] );
 		$this->assertEquals( array(), $summary['sections'] );
 		$this->assertEquals( array(), $summary['headings'] );
-		$this->assertEquals( array(), $summary['legacy_blocks'] );
+		$this->assertEquals( 0, $summary['legacy_blocks']['total'] );
+		$this->assertEquals( array(), $summary['legacy_blocks']['by_block_name'] );
+		$this->assertEquals( array( 'stackable' => 0, 'ugb' => 0, 'jetpack' => 0 ), $summary['legacy_blocks']['by_namespace'] );
 		$this->assertEquals( 0, $summary['max_path_depth'] );
 	}
 

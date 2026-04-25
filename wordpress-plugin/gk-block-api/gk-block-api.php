@@ -3,7 +3,7 @@
  * Plugin Name: GK Block API
  * Plugin URI: https://www.gravitykit.com
  * Description: REST API for block-level CRUD operations with smart preferences for AI agents.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later

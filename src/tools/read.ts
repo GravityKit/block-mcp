@@ -16,7 +16,7 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      "Get a post's blocks. Pass either post_id OR url (full URL or site-relative path — resolved server-side; do NOT shell out to curl/wp-json to look up IDs). Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
+      "Get a post's blocks. Pass post_id OR url (resolved server-side — don't shell out). Returns summary (block counts, headings, sections, legacy_blocks aggregate) and nested blocks with path, name, attributes, innerHTML, text_preview. Path is consumed by mutate_block_tree. Start with outline=true or summary_only=true for cheap inspection. legacy_blocks paths are opt-in via include_legacy_paths.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -52,6 +52,10 @@ export const READ_TOOLS = [
           type: 'boolean',
           description: 'Return only the summary object (no blocks). Fastest page inspection.',
         },
+        include_legacy_paths: {
+          type: 'boolean',
+          description: 'Add summary.legacy_blocks.paths (per-block path list). Off by default; turn on for migration audits.',
+        },
       },
     },
   },
@@ -80,6 +84,7 @@ export async function handleReadTool(
       const blockName = args.block_name as string | undefined;
       const outline = args.outline as boolean | undefined;
       const summaryOnly = args.summary_only as boolean | undefined;
+      const includeLegacyPaths = args.include_legacy_paths as boolean | undefined;
 
       if ((postId === undefined || postId === null) && !url) {
         throw new Error('Either post_id or url is required');
@@ -91,7 +96,9 @@ export async function handleReadTool(
       }
 
       const response = await client.getPageBlocks(postId, {
-        fields, render, search, block_name: blockName, outline, summary_only: summaryOnly,
+        fields, render, search, block_name: blockName, outline,
+        summary_only: summaryOnly,
+        include_legacy_paths: includeLegacyPaths,
       });
 
       // summary_only mode: return server summary as-is.

@@ -17531,121 +17531,6 @@ var require_browser = __commonJS({
   }
 });
 
-// ../../node_modules/has-flag/index.js
-var require_has_flag = __commonJS({
-  "../../node_modules/has-flag/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = (flag, argv = process.argv) => {
-      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-      const position = argv.indexOf(prefix + flag);
-      const terminatorPosition = argv.indexOf("--");
-      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
-    };
-  }
-});
-
-// ../../node_modules/supports-color/index.js
-var require_supports_color = __commonJS({
-  "../../node_modules/supports-color/index.js"(exports2, module2) {
-    "use strict";
-    var os = require("os");
-    var tty = require("tty");
-    var hasFlag = require_has_flag();
-    var { env } = process;
-    var forceColor;
-    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
-      forceColor = 0;
-    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
-      forceColor = 1;
-    }
-    if ("FORCE_COLOR" in env) {
-      if (env.FORCE_COLOR === "true") {
-        forceColor = 1;
-      } else if (env.FORCE_COLOR === "false") {
-        forceColor = 0;
-      } else {
-        forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
-      }
-    }
-    function translateLevel(level) {
-      if (level === 0) {
-        return false;
-      }
-      return {
-        level,
-        hasBasic: true,
-        has256: level >= 2,
-        has16m: level >= 3
-      };
-    }
-    function supportsColor(haveStream, streamIsTTY) {
-      if (forceColor === 0) {
-        return 0;
-      }
-      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
-        return 3;
-      }
-      if (hasFlag("color=256")) {
-        return 2;
-      }
-      if (haveStream && !streamIsTTY && forceColor === void 0) {
-        return 0;
-      }
-      const min = forceColor || 0;
-      if (env.TERM === "dumb") {
-        return min;
-      }
-      if (process.platform === "win32") {
-        const osRelease = os.release().split(".");
-        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
-          return Number(osRelease[2]) >= 14931 ? 3 : 2;
-        }
-        return 1;
-      }
-      if ("CI" in env) {
-        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env) || env.CI_NAME === "codeship") {
-          return 1;
-        }
-        return min;
-      }
-      if ("TEAMCITY_VERSION" in env) {
-        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
-      }
-      if (env.COLORTERM === "truecolor") {
-        return 3;
-      }
-      if ("TERM_PROGRAM" in env) {
-        const version2 = parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-        switch (env.TERM_PROGRAM) {
-          case "iTerm.app":
-            return version2 >= 3 ? 3 : 2;
-          case "Apple_Terminal":
-            return 2;
-        }
-      }
-      if (/-256(color)?$/i.test(env.TERM)) {
-        return 2;
-      }
-      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
-        return 1;
-      }
-      if ("COLORTERM" in env) {
-        return 1;
-      }
-      return min;
-    }
-    function getSupportLevel(stream4) {
-      const level = supportsColor(stream4, stream4 && stream4.isTTY);
-      return translateLevel(level);
-    }
-    module2.exports = {
-      supportsColor: getSupportLevel,
-      stdout: translateLevel(supportsColor(true, tty.isatty(1))),
-      stderr: translateLevel(supportsColor(true, tty.isatty(2)))
-    };
-  }
-});
-
 // node_modules/debug/src/node.js
 var require_node = __commonJS({
   "node_modules/debug/src/node.js"(exports2, module2) {
@@ -17664,7 +17549,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require_supports_color();
+      const supportsColor = require("supports-color");
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -36425,8 +36310,48 @@ var WordPressBlockClient = class {
     if (params?.block_name) queryParams.block_name = params.block_name;
     if (params?.outline) queryParams.outline = "true";
     if (params?.summary_only) queryParams.summary_only = "true";
+    if (params?.include_legacy_paths) queryParams.include_legacy_paths = "true";
     const response = await this.client.get(
       `/posts/${postId}/blocks`,
+      { params: queryParams }
+    );
+    return response.data;
+  }
+  /**
+   * Search posts by title/content with filters. Cheap WP_Query lookup —
+   * returns post stubs with no block parsing.
+   */
+  async findPosts(params) {
+    const queryParams = {};
+    if (params?.search) queryParams.search = params.search;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.post_status) queryParams.post_status = params.post_status;
+    if (params?.per_page !== void 0) queryParams.per_page = String(params.per_page);
+    if (params?.page !== void 0) queryParams.page = String(params.page);
+    const response = await this.client.get(
+      "/find-posts",
+      { params: queryParams }
+    );
+    return response.data;
+  }
+  /**
+   * Look up a single post's metadata by post_id, url, or slug+post_type.
+   * Returns title, status, permalink, modified, parent, author, etc.
+   * No block parsing — cheap.
+   */
+  async getPostInfo(params) {
+    if ((params.post_id === void 0 || params.post_id === null) && !params.url && !params.slug) {
+      throw new Error("post_info requires one of: post_id, url, or slug");
+    }
+    const queryParams = {};
+    if (params.post_id !== void 0 && params.post_id !== null) {
+      queryParams.post_id = String(params.post_id);
+    }
+    if (params.url) queryParams.url = params.url;
+    if (params.slug) queryParams.slug = params.slug;
+    if (params.post_type) queryParams.post_type = params.post_type;
+    const response = await this.client.get(
+      "/post-info",
       { params: queryParams }
     );
     return response.data;
@@ -36818,6 +36743,33 @@ var DISCOVERY_TOOLS = [
       },
       required: ["url"]
     }
+  },
+  {
+    name: "find_posts",
+    description: "Search posts by title/content. Returns stubs (id, title, slug, post_type, post_status, post_url, modified). Use instead of wp post list / wp-json.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Free-text across title + content. Omit to list by filters alone." },
+        post_type: { type: "string", description: "Single or comma-separated. Default: public types." },
+        post_status: { type: "string", description: "publish | draft | private | any | comma-separated. Default: publish." },
+        per_page: { type: "number", description: "Default 20, max 100." },
+        page: { type: "number", description: "Default 1." }
+      }
+    }
+  },
+  {
+    name: "post_info",
+    description: "Look up post metadata by post_id, url, or slug+post_type. Returns title, status, post_url, edit_url, modified, parent_id, author. Replaces wp eval / get_permalink() shell-outs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "number", description: "One of post_id, url, or slug." },
+        url: { type: "string", description: "Full URL or path. Resolved via url_to_postid." },
+        slug: { type: "string", description: "post_name. Combine with post_type for uniqueness." },
+        post_type: { type: "string", description: "Scope a slug lookup. Default: any." }
+      }
+    }
   }
 ];
 async function handleDiscoveryTool(toolName, args, client2) {
@@ -36868,6 +36820,29 @@ async function handleDiscoveryTool(toolName, args, client2) {
       }
       return await client2.resolveUrl(url3);
     }
+    case "find_posts": {
+      return await client2.findPosts({
+        search: args.search,
+        post_type: args.post_type,
+        post_status: args.post_status,
+        per_page: args.per_page,
+        page: args.page
+      });
+    }
+    case "post_info": {
+      const postId = args.post_id;
+      const url3 = args.url;
+      const slug = args.slug;
+      if ((postId === void 0 || postId === null) && (typeof url3 !== "string" || url3.length === 0) && (typeof slug !== "string" || slug.length === 0)) {
+        throw new Error("post_info requires one of: post_id, url, or slug");
+      }
+      return await client2.getPostInfo({
+        post_id: typeof postId === "number" ? postId : void 0,
+        url: typeof url3 === "string" ? url3 : void 0,
+        slug: typeof slug === "string" ? slug : void 0,
+        post_type: args.post_type
+      });
+    }
     default:
       throw new Error(`Unknown discovery tool: ${toolName}`);
   }
@@ -36877,7 +36852,7 @@ async function handleDiscoveryTool(toolName, args, client2) {
 var READ_TOOLS = [
   {
     name: "get_page_blocks",
-    description: "Get a post's blocks. Pass either post_id OR url (full URL or site-relative path \u2014 resolved server-side; do NOT shell out to curl/wp-json to look up IDs). Returns a summary (block counts, headings, sections) and the nested blocks with path, name, attributes, innerHTML, and text_preview (stripped text, ~100 chars). Use path for mutate_block_tree. Legacy blocks annotated with replacements. Start with outline=true or summary_only=true for fast inspection before drilling in.",
+    description: "Get a post's blocks. Pass post_id OR url (resolved server-side \u2014 don't shell out). Returns summary (block counts, headings, sections, legacy_blocks aggregate) and nested blocks with path, name, attributes, innerHTML, text_preview. Path is consumed by mutate_block_tree. Start with outline=true or summary_only=true for cheap inspection. legacy_blocks paths are opt-in via include_legacy_paths.",
     inputSchema: {
       type: "object",
       properties: {
@@ -36912,6 +36887,10 @@ var READ_TOOLS = [
         summary_only: {
           type: "boolean",
           description: "Return only the summary object (no blocks). Fastest page inspection."
+        },
+        include_legacy_paths: {
+          type: "boolean",
+          description: "Add summary.legacy_blocks.paths (per-block path list). Off by default; turn on for migration audits."
         }
       }
     }
@@ -36928,6 +36907,7 @@ async function handleReadTool(toolName, args, client2) {
       const blockName = args.block_name;
       const outline = args.outline;
       const summaryOnly = args.summary_only;
+      const includeLegacyPaths = args.include_legacy_paths;
       if ((postId === void 0 || postId === null) && !url3) {
         throw new Error("Either post_id or url is required");
       }
@@ -36941,7 +36921,8 @@ async function handleReadTool(toolName, args, client2) {
         search,
         block_name: blockName,
         outline,
-        summary_only: summaryOnly
+        summary_only: summaryOnly,
+        include_legacy_paths: includeLegacyPaths
       });
       if (summaryOnly) {
         return {
