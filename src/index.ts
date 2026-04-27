@@ -32,6 +32,9 @@ import { READ_TOOLS, handleReadTool } from './tools/read.js';
 import { WRITE_TOOLS, handleWriteTool } from './tools/write.js';
 import { PATTERN_TOOLS, handlePatternTool } from './tools/patterns.js';
 import { MUTATE_TOOLS, handleMutateTool } from './tools/mutate.js';
+import { POST_TOOLS, handlePostTool } from './tools/posts.js';
+import { TERM_TOOLS, handleTermTool } from './tools/terms.js';
+import { MEDIA_TOOLS, handleMediaTool } from './tools/media.js';
 
 // Environment variables are passed by the parent process (Claude Code, Hermes, etc.)
 // No dotenv.config() needed — it breaks esbuild ESM bundles due to CJS dynamic require('fs').
@@ -96,6 +99,9 @@ const ALL_TOOLS = [
   ...WRITE_TOOLS,
   ...PATTERN_TOOLS,
   ...MUTATE_TOOLS,
+  ...POST_TOOLS,
+  ...TERM_TOOLS,
+  ...MEDIA_TOOLS,
 ];
 
 /** Set of discovery tool names for routing. */
@@ -112,6 +118,15 @@ const PATTERN_TOOL_NAMES = new Set(PATTERN_TOOLS.map((t) => t.name));
 
 /** Set of mutate tool names for routing. */
 const MUTATE_TOOL_NAMES = new Set(MUTATE_TOOLS.map((t) => t.name));
+
+/** v1.2 — post lifecycle tool names. */
+const POST_TOOL_NAMES = new Set(POST_TOOLS.map((t) => t.name));
+
+/** v1.2 — term tool names. */
+const TERM_TOOL_NAMES = new Set(TERM_TOOLS.map((t) => t.name));
+
+/** v1.2 — media tool names. */
+const MEDIA_TOOL_NAMES = new Set(MEDIA_TOOLS.map((t) => t.name));
 
 // ============================================
 // System prompt context resource
@@ -172,6 +187,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       result = await handlePatternTool(name, toolArgs, client);
     } else if (MUTATE_TOOL_NAMES.has(name)) {
       result = await handleMutateTool(name, toolArgs, client);
+    } else if (POST_TOOL_NAMES.has(name)) {
+      result = await handlePostTool(name, toolArgs, client);
+    } else if (TERM_TOOL_NAMES.has(name)) {
+      result = await handleTermTool(name, toolArgs, client);
+    } else if (MEDIA_TOOL_NAMES.has(name)) {
+      result = await handleMediaTool(name, toolArgs, client);
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }

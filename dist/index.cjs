@@ -17531,6 +17531,121 @@ var require_browser = __commonJS({
   }
 });
 
+// ../../node_modules/has-flag/index.js
+var require_has_flag = __commonJS({
+  "../../node_modules/has-flag/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (flag, argv = process.argv) => {
+      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+      const position = argv.indexOf(prefix + flag);
+      const terminatorPosition = argv.indexOf("--");
+      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+    };
+  }
+});
+
+// ../../node_modules/supports-color/index.js
+var require_supports_color = __commonJS({
+  "../../node_modules/supports-color/index.js"(exports2, module2) {
+    "use strict";
+    var os = require("os");
+    var tty = require("tty");
+    var hasFlag = require_has_flag();
+    var { env } = process;
+    var forceColor;
+    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+      forceColor = 0;
+    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+      forceColor = 1;
+    }
+    if ("FORCE_COLOR" in env) {
+      if (env.FORCE_COLOR === "true") {
+        forceColor = 1;
+      } else if (env.FORCE_COLOR === "false") {
+        forceColor = 0;
+      } else {
+        forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+      }
+    }
+    function translateLevel(level) {
+      if (level === 0) {
+        return false;
+      }
+      return {
+        level,
+        hasBasic: true,
+        has256: level >= 2,
+        has16m: level >= 3
+      };
+    }
+    function supportsColor(haveStream, streamIsTTY) {
+      if (forceColor === 0) {
+        return 0;
+      }
+      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+        return 3;
+      }
+      if (hasFlag("color=256")) {
+        return 2;
+      }
+      if (haveStream && !streamIsTTY && forceColor === void 0) {
+        return 0;
+      }
+      const min = forceColor || 0;
+      if (env.TERM === "dumb") {
+        return min;
+      }
+      if (process.platform === "win32") {
+        const osRelease = os.release().split(".");
+        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+          return Number(osRelease[2]) >= 14931 ? 3 : 2;
+        }
+        return 1;
+      }
+      if ("CI" in env) {
+        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env) || env.CI_NAME === "codeship") {
+          return 1;
+        }
+        return min;
+      }
+      if ("TEAMCITY_VERSION" in env) {
+        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+      }
+      if (env.COLORTERM === "truecolor") {
+        return 3;
+      }
+      if ("TERM_PROGRAM" in env) {
+        const version2 = parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+        switch (env.TERM_PROGRAM) {
+          case "iTerm.app":
+            return version2 >= 3 ? 3 : 2;
+          case "Apple_Terminal":
+            return 2;
+        }
+      }
+      if (/-256(color)?$/i.test(env.TERM)) {
+        return 2;
+      }
+      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+        return 1;
+      }
+      if ("COLORTERM" in env) {
+        return 1;
+      }
+      return min;
+    }
+    function getSupportLevel(stream4) {
+      const level = supportsColor(stream4, stream4 && stream4.isTTY);
+      return translateLevel(level);
+    }
+    module2.exports = {
+      supportsColor: getSupportLevel,
+      stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+      stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+    };
+  }
+});
+
 // node_modules/debug/src/node.js
 var require_node = __commonJS({
   "node_modules/debug/src/node.js"(exports2, module2) {
@@ -17549,7 +17664,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require("supports-color");
+      const supportsColor = require_supports_color();
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -36490,6 +36605,84 @@ var WordPressBlockClient = class {
     );
     return response.data;
   }
+  // ──────────────────────────────────────────────────────────
+  // v1.2 — Docs lifecycle
+  // ──────────────────────────────────────────────────────────
+  /**
+   * Create a new post or page.
+   *
+   * @param data - Title (required), plus optional status, content/blocks,
+   *               terms, parent, slug, etc.
+   * @returns The created post's ID, slug, permalink, edit link, revision.
+   */
+  async createPost(data) {
+    if (!data.title || data.title.trim() === "") {
+      throw new Error('create_post: a non-empty "title" is required');
+    }
+    if (data.content !== void 0 && Array.isArray(data.blocks)) {
+      throw new Error('create_post: "content" and "blocks" are mutually exclusive');
+    }
+    const response = await this.client.post("/posts", data);
+    return response.data;
+  }
+  /**
+   * Update post metadata, status, or terms. Block content edits stay on the
+   * per-block tools (update_block / mutate_block_tree / replace_all_blocks).
+   *
+   * Use `status: trash` to trash; any non-trash status untrashes a trashed post.
+   */
+  async updatePost(postId, data) {
+    if (postId === void 0 || postId === null) {
+      throw new Error("update_post: post_id is required");
+    }
+    const response = await this.client.patch(`/posts/${postId}`, data);
+    return response.data;
+  }
+  /** List terms in a taxonomy (default: category). */
+  async listTerms(args = {}) {
+    const response = await this.client.get("/terms", { params: args });
+    return response.data;
+  }
+  /**
+   * Upload an item to the WordPress media library.
+   *
+   * Three input modes (exactly one of `path`, `url`, or `data_base64`):
+   *  - `path`: local filesystem path on the MCP host. Read and POSTed as
+   *    multipart/form-data. The MCP process must have read access.
+   *  - `url`: WordPress fetches the URL server-side (sideload, 25 MB cap).
+   *  - `data_base64`: base64-encoded contents. Requires `filename`.
+   */
+  async uploadMedia(args) {
+    const modes = ["path", "url", "data_base64"].filter(
+      (k) => typeof args[k] === "string" && args[k].length > 0
+    );
+    if (modes.length === 0) {
+      throw new Error('upload_media: provide one of "path", "url", or "data_base64"');
+    }
+    if (modes.length > 1) {
+      throw new Error(`upload_media: only one of path/url/data_base64 (got ${modes.join(", ")})`);
+    }
+    if (args.data_base64 && !args.filename) {
+      throw new Error('upload_media: "filename" is required with "data_base64"');
+    }
+    if (args.path) {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const data = await fs.readFile(args.path);
+      const filename = args.filename ?? path.basename(args.path);
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(data)]), filename);
+      if (args.title) form.append("title", args.title);
+      if (args.alt_text) form.append("alt_text", args.alt_text);
+      if (args.caption) form.append("caption", args.caption);
+      if (args.description) form.append("description", args.description);
+      if (typeof args.post_id === "number") form.append("post_id", String(args.post_id));
+      const response2 = await this.client.post("/media", form);
+      return response2.data;
+    }
+    const response = await this.client.post("/media", args);
+    return response.data;
+  }
 };
 
 // src/preferences.ts
@@ -37461,6 +37654,219 @@ async function handleMutateTool(toolName, args, client2) {
   return result;
 }
 
+// src/tools/posts.ts
+var POST_STATUS_CREATE = ["draft", "pending", "private", "publish", "future"];
+var POST_STATUS_UPDATE = ["draft", "pending", "private", "publish", "future", "trash"];
+var POST_TOOLS = [
+  {
+    name: "create_post",
+    description: "Create a new post or page. Returns ID, slug, permalink, and edit link. Provide either `content` (raw HTML or block markup) OR `blocks` (structured), not both. Status defaults to draft. Use update_post for trash transitions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Post title (required, non-empty)." },
+        post_type: { type: "string", description: "Post type slug (default: post)." },
+        status: {
+          type: "string",
+          enum: [...POST_STATUS_CREATE],
+          description: "Initial status. Use update_post for trash transitions."
+        },
+        content: {
+          type: "string",
+          description: "Raw post_content (HTML or block markup). Mutually exclusive with blocks."
+        },
+        blocks: {
+          type: "array",
+          description: "Structured blocks. Validated against block registry and preference tier \u2014 legacy blocks are rejected.",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"]
+          }
+        },
+        slug: { type: "string" },
+        parent: { type: "number", description: "Parent post ID (hierarchical post types only)." },
+        excerpt: { type: "string" },
+        featured_media: {
+          type: "number",
+          description: "Attachment ID. Must be an image MIME. Send 0 to leave unset."
+        },
+        categories: {
+          type: "array",
+          items: { type: "number" },
+          description: "Term IDs in the `category` taxonomy."
+        },
+        tags: {
+          type: "array",
+          items: { type: "number" },
+          description: "Term IDs in the `post_tag` taxonomy."
+        },
+        terms: {
+          type: "object",
+          description: "Map of taxonomy slug \u2192 term IDs. For non-built-in taxonomies on CPTs."
+        },
+        date: { type: "string", description: "ISO 8601 publish date." },
+        menu_order: { type: "number" },
+        comment_status: { type: "string", enum: ["open", "closed"] },
+        ping_status: { type: "string", enum: ["open", "closed"] },
+        author: {
+          type: "number",
+          description: "User ID. Other-user authorship requires edit_others_posts cap."
+        }
+      },
+      required: ["title"]
+    }
+  },
+  {
+    name: "update_post",
+    description: 'Partial update of post metadata, status, or terms. Block content edits stay on the per-block tools. Use status: "trash" to trash; any non-trash status untrashes a trashed post. At least one mutating field besides post_id is required.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "number", description: "WordPress post ID." },
+        title: { type: "string" },
+        status: { type: "string", enum: [...POST_STATUS_UPDATE] },
+        slug: { type: "string" },
+        parent: { type: "number" },
+        excerpt: { type: "string" },
+        featured_media: {
+          type: "number",
+          description: "Attachment ID. Send 0 to clear."
+        },
+        categories: { type: "array", items: { type: "number" } },
+        tags: { type: "array", items: { type: "number" } },
+        terms: { type: "object" },
+        date: { type: "string" },
+        menu_order: { type: "number" },
+        comment_status: { type: "string", enum: ["open", "closed"] },
+        ping_status: { type: "string", enum: ["open", "closed"] },
+        author: { type: "number" }
+      },
+      required: ["post_id"]
+    }
+  }
+];
+async function handlePostTool(toolName, args, client2) {
+  switch (toolName) {
+    case "create_post": {
+      if (typeof args.title !== "string" || args.title.trim() === "") {
+        throw new Error('create_post: a non-empty "title" is required');
+      }
+      if (args.content !== void 0 && Array.isArray(args.blocks)) {
+        throw new Error('create_post: "content" and "blocks" are mutually exclusive');
+      }
+      return client2.createPost(args);
+    }
+    case "update_post": {
+      if (typeof args.post_id !== "number") {
+        throw new Error('update_post: "post_id" (number) is required');
+      }
+      const { post_id: postId, ...rest } = args;
+      if (Object.keys(rest).length === 0) {
+        throw new Error("update_post: provide at least one mutating field besides post_id");
+      }
+      return client2.updatePost(postId, rest);
+    }
+    default:
+      throw new Error(`Unknown post tool: ${toolName}`);
+  }
+}
+
+// src/tools/terms.ts
+var TERM_TOOLS = [
+  {
+    name: "list_terms",
+    description: "List terms in a taxonomy (default: category). Useful for discovering category and tag IDs to pass to create_post or update_post.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taxonomy: { type: "string", description: "Taxonomy slug. Default: category." },
+        search: { type: "string", description: "LIKE match against term name." },
+        parent: { type: "number" },
+        hide_empty: { type: "boolean", description: "Default: false." },
+        per_page: { type: "number", description: "Default 100, max 200." },
+        page: { type: "number", description: "1-indexed." },
+        orderby: { type: "string", enum: ["name", "count", "term_id", "slug"] },
+        order: { type: "string", enum: ["asc", "desc"] },
+        include: { type: "array", items: { type: "number" } },
+        slug: { type: "string" }
+      }
+    }
+  }
+];
+async function handleTermTool(toolName, args, client2) {
+  switch (toolName) {
+    case "list_terms": {
+      return client2.listTerms(args);
+    }
+    default:
+      throw new Error(`Unknown term tool: ${toolName}`);
+  }
+}
+
+// src/tools/media.ts
+var MEDIA_TOOLS = [
+  {
+    name: "upload_media",
+    description: "Upload an item to the WordPress media library. Provide exactly one of: `path` (local filesystem on the MCP host, sent as multipart), `url` (server-side sideload, 25 MB cap), or `data_base64` (with `filename`). Returns the attachment ID and URL ready for core/image blocks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Absolute path on the MCP host. Will be read and POSTed as multipart."
+        },
+        url: {
+          type: "string",
+          description: "Public URL the WordPress site can fetch."
+        },
+        data_base64: {
+          type: "string",
+          description: "Base64-encoded file contents (requires filename)."
+        },
+        filename: {
+          type: "string",
+          description: "Override filename (required when using data_base64)."
+        },
+        title: { type: "string" },
+        alt_text: {
+          type: "string",
+          description: "Saved as _wp_attachment_image_alt meta. Critical for accessibility."
+        },
+        caption: { type: "string" },
+        description: { type: "string" },
+        post_id: {
+          type: "number",
+          description: "Attach to a parent post (sets post_parent)."
+        }
+      }
+    }
+  }
+];
+async function handleMediaTool(toolName, args, client2) {
+  switch (toolName) {
+    case "upload_media": {
+      const modes = ["path", "url", "data_base64"].filter(
+        (k) => typeof args[k] === "string" && args[k].length > 0
+      );
+      if (modes.length === 0) {
+        throw new Error('upload_media: provide one of "path", "url", or "data_base64"');
+      }
+      if (modes.length > 1) {
+        throw new Error(
+          `upload_media: only one of path/url/data_base64 may be supplied (got ${modes.join(", ")})`
+        );
+      }
+      if (args.data_base64 && !args.filename) {
+        throw new Error('upload_media: "filename" is required when using data_base64');
+      }
+      return client2.uploadMedia(args);
+    }
+    default:
+      throw new Error(`Unknown media tool: ${toolName}`);
+  }
+}
+
 // src/index.ts
 var GK_SITE_URL = process.env.GK_SITE_URL;
 var GK_BLOCK_API_USER = process.env.GK_BLOCK_API_USER;
@@ -37505,13 +37911,19 @@ var ALL_TOOLS = [
   ...READ_TOOLS,
   ...WRITE_TOOLS,
   ...PATTERN_TOOLS,
-  ...MUTATE_TOOLS
+  ...MUTATE_TOOLS,
+  ...POST_TOOLS,
+  ...TERM_TOOLS,
+  ...MEDIA_TOOLS
 ];
 var DISCOVERY_TOOL_NAMES = new Set(DISCOVERY_TOOLS.map((t) => t.name));
 var READ_TOOL_NAMES = new Set(READ_TOOLS.map((t) => t.name));
 var WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
 var PATTERN_TOOL_NAMES = new Set(PATTERN_TOOLS.map((t) => t.name));
 var MUTATE_TOOL_NAMES = new Set(MUTATE_TOOLS.map((t) => t.name));
+var POST_TOOL_NAMES = new Set(POST_TOOLS.map((t) => t.name));
+var TERM_TOOL_NAMES = new Set(TERM_TOOLS.map((t) => t.name));
+var MEDIA_TOOL_NAMES = new Set(MEDIA_TOOLS.map((t) => t.name));
 var BLOCK_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
 var BLOCK_PREFERENCES_CONTENT = `# GravityKit Block MCP \u2014 Agent Guide
 
@@ -37554,6 +37966,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       result = await handlePatternTool(name, toolArgs, client);
     } else if (MUTATE_TOOL_NAMES.has(name)) {
       result = await handleMutateTool(name, toolArgs, client);
+    } else if (POST_TOOL_NAMES.has(name)) {
+      result = await handlePostTool(name, toolArgs, client);
+    } else if (TERM_TOOL_NAMES.has(name)) {
+      result = await handleTermTool(name, toolArgs, client);
+    } else if (MEDIA_TOOL_NAMES.has(name)) {
+      result = await handleMediaTool(name, toolArgs, client);
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }

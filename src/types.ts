@@ -404,3 +404,172 @@ export interface MutationResponse {
   before_revision_id: number;
   revision_id: number;
 }
+
+// ============================================
+// v1.2 — Docs Lifecycle: Posts
+// ============================================
+
+/** A block in structured form, suitable for create_post's `blocks` input. */
+export interface BlockInput {
+  name: string;
+  attributes?: Record<string, unknown>;
+  innerBlocks?: BlockInput[];
+  innerHTML?: string;
+  innerContent?: unknown[];
+}
+
+export type CreatePostStatus = 'draft' | 'pending' | 'private' | 'publish' | 'future';
+export type UpdatePostStatus = CreatePostStatus | 'trash';
+export type CommentPingStatus = 'open' | 'closed';
+
+/** Body of POST /posts. `content` and `blocks` are mutually exclusive. */
+export interface CreatePostRequest {
+  title: string;
+  post_type?: string;
+  status?: CreatePostStatus;
+  content?: string;
+  blocks?: BlockInput[];
+  slug?: string;
+  parent?: number;
+  excerpt?: string;
+  /** Attachment ID. Send 0 to leave unset. Validated as image MIME. */
+  featured_media?: number;
+  /** Term IDs in the `category` taxonomy. */
+  categories?: number[];
+  /** Term IDs in the `post_tag` taxonomy. */
+  tags?: number[];
+  /** Map of taxonomy slug → term IDs (for non-built-in taxonomies on CPTs). */
+  terms?: Record<string, number[]>;
+  date?: string;
+  menu_order?: number;
+  comment_status?: CommentPingStatus;
+  ping_status?: CommentPingStatus;
+  author?: number;
+}
+
+/**
+ * Body of PATCH /posts/{id}. All fields optional. Send `[]` to clear
+ * `categories`/`tags`. Send `0` to clear `featured_media`. Use `status: trash`
+ * to trash; any non-trash status untrashes a trashed post.
+ */
+export interface UpdatePostRequest {
+  title?: string;
+  status?: UpdatePostStatus;
+  slug?: string;
+  parent?: number;
+  excerpt?: string;
+  featured_media?: number;
+  categories?: number[];
+  tags?: number[];
+  terms?: Record<string, number[]>;
+  date?: string;
+  menu_order?: number;
+  comment_status?: CommentPingStatus;
+  ping_status?: CommentPingStatus;
+  author?: number;
+}
+
+/** Common response shape for create_post and update_post. */
+export interface PostMutationResponse {
+  success: boolean;
+  id: number;
+  post_type: string;
+  status: string;
+  title: string;
+  slug: string;
+  permalink: string;
+  edit_link: string;
+  before_revision_id: number | null;
+  revision_id: number | null;
+  /** Set on update_post when the post moves into `publish` from a non-publish status. */
+  transitioned_to_publish?: boolean;
+  /** Set on update_post when the post moved out of `trash`. */
+  untrashed?: boolean;
+  warnings: Array<Record<string, unknown>>;
+}
+
+// ============================================
+// v1.2 — Docs Lifecycle: Terms
+// ============================================
+
+export type TermOrderBy = 'name' | 'count' | 'term_id' | 'slug';
+export type SortOrder = 'asc' | 'desc';
+
+export interface ListTermsRequest {
+  taxonomy?: string;
+  search?: string;
+  parent?: number;
+  hide_empty?: boolean;
+  per_page?: number;
+  page?: number;
+  orderby?: TermOrderBy;
+  order?: SortOrder;
+  include?: number[];
+  slug?: string;
+}
+
+export interface Term {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  parent: number;
+  count: number;
+  taxonomy: string;
+  link: string;
+}
+
+export interface ListTermsResponse {
+  taxonomy: string;
+  total: number;
+  page: number;
+  per_page: number;
+  terms: Term[];
+}
+
+// ============================================
+// v1.2 — Docs Lifecycle: Media
+// ============================================
+
+/** Exactly one of `path`, `url`, or `data_base64` is required. */
+export interface UploadMediaRequest {
+  /** Local filesystem path on the MCP host. Read and POSTed as multipart. */
+  path?: string;
+  /** Public URL the WordPress site can fetch. Server-side sideload. */
+  url?: string;
+  /** Base64-encoded file contents. Requires `filename`. */
+  data_base64?: string;
+  /** Override filename (required when using `data_base64`). */
+  filename?: string;
+  title?: string;
+  /** Saved as `_wp_attachment_image_alt`. Critical for accessibility. */
+  alt_text?: string;
+  caption?: string;
+  description?: string;
+  /** Attach to a parent post (sets post_parent). */
+  post_id?: number;
+}
+
+export interface AttachmentSize {
+  url: string;
+  width: number;
+  height: number;
+}
+
+export interface UploadMediaResponse {
+  success: boolean;
+  id: number;
+  title: string;
+  filename: string;
+  url: string;
+  source_url: string;
+  mime_type: string;
+  alt_text: string;
+  caption?: string;
+  description?: string;
+  post_parent: number;
+  /** Image-only fields (absent for non-image attachments). */
+  width?: number;
+  height?: number;
+  sizes?: Record<string, AttachmentSize>;
+}

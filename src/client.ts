@@ -20,6 +20,13 @@ import type {
   MutationRequest,
   MutationResponse,
   ResolveUrlResponse,
+  CreatePostRequest,
+  UpdatePostRequest,
+  PostMutationResponse,
+  ListTermsRequest,
+  ListTermsResponse,
+  UploadMediaRequest,
+  UploadMediaResponse,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -540,6 +547,94 @@ export class WordPressBlockClient {
       `/posts/${postId}/insert-pattern`,
       data
     );
+    return response.data;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v1.2 — Docs lifecycle
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Create a new post or page.
+   *
+   * @param data - Title (required), plus optional status, content/blocks,
+   *               terms, parent, slug, etc.
+   * @returns The created post's ID, slug, permalink, edit link, revision.
+   */
+  async createPost(data: CreatePostRequest): Promise<PostMutationResponse> {
+    if (!data.title || data.title.trim() === '') {
+      throw new Error('create_post: a non-empty "title" is required');
+    }
+    if (data.content !== undefined && Array.isArray(data.blocks)) {
+      throw new Error('create_post: "content" and "blocks" are mutually exclusive');
+    }
+    const response = await this.client.post<PostMutationResponse>('/posts', data);
+    return response.data;
+  }
+
+  /**
+   * Update post metadata, status, or terms. Block content edits stay on the
+   * per-block tools (update_block / mutate_block_tree / replace_all_blocks).
+   *
+   * Use `status: trash` to trash; any non-trash status untrashes a trashed post.
+   */
+  async updatePost(postId: number, data: UpdatePostRequest): Promise<PostMutationResponse> {
+    if (postId === undefined || postId === null) {
+      throw new Error('update_post: post_id is required');
+    }
+    const response = await this.client.patch<PostMutationResponse>(`/posts/${postId}`, data);
+    return response.data;
+  }
+
+  /** List terms in a taxonomy (default: category). */
+  async listTerms(args: ListTermsRequest = {}): Promise<ListTermsResponse> {
+    const response = await this.client.get<ListTermsResponse>('/terms', { params: args });
+    return response.data;
+  }
+
+  /**
+   * Upload an item to the WordPress media library.
+   *
+   * Three input modes (exactly one of `path`, `url`, or `data_base64`):
+   *  - `path`: local filesystem path on the MCP host. Read and POSTed as
+   *    multipart/form-data. The MCP process must have read access.
+   *  - `url`: WordPress fetches the URL server-side (sideload, 25 MB cap).
+   *  - `data_base64`: base64-encoded contents. Requires `filename`.
+   */
+  async uploadMedia(args: UploadMediaRequest): Promise<UploadMediaResponse> {
+    const modes = (['path', 'url', 'data_base64'] as const).filter(
+      (k) => typeof args[k] === 'string' && (args[k] as string).length > 0,
+    );
+    if (modes.length === 0) {
+      throw new Error('upload_media: provide one of "path", "url", or "data_base64"');
+    }
+    if (modes.length > 1) {
+      throw new Error(`upload_media: only one of path/url/data_base64 (got ${modes.join(', ')})`);
+    }
+    if (args.data_base64 && !args.filename) {
+      throw new Error('upload_media: "filename" is required with "data_base64"');
+    }
+
+    if (args.path) {
+      const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      const data = await fs.readFile(args.path);
+      const filename = args.filename ?? path.basename(args.path);
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(data)]), filename);
+      if (args.title) form.append('title', args.title);
+      if (args.alt_text) form.append('alt_text', args.alt_text);
+      if (args.caption) form.append('caption', args.caption);
+      if (args.description) form.append('description', args.description);
+      if (typeof args.post_id === 'number') form.append('post_id', String(args.post_id));
+
+      // axios sets the multipart Content-Type and boundary automatically.
+      const response = await this.client.post<UploadMediaResponse>('/media', form);
+      return response.data;
+    }
+
+    // url or data_base64 ride as JSON.
+    const response = await this.client.post<UploadMediaResponse>('/media', args);
     return response.data;
   }
 }
