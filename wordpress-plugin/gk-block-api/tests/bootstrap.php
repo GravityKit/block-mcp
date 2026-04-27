@@ -29,7 +29,7 @@ if ( ! function_exists( 'wp_kses_post' ) ) {
 	function wp_kses_post( $data ) { return $data; }
 }
 if ( ! function_exists( '__' ) ) {
-	function __( $text, $domain = 'default' ) { return $text; }
+	function __( $text, $domain = 'default' ) { unset( $domain ); return $text; }
 }
 if ( ! function_exists( 'esc_attr' ) ) {
 	function esc_attr( $text ) { return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' ); }
@@ -158,26 +158,42 @@ if ( ! function_exists( 'get_post' ) ) {
 }
 if ( ! function_exists( 'wp_update_post' ) ) {
 	function wp_update_post( $args, $wp_error = false ) {
+		unset( $wp_error );
 		$id = isset( $args['ID'] ) ? (int) $args['ID'] : 0;
-		if ( $id > 0 && isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
-			if ( isset( $args['post_content'] ) ) {
-				$GLOBALS['_gk_test_posts'][ $id ]->post_content = $args['post_content'];
-			}
-			if ( isset( $args['post_title'] ) ) {
-				$GLOBALS['_gk_test_posts'][ $id ]->post_title = $args['post_title'];
-			}
-			return $id;
+		if ( $id <= 0 || ! isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+			return 0;
 		}
-		return 0;
+		$post = $GLOBALS['_gk_test_posts'][ $id ];
+		foreach ( array(
+			'post_title',
+			'post_content',
+			'post_excerpt',
+			'post_status',
+			'post_name',
+			'post_parent',
+			'post_date',
+			'menu_order',
+			'comment_status',
+			'ping_status',
+			'post_author',
+			'post_mime_type',
+		) as $field ) {
+			if ( array_key_exists( $field, $args ) ) {
+				$post->{$field} = $args[ $field ];
+			}
+		}
+		$GLOBALS['_gk_test_posts'][ $id ] = $post;
+		return $id;
 	}
 }
 if ( ! function_exists( 'wp_get_post_revisions' ) ) {
 	function wp_get_post_revisions( $post_id, $args = array() ) {
+		unset( $post_id, $args );
 		return array();
 	}
 }
 if ( ! function_exists( 'setup_postdata' ) ) {
-	function setup_postdata( $post ) { return true; }
+	function setup_postdata( $post ) { unset( $post ); return true; }
 }
 if ( ! function_exists( 'wp_reset_postdata' ) ) {
 	function wp_reset_postdata() { return true; }
@@ -196,6 +212,7 @@ if ( ! function_exists( 'get_transient' ) ) {
 }
 if ( ! function_exists( 'set_transient' ) ) {
 	function set_transient( $key, $value, $expiration = 0 ) {
+		unset( $expiration );
 		$GLOBALS['_gk_test_transients'][ $key ] = $value;
 		return true;
 	}
@@ -248,9 +265,444 @@ if ( ! class_exists( 'WP_Block_Type' ) ) {
 	}
 }
 
-// Stub WP_HTML_Tag_Processor if not available.
+// Functions WP_HTML_Tag_Processor depends on.
+if ( ! function_exists( '_doing_it_wrong' ) ) {
+	function _doing_it_wrong( $function_name, $message, $version ) {
+		// No-op in tests.
+		unset( $function_name, $message, $version );
+	}
+}
+if ( ! function_exists( 'wp_kses_uri_attributes' ) ) {
+	function wp_kses_uri_attributes() {
+		return array(
+			'action', 'archive', 'background', 'cite', 'classid', 'codebase', 'data',
+			'formaction', 'href', 'icon', 'longdesc', 'manifest', 'poster', 'profile',
+			'src', 'usemap', 'xmlns', 'xlink:href',
+		);
+	}
+}
+
+// Load the vendored WordPress HTML API (see tests/wp-html-api/README.md).
+// These files are required by HtmlTransformerTest. Outside a real WP install,
+// they're loaded from the vendor directory so Block_CRUD's auto-transform code
+// paths can be exercised without skipping.
 if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
-	// We can't easily stub this — skip tests that need it.
+	$_gk_html_api_dir = __DIR__ . '/wp-html-api';
+	if ( is_dir( $_gk_html_api_dir ) ) {
+		require_once $_gk_html_api_dir . '/class-wp-html-attribute-token.php';
+		require_once $_gk_html_api_dir . '/class-wp-html-span.php';
+		require_once $_gk_html_api_dir . '/class-wp-html-text-replacement.php';
+		require_once $_gk_html_api_dir . '/class-wp-html-tag-processor.php';
+	}
+}
+
+// ── Stubs for Post_Manager / Term_Manager / Media_Manager tests ──
+//
+// These additional stubs cover the WordPress functions touched by the
+// v1.2 lifecycle managers. The stub layer focuses on validation/error
+// paths; real WP integration is proved by the gkclone E2E smoke
+// (scripts/e2e-gkclone.mjs). Issue #2 tracks moving to wp-env-based
+// PHPUnit for full integration coverage.
+
+// Capabilities — controllable per test via $GLOBALS['_gk_test_caps'].
+// Default: every cap granted. Tests denying a cap set the array key to false.
+$GLOBALS['_gk_test_caps']    = array();
+$GLOBALS['_gk_test_user_id'] = 1;
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( $cap, ...$args ) {
+		unset( $args );
+		if ( array_key_exists( $cap, $GLOBALS['_gk_test_caps'] ) ) {
+			return (bool) $GLOBALS['_gk_test_caps'][ $cap ];
+		}
+		return true;
+	}
+}
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	function get_current_user_id() {
+		return (int) $GLOBALS['_gk_test_user_id'];
+	}
+}
+
+// Post types — register via $GLOBALS['_gk_test_post_types'].
+$GLOBALS['_gk_test_post_types'] = array(
+	'post' => (object) array(
+		'name'         => 'post',
+		'hierarchical' => false,
+		'show_in_rest' => true,
+		'cap'          => (object) array(
+			'create_posts'      => 'edit_posts',
+			'edit_posts'        => 'edit_posts',
+			'edit_post'         => 'edit_post',
+			'publish_posts'     => 'publish_posts',
+			'edit_others_posts' => 'edit_others_posts',
+		),
+	),
+	'page' => (object) array(
+		'name'         => 'page',
+		'hierarchical' => true,
+		'show_in_rest' => true,
+		'cap'          => (object) array(
+			'create_posts'      => 'edit_pages',
+			'edit_posts'        => 'edit_pages',
+			'edit_post'         => 'edit_page',
+			'publish_posts'     => 'publish_pages',
+			'edit_others_posts' => 'edit_others_pages',
+		),
+	),
+);
+
+if ( ! function_exists( 'get_post_type_object' ) ) {
+	function get_post_type_object( $type ) {
+		return isset( $GLOBALS['_gk_test_post_types'][ $type ] )
+			? $GLOBALS['_gk_test_post_types'][ $type ]
+			: null;
+	}
+}
+if ( ! function_exists( 'get_post_types' ) ) {
+	function get_post_types( $args = array(), $output = 'names' ) {
+		$results = array();
+		foreach ( $GLOBALS['_gk_test_post_types'] as $name => $obj ) {
+			$match = true;
+			foreach ( $args as $arg_key => $arg_value ) {
+				if ( ! isset( $obj->{$arg_key} ) || $obj->{$arg_key} !== $arg_value ) {
+					$match = false;
+					break;
+				}
+			}
+			if ( $match ) {
+				$results[ $name ] = $obj;
+			}
+		}
+		return 'names' === $output ? array_keys( $results ) : $results;
+	}
+}
+
+// Post insert / update — extend the existing $_gk_test_posts store.
+$GLOBALS['_gk_test_next_post_id'] = 1000;
+
+if ( ! function_exists( 'wp_insert_post' ) ) {
+	function wp_insert_post( $args, $wp_error = false ) {
+		unset( $wp_error );
+		$id = ++$GLOBALS['_gk_test_next_post_id'];
+
+		$post                 = new \stdClass();
+		$post->ID             = $id;
+		$post->post_type      = isset( $args['post_type'] ) ? $args['post_type'] : 'post';
+		$post->post_status    = isset( $args['post_status'] ) ? $args['post_status'] : 'draft';
+		$post->post_title     = isset( $args['post_title'] ) ? $args['post_title'] : '';
+		$post->post_content   = isset( $args['post_content'] ) ? $args['post_content'] : '';
+		$post->post_excerpt   = isset( $args['post_excerpt'] ) ? $args['post_excerpt'] : '';
+		$post->post_name      = isset( $args['post_name'] ) ? $args['post_name'] : sanitize_title( $post->post_title );
+		$post->post_parent    = isset( $args['post_parent'] ) ? (int) $args['post_parent'] : 0;
+		$post->post_date      = isset( $args['post_date'] ) ? $args['post_date'] : '2026-01-01 00:00:00';
+		$post->menu_order     = isset( $args['menu_order'] ) ? (int) $args['menu_order'] : 0;
+		$post->comment_status = isset( $args['comment_status'] ) ? $args['comment_status'] : 'closed';
+		$post->ping_status    = isset( $args['ping_status'] ) ? $args['ping_status'] : 'closed';
+		$post->post_author    = isset( $args['post_author'] ) ? (int) $args['post_author'] : get_current_user_id();
+		$post->post_mime_type = isset( $args['post_mime_type'] ) ? $args['post_mime_type'] : '';
+
+		$GLOBALS['_gk_test_posts'][ $id ] = $post;
+		return $id;
+	}
+}
+
+if ( ! function_exists( 'wp_delete_post' ) ) {
+	function wp_delete_post( $id, $force = false ) {
+		unset( $force );
+		if ( isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+			unset( $GLOBALS['_gk_test_posts'][ $id ] );
+			return true;
+		}
+		return false;
+	}
+}
+if ( ! function_exists( 'wp_trash_post' ) ) {
+	function wp_trash_post( $id ) {
+		if ( ! isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+			return false;
+		}
+		$GLOBALS['_gk_test_posts'][ $id ]->_pre_trash_status = $GLOBALS['_gk_test_posts'][ $id ]->post_status;
+		$GLOBALS['_gk_test_posts'][ $id ]->post_status       = 'trash';
+		return $GLOBALS['_gk_test_posts'][ $id ];
+	}
+}
+if ( ! function_exists( 'wp_untrash_post' ) ) {
+	function wp_untrash_post( $id ) {
+		if ( ! isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+			return false;
+		}
+		$prior = isset( $GLOBALS['_gk_test_posts'][ $id ]->_pre_trash_status )
+			? $GLOBALS['_gk_test_posts'][ $id ]->_pre_trash_status
+			: 'draft';
+		$GLOBALS['_gk_test_posts'][ $id ]->post_status = $prior;
+		return $GLOBALS['_gk_test_posts'][ $id ];
+	}
+}
+if ( ! function_exists( 'get_post_mime_type' ) ) {
+	function get_post_mime_type( $id ) {
+		return isset( $GLOBALS['_gk_test_posts'][ $id ] )
+			? $GLOBALS['_gk_test_posts'][ $id ]->post_mime_type
+			: '';
+	}
+}
+if ( ! function_exists( 'get_permalink' ) ) {
+	function get_permalink( $post ) {
+		$id = is_object( $post ) ? $post->ID : (int) $post;
+		return 'https://example.test/?p=' . $id;
+	}
+}
+if ( ! function_exists( 'get_edit_post_link' ) ) {
+	function get_edit_post_link( $post, $context = 'display' ) {
+		$id  = is_object( $post ) ? $post->ID : (int) $post;
+		$url = 'https://example.test/wp-admin/post.php?post=' . $id . '&action=edit';
+		// WordPress escapes ampersands in 'display' context; raw otherwise.
+		return 'display' === $context ? str_replace( '&', '&amp;', $url ) : $url;
+	}
+}
+
+// Featured image — store as post meta.
+$GLOBALS['_gk_test_post_meta'] = array();
+
+if ( ! function_exists( 'set_post_thumbnail' ) ) {
+	function set_post_thumbnail( $post_id, $thumbnail_id ) {
+		$GLOBALS['_gk_test_post_meta'][ $post_id ]['_thumbnail_id'] = (int) $thumbnail_id;
+		return true;
+	}
+}
+if ( ! function_exists( 'delete_post_thumbnail' ) ) {
+	function delete_post_thumbnail( $post_id ) {
+		unset( $GLOBALS['_gk_test_post_meta'][ $post_id ]['_thumbnail_id'] );
+		return true;
+	}
+}
+if ( ! function_exists( 'get_post_thumbnail_id' ) ) {
+	function get_post_thumbnail_id( $post_id ) {
+		return isset( $GLOBALS['_gk_test_post_meta'][ $post_id ]['_thumbnail_id'] )
+			? $GLOBALS['_gk_test_post_meta'][ $post_id ]['_thumbnail_id']
+			: 0;
+	}
+}
+if ( ! function_exists( 'get_post_meta' ) ) {
+	function get_post_meta( $post_id, $key = '', $single = false ) {
+		if ( '' === $key ) {
+			return isset( $GLOBALS['_gk_test_post_meta'][ $post_id ] ) ? $GLOBALS['_gk_test_post_meta'][ $post_id ] : array();
+		}
+		$value = isset( $GLOBALS['_gk_test_post_meta'][ $post_id ][ $key ] )
+			? $GLOBALS['_gk_test_post_meta'][ $post_id ][ $key ]
+			: '';
+		return $single ? $value : ( '' === $value ? array() : array( $value ) );
+	}
+}
+if ( ! function_exists( 'update_post_meta' ) ) {
+	function update_post_meta( $post_id, $key, $value ) {
+		$GLOBALS['_gk_test_post_meta'][ $post_id ][ $key ] = $value;
+		return true;
+	}
+}
+
+// Taxonomies and terms.
+$GLOBALS['_gk_test_taxonomies'] = array(
+	'category' => array( 'object_types' => array( 'post' ), 'hierarchical' => true ),
+	'post_tag' => array( 'object_types' => array( 'post' ), 'hierarchical' => false ),
+);
+$GLOBALS['_gk_test_terms']        = array(); // term_id => WP_Term-like object
+$GLOBALS['_gk_test_post_terms']   = array(); // post_id => taxonomy => [term_ids]
+$GLOBALS['_gk_test_next_term_id'] = 1;
+
+if ( ! function_exists( 'taxonomy_exists' ) ) {
+	function taxonomy_exists( $taxonomy ) {
+		return isset( $GLOBALS['_gk_test_taxonomies'][ $taxonomy ] );
+	}
+}
+if ( ! function_exists( 'get_object_taxonomies' ) ) {
+	function get_object_taxonomies( $object_type, $output = 'names' ) {
+		$type    = is_string( $object_type ) ? $object_type : ( isset( $object_type->post_type ) ? $object_type->post_type : '' );
+		$objects = array();
+		foreach ( $GLOBALS['_gk_test_taxonomies'] as $tax => $cfg ) {
+			if ( in_array( $type, $cfg['object_types'], true ) ) {
+				$objects[ $tax ] = (object) array_merge( array( 'name' => $tax ), $cfg );
+			}
+		}
+		return 'names' === $output ? array_keys( $objects ) : $objects;
+	}
+}
+
+if ( ! class_exists( 'WP_Term' ) ) {
+	class WP_Term {
+		public $term_id;
+		public $name;
+		public $slug;
+		public $description = '';
+		public $parent      = 0;
+		public $count       = 0;
+		public $taxonomy;
+
+		public function __construct( $args ) {
+			foreach ( $args as $k => $v ) {
+				$this->{$k} = $v;
+			}
+		}
+	}
+}
+
+if ( ! function_exists( '_gk_test_make_term' ) ) {
+	function _gk_test_make_term( $taxonomy, $name, $extra = array() ) {
+		$id = ++$GLOBALS['_gk_test_next_term_id'];
+		$term = new WP_Term(
+			array_merge(
+				array(
+					'term_id'  => $id,
+					'name'     => $name,
+					'slug'     => sanitize_title( $name ),
+					'taxonomy' => $taxonomy,
+				),
+				$extra
+			)
+		);
+		$GLOBALS['_gk_test_terms'][ $id ] = $term;
+		return $term;
+	}
+}
+
+if ( ! function_exists( 'get_term' ) ) {
+	function get_term( $term_id, $taxonomy = '' ) {
+		if ( ! isset( $GLOBALS['_gk_test_terms'][ $term_id ] ) ) {
+			return null;
+		}
+		$term = $GLOBALS['_gk_test_terms'][ $term_id ];
+		if ( $taxonomy && $term->taxonomy !== $taxonomy ) {
+			return null;
+		}
+		return $term;
+	}
+}
+
+if ( ! function_exists( 'get_term_link' ) ) {
+	function get_term_link( $term ) {
+		$slug = is_object( $term ) ? $term->slug : (string) $term;
+		return 'https://example.test/?term=' . $slug;
+	}
+}
+
+if ( ! function_exists( 'get_terms' ) ) {
+	function get_terms( $args = array() ) {
+		$taxonomy = isset( $args['taxonomy'] ) ? $args['taxonomy'] : '';
+		if ( $taxonomy && ! taxonomy_exists( $taxonomy ) ) {
+			return new \WP_Error( 'invalid_taxonomy', 'invalid' );
+		}
+		$results = array();
+		foreach ( $GLOBALS['_gk_test_terms'] as $term ) {
+			if ( $taxonomy && $term->taxonomy !== $taxonomy ) {
+				continue;
+			}
+			if ( isset( $args['parent'] ) && (int) $term->parent !== (int) $args['parent'] ) {
+				continue;
+			}
+			if ( ! empty( $args['hide_empty'] ) && (int) $term->count <= 0 ) {
+				continue;
+			}
+			if ( ! empty( $args['search'] ) && false === stripos( $term->name, $args['search'] ) ) {
+				continue;
+			}
+			if ( ! empty( $args['slug'] ) && $term->slug !== $args['slug'] ) {
+				continue;
+			}
+			if ( ! empty( $args['include'] ) && ! in_array( (int) $term->term_id, array_map( 'intval', $args['include'] ), true ) ) {
+				continue;
+			}
+			$results[] = $term;
+		}
+
+		$orderby = isset( $args['orderby'] ) ? $args['orderby'] : 'name';
+		$order   = isset( $args['order'] ) && 'DESC' === strtoupper( $args['order'] ) ? -1 : 1;
+		usort(
+			$results,
+			function ( $a, $b ) use ( $orderby, $order ) {
+				$av = isset( $a->{$orderby} ) ? $a->{$orderby} : ( 'name' === $orderby ? $a->name : 0 );
+				$bv = isset( $b->{$orderby} ) ? $b->{$orderby} : ( 'name' === $orderby ? $b->name : 0 );
+				if ( is_numeric( $av ) && is_numeric( $bv ) ) {
+					return ( $av <=> $bv ) * $order;
+				}
+				return strcasecmp( (string) $av, (string) $bv ) * $order;
+			}
+		);
+
+		$offset = isset( $args['offset'] ) ? (int) $args['offset'] : 0;
+		$number = isset( $args['number'] ) ? (int) $args['number'] : 0;
+		if ( $number > 0 ) {
+			$results = array_slice( $results, $offset, $number );
+		} elseif ( $offset > 0 ) {
+			$results = array_slice( $results, $offset );
+		}
+		return $results;
+	}
+}
+
+if ( ! function_exists( 'wp_count_terms' ) ) {
+	function wp_count_terms( $args = array() ) {
+		$count_args = $args;
+		unset( $count_args['number'], $count_args['offset'] );
+		return count( get_terms( $count_args ) );
+	}
+}
+
+if ( ! function_exists( 'wp_set_post_terms' ) ) {
+	function wp_set_post_terms( $post_id, $terms = array(), $taxonomy = 'post_tag', $append = false ) {
+		$terms = (array) $terms;
+		if ( ! taxonomy_exists( $taxonomy ) ) {
+			return new \WP_Error( 'invalid_taxonomy', 'invalid' );
+		}
+		$existing = isset( $GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ] )
+			? $GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ]
+			: array();
+		$ids = array_map( 'intval', $terms );
+		$GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ] = $append ? array_unique( array_merge( $existing, $ids ) ) : $ids;
+		return $GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ];
+	}
+}
+
+if ( ! function_exists( 'wp_get_post_terms' ) ) {
+	function wp_get_post_terms( $post_id, $taxonomy = 'post_tag', $args = array() ) {
+		$ids = isset( $GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ] )
+			? $GLOBALS['_gk_test_post_terms'][ $post_id ][ $taxonomy ]
+			: array();
+		if ( isset( $args['fields'] ) && 'ids' === $args['fields'] ) {
+			return $ids;
+		}
+		return array_map(
+			function ( $id ) {
+				return isset( $GLOBALS['_gk_test_terms'][ $id ] ) ? $GLOBALS['_gk_test_terms'][ $id ] : null;
+			},
+			$ids
+		);
+	}
+}
+
+if ( ! function_exists( 'absint' ) ) {
+	function absint( $maybeint ) {
+		return abs( (int) $maybeint );
+	}
+}
+if ( ! function_exists( 'sanitize_title' ) ) {
+	function sanitize_title( $title ) {
+		$title = strtolower( strip_tags( (string) $title ) );
+		$title = preg_replace( '/[^a-z0-9\s-]/', '', $title );
+		$title = preg_replace( '/[\s-]+/', '-', $title );
+		return trim( $title, '-' );
+	}
+}
+if ( ! function_exists( 'sanitize_file_name' ) ) {
+	function sanitize_file_name( $filename ) {
+		$filename = strip_tags( (string) $filename );
+		$filename = preg_replace( '/[^a-zA-Z0-9._-]+/', '-', $filename );
+		return trim( $filename, '-' );
+	}
+}
+if ( ! function_exists( 'wp_basename' ) ) {
+	function wp_basename( $path, $suffix = '' ) {
+		return urldecode( basename( str_replace( array( '%2F', '%5C' ), '/', urlencode( $path ) ), $suffix ) );
+	}
 }
 
 // Autoload plugin classes.
