@@ -705,6 +705,155 @@ if ( ! function_exists( 'wp_basename' ) ) {
 	}
 }
 
+// ── Media stubs ──
+//
+// These cover the validation-path tests for Media_Manager. The actual
+// upload happy-path is exercised end-to-end against gkclone — see issue #2
+// for moving to wp-env-based PHPUnit so we can test with real WP media.
+
+$GLOBALS['_gk_test_media_allowed_mimes'] = array(
+	'png'      => 'image/png',
+	'jpg|jpeg' => 'image/jpeg',
+	'gif'      => 'image/gif',
+	'webp'     => 'image/webp',
+	'svg'      => 'image/svg+xml',
+);
+$GLOBALS['_gk_test_max_upload_size']     = 26214400; // 25 MB
+$GLOBALS['_gk_test_url_responses']       = array(); // url => filepath OR WP_Error
+
+if ( ! function_exists( 'esc_url_raw' ) ) {
+	function esc_url_raw( $url ) {
+		return is_string( $url ) ? trim( $url ) : '';
+	}
+}
+if ( ! function_exists( 'wp_http_validate_url' ) ) {
+	function wp_http_validate_url( $url ) {
+		if ( ! is_string( $url ) || '' === $url ) {
+			return false;
+		}
+		$parts = parse_url( $url );
+		if ( ! $parts || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+			return false;
+		}
+		return in_array( strtolower( $parts['scheme'] ), array( 'http', 'https' ), true ) ? $url : false;
+	}
+}
+if ( ! function_exists( 'wp_parse_url' ) ) {
+	function wp_parse_url( $url, $component = -1 ) {
+		return parse_url( $url, $component );
+	}
+}
+if ( ! function_exists( 'wp_max_upload_size' ) ) {
+	function wp_max_upload_size() {
+		return (int) $GLOBALS['_gk_test_max_upload_size'];
+	}
+}
+if ( ! function_exists( 'wp_tempnam' ) ) {
+	function wp_tempnam( $filename = '' ) {
+		$tmp = tempnam( sys_get_temp_dir(), 'gkbla' );
+		if ( $tmp && $filename ) {
+			$dest = $tmp . '-' . sanitize_file_name( $filename );
+			rename( $tmp, $dest );
+			return $dest;
+		}
+		return $tmp;
+	}
+}
+if ( ! function_exists( 'wp_check_filetype_and_ext' ) ) {
+	function wp_check_filetype_and_ext( $file, $filename ) {
+		// $file (the temp path) ignored in stubs — real WP reads file contents
+		// to verify magic bytes match the extension. Tests trust the extension.
+		unset( $file );
+		$ext = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
+		foreach ( $GLOBALS['_gk_test_media_allowed_mimes'] as $exts => $mime ) {
+			foreach ( explode( '|', $exts ) as $allowed ) {
+				if ( $allowed === $ext ) {
+					return array( 'ext' => $ext, 'type' => $mime, 'proper_filename' => $filename );
+				}
+			}
+		}
+		return array( 'ext' => false, 'type' => false, 'proper_filename' => false );
+	}
+}
+if ( ! function_exists( 'download_url' ) ) {
+	function download_url( $url, $timeout = 300 ) {
+		unset( $timeout );
+		if ( isset( $GLOBALS['_gk_test_url_responses'][ $url ] ) ) {
+			$resp = $GLOBALS['_gk_test_url_responses'][ $url ];
+			return $resp;
+		}
+		return new \WP_Error( 'http_404', 'No fixture for URL: ' . $url );
+	}
+}
+if ( ! function_exists( 'media_handle_sideload' ) ) {
+	function media_handle_sideload( $file, $post_id = 0, $desc = null, $post_data = array() ) {
+		unset( $desc, $post_data );
+		$mime = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
+		if ( empty( $mime['type'] ) ) {
+			return new \WP_Error( 'invalid_mime', 'invalid' );
+		}
+		$id = wp_insert_post( array(
+			'post_type'      => 'attachment',
+			'post_title'     => pathinfo( $file['name'], PATHINFO_FILENAME ),
+			'post_status'    => 'inherit',
+			'post_parent'    => (int) $post_id,
+			'post_mime_type' => $mime['type'],
+		) );
+		// Track the source path for get_attached_file.
+		$GLOBALS['_gk_test_attached_files'][ $id ] = $file['tmp_name'];
+		// Synthetic image metadata for image MIMEs.
+		if ( 0 === strpos( $mime['type'], 'image/' ) ) {
+			$GLOBALS['_gk_test_attachment_meta'][ $id ] = array(
+				'width'  => 1,
+				'height' => 1,
+				'file'   => $file['name'],
+				'sizes'  => array(),
+			);
+		}
+		return $id;
+	}
+}
+if ( ! function_exists( 'media_handle_upload' ) ) {
+	function media_handle_upload( $file_id, $post_id = 0, $post_data = array(), $overrides = array() ) {
+		unset( $post_data, $overrides );
+		if ( ! isset( $_FILES[ $file_id ] ) ) {
+			return new \WP_Error( 'no_file', 'no file in $_FILES' );
+		}
+		$file = $_FILES[ $file_id ];
+		return media_handle_sideload( $file, $post_id );
+	}
+}
+if ( ! function_exists( 'wp_get_attachment_metadata' ) ) {
+	function wp_get_attachment_metadata( $attachment_id ) {
+		return isset( $GLOBALS['_gk_test_attachment_meta'][ $attachment_id ] )
+			? $GLOBALS['_gk_test_attachment_meta'][ $attachment_id ]
+			: array();
+	}
+}
+if ( ! function_exists( 'wp_get_attachment_url' ) ) {
+	function wp_get_attachment_url( $attachment_id ) {
+		$post = get_post( $attachment_id );
+		if ( ! $post ) {
+			return '';
+		}
+		return 'https://example.test/wp-content/uploads/' . $post->post_title . '.bin';
+	}
+}
+if ( ! function_exists( 'wp_get_attachment_image_src' ) ) {
+	function wp_get_attachment_image_src( $attachment_id, $size = 'thumbnail' ) {
+		unset( $size );
+		$url = wp_get_attachment_url( $attachment_id );
+		return $url ? array( $url, 1, 1 ) : false;
+	}
+}
+if ( ! function_exists( 'get_attached_file' ) ) {
+	function get_attached_file( $attachment_id ) {
+		return isset( $GLOBALS['_gk_test_attached_files'][ $attachment_id ] )
+			? $GLOBALS['_gk_test_attached_files'][ $attachment_id ]
+			: '';
+	}
+}
+
 // Autoload plugin classes.
 spl_autoload_register( function ( $class ) {
 	$prefix   = 'GravityKit\\BlockAPI\\';
