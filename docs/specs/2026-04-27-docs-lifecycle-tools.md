@@ -27,7 +27,7 @@ Close the gaps in stages 2, 4, 7, 8, 9 of the docs lifecycle without expanding i
 
 ## 2. Out of scope
 
-- **Yoast SEO metadata** — handled by the existing `yoast-seo` MCP.
+- **~~Yoast SEO metadata~~** — _Originally separate. Folded into v1.2 mid-development (see §5 below); the standalone `yoast-seo-mcp` is deprecated._
 - **Redirects** — Redirection plugin's domain.
 - **Term creation/edit/delete** — admin task, do in wp-admin.
 - **Comments / users / plugins / themes / options** — outside docs workflow.
@@ -282,6 +282,20 @@ Input modes:
 - `data_base64` + `filename` — pass-through.
 
 Plus shared metadata fields. Exactly one of `path`/`url`/`data_base64` is required (validated client-side before HTTP).
+
+## 4.5 Yoast SEO tools (folded in mid-development)
+
+Three TS-only tools added to block-mcp; backed by the existing `gravitykit/v1/yoast-seo` REST namespace (provided by the Block-Theme mu-plugin, not gk-block-api). The MCP client uses a sibling axios instance with the same Application Password auth but a different base URL:
+
+| Tool | Endpoint | Purpose |
+|---|---|---|
+| `yoast_get_seo` | `GET gravitykit/v1/yoast-seo/{id}` | Read full SEO meta (incl. read-only scores) |
+| `yoast_update_seo` | `PATCH gravitykit/v1/yoast-seo/{id}` | Partial update of any subset of fields |
+| `yoast_bulk_update_seo` | `PATCH gravitykit/v1/yoast-seo/bulk` | Batch update; response order matches input |
+
+Field set: `title`, `description`, `canonical`, `focus_keyword`, `noindex` (tri-state: true/false/null), `nofollow`, `robots_advanced` (subset of `noimageindex`/`noarchive`/`nosnippet`), Open Graph (`og_title`, `og_description`, `og_image`, `og_image_id`), Twitter card (`twitter_*`), schema (`schema_page_type`, `schema_article_type`), `is_cornerstone`, `breadcrumb_title`, `redirect`, `primary_terms`. Read-only: `seo_score`, `readability_score`, `inclusive_language_score`.
+
+The standalone `yoast-seo-mcp` MCP is deprecated as of v1.2. No PHP changes — Yoast endpoints already exist in the Block-Theme mu-plugin.
 
 ## 5. PHP class additions
 

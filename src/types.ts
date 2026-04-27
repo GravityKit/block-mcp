@@ -574,3 +574,77 @@ export interface UploadMediaResponse {
   height?: number;
   sizes?: Record<string, AttachmentSize>;
 }
+
+// ============================================
+// v1.2 — Yoast SEO Metadata
+//
+// Endpoints live in the Block-Theme mu-plugin (`gravitykit/v1/yoast-seo/*`),
+// not in the gk-block-api WordPress plugin. The MCP client targets that
+// namespace by absolute URL.
+// ============================================
+
+export type YoastSchemaPageType =
+  | 'WebPage' | 'ItemPage' | 'AboutPage' | 'FAQPage' | 'QAPage'
+  | 'ProfilePage' | 'ContactPage' | 'MedicalWebPage' | 'CollectionPage'
+  | 'CheckoutPage' | 'RealEstateListing' | 'SearchResultsPage';
+
+export type YoastSchemaArticleType =
+  | 'Article' | 'BlogPosting' | 'SocialMediaPosting' | 'NewsArticle'
+  | 'AdvertiserContentArticle' | 'SatiricalArticle' | 'ScholarlyArticle'
+  | 'TechArticle' | 'Report' | 'None';
+
+export type YoastRobotsAdvanced = 'noimageindex' | 'noarchive' | 'nosnippet';
+
+/**
+ * Writable Yoast SEO fields. All optional in update payloads — only the
+ * fields you include get written.
+ *
+ * NOTE: `noindex` is intentionally tri-state — `true` = noindex, `false` =
+ * explicit index, `null` = post-type default (Yoast clears the meta).
+ */
+export interface YoastSEOFields {
+  title?: string;
+  description?: string;
+  canonical?: string;
+  focus_keyword?: string;
+  noindex?: boolean | null;
+  nofollow?: boolean;
+  robots_advanced?: YoastRobotsAdvanced[];
+  og_title?: string;
+  og_description?: string;
+  og_image?: string;
+  og_image_id?: number;
+  twitter_title?: string;
+  twitter_description?: string;
+  twitter_image?: string;
+  twitter_image_id?: number;
+  schema_page_type?: YoastSchemaPageType;
+  schema_article_type?: YoastSchemaArticleType;
+  is_cornerstone?: boolean;
+  breadcrumb_title?: string;
+  redirect?: string;
+  primary_terms?: Record<string, number>;
+}
+
+/** Full Yoast SEO metadata returned by `yoast_get_seo`. Includes read-only scores. */
+export interface YoastSEOMeta extends YoastSEOFields {
+  post_id: number;
+  /** Yoast SEO score (0-100), null if unscored. */
+  seo_score?: number | null;
+  /** Readability score (0-100), null if unscored. */
+  readability_score?: number | null;
+  /** Inclusive language score (0-100), null if unscored. */
+  inclusive_language_score?: number | null;
+}
+
+export type YoastUpdateRequest = YoastSEOFields;
+
+/** One entry in a `yoast_bulk_update_seo` request. */
+export interface YoastBulkUpdateItem extends YoastSEOFields {
+  post_id: number;
+}
+
+export type YoastBulkUpdateResponse = Array<
+  | { post_id: number; success: true; seo: YoastSEOMeta }
+  | { post_id: number; success: false; error: string }
+>;

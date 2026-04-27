@@ -116,6 +116,9 @@ Then register the server with your MCP client (Claude Code, etc.) pointing at `d
 | `update_post` | Update post metadata, status, or terms — covers publish/trash/untrash transitions |
 | `list_terms` | List taxonomy terms (categories, tags, custom taxonomies) for ID lookup |
 | `upload_media` | Upload to the media library via local path, URL sideload, or base64 |
+| `yoast_get_seo` | Read Yoast SEO metadata for a post (title, description, robots, OG, Twitter, schema, scores) |
+| `yoast_update_seo` | Update one or more Yoast SEO fields on a single post |
+| `yoast_bulk_update_seo` | Batch-update Yoast SEO fields on multiple posts |
 
 ## Preference System
 
@@ -154,8 +157,9 @@ Authoring a fresh doc end-to-end with a single MCP:
 2. `create_post({ title: "Getting Started with GravityView", status: "draft", categories: [<id>], blocks: [{ name: "core/heading", attributes: { level: 2 }, innerHTML: "<h2 class=\"wp-block-heading\">Quick Start</h2>" }] })` → captures the post ID.
 3. `upload_media({ path: "/tmp/screenshot.png", alt_text: "Filtering view results", post_id: <id> })` → captures the attachment ID + URL.
 4. `insert_blocks({ post_id, after: 0, blocks: [{ name: "core/image", attributes: { id: <atch>, url, alt: "Filtering view results" } }] })`.
-5. `update_post({ post_id, status: "publish" })` → live.
-6. (Later) `update_post({ post_id, status: "trash" })` to retire, or `revert_to_revision` to undo a bad edit.
+5. `yoast_update_seo({ post_id, title: "Getting Started with GravityView | GravityKit Docs", description: "Step-by-step setup of GravityView with screenshots.", focus_keyword: "GravityView setup", schema_article_type: "TechArticle" })` → SEO meta in place.
+6. `update_post({ post_id, status: "publish" })` → live.
+7. (Later) `update_post({ post_id, status: "trash" })` to retire, or `revert_to_revision` to undo a bad edit.
 
 ## Testing
 

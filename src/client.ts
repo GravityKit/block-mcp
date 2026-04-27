@@ -27,6 +27,10 @@ import type {
   ListTermsResponse,
   UploadMediaRequest,
   UploadMediaResponse,
+  YoastSEOMeta,
+  YoastUpdateRequest,
+  YoastBulkUpdateItem,
+  YoastBulkUpdateResponse,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -52,6 +56,12 @@ interface PageBlocksResponse {
  */
 export class WordPressBlockClient {
   private client: AxiosInstance;
+  /**
+   * Sibling axios instance pointed at `gravitykit/v1` for Yoast SEO meta.
+   * Same auth as the main client; different REST namespace because Yoast
+   * endpoints live in the Block-Theme mu-plugin, not the gk-block-api plugin.
+   */
+  private yoastClient: AxiosInstance;
 
   /**
    * Create a new WordPress Block API client.
@@ -79,20 +89,34 @@ export class WordPressBlockClient {
       `${auth.username}:${auth.application_password}`
     ).toString('base64');
 
-    const baseURL = `${wordpress_url.replace(/\/+$/, '')}/wp-json/gk-block-api/v1`;
+    const trimmed = wordpress_url.replace(/\/+$/, '');
+    const baseURL = `${trimmed}/wp-json/gk-block-api/v1`;
+    const yoastBaseURL = `${trimmed}/wp-json/gravitykit/v1`;
+
+    const sharedHeaders = {
+      Authorization: `Basic ${credentials}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'MonoKit Block MCP Server (https://github.com/GravityKit)',
+    };
 
     this.client = axios.create({
       baseURL,
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'MonoKit Block MCP Server (https://github.com/GravityKit)',
-      },
+      headers: sharedHeaders,
       timeout: 30000,
     });
 
-    // Response interceptor for consistent error formatting
+    this.yoastClient = axios.create({
+      baseURL: yoastBaseURL,
+      headers: sharedHeaders,
+      timeout: 30000,
+    });
+
+    // Response interceptor for consistent error formatting (applied to both clients).
+    const errorInterceptor = (error: AxiosError) => {
+      throw new Error(this.formatError(error));
+    };
+    this.yoastClient.interceptors.response.use((r) => r, errorInterceptor);
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
@@ -635,6 +659,40 @@ export class WordPressBlockClient {
 
     // url or data_base64 ride as JSON.
     const response = await this.client.post<UploadMediaResponse>('/media', args);
+    return response.data;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v1.2 — Yoast SEO metadata (separate REST namespace)
+  //
+  // Endpoints: gravitykit/v1/yoast-seo/{post_id}, gravitykit/v1/yoast-seo/bulk
+  // Backed by the Block-Theme mu-plugin, not gk-block-api.
+  // ──────────────────────────────────────────────────────────
+
+  /** Read all Yoast SEO metadata for a post. */
+  async getYoastSEO(postId: number): Promise<YoastSEOMeta> {
+    if (postId === undefined || postId === null) {
+      throw new Error('yoast_get_seo: post_id is required');
+    }
+    const response = await this.yoastClient.get<YoastSEOMeta>(`/yoast-seo/${postId}`);
+    return response.data;
+  }
+
+  /** Partial update of Yoast SEO fields on a single post. */
+  async updateYoastSEO(postId: number, fields: YoastUpdateRequest): Promise<YoastSEOMeta> {
+    if (postId === undefined || postId === null) {
+      throw new Error('yoast_update_seo: post_id is required');
+    }
+    const response = await this.yoastClient.patch<YoastSEOMeta>(`/yoast-seo/${postId}`, fields);
+    return response.data;
+  }
+
+  /** Batch-update Yoast SEO fields on multiple posts. Order preserved in response. */
+  async bulkUpdateYoastSEO(posts: YoastBulkUpdateItem[]): Promise<YoastBulkUpdateResponse> {
+    if (!Array.isArray(posts) || posts.length === 0) {
+      throw new Error('yoast_bulk_update_seo: non-empty `posts` array is required');
+    }
+    const response = await this.yoastClient.patch<YoastBulkUpdateResponse>('/yoast-seo/bulk', { posts });
     return response.data;
   }
 }

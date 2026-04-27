@@ -175,6 +175,7 @@ The server (`src/index.ts`) aggregates tools from five modules, each exporting a
 | `posts.ts` (v1.2) | `create_post`, `update_post` | Post lifecycle |
 | `terms.ts` (v1.2) | `list_terms` | Taxonomy term discovery |
 | `media.ts` (v1.2) | `upload_media` | Media library upload |
+| `yoast.ts` (v1.2) | `yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo` | Yoast SEO metadata (separate REST namespace) |
 
 Tool routing in `index.ts` uses `Set<string>` lookups per category (lines 92-104). Each handler:
 1. Validates and casts input arguments
