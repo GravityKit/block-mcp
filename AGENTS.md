@@ -122,7 +122,7 @@ GET `/posts/{id}/blocks` supports query params:
 
 ### WordPress Plugin: Core Classes
 
-**`Block_CRUD`** (`class-block-crud.php`, ~2000 lines) — the engine.
+**`Block_CRUD`** (`class-block-crud.php`, ~1184 lines) — the block-level engine.
 - `get_blocks($post_id, $render)` — parses `post_content`, formats with path tracking
 - `update_block()` — merges attributes and/or replaces innerHTML at flat index
 - `insert_blocks()` — validates block names against registry, checks preference tier, splices into content
@@ -160,6 +160,21 @@ GET `/posts/{id}/blocks` supports query params:
 - Scans all published content, counts blocks per post, tracks namespace totals
 - Detects legacy patterns (synced patterns containing avoid/legacy blocks)
 - Cached in transient `gk_block_usage_stats` (1-hour TTL)
+
+**`Post_Manager`** (`class-post-manager.php`, v1.2, ~696 lines) — post lifecycle.
+- `create_post( $args )` — create a new post or page. Validates: title required, post_type allow-list (overridable via `gk_block_api_post_types_allowlist` option), status enum (no `trash` on create), `future` status requires future `date`, parent must be hierarchical type and not self, terms must exist in their taxonomy, featured_media must be an image attachment.
+- `update_post( $post_id, $args )` — partial update. Routes status transitions through `wp_trash_post`/`wp_untrash_post` so trash hooks fire. Rejects `mixed_trash_payload` (status:trash + other fields). Uses `Block_CRUD::check_rate_limit` (10 writes/min/post bucket) — shared with the per-block write tools.
+- Block validation delegates to `Block_CRUD::validate_block_def()` — single source of truth for tier policy and replacement messaging.
+
+**`Term_Manager`** (`class-term-manager.php`, v1.2, ~107 lines) — read-only term listing.
+- `list_terms( $args )` — wraps `get_terms()` + `wp_count_terms()`. Returns `{ taxonomy, total, page, per_page, terms[] }`. Per-page caps at 200.
+
+**`Media_Manager`** (`class-media-manager.php`, v1.2, ~404 lines) — media uploads.
+- Three input modes (mutually exclusive): multipart `file` field, URL sideload, base64 (with `filename`).
+- **SSRF guard** (`guard_ssrf`): URL host is DNS-resolved; reserved/private/link-local IPv4 ranges (RFC1918, 169.254/16 cloud metadata, 127/8 loopback, 0/8, 224/4 multicast) are rejected with `400 invalid_url` *before* `download_url()` runs. Block list is admin-extensible via the `gk_block_api_url_sideload_blocked_ranges` filter.
+- Size cap: URL sideload limited to `URL_DOWNLOAD_MAX_BYTES` (25 MB). Base64 size is checked twice — encoded length first (cheap), then decoded length — so memory consumption is bounded before any disk write.
+- MIME via `wp_check_filetype_and_ext`. Disallowed types rejected with `400 disallowed_mime`; tmp file is `@unlink`'d on every error path.
+- `download_url()` timeout reduced from default 300s to 10s.
 
 ### MCP Server: Tool Architecture
 

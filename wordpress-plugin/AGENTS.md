@@ -18,16 +18,18 @@ gk-block-api/
 ├── uninstall.php                 # Cleanup on plugin delete
 ├── readme.txt                    # WordPress plugin readme
 └── includes/
-    ├── class-block-crud.php      # Mutation engine (~2015 lines)
-    ├── class-rest-controller.php # HTTP layer, route registration
+    ├── class-block-crud.php      # Block-level CRUD engine (~1184 lines)
+    ├── class-block-mutator.php   # Path-based mutation engine (~836 lines)
+    ├── class-html-transformer.php# Auto-transform engine (Tag_Processor) (~376 lines)
+    ├── class-rest-controller.php # HTTP layer, route registration (~1870 lines)
     ├── class-preferences.php     # Namespace scoring, replacement map (~345 lines)
     ├── class-block-safety.php    # Static block safety guards (~132 lines)
     ├── class-block-registry.php  # Block type discovery with enrichment (~196 lines)
     ├── class-pattern-manager.php # Synced + registered pattern management (~477 lines)
     ├── class-usage-stats.php     # Site-wide block/pattern analytics (~331 lines)
-    ├── class-post-manager.php    # (v1.2) create_post / update_post
-    ├── class-term-manager.php    # (v1.2) list_terms
-    └── class-media-manager.php   # (v1.2) upload_media (multipart, URL sideload, base64)
+    ├── class-post-manager.php    # (v1.2) create_post / update_post (~696 lines)
+    ├── class-term-manager.php    # (v1.2) list_terms (~107 lines)
+    └── class-media-manager.php   # (v1.2) upload_media — multipart/URL/base64 with SSRF guard (~404 lines)
 ```
 
 ## Plugin Architecture
@@ -201,6 +203,49 @@ Site-wide block usage analytics cached in transient `gk_block_usage_stats` (1 ho
 - **`get_stats()`** (line 54) — Returns `block_usage`, `namespace_totals`, `pattern_references`, `legacy_patterns`.
 - **`build_stats()`** (line 107) — Scans all published posts of all public post types. Counts blocks recursively, tracks per-block post counts, and detects synced patterns with legacy blocks.
 
+### Post_Manager (v1.2)
+**File**: `includes/class-post-manager.php` (~696 lines)
+
+Owns post lifecycle: create + update metadata/status/terms. Block-content edits stay on the per-block endpoints.
+
+- **`create_post( $args )`** — required `title`, status enum (no `trash`), `future` requires future `date`, `content` xor `blocks`, parent must be hierarchical and not self, terms verified to exist in their taxonomy, `featured_media` must be image MIME (uses `wp_attachment_is_image()` with MIME fallback). Returns `{ id, post_type, status, title, slug, permalink, edit_link, before_revision_id: null, revision_id, warnings }`. On term-assignment failure, the inserted post is rolled back via `wp_delete_post` (orphan logged on rollback failure).
+- **`update_post( $post_id, $args )`** — partial update. Status transitions: `trash` via `wp_trash_post`, untrash via `wp_untrash_post` (return value checked). Rejects `mixed_trash_payload` — `status: trash` cannot be combined with other fields. Validates `featured_media` BEFORE `wp_update_post` so partial state can't leak. Wraps core `WP_Error` from `wp_insert_post`/`wp_update_post` with HTTP 400 (core leaves status undefined → defaulted to 500 by REST infra).
+- **Rate limiting**: shares the per-post writes bucket with the per-block tools — `Block_CRUD::check_rate_limit($post_id, 'write')` / `record_rate_limit`. 10 writes/min/post, 429 on overflow.
+- **Block validation** delegates to `Block_CRUD::validate_block_def()` — single source of truth. Avoid-tier blocks emit warnings, legacy-tier hard-rejects.
+- **Allow-list**: `default_allowed_post_types()` reads `gk_block_api_post_types_allowlist` option first. When unset, defaults to `post`, `page`, plus any post type with `show_in_rest: true`. Cleaned up in `uninstall.php`.
+
+### Term_Manager (v1.2)
+**File**: `includes/class-term-manager.php` (~107 lines)
+
+Read-only term listing for taxonomy lookup. Capability: `edit_posts`.
+
+- **`list_terms( $args )`** — wraps `get_terms()` + `wp_count_terms()`. Per-page max 200. Response: `{ taxonomy, total, page, per_page, terms[] }` where each term has `{ id, name, slug, description, parent, count, taxonomy, link }`. Validates `taxonomy` is registered.
+
+### Media_Manager (v1.2)
+**File**: `includes/class-media-manager.php` (~404 lines)
+
+Three input modes with mode mutex enforced at request time:
+
+- **Multipart** (`handle_multipart`) — `$_FILES[$args['file_field']]`. Pre-checks `wp_max_upload_size` and `wp_check_filetype_and_ext` before `media_handle_upload`; tmp file `@unlink`'d on early rejection.
+- **URL sideload** (`handle_url`) — `wp_http_validate_url` + SSRF guard (see below) + 25 MB cap (`URL_DOWNLOAD_MAX_BYTES`). Timeout reduced from 300s default to 10s.
+- **Base64** (`handle_base64`) — encoded length cap (`URL_DOWNLOAD_MAX_BYTES * 4 / 3`) BEFORE decode; decoded length cap (min of `wp_max_upload_size` and `URL_DOWNLOAD_MAX_BYTES`) before disk write; `file_put_contents` return checked.
+- **Metadata** (`apply_metadata`): title/caption/description sanitized + assigned via `wp_update_post`; `alt_text` saved to `_wp_attachment_image_alt` meta.
+- **Response shape**: `{ success, id, title, filename, url, source_url, mime_type, alt_text, caption, description, post_parent }` + image-only `{ width, height, sizes: { thumbnail, medium, large, full } }`.
+
+**SSRF guard** (`guard_ssrf`): URL host is DNS-resolved via `dns_get_record` (with `gethostbyname` fallback). Reserved/private/link-local IPv4 ranges are rejected with `400 invalid_url` *before* `download_url()` runs:
+
+| Range | Reason |
+|---|---|
+| `0.0.0.0/8` | "this network" |
+| `10.0.0.0/8`, `172.16/12`, `192.168/16` | RFC1918 private |
+| `127.0.0.0/8` | loopback |
+| `169.254.0.0/16` | link-local — **AWS/GCP/Azure metadata** |
+| `192.0.0.0/24` | IETF reserved |
+| `198.18.0.0/15` | benchmark |
+| `224.0.0.0/4` and beyond | multicast + reserved |
+
+Block list is admin-extensible via the `gk_block_api_url_sideload_blocked_ranges` filter (returns array of `[start, end]` IPv4 dotted-string pairs). Hosts that fail to resolve are also rejected (paranoid default).
+
 ## Key Concepts
 
 ### Block Paths
@@ -253,13 +298,29 @@ Pass `render=true` on `GET /posts/{id}/blocks` to get:
 
 The handler sets up global `$post` context (class-block-crud.php:100) so post-specific shortcodes and template tags work correctly. It restores the original context afterward.
 
+### Mixed Trash Payload Guard (v1.2)
+
+`update_post` rejects calls that combine `status: 'trash'` with any other field — `mixed_trash_payload` 400. Trashing is a status-only operation; mixing fields used to silently mutate a trashed post's title/parent/etc. The guard makes the contract explicit: trash first, then update.
+
+### Post-Type Allow-List (v1.2)
+
+`POST /posts` accepts post types from a configurable allow-list, stored in the `gk_block_api_post_types_allowlist` WP option. When unset, defaults to `post`, `page`, plus any post type with `show_in_rest: true`. To restrict to docs-only post types:
+
+```php
+update_option( 'gk_block_api_post_types_allowlist', array( 'post', 'docs' ) );
+```
+
+The option is deleted in `uninstall.php`.
+
 ### Rate Limiting
 
 Per-post, per-minute, stored as transients with 2-minute TTL (class-block-crud.php:1993-2013):
-- **Writes** (POST/PATCH/DELETE/mutate): 10/min/post (`RATE_LIMIT_WRITES`)
+- **Writes** (POST/PATCH/DELETE on blocks; mutate; v1.2 `update_post`): 10/min/post (`RATE_LIMIT_WRITES`)
 - **PUT** (full page rewrite): 2/min/post (`RATE_LIMIT_PUT`)
 
-Returns HTTP 429 when exceeded.
+`Post_Manager::update_post` shares the writes bucket with the per-block tools, so mixing post-meta updates with block edits on the same post draws from the same budget. `create_post` and `upload_media` are not rate-limited in v1.2 (capability gates are sufficient).
+
+Returns HTTP 429 `rate_limit_exceeded` when exceeded.
 
 ### Revision Tracking
 
@@ -380,10 +441,11 @@ The plugin does not define custom WordPress hooks/filters. It relies on:
 | What | Where | TTL |
 |------|-------|-----|
 | Preference config | WP option `gk_block_api_preferences` | Permanent |
+| Post-type allow-list (v1.2) | WP option `gk_block_api_post_types_allowlist` | Permanent |
 | Usage stats cache | Transient `gk_block_usage_stats` | 1 hour |
 | Rate limit counters | Transient `gk_block_api_rate_{post_id}` | 2 minutes |
 
-All three are cleaned on uninstall (except rate limit transients, which expire naturally).
+Both options and the usage transient are cleaned on uninstall. Rate-limit transients expire naturally.
 
 ## Conventions
 

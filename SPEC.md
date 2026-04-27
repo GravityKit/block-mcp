@@ -2,6 +2,8 @@
 
 > AI-powered block-level content management for gravitykit.com via Model Context Protocol.
 
+> **Note:** This document is the original v1.0/v1.1 spec — block-level CRUD, patterns, mutations, preferences. v1.2 expands the surface to cover the full docs lifecycle (`create_post`, `update_post`, `list_terms`, `upload_media`) plus Yoast SEO meta. See [`docs/specs/2026-04-27-docs-lifecycle-tools.md`](docs/specs/2026-04-27-docs-lifecycle-tools.md) for the v1.2 spec; this file remains accurate for the v1.0/v1.1 surface and core architecture.
+
 ## Problem
 
 Today, AI agents can read WordPress page content as raw HTML (via `wordpress-mcp`) or as structured JSON (via VIP Block Data API). But they **cannot**:

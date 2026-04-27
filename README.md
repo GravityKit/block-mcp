@@ -163,17 +163,24 @@ Authoring a fresh doc end-to-end with a single MCP:
 
 ## Testing
 
-- **PHP**: 162 PHPUnit tests covering preferences, safety, CRUD, mutation engine, HTML transforms, summary/outline
-- **TypeScript**: 99 Vitest tests covering tool validation, client calls, enrichment
+Three layers, run from cheap to expensive:
+
+- **PHP** (PHPUnit, stub bootstrap): 230 tests covering preferences, safety, CRUD, mutation engine, HTML transforms, post lifecycle, term listing, media validation, REST summary/outline. The stub layer mocks just enough WordPress to exercise validation/error paths without booting WP. (Issue [#2](https://github.com/GravityKit/block-mcp/issues/2) tracks moving to wp-env-based PHPUnit for full integration coverage.)
+- **TypeScript** (Vitest): 146 tests covering tool input validation, client calls, enrichment, and field-narrowing across `discovery`, `read`, `write`, `mutate`, `patterns`, `posts`, `terms`, `media`, `yoast`, and `preferences`.
+- **End-to-end** (`scripts/e2e-gkclone.mjs`, manual): 11-step lifecycle smoke against gkclone — `list_terms` → `create_post` → `upload_media` → `insert_blocks` → `get_page_blocks` → `yoast_update_seo` → `yoast_get_seo` → `update_post (publish/trash/untrash/re-trash)`. Proves the real WP backends.
 
 Run locally:
 
 ```bash
-# PHP
+# PHP unit (stub layer)
 cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
 
 # TypeScript
 npm test
+
+# End-to-end against gkclone (requires gkclone running + .env.gkclone)
+set -a; source .env.gkclone; set +a
+node scripts/e2e-gkclone.mjs
 ```
 
 ## Requirements
@@ -188,6 +195,12 @@ npm test
 - Edits work on posts stored as blocks. Block-theme templates (`wp_template`, `wp_template_part`) and widget areas are not currently supported.
 - Rate limits are per-post, not per-user — multiple agents editing the same post share the budget.
 - Static block innerHTML can't be regenerated server-side (WordPress has no PHP equivalent of the React `save` function). Auto-transforms cover the common cases; for anything else, supply innerHTML explicitly.
+
+## Migrating from `yoast-seo-mcp`
+
+block-mcp v1.2 absorbs the standalone `@gravitykit/yoast-seo-mcp` server. If you previously had it registered with your MCP client, remove it — the three Yoast tools (`yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo`) are now part of block-mcp and use the same auth.
+
+The Yoast REST endpoints themselves (`gravitykit/v1/yoast-seo/*`) didn't move — they still live in the Block-Theme mu-plugin. Only the MCP tool surface consolidated.
 
 ## License
 
