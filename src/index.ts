@@ -15,7 +15,7 @@
  * Connects to the gk-block-api WordPress plugin via REST API with
  * Application Password authentication.
  *
- * @see SPEC.md for full architecture and endpoint documentation
+ * @see AGENTS.md and docs/specs/ for architecture and endpoint documentation
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

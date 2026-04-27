@@ -4,7 +4,7 @@
 
 **Status:** Draft, scoped 2026-04-27
 **Target version:** `@gravitykit/block-mcp` 1.2.0 / `gk-block-api` 1.2.0
-**Predecessor:** `SPEC.md` (v1.0–v1.1 — block-only CRUD)
+**Predecessor:** v1.0–v1.1 (block-only CRUD; documented in AGENTS.md and `wordpress-plugin/AGENTS.md`)
 
 ---
 

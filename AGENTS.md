@@ -31,7 +31,7 @@ The WordPress plugin (`wordpress-plugin/gk-block-api/`) must be active on the ta
 MCPs/block-mcp/
 ├── AGENTS.md                          # This file
 ├── CLAUDE.md                          # Points Claude at AGENTS.md
-├── SPEC.md                            # Original design specification
+├── docs/specs/                        # Versioned design specs (v1.2: docs lifecycle)
 ├── package.json                       # @gravitykit/block-mcp, esbuild build
 ├── tsconfig.json                      # ES2022, bundler resolution
 ├── .env.example                       # Required env vars template
@@ -513,7 +513,7 @@ Copy the `wordpress-plugin/gk-block-api/` directory to the target site's `wp-con
 
 ## Related Resources
 
-- `SPEC.md` — original design specification (in repo root)
+- `docs/specs/` — versioned design specs (v1.2: `2026-04-27-docs-lifecycle-tools.md`)
 - WordPress Block API: https://developer.wordpress.org/block-editor/reference-guides/block-api/
 - MCP Specification: https://modelcontextprotocol.io
 - WP_HTML_Tag_Processor: https://developer.wordpress.org/reference/classes/wp_html_tag_processor/
