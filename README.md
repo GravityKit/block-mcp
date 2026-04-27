@@ -112,6 +112,10 @@ Then register the server with your MCP client (Claude Code, etc.) pointing at `d
 | `get_pattern` | Inspect a pattern's block content |
 | `get_site_usage` | Block/pattern usage analytics |
 | `resolve_url` | Map a URL to post ID and type |
+| `create_post` | Create a new post or page (draft, publish, etc.) — accepts blocks or HTML |
+| `update_post` | Update post metadata, status, or terms — covers publish/trash/untrash transitions |
+| `list_terms` | List taxonomy terms (categories, tags, custom taxonomies) for ID lookup |
+| `upload_media` | Upload to the media library via local path, URL sideload, or base64 |
 
 ## Preference System
 
@@ -139,6 +143,19 @@ Once configured with your MCP client:
 3. Agent calls `mutate_block_tree({ post_id: 42, op: "update-attrs", path: [4], attributes: { content: "About Us" } })` → done, revision created
 
 The auto-transform updates both the `content` attribute and the inner `<h2>...</h2>` text so the block editor stays consistent.
+
+### Docs Lifecycle (v1.2)
+
+Authoring a fresh doc end-to-end with a single MCP:
+
+> **Agent**: "Write a getting-started doc with a screenshot, publish under Documentation."
+
+1. `list_terms({ taxonomy: "category", search: "Documentation" })` → grab the category ID.
+2. `create_post({ title: "Getting Started with GravityView", status: "draft", categories: [<id>], blocks: [{ name: "core/heading", attributes: { level: 2 }, innerHTML: "<h2 class=\"wp-block-heading\">Quick Start</h2>" }] })` → captures the post ID.
+3. `upload_media({ path: "/tmp/screenshot.png", alt_text: "Filtering view results", post_id: <id> })` → captures the attachment ID + URL.
+4. `insert_blocks({ post_id, after: 0, blocks: [{ name: "core/image", attributes: { id: <atch>, url, alt: "Filtering view results" } }] })`.
+5. `update_post({ post_id, status: "publish" })` → live.
+6. (Later) `update_post({ post_id, status: "trash" })` to retire, or `revert_to_revision` to undo a bad edit.
 
 ## Testing
 

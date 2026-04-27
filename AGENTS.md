@@ -109,6 +109,10 @@ All routes are under `gk-block-api/v1`. Read endpoints require `edit_posts`; wri
 | PUT | `/posts/{id}/blocks` | `replace_all_blocks` | Full page rewrite |
 | POST | `/posts/{id}/insert-pattern` | `insert_pattern` | Insert pattern (synced or inline) |
 | POST | `/posts/{id}/mutate` | `mutate_block_tree` | Path-based structural mutations |
+| POST | `/posts` | `create_post` | (v1.2) Create a new post or page |
+| PATCH | `/posts/{id}` | `update_post` | (v1.2) Update post metadata, status, or terms |
+| GET | `/terms` | `list_terms` | (v1.2) List taxonomy terms |
+| POST | `/media` | `upload_media` | (v1.2) Upload to media library (multipart, URL sideload, or base64) |
 
 GET `/posts/{id}/blocks` supports query params:
 - `fields` — comma-separated field filter (e.g., `path,name,attributes`)
@@ -168,6 +172,9 @@ The server (`src/index.ts`) aggregates tools from five modules, each exporting a
 | `write.ts` | `update_block`, `insert_blocks`, `delete_block`, `replace_all_blocks` | Index-based CRUD |
 | `mutate.ts` | `mutate_block_tree` | Path-based structural operations |
 | `patterns.ts` | `insert_pattern` | Pattern insertion |
+| `posts.ts` (v1.2) | `create_post`, `update_post` | Post lifecycle |
+| `terms.ts` (v1.2) | `list_terms` | Taxonomy term discovery |
+| `media.ts` (v1.2) | `upload_media` | Media library upload |
 
 Tool routing in `index.ts` uses `Set<string>` lookups per category (lines 92-104). Each handler:
 1. Validates and casts input arguments

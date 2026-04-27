@@ -19,12 +19,15 @@ gk-block-api/
 ├── readme.txt                    # WordPress plugin readme
 └── includes/
     ├── class-block-crud.php      # Mutation engine (~2015 lines)
-    ├── class-rest-controller.php # HTTP layer, route registration (~1167 lines)
+    ├── class-rest-controller.php # HTTP layer, route registration
     ├── class-preferences.php     # Namespace scoring, replacement map (~345 lines)
     ├── class-block-safety.php    # Static block safety guards (~132 lines)
     ├── class-block-registry.php  # Block type discovery with enrichment (~196 lines)
     ├── class-pattern-manager.php # Synced + registered pattern management (~477 lines)
-    └── class-usage-stats.php     # Site-wide block/pattern analytics (~331 lines)
+    ├── class-usage-stats.php     # Site-wide block/pattern analytics (~331 lines)
+    ├── class-post-manager.php    # (v1.2) create_post / update_post
+    ├── class-term-manager.php    # (v1.2) list_terms
+    └── class-media-manager.php   # (v1.2) upload_media (multipart, URL sideload, base64)
 ```
 
 ## Plugin Architecture
@@ -85,6 +88,10 @@ All routes are registered in `REST_Controller::register_routes()` (class-rest-co
 | PATCH | `/posts/{id}/blocks/{index}` | `update_block` | Update a single block by flat index. Params: `attributes`, `innerHTML`. |
 | DELETE | `/posts/{id}/blocks/{index}` | `delete_block` | Remove block(s) at index. Param: `count`. |
 | PUT | `/posts/{id}/blocks` | `replace_all_blocks` | Full page rewrite. Param: `blocks[]`. Uses stricter `put` rate limit (2/min). |
+| POST | `/posts` | `create_post` | (v1.2) Create a new post/page. Body: `title` (req), `post_type`, `status`, `content` xor `blocks`, `slug`, `parent`, `categories`, `tags`, `terms`, `excerpt`, `featured_media`, `date`, `menu_order`, `comment_status`, `ping_status`, `author`. |
+| PATCH | `/posts/{id}` | `update_post` | (v1.2) Partial update of post metadata/status/terms. `status: trash` trashes; any non-trash status untrashes. Block content edits stay on per-block routes. |
+| GET | `/terms` | `list_terms` | (v1.2) List taxonomy terms. Params: `taxonomy` (default `category`), `search`, `parent`, `hide_empty`, `per_page` (≤200), `page`, `orderby`, `order`, `include`, `slug`. |
+| POST | `/media` | `upload_media` | (v1.2) Upload to media library. Multipart `file` field, `url` (sideload, 25 MB cap), or `data_base64` + `filename`. Plus `title`, `alt_text`, `caption`, `description`, `post_id`. Cap: `upload_files`. |
 
 ### Mutation Endpoint
 
