@@ -18,7 +18,7 @@
  * @see SPEC.md for full architecture and endpoint documentation
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
@@ -66,10 +66,10 @@ const client = new WordPressBlockClient({
 // Create MCP server
 // ============================================
 
-const server = new Server(
+const server = new McpServer(
   {
     name: 'block-mcp',
-    version: '1.0.0',
+    version: '1.2.0',
   },
   {
     capabilities: {
@@ -162,7 +162,7 @@ When editing pages on gravitykit.com:
 // Handler: List tools
 // ============================================
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
 });
 
@@ -170,7 +170,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // Handler: Call tool
 // ============================================
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const toolArgs = (args ?? {}) as Record<string, unknown>;
 
@@ -235,7 +235,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Handler: List resources
 // ============================================
 
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [
       {
@@ -254,7 +254,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
 // Handler: Read resource
 // ============================================
 
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
 
   if (uri === BLOCK_PREFERENCES_RESOURCE_URI) {
