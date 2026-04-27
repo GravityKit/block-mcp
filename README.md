@@ -198,9 +198,17 @@ node scripts/e2e-gkclone.mjs
 
 ## Migrating from `yoast-seo-mcp`
 
-block-mcp v1.2 absorbs the standalone `@gravitykit/yoast-seo-mcp` server. If you previously had it registered with your MCP client, remove it — the three Yoast tools (`yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo`) are now part of block-mcp and use the same auth.
+As of v1.3, the standalone `@gravitykit/yoast-seo-mcp` server has been **removed** from the GravityKit marketplace. block-mcp owns Yoast SEO metadata tools now.
 
-The Yoast REST endpoints themselves (`gravitykit/v1/yoast-seo/*`) didn't move — they still live in the Block-Theme mu-plugin. Only the MCP tool surface consolidated.
+If you have the old plugin still registered, uninstall it:
+
+```
+/plugin uninstall yoast-seo
+```
+
+The three tools (`yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo`) are part of block-mcp v1.2+ and use the same Application Password auth. The Yoast REST endpoints themselves (`gravitykit/v1/yoast-seo/*`) didn't move — they still live in the Block-Theme mu-plugin. Only the MCP tool surface consolidated.
+
+**For skills authors:** tool name changed from `mcp__yoast-seo__yoast_*` to `mcp__plugin_block-mcp_block-mcp__yoast_*`.
 
 ## License
 

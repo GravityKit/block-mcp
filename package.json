@@ -1,6 +1,6 @@
 {
   "name": "@gravitykit/block-mcp",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "MCP server for WordPress block-level content management with preference-aware editing",
   "main": "dist/index.cjs",
   "type": "module",
