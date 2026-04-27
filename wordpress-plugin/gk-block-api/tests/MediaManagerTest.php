@@ -150,22 +150,48 @@ class MediaManagerTest extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function test_url_happy_path() {
+		// Use a TEST-NET-3 documentation IP (RFC5737 203.0.113.0/24) — public
+		// space, not in any SSRF-blocked range, and (when used as a literal in
+		// the URL) bypasses DNS resolution.
 		$src = __DIR__ . '/fixtures/sample.png';
 		$tmp = tempnam( sys_get_temp_dir(), 'fetched' );
 		copy( $src, $tmp );
-		$GLOBALS['_gk_test_url_responses']['https://example.com/test.png'] = $tmp;
+		$url = 'https://203.0.113.1/test.png';
+		$GLOBALS['_gk_test_url_responses'][ $url ] = $tmp;
 
 		$result = $this->mm->upload( array(
-			'url'      => 'https://example.com/test.png',
+			'url'      => $url,
 			'alt_text' => 'remote',
+			'filename' => 'remote.png',
 		) );
 		$this->assertIsArray( $result, is_object( $result ) ? $result->get_error_message() : '' );
 		$this->assertSame( 'image/png', $result['mime_type'] );
 	}
 
 	public function test_url_propagates_fetch_failure() {
-		$result = $this->mm->upload( array( 'url' => 'https://nope.example/x.png' ) );
+		// Public IP (RFC5737 documentation), no fixture → download_url fails →
+		// wrapped as url_fetch_failed (502).
+		$result = $this->mm->upload( array( 'url' => 'https://203.0.113.99/x.png' ) );
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'url_fetch_failed', $result->get_error_code() );
+	}
+
+	public function test_url_blocks_link_local_metadata() {
+		// AWS/GCP/Azure cloud metadata endpoint — must be rejected.
+		$result = $this->mm->upload( array( 'url' => 'http://169.254.169.254/latest/meta-data/' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_url', $result->get_error_code() );
+	}
+
+	public function test_url_blocks_rfc1918_private() {
+		$result = $this->mm->upload( array( 'url' => 'http://10.0.0.5/admin.png' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_url', $result->get_error_code() );
+	}
+
+	public function test_url_blocks_loopback() {
+		$result = $this->mm->upload( array( 'url' => 'http://127.0.0.1/x.png' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_url', $result->get_error_code() );
 	}
 }

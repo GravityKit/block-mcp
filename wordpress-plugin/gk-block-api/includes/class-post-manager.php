@@ -23,13 +23,16 @@ class Post_Manager {
 	const ALLOWED_STATUSES_CREATE = array( 'draft', 'pending', 'private', 'publish', 'future' );
 	const ALLOWED_STATUSES_UPDATE = array( 'draft', 'pending', 'private', 'publish', 'future', 'trash' );
 
-	/**
-	 * @var Preferences
-	 */
-	private $preferences;
+	/** Option name for the post-type allow-list (see spec §3.1). */
+	const POST_TYPES_ALLOWLIST_OPTION = 'gk_block_api_post_types_allowlist';
 
-	public function __construct( Preferences $preferences ) {
-		$this->preferences = $preferences;
+	/**
+	 * @var Block_CRUD
+	 */
+	private $block_crud;
+
+	public function __construct( Block_CRUD $block_crud ) {
+		$this->block_crud = $block_crud;
 	}
 
 	/**
@@ -87,6 +90,13 @@ class Post_Manager {
 					__( 'You cannot publish posts of this type.', 'gk-block-api' ),
 					array( 'status' => 403 )
 				);
+			}
+		}
+
+		if ( 'future' === $status ) {
+			$future_check = $this->validate_future_date( isset( $args['date'] ) ? $args['date'] : null );
+			if ( is_wp_error( $future_check ) ) {
+				return $future_check;
 			}
 		}
 
@@ -165,21 +175,18 @@ class Post_Manager {
 		}
 		if ( isset( $args['featured_media'] ) ) {
 			$fm = (int) $args['featured_media'];
-			if ( $fm > 0 ) {
-				$mime = get_post_mime_type( $fm );
-				if ( ! $mime || strpos( $mime, 'image/' ) !== 0 ) {
-					return new \WP_Error(
-						'invalid_featured_media',
-						'featured_media is not a valid image attachment.',
-						array( 'status' => 400 )
-					);
-				}
+			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
+				return new \WP_Error(
+					'invalid_featured_media',
+					'featured_media is not a valid image attachment.',
+					array( 'status' => 400 )
+				);
 			}
 		}
 
 		$post_id = wp_insert_post( $postarr, true );
 		if ( is_wp_error( $post_id ) ) {
-			return $post_id;
+			return $this->ensure_status( $post_id, 400, 'wp_insert_post_failed' );
 		}
 		$post_id = (int) $post_id;
 		if ( $post_id <= 0 ) {
@@ -201,7 +208,12 @@ class Post_Manager {
 
 		$term_assignment = $this->assign_terms( $post_id, $post_type, $args );
 		if ( is_wp_error( $term_assignment ) ) {
-			wp_delete_post( $post_id, true );
+			$deleted = wp_delete_post( $post_id, true );
+			if ( false === $deleted || null === $deleted ) {
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					error_log( sprintf( 'gk-block-api: orphaned post %d after term assignment failure', $post_id ) );
+				}
+			}
 			return $term_assignment;
 		}
 
@@ -249,6 +261,26 @@ class Post_Manager {
 			);
 		}
 
+		// Per-post writes bucket (10/min). Shared with the existing block-level
+		// write tools so updating a post and editing its blocks share the budget.
+		$rate_check = $this->block_crud->check_rate_limit( $post_id, 'write' );
+		if ( is_wp_error( $rate_check ) ) {
+			return $rate_check;
+		}
+
+		// Validate featured_media BEFORE any writes so partial state can't leak
+		// when the attachment is invalid.
+		if ( array_key_exists( 'featured_media', $args ) ) {
+			$fm = (int) $args['featured_media'];
+			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
+				return new \WP_Error(
+					'invalid_featured_media',
+					'featured_media is not a valid image attachment.',
+					array( 'status' => 400 )
+				);
+			}
+		}
+
 		$pt_object        = get_post_type_object( $post->post_type );
 		$before_rev_id    = $this->latest_revision_id( $post_id );
 		$transitioned_to_publish = false;
@@ -276,10 +308,31 @@ class Post_Manager {
 					);
 				}
 			}
+			if ( 'future' === $new_status ) {
+				$future_date = array_key_exists( 'date', $args ) ? $args['date'] : $post->post_date;
+				$future_check = $this->validate_future_date( $future_date );
+				if ( is_wp_error( $future_check ) ) {
+					return $future_check;
+				}
+			}
 			if ( 'trash' === $new_status ) {
+				// Reject trash-plus-other-fields: trashing is a status-only
+				// operation. Mixed payloads were silently mutating a trashed
+				// post's title/parent/etc. before this guard.
+				$mutating = array_diff( array_keys( $args ), array( 'status' ) );
+				if ( ! empty( $mutating ) ) {
+					return new \WP_Error(
+						'mixed_trash_payload',
+						sprintf(
+							'`status: "trash"` cannot be combined with other fields (got: %s). Trash first, then update.',
+							implode( ', ', $mutating )
+						),
+						array( 'status' => 400 )
+					);
+				}
 				if ( 'trash' !== $post->post_status ) {
 					$trashed = wp_trash_post( $post_id );
-					if ( ! $trashed ) {
+					if ( false === $trashed || null === $trashed ) {
 						return new \WP_Error(
 							'trash_failed',
 							'wp_trash_post returned a falsey value.',
@@ -290,7 +343,14 @@ class Post_Manager {
 				}
 			} else {
 				if ( 'trash' === $post->post_status ) {
-					wp_untrash_post( $post_id );
+					$untrashed_post = wp_untrash_post( $post_id );
+					if ( false === $untrashed_post || null === $untrashed_post ) {
+						return new \WP_Error(
+							'untrash_failed',
+							'wp_untrash_post returned a falsey value.',
+							array( 'status' => 500 )
+						);
+					}
 					$untrashed = true;
 					$post      = get_post( $post_id );
 				}
@@ -360,21 +420,14 @@ class Post_Manager {
 		if ( count( $postarr ) > 1 ) {
 			$updated = wp_update_post( $postarr, true );
 			if ( is_wp_error( $updated ) ) {
-				return $updated;
+				return $this->ensure_status( $updated, 400, 'wp_update_post_failed' );
 			}
 		}
 
+		// featured_media was already validated above, before any writes.
 		if ( array_key_exists( 'featured_media', $args ) ) {
 			$fm = (int) $args['featured_media'];
 			if ( $fm > 0 ) {
-				$mime = get_post_mime_type( $fm );
-				if ( ! $mime || strpos( $mime, 'image/' ) !== 0 ) {
-					return new \WP_Error(
-						'invalid_featured_media',
-						'featured_media is not a valid image attachment.',
-						array( 'status' => 400 )
-					);
-				}
 				set_post_thumbnail( $post_id, $fm );
 			} else {
 				delete_post_thumbnail( $post_id );
@@ -392,6 +445,9 @@ class Post_Manager {
 		}
 
 		$post = get_post( $post_id );
+
+		// Record successful write into the per-post writes bucket.
+		$this->block_crud->record_rate_limit( $post_id, 'write' );
 
 		return array(
 			'success'                 => true,
@@ -411,33 +467,25 @@ class Post_Manager {
 	}
 
 	/**
-	 * Validate blocks against the registry and preference tier.
+	 * Validate blocks via Block_CRUD's existing tier policy. Aggregates
+	 * avoid-tier warnings; bails on the first hard error.
 	 *
 	 * @param array $blocks
 	 * @return array{blocks:array,warnings:array}|\WP_Error
 	 */
 	private function validate_blocks_for_insert( array $blocks ) {
 		$warnings = array();
-		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( $blocks as $block ) {
 			$name = isset( $block['name'] ) ? (string) $block['name'] : '';
 			if ( '' === $name ) {
 				return new \WP_Error( 'invalid_block', 'Each block requires a "name".', array( 'status' => 400 ) );
 			}
-			if ( ! $registry->is_registered( $name ) ) {
-				return new \WP_Error( 'unregistered_block', sprintf( 'Block "%s" is not registered.', $name ), array( 'status' => 400 ) );
+			$check = $this->block_crud->validate_block_def( $name );
+			if ( $check['error'] instanceof \WP_Error ) {
+				return $check['error'];
 			}
-			$score = $this->preferences->get_block_score( $name );
-			$tier  = isset( $score['tier'] ) ? $score['tier'] : 'acceptable';
-			if ( 'legacy' === $tier ) {
-				return new \WP_Error( 'legacy_block', sprintf( 'Block "%s" is legacy and cannot be inserted.', $name ), array( 'status' => 400 ) );
-			}
-			if ( 'avoid' === $tier ) {
-				$warnings[] = array(
-					'block'                 => $name,
-					'message'               => sprintf( 'Block "%s" is on the avoid list.', $name ),
-					'suggested_replacement' => $this->preferences->get_replacement( $name ),
-				);
+			if ( ! empty( $check['warnings'] ) ) {
+				$warnings = array_merge( $warnings, $check['warnings'] );
 			}
 		}
 
@@ -454,6 +502,69 @@ class Post_Manager {
 			$blocks
 		);
 		return array( 'blocks' => $normalized, 'warnings' => $warnings );
+	}
+
+	/**
+	 * Validate that `status: future` is paired with a future date.
+	 *
+	 * @param string|null $date ISO 8601 string.
+	 * @return true|\WP_Error
+	 */
+	private function validate_future_date( $date ) {
+		if ( empty( $date ) || ! is_string( $date ) ) {
+			return new \WP_Error(
+				'invalid_status',
+				'Status "future" requires a "date" set in the future.',
+				array( 'status' => 400 )
+			);
+		}
+		$timestamp = strtotime( $date );
+		if ( false === $timestamp || $timestamp <= time() ) {
+			return new \WP_Error(
+				'invalid_status',
+				'Status "future" requires a "date" set in the future.',
+				array( 'status' => 400 )
+			);
+		}
+		return true;
+	}
+
+	/**
+	 * Verify an attachment ID points at an image.
+	 *
+	 * @param int $attachment_id
+	 * @return bool
+	 */
+	private function is_valid_image_attachment( $attachment_id ) {
+		if ( function_exists( 'wp_attachment_is_image' ) && wp_attachment_is_image( $attachment_id ) ) {
+			return true;
+		}
+		$mime = get_post_mime_type( $attachment_id );
+		return is_string( $mime ) && 0 === strpos( $mime, 'image/' );
+	}
+
+	/**
+	 * Ensure a WP_Error from core has a sensible HTTP status. Core returns
+	 * `WP_Error`s with no `status` data field, which the REST infra defaults
+	 * to 500 — even for validation errors. Wrap with the supplied status and
+	 * preserve any existing data fields.
+	 *
+	 * @param \WP_Error $error
+	 * @param int       $status   HTTP status to apply.
+	 * @param string    $fallback Code to use if $error has none.
+	 * @return \WP_Error
+	 */
+	private function ensure_status( \WP_Error $error, $status, $fallback ) {
+		$code = $error->get_error_code();
+		if ( '' === $code ) {
+			$code = $fallback;
+		}
+		$message = $error->get_error_message();
+		$data    = (array) $error->get_error_data();
+		if ( ! isset( $data['status'] ) ) {
+			$data['status'] = (int) $status;
+		}
+		return new \WP_Error( $code, $message, $data );
 	}
 
 	/**
@@ -564,11 +675,18 @@ class Post_Manager {
 	}
 
 	/**
-	 * Built-in allow-list when no override option is set.
+	 * Resolve the post-type allow-list. Site admins can override the default
+	 * via the `gk_block_api_post_types_allowlist` option (array of post-type
+	 * slugs). When unset, defaults to `post`, `page`, plus any post type whose
+	 * `show_in_rest` is true.
 	 *
 	 * @return string[]
 	 */
 	private function default_allowed_post_types() {
+		$override = get_option( self::POST_TYPES_ALLOWLIST_OPTION, null );
+		if ( is_array( $override ) && ! empty( $override ) ) {
+			return array_values( array_unique( array_map( 'sanitize_key', $override ) ) );
+		}
 		$built_in     = array( 'post', 'page' );
 		$rest_enabled = function_exists( 'get_post_types' )
 			? array_values( get_post_types( array( 'show_in_rest' => true ), 'names' ) )

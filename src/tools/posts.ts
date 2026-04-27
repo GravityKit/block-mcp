@@ -121,7 +121,11 @@ export async function handlePostTool(
       if (args.content !== undefined && Array.isArray(args.blocks)) {
         throw new Error('create_post: "content" and "blocks" are mutually exclusive');
       }
-      return client.createPost(args as unknown as CreatePostRequest);
+      // Narrow incoming args to the documented shape. The MCP SDK already
+      // validates against `inputSchema`, but `terms` (Record<string, number[]>)
+      // and nested block shapes aren't enforced — narrow defensively here.
+      const create = narrowCreatePost(args);
+      return client.createPost(create);
     }
 
     case 'update_post': {
@@ -132,10 +136,66 @@ export async function handlePostTool(
       if (Object.keys(rest).length === 0) {
         throw new Error('update_post: provide at least one mutating field besides post_id');
       }
-      return client.updatePost(postId as number, rest as UpdatePostRequest);
+      const update = narrowUpdatePost(rest);
+      return client.updatePost(postId as number, update);
     }
 
     default:
       throw new Error(`Unknown post tool: ${toolName}`);
   }
+}
+
+function narrowCreatePost(input: Record<string, unknown>): CreatePostRequest {
+  // input.title is already validated as a non-empty string by the caller.
+  const out: CreatePostRequest = { title: input.title as string };
+  if (typeof input.post_type === 'string') out.post_type = input.post_type;
+  if (typeof input.status === 'string') out.status = input.status as CreatePostRequest['status'];
+  if (typeof input.content === 'string') out.content = input.content;
+  if (Array.isArray(input.blocks)) out.blocks = input.blocks as CreatePostRequest['blocks'];
+  if (typeof input.slug === 'string') out.slug = input.slug;
+  if (typeof input.parent === 'number') out.parent = input.parent;
+  if (typeof input.excerpt === 'string') out.excerpt = input.excerpt;
+  if (typeof input.featured_media === 'number') out.featured_media = input.featured_media;
+  if (Array.isArray(input.categories)) out.categories = (input.categories as unknown[]).filter((n) => typeof n === 'number') as number[];
+  if (Array.isArray(input.tags)) out.tags = (input.tags as unknown[]).filter((n) => typeof n === 'number') as number[];
+  if (input.terms && typeof input.terms === 'object' && !Array.isArray(input.terms)) {
+    out.terms = narrowTermsMap(input.terms as Record<string, unknown>);
+  }
+  if (typeof input.date === 'string') out.date = input.date;
+  if (typeof input.menu_order === 'number') out.menu_order = input.menu_order;
+  if (input.comment_status === 'open' || input.comment_status === 'closed') out.comment_status = input.comment_status;
+  if (input.ping_status === 'open' || input.ping_status === 'closed') out.ping_status = input.ping_status;
+  if (typeof input.author === 'number') out.author = input.author;
+  return out;
+}
+
+function narrowUpdatePost(input: Record<string, unknown>): UpdatePostRequest {
+  const out: UpdatePostRequest = {};
+  if (typeof input.title === 'string') out.title = input.title;
+  if (typeof input.status === 'string') out.status = input.status as UpdatePostRequest['status'];
+  if (typeof input.slug === 'string') out.slug = input.slug;
+  if (typeof input.parent === 'number') out.parent = input.parent;
+  if (typeof input.excerpt === 'string') out.excerpt = input.excerpt;
+  if (typeof input.featured_media === 'number') out.featured_media = input.featured_media;
+  if (Array.isArray(input.categories)) out.categories = (input.categories as unknown[]).filter((n) => typeof n === 'number') as number[];
+  if (Array.isArray(input.tags)) out.tags = (input.tags as unknown[]).filter((n) => typeof n === 'number') as number[];
+  if (input.terms && typeof input.terms === 'object' && !Array.isArray(input.terms)) {
+    out.terms = narrowTermsMap(input.terms as Record<string, unknown>);
+  }
+  if (typeof input.date === 'string') out.date = input.date;
+  if (typeof input.menu_order === 'number') out.menu_order = input.menu_order;
+  if (input.comment_status === 'open' || input.comment_status === 'closed') out.comment_status = input.comment_status;
+  if (input.ping_status === 'open' || input.ping_status === 'closed') out.ping_status = input.ping_status;
+  if (typeof input.author === 'number') out.author = input.author;
+  return out;
+}
+
+function narrowTermsMap(input: Record<string, unknown>): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const [taxonomy, ids] of Object.entries(input)) {
+    if (Array.isArray(ids)) {
+      out[taxonomy] = (ids as unknown[]).filter((n) => typeof n === 'number') as number[];
+    }
+  }
+  return out;
 }

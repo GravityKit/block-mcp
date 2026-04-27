@@ -40148,7 +40148,8 @@ async function handlePostTool(toolName, args, client2) {
       if (args.content !== void 0 && Array.isArray(args.blocks)) {
         throw new Error('create_post: "content" and "blocks" are mutually exclusive');
       }
-      return client2.createPost(args);
+      const create = narrowCreatePost(args);
+      return client2.createPost(create);
     }
     case "update_post": {
       if (typeof args.post_id !== "number") {
@@ -40158,11 +40159,63 @@ async function handlePostTool(toolName, args, client2) {
       if (Object.keys(rest).length === 0) {
         throw new Error("update_post: provide at least one mutating field besides post_id");
       }
-      return client2.updatePost(postId, rest);
+      const update = narrowUpdatePost(rest);
+      return client2.updatePost(postId, update);
     }
     default:
       throw new Error(`Unknown post tool: ${toolName}`);
   }
+}
+function narrowCreatePost(input) {
+  const out = { title: input.title };
+  if (typeof input.post_type === "string") out.post_type = input.post_type;
+  if (typeof input.status === "string") out.status = input.status;
+  if (typeof input.content === "string") out.content = input.content;
+  if (Array.isArray(input.blocks)) out.blocks = input.blocks;
+  if (typeof input.slug === "string") out.slug = input.slug;
+  if (typeof input.parent === "number") out.parent = input.parent;
+  if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
+  if (typeof input.featured_media === "number") out.featured_media = input.featured_media;
+  if (Array.isArray(input.categories)) out.categories = input.categories.filter((n) => typeof n === "number");
+  if (Array.isArray(input.tags)) out.tags = input.tags.filter((n) => typeof n === "number");
+  if (input.terms && typeof input.terms === "object" && !Array.isArray(input.terms)) {
+    out.terms = narrowTermsMap(input.terms);
+  }
+  if (typeof input.date === "string") out.date = input.date;
+  if (typeof input.menu_order === "number") out.menu_order = input.menu_order;
+  if (input.comment_status === "open" || input.comment_status === "closed") out.comment_status = input.comment_status;
+  if (input.ping_status === "open" || input.ping_status === "closed") out.ping_status = input.ping_status;
+  if (typeof input.author === "number") out.author = input.author;
+  return out;
+}
+function narrowUpdatePost(input) {
+  const out = {};
+  if (typeof input.title === "string") out.title = input.title;
+  if (typeof input.status === "string") out.status = input.status;
+  if (typeof input.slug === "string") out.slug = input.slug;
+  if (typeof input.parent === "number") out.parent = input.parent;
+  if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
+  if (typeof input.featured_media === "number") out.featured_media = input.featured_media;
+  if (Array.isArray(input.categories)) out.categories = input.categories.filter((n) => typeof n === "number");
+  if (Array.isArray(input.tags)) out.tags = input.tags.filter((n) => typeof n === "number");
+  if (input.terms && typeof input.terms === "object" && !Array.isArray(input.terms)) {
+    out.terms = narrowTermsMap(input.terms);
+  }
+  if (typeof input.date === "string") out.date = input.date;
+  if (typeof input.menu_order === "number") out.menu_order = input.menu_order;
+  if (input.comment_status === "open" || input.comment_status === "closed") out.comment_status = input.comment_status;
+  if (input.ping_status === "open" || input.ping_status === "closed") out.ping_status = input.ping_status;
+  if (typeof input.author === "number") out.author = input.author;
+  return out;
+}
+function narrowTermsMap(input) {
+  const out = {};
+  for (const [taxonomy, ids] of Object.entries(input)) {
+    if (Array.isArray(ids)) {
+      out[taxonomy] = ids.filter((n) => typeof n === "number");
+    }
+  }
+  return out;
 }
 
 // src/tools/terms.ts

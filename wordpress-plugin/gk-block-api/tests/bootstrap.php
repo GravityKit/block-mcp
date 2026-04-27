@@ -748,6 +748,13 @@ if ( ! function_exists( 'wp_max_upload_size' ) ) {
 		return (int) $GLOBALS['_gk_test_max_upload_size'];
 	}
 }
+
+// Tests can prime DNS resolution so the Media_Manager SSRF guard is
+// deterministic. Maps host → IP. Hosts not in the map fall through to PHP's
+// built-in resolver, which on most CI hosts returns the host unchanged on
+// failure (causing the SSRF guard to reject — appropriate for genuine
+// invalid_url tests).
+$GLOBALS['_gk_test_dns'] = array();
 if ( ! function_exists( 'wp_tempnam' ) ) {
 	function wp_tempnam( $filename = '' ) {
 		$tmp = tempnam( sys_get_temp_dir(), 'gkbla' );

@@ -49,7 +49,7 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 			$crud,
 			$usage_stats,
 			$mutator,
-			new Post_Manager( $preferences ),
+			new Post_Manager( $crud ),
 			new Term_Manager(),
 			new Media_Manager()
 		);

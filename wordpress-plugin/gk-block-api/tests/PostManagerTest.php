@@ -13,6 +13,10 @@
 
 use GravityKit\BlockAPI\Post_Manager;
 use GravityKit\BlockAPI\Preferences;
+use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Block_Safety;
+use GravityKit\BlockAPI\HTML_Transformer;
+// Note: Preferences only used inside the test setUp to construct Block_CRUD.
 
 class PostManagerTest extends \PHPUnit\Framework\TestCase {
 
@@ -38,7 +42,9 @@ class PostManagerTest extends \PHPUnit\Framework\TestCase {
 			}
 		}
 
-		$this->pm = new Post_Manager( new Preferences() );
+		$preferences = new Preferences();
+		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer() );
+		$this->pm    = new Post_Manager( $block_crud );
 	}
 
 	// ── create_post: required + format ───────────────────────────────
@@ -152,7 +158,8 @@ class PostManagerTest extends \PHPUnit\Framework\TestCase {
 			'blocks' => array( array( 'name' => 'fake/notregistered' ) ),
 		) );
 		$this->assertInstanceOf( \WP_Error::class, $result );
-		$this->assertSame( 'unregistered_block', $result->get_error_code() );
+		// Delegated to Block_CRUD::validate_block_def, which uses 'invalid_block'.
+		$this->assertSame( 'invalid_block', $result->get_error_code() );
 	}
 
 	// ── create_post: terms ───────────────────────────────────────────
@@ -362,5 +369,82 @@ class PostManagerTest extends \PHPUnit\Framework\TestCase {
 		$result = $this->pm->update_post( $id, array( 'categories' => array( $cat->term_id ) ) );
 		$this->assertIsArray( $result );
 		$this->assertSame( array( $cat->term_id ), $GLOBALS['_gk_test_post_terms'][ $id ]['category'] );
+	}
+
+	// ── update_post: mixed trash payload guard ───────────────────────
+
+	public function test_update_post_rejects_status_trash_with_title() {
+		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash', 'title' => 'New' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'mixed_trash_payload', $result->get_error_code() );
+		// Post must NOT have been trashed or renamed.
+		$this->assertSame( 'publish', $GLOBALS['_gk_test_posts'][ $id ]->post_status );
+		$this->assertSame( 'X', $GLOBALS['_gk_test_posts'][ $id ]->post_title );
+	}
+
+	public function test_update_post_status_trash_alone_is_allowed() {
+		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+		$this->assertIsArray( $result );
+		$this->assertSame( 'trash', $GLOBALS['_gk_test_posts'][ $id ]->post_status );
+	}
+
+	// ── future status requires future date ───────────────────────────
+
+	public function test_create_post_status_future_requires_future_date() {
+		$result = $this->pm->create_post( array( 'title' => 'X', 'status' => 'future' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_status', $result->get_error_code() );
+
+		$result_past = $this->pm->create_post( array(
+			'title'  => 'X',
+			'status' => 'future',
+			'date'   => '2000-01-01 00:00:00',
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result_past );
+		$this->assertSame( 'invalid_status', $result_past->get_error_code() );
+
+		$future = gmdate( 'Y-m-d H:i:s', time() + 86400 );
+		$result_ok = $this->pm->create_post( array(
+			'title'  => 'X',
+			'status' => 'future',
+			'date'   => $future,
+		) );
+		$this->assertIsArray( $result_ok );
+		$this->assertSame( 'future', $result_ok['status'] );
+	}
+
+	// ── post-types allow-list option override ────────────────────────
+
+	public function test_post_types_allowlist_option_restricts_types() {
+		// With override set to ['post'] only, page should be rejected.
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, array( 'post' ) );
+		$result = $this->pm->create_post( array( 'title' => 'X', 'post_type' => 'page' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_post_type', $result->get_error_code() );
+		// Cleanup.
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, false );
+	}
+
+	// ── update_post rate limit ───────────────────────────────────────
+
+	public function test_update_post_respects_rate_limit() {
+		$id = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'X' ) );
+		// Pre-fill the writes bucket past the 10/min limit.
+		$now = time();
+		set_transient(
+			'gk_block_api_rate_' . $id,
+			array(
+				'writes' => array(
+					$now, $now, $now, $now, $now, $now, $now, $now, $now, $now,
+				),
+				'puts'   => array(),
+			),
+			120
+		);
+		$result = $this->pm->update_post( $id, array( 'title' => 'New' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rate_limit_exceeded', $result->get_error_code() );
 	}
 }

@@ -26,6 +26,24 @@ class Media_Manager {
 	const URL_DOWNLOAD_MAX_BYTES = 26214400;
 
 	/**
+	 * Reserved IP ranges to block on URL sideload (SSRF defense).
+	 * Includes link-local, loopback, multicast, RFC1918 private ranges,
+	 * and IPv6 unique-local + link-local. Overrideable by site admins
+	 * via the `gk_block_api_url_sideload_blocked_ranges` filter.
+	 */
+	const SSRF_BLOCKED_IPV4_RANGES = array(
+		array( '0.0.0.0',     '0.255.255.255' ),       // "this network"
+		array( '10.0.0.0',    '10.255.255.255' ),      // RFC1918
+		array( '127.0.0.0',   '127.255.255.255' ),     // loopback
+		array( '169.254.0.0', '169.254.255.255' ),     // link-local (AWS/GCP/Azure metadata)
+		array( '172.16.0.0',  '172.31.255.255' ),      // RFC1918
+		array( '192.0.0.0',   '192.0.0.255' ),         // IETF reserved
+		array( '192.168.0.0', '192.168.255.255' ),     // RFC1918
+		array( '198.18.0.0',  '198.19.255.255' ),      // benchmark
+		array( '224.0.0.0',   '255.255.255.255' ),     // multicast + reserved
+	);
+
+	/**
 	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.4.
 	 * @return array|\WP_Error
 	 */
@@ -80,8 +98,24 @@ class Media_Manager {
 		$post_parent = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
 
 		$file = $_FILES[ $field ];
+
+		// Enforce site upload-size limit before move/copy. media_handle_upload
+		// will also enforce, but failing fast keeps us out of the WP error path.
+		$max = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
+		if ( $max > 0 && isset( $file['size'] ) && (int) $file['size'] > $max ) {
+			@unlink( $file['tmp_name'] );
+			return new \WP_Error(
+				'file_too_large',
+				'Uploaded file exceeds the site upload limit.',
+				array( 'status' => 400 )
+			);
+		}
+
+		// Defensive MIME check before media_handle_upload runs its own. Catches
+		// disallowed types early so the temp file isn't moved into uploads.
 		$mime = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
 		if ( empty( $mime['type'] ) ) {
+			@unlink( $file['tmp_name'] );
 			return new \WP_Error(
 				'disallowed_mime',
 				sprintf( 'Disallowed file type for "%s".', sanitize_file_name( $file['name'] ) ),
@@ -102,7 +136,17 @@ class Media_Manager {
 			return new \WP_Error( 'invalid_url', 'URL is not valid or not allowed.', array( 'status' => 400 ) );
 		}
 
-		$tmp = download_url( $url, 30 );
+		// SSRF defense: resolve host and reject reserved/private/link-local IPs.
+		// `wp_http_validate_url()` only catches loopback/0.0.0.0; cloud metadata
+		// endpoints (169.254.169.254) and RFC1918 private ranges sail past it.
+		$ssrf_check = $this->guard_ssrf( $url );
+		if ( is_wp_error( $ssrf_check ) ) {
+			return $ssrf_check;
+		}
+
+		// Use a tighter timeout than core's 300s default. Slow-source amplification
+		// drops to ~10s of resource hold per request.
+		$tmp = download_url( $url, 10 );
 		if ( is_wp_error( $tmp ) ) {
 			return new \WP_Error( 'url_fetch_failed', $tmp->get_error_message(), array( 'status' => 502 ) );
 		}
@@ -142,9 +186,30 @@ class Media_Manager {
 		if ( empty( $args['filename'] ) ) {
 			return new \WP_Error( 'invalid_filename', '"filename" is required for base64 uploads.', array( 'status' => 400 ) );
 		}
+
+		// Bound the encoded payload BEFORE decoding to limit memory consumption.
+		// Base64 expands 3 bytes → 4 bytes, so the encoded length cap matches the
+		// decoded size cap (URL_DOWNLOAD_MAX_BYTES, 25 MB).
+		$encoded_max = (int) ceil( self::URL_DOWNLOAD_MAX_BYTES * 4 / 3 );
+		if ( strlen( (string) $args['data_base64'] ) > $encoded_max ) {
+			return new \WP_Error(
+				'file_too_large',
+				'data_base64 exceeds size cap before decoding.',
+				array( 'status' => 400 )
+			);
+		}
+
 		$decoded = base64_decode( $args['data_base64'], true );
 		if ( false === $decoded || '' === $decoded ) {
 			return new \WP_Error( 'invalid_base64', 'data_base64 is not valid base64.', array( 'status' => 400 ) );
+		}
+
+		// Enforce both the URL-mode cap and the site upload limit on the decoded
+		// payload before any disk write.
+		$max     = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
+		$cap     = $max > 0 ? min( $max, self::URL_DOWNLOAD_MAX_BYTES ) : self::URL_DOWNLOAD_MAX_BYTES;
+		if ( strlen( $decoded ) > $cap ) {
+			return new \WP_Error( 'file_too_large', 'Decoded data exceeds size cap.', array( 'status' => 400 ) );
 		}
 
 		$filename = sanitize_file_name( (string) $args['filename'] );
@@ -152,12 +217,10 @@ class Media_Manager {
 		if ( ! $tmp ) {
 			return new \WP_Error( 'sideload_failed', 'Could not create temp file.', array( 'status' => 500 ) );
 		}
-		file_put_contents( $tmp, $decoded );
-
-		$max = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
-		if ( $max > 0 && filesize( $tmp ) > $max ) {
+		$bytes_written = file_put_contents( $tmp, $decoded );
+		if ( false === $bytes_written ) {
 			@unlink( $tmp );
-			return new \WP_Error( 'file_too_large', 'Uploaded file exceeds the site upload limit.', array( 'status' => 400 ) );
+			return new \WP_Error( 'sideload_failed', 'Could not write temp file.', array( 'status' => 500 ) );
 		}
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
@@ -259,6 +322,76 @@ class Media_Manager {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * SSRF defense for URL sideload. Rejects URLs whose host resolves to a
+	 * reserved/private/link-local IP. Cloud metadata endpoints (AWS/GCP/Azure
+	 * `169.254.169.254`) and RFC1918 ranges are explicitly blocked.
+	 *
+	 * Site admins can extend the block list via the
+	 * `gk_block_api_url_sideload_blocked_ranges` filter (returns array of
+	 * `[start, end]` pairs in IPv4 dotted notation).
+	 *
+	 * @param string $url
+	 * @return true|\WP_Error
+	 */
+	private function guard_ssrf( $url ) {
+		$host = wp_parse_url( $url, PHP_URL_HOST );
+		if ( ! $host ) {
+			return new \WP_Error( 'invalid_url', 'URL has no host.', array( 'status' => 400 ) );
+		}
+
+		// Resolve to all A records (some hosts use round-robin DNS to bypass).
+		// Fall back to gethostbyname when dns_get_record is unavailable.
+		$ips = array();
+		if ( function_exists( 'dns_get_record' ) ) {
+			$records = @dns_get_record( $host, DNS_A );
+			if ( is_array( $records ) ) {
+				foreach ( $records as $r ) {
+					if ( ! empty( $r['ip'] ) ) {
+						$ips[] = $r['ip'];
+					}
+				}
+			}
+		}
+		if ( empty( $ips ) ) {
+			$resolved = @gethostbyname( $host );
+			if ( $resolved && filter_var( $resolved, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) ) {
+				$ips[] = $resolved;
+			}
+		}
+		if ( empty( $ips ) ) {
+			return new \WP_Error( 'invalid_url', sprintf( 'Could not resolve host "%s".', $host ), array( 'status' => 400 ) );
+		}
+
+		$ranges = self::SSRF_BLOCKED_IPV4_RANGES;
+		if ( function_exists( 'apply_filters' ) ) {
+			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ranges', $ranges );
+			if ( is_array( $filtered ) ) {
+				$ranges = $filtered;
+			}
+		}
+
+		foreach ( $ips as $ip ) {
+			$ip_long = ip2long( $ip );
+			if ( false === $ip_long ) {
+				// Non-IPv4 (or invalid) — be conservative and reject.
+				return new \WP_Error( 'invalid_url', sprintf( 'Could not validate IP "%s" for "%s".', $ip, $host ), array( 'status' => 400 ) );
+			}
+			foreach ( $ranges as $range ) {
+				$start = ip2long( $range[0] );
+				$end   = ip2long( $range[1] );
+				if ( false !== $start && false !== $end && $ip_long >= $start && $ip_long <= $end ) {
+					return new \WP_Error(
+						'invalid_url',
+						sprintf( 'URL host "%s" resolves to a reserved or private IP (%s).', $host, $ip ),
+						array( 'status' => 400 )
+					);
+				}
+			}
+		}
+		return true;
 	}
 
 	private function require_admin_includes() {

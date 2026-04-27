@@ -485,7 +485,8 @@ export interface PostMutationResponse {
   transitioned_to_publish?: boolean;
   /** Set on update_post when the post moved out of `trash`. */
   untrashed?: boolean;
-  warnings: Array<Record<string, unknown>>;
+  /** Avoid-tier warnings emitted by Block_CRUD when blocks are passed at create time. */
+  warnings: PreferenceWarning[];
 }
 
 // ============================================

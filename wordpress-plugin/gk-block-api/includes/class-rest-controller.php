@@ -624,6 +624,18 @@ class REST_Controller {
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'list_terms' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'taxonomy'   => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_key', 'default' => 'category' ),
+					'search'     => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ),
+					'parent'     => array( 'type' => 'integer', 'sanitize_callback' => 'absint' ),
+					'hide_empty' => array( 'type' => 'boolean', 'default' => false ),
+					'per_page'   => array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'default' => 100 ),
+					'page'       => array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'default' => 1 ),
+					'orderby'    => array( 'type' => 'string', 'enum' => array( 'name', 'count', 'term_id', 'slug' ), 'default' => 'name' ),
+					'order'      => array( 'type' => 'string', 'enum' => array( 'asc', 'desc' ), 'default' => 'asc' ),
+					'include'    => array( 'type' => 'array', 'items' => array( 'type' => 'integer' ) ),
+					'slug'       => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_title' ),
+				),
 			)
 		);
 
@@ -798,6 +810,9 @@ class REST_Controller {
 	 * @return \WP_Error
 	 */
 	private function handle_error( \Throwable $e ) {
+		// Always log; never include exception detail in the API response. A
+		// production site that accidentally has WP_DEBUG=true should not leak
+		// filesystem paths or SQL/PHP internals to remote callers.
 		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 			error_log( 'GK Block API error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
 		}
@@ -805,10 +820,7 @@ class REST_Controller {
 		return new \WP_Error(
 			'internal_error',
 			__( 'An unexpected error occurred.', 'gk-block-api' ),
-			array(
-				'status' => 500,
-				'detail' => defined( 'WP_DEBUG' ) && WP_DEBUG ? $e->getMessage() : '',
-			)
+			array( 'status' => 500 )
 		);
 	}
 

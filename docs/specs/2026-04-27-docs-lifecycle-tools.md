@@ -295,7 +295,7 @@ includes/
 
 Bootstrap (`gk-block-api.php`) wires:
 ```php
-$post_manager  = new Post_Manager( $preferences, $block_crud );
+$post_manager  = new Post_Manager( $block_crud );
 $term_manager  = new Term_Manager();
 $media_manager = new Media_Manager();
 $controller = new REST_Controller(
@@ -304,7 +304,7 @@ $controller = new REST_Controller(
 );
 ```
 
-`Post_Manager` reuses `Block_CRUD` for the `blocks → serialized content` path, including preference enforcement. `Term_Manager` is a thin wrapper around `get_terms()` + `wp_count_terms()`. `Media_Manager` wraps `media_handle_sideload()` (multipart and base64 paths write a temp file first; URL path uses `wp_get_image_editor()` only for size metadata).
+`Post_Manager` delegates block validation to `Block_CRUD::validate_block_def()` (single source of truth for tier policy and replacement messaging) and uses its `check_rate_limit()` / `record_rate_limit()` for the per-post writes bucket. `Term_Manager` is a thin wrapper around `get_terms()` + `wp_count_terms()`. `Media_Manager` wraps `media_handle_sideload()` (multipart and base64 paths write a temp file first; URL path adds an SSRF guard rejecting reserved/private/link-local IPs before download).
 
 ## 6. TS module additions
 
@@ -325,8 +325,12 @@ Multipart in `client.ts` uses Node's built-in `FormData` (Node >= 18) and `Blob`
 
 - Application Password basic auth, same as today.
 - Rate limits:
-  - `update_post` — uses existing per-post writes bucket (10/min).
+  - `update_post` — uses existing per-post writes bucket (10/min). Returns `429 rate_limit_exceeded` when exceeded.
   - `create_post`, `upload_media`, `list_terms` — no additional rate limit in v1.2 (caps are sufficient).
+- SSRF defense for `upload_media` URL mode:
+  - URLs are resolved via DNS; reserved/private/link-local IPv4 ranges (RFC1918, 169.254/16 cloud metadata, 127.0.0.0/8 loopback, 0.0.0.0/8, 172.16/12, 192.168/16, 224.0.0.0/4 multicast) are rejected with `400 invalid_url`.
+  - Site admins can extend the block list via the `gk_block_api_url_sideload_blocked_ranges` filter.
+  - `download_url()` timeout reduced from default 300s to 10s to limit slow-source amplification.
 - Sanitization:
   - All strings via `sanitize_text_field()`; HTML content via `wp_kses_post()`.
   - Slugs via `sanitize_title()`.
