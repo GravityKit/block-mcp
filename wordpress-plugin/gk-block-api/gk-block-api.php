@@ -61,13 +61,19 @@ add_action( 'rest_api_init', function () {
 		$html_transformer = new HTML_Transformer();
 		$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer );
 		$block_mutator    = new Block_Mutator( $block_crud, $preferences, $block_safety, $html_transformer );
+		$post_manager     = new Post_Manager( $preferences );
+		$term_manager     = new Term_Manager();
+		$media_manager    = new Media_Manager();
 
 		$controller = new REST_Controller(
 			$block_registry,
 			$pattern_manager,
 			$block_crud,
 			$usage_stats,
-			$block_mutator
+			$block_mutator,
+			$post_manager,
+			$term_manager,
+			$media_manager
 		);
 
 		$controller->register_routes();

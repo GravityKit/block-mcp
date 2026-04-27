@@ -24,6 +24,9 @@ use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
 use GravityKit\BlockAPI\Usage_Stats;
+use GravityKit\BlockAPI\Post_Manager;
+use GravityKit\BlockAPI\Term_Manager;
+use GravityKit\BlockAPI\Media_Manager;
 
 class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 
@@ -45,7 +48,10 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 			$patterns,
 			$crud,
 			$usage_stats,
-			$mutator
+			$mutator,
+			new Post_Manager( $preferences ),
+			new Term_Manager(),
+			new Media_Manager()
 		);
 	}
 
@@ -60,7 +66,8 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 	private function callPrivate( string $method_name, array $args ) {
 		$reflection = new \ReflectionClass( REST_Controller::class );
 		$method     = $reflection->getMethod( $method_name );
-		$method->setAccessible( true );
+		// PHP 8.1+ allows ReflectionMethod::invokeArgs on private methods
+		// without setAccessible; setAccessible is deprecated.
 		return $method->invokeArgs( $this->controller, $args );
 	}
 

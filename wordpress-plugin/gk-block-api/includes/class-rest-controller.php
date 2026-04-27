@@ -65,6 +65,27 @@ class REST_Controller {
 	private $usage_stats;
 
 	/**
+	 * Post manager instance (create_post, update_post).
+	 *
+	 * @var Post_Manager
+	 */
+	private $post_manager;
+
+	/**
+	 * Term manager instance (list_terms).
+	 *
+	 * @var Term_Manager
+	 */
+	private $term_manager;
+
+	/**
+	 * Media manager instance (upload_media).
+	 *
+	 * @var Media_Manager
+	 */
+	private $media_manager;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Block_Registry  $block_registry  Block registry.
@@ -72,19 +93,28 @@ class REST_Controller {
 	 * @param Block_CRUD      $block_crud      Block CRUD.
 	 * @param Usage_Stats     $usage_stats     Usage stats.
 	 * @param Block_Mutator   $block_mutator   Block mutator.
+	 * @param Post_Manager    $post_manager    Post manager.
+	 * @param Term_Manager    $term_manager    Term manager.
+	 * @param Media_Manager   $media_manager   Media manager.
 	 */
 	public function __construct(
 		Block_Registry $block_registry,
 		Pattern_Manager $pattern_manager,
 		Block_CRUD $block_crud,
 		Usage_Stats $usage_stats,
-		Block_Mutator $block_mutator
+		Block_Mutator $block_mutator,
+		Post_Manager $post_manager,
+		Term_Manager $term_manager,
+		Media_Manager $media_manager
 	) {
 		$this->block_registry  = $block_registry;
 		$this->pattern_manager = $pattern_manager;
 		$this->block_crud      = $block_crud;
 		$this->usage_stats     = $usage_stats;
 		$this->block_mutator   = $block_mutator;
+		$this->post_manager    = $post_manager;
+		$this->term_manager    = $term_manager;
+		$this->media_manager   = $media_manager;
 	}
 
 	/**
@@ -555,6 +585,57 @@ class REST_Controller {
 				),
 			)
 		);
+
+		// =====================================================================
+		// v1.2 — Docs lifecycle (create_post, update_post, list_terms, upload_media).
+		// =====================================================================
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'create_post' ),
+				'permission_callback' => array( $this, 'check_edit_permissions' ),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)',
+			array(
+				'methods'             => \WP_REST_Server::EDITABLE,
+				'callback'            => array( $this, 'update_post' ),
+				'permission_callback' => array( $this, 'check_edit_permissions' ),
+				'args'                => array(
+					'id' => array(
+						'type'              => 'integer',
+						'required'          => true,
+						'sanitize_callback' => 'absint',
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/terms',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'list_terms' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/media',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'upload_media' ),
+				'permission_callback' => array( $this, 'check_upload_permissions' ),
+			)
+		);
 	}
 
 	/**
@@ -589,6 +670,120 @@ class REST_Controller {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Permission callback for media upload.
+	 *
+	 * @return bool|\WP_Error
+	 */
+	public function check_upload_permissions() {
+		if ( ! current_user_can( 'upload_files' ) ) {
+			return new \WP_Error(
+				'rest_cannot_upload',
+				__( 'You do not have permission to upload files.', 'gk-block-api' ),
+				array( 'status' => 403 )
+			);
+		}
+		return true;
+	}
+
+	// =========================================================================
+	// v1.2 — Docs lifecycle handlers.
+	// =========================================================================
+
+	/**
+	 * POST /posts — create a new post or page.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function create_post( $request ) {
+		try {
+			$args = $request->get_json_params();
+			if ( ! is_array( $args ) ) {
+				$args = $request->get_params();
+			}
+			$result = $this->post_manager->create_post( (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * PATCH /posts/{id} — update post metadata or status.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function update_post( $request ) {
+		try {
+			$post_id = (int) $request['id'];
+			$cap_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $cap_check ) ) {
+				return $cap_check;
+			}
+			$args = $request->get_json_params();
+			if ( ! is_array( $args ) ) {
+				$args = $request->get_params();
+			}
+			// Strip the route 'id' param so we don't accidentally treat it as a body field.
+			unset( $args['id'] );
+			$result = $this->post_manager->update_post( $post_id, (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /terms — list taxonomy terms.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function list_terms( $request ) {
+		try {
+			$args = $request->get_query_params();
+			$result = $this->term_manager->list_terms( (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /media — upload to the media library.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function upload_media( $request ) {
+		try {
+			$args = $request->get_params();
+			$file_params = $request->get_file_params();
+			if ( ! empty( $file_params ) ) {
+				$first = array_keys( $file_params )[0];
+				$args['file_field'] = (string) $first;
+			}
+			$result = $this->media_manager->upload( (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
 	}
 
 	// =========================================================================
