@@ -1,89 +1,68 @@
 /**
- * Write Tools
+ * Write Tools — single-block updates, insertion, deletion, range/full
+ * replacement, revert. All ops create a WordPress revision.
  *
- * MCP tools for modifying block content on WordPress pages.
- * Includes single-block updates, block insertion, deletion,
- * and full page rewrites. All operations create WordPress revisions.
+ * Naming conventions (1.4.0+):
+ *   - `flat_index`         = sequential position across ALL blocks (incl. nested).
+ *   - `top_level_counter`  = sequential position among top-level blocks only.
+ *   - tool names use verb_noun; range tools spell out the scope.
  */
 
 import type { WordPressBlockClient } from '../client.js';
 import { formatPreferenceWarning } from '../preferences.js';
 
-/**
- * Tool definitions for the write category.
- */
+/** Shape shared by every block-input arg in this module. */
+const BLOCK_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', description: 'Fully-qualified block name (e.g. "core/heading").' },
+    attributes: { type: 'object', description: 'Block attributes.' },
+    innerHTML: { type: 'string', description: 'Raw HTML content.' },
+  },
+  required: ['name'],
+} as const;
+
 export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
-      "Update a block's attributes and/or innerHTML. Attributes are SHALLOW-merged: top-level keys you don't pass are preserved; top-level keys you DO pass replace existing values wholesale (no deep merge). For array attributes (e.g. `questions: [...]`), pass the FULL new array — passing one element overwrites the rest. innerHTML replaces atomically. Creates a revision.",
+      'Update one block by flat_index. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Update one block' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
+        post_id: { type: 'number', description: 'Post ID.' },
+        flat_index: {
           type: 'number',
-          description: 'Post ID.',
+          description: 'Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). For top-level-only addressing, use delete_block / insert_blocks / replace_block_range.',
         },
-        block_index: {
-          type: 'number',
-          description:
-            'Zero-based flat `index` from get_page_blocks (counts every block including innerBlocks). NOT the `top_level_counter` — that one is consumed by `delete_block` and `insert_blocks`.',
-        },
-        attributes: {
-          type: 'object',
-          description:
-            'Partial attributes to SHALLOW-merge. Top-level keys you pass replace existing values wholesale (no deep merge for nested objects or arrays). For array attributes, pass the full new array — partial arrays overwrite the rest.',
-        },
-        innerHTML: {
-          type: 'string',
-          description: 'Replacement innerHTML (replaces atomically, not merged).',
-        },
+        attributes: { type: 'object', description: 'Partial attrs (top-level shallow merge).' },
+        innerHTML: { type: 'string', description: 'Replacement innerHTML.' },
       },
-      required: ['post_id', 'block_index'],
+      required: ['post_id', 'flat_index'],
     },
   },
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces (stackable/, ugb/, jetpack/) are hard-rejected — see the `block-mcp://block-preferences` resource for the full allow/deny policy and replacement map. Response.inserted[] entries include `path` and `top_level_counter` so you can chain a `mutate_block_tree op: insert-child` without an extra `get_page_blocks` round-trip.',
+      'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
-          type: 'number',
-          description: 'Post ID.',
-        },
-        after: {
+        post_id: { type: 'number', description: 'Post ID.' },
+        after_top_level: {
           type: ['number', 'string'],
-          description:
-            'Insert after the block at this top-level counter (sequential position among top-level blocks only — the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`). -1/omit = append, "start" = prepend.',
+          description: 'top_level_counter to insert AFTER. -1/omit = append, "start" = prepend.',
         },
-        before: {
+        before_top_level: {
           type: 'number',
-          description:
-            'Insert before the block at this top-level counter (sequential position among top-level blocks only — the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`).',
+          description: 'top_level_counter to insert BEFORE.',
         },
         blocks: {
           type: 'array',
           description: 'Blocks to insert.',
-          items: {
-            type: 'object',
-            properties: {
-              name: {
-                type: 'string',
-                description: 'Fully-qualified block name (e.g. "core/heading").',
-              },
-              attributes: {
-                type: 'object',
-                description: 'Block attributes.',
-              },
-              innerHTML: {
-                type: 'string',
-                description: 'Raw HTML content.',
-              },
-            },
-            required: ['name'],
-          },
+          items: BLOCK_INPUT_SCHEMA,
         },
       },
       required: ['post_id', 'blocks'],
@@ -91,125 +70,59 @@ export const WRITE_TOOLS = [
   },
   {
     name: 'delete_block',
-    description:
-      'Remove block(s) at a top-level counter. For core/block, removes the reference only, not the source pattern.',
+    description: 'Remove block(s) at a top_level_counter. For core/block, removes the reference only — not the source pattern.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Delete blocks' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
+        post_id: { type: 'number', description: 'Post ID.' },
+        top_level_counter: {
           type: 'number',
-          description: 'Post ID.',
+          description: 'Zero-based top_level_counter (sequential position among top-level blocks). NOT the flat index — that one is for update_block.',
         },
-        block_index: {
-          type: 'number',
-          description:
-            'Zero-based **top-level counter** (sequential position among top-level blocks only — the `top_level_counter` field on get_page_blocks entries). NOT the flat `index` field — that one is consumed by `update_block`. Passing a flat index here will land on the wrong block or return "Block index out of range".',
-        },
-        count: {
-          type: 'number',
-          description: 'Consecutive top-level blocks to remove. Default 1.',
-        },
+        count: { type: 'number', description: 'Consecutive top-level blocks to remove. Default 1.' },
       },
-      required: ['post_id', 'block_index'],
+      required: ['post_id', 'top_level_counter'],
     },
   },
   {
-    name: 'replace_blocks',
+    name: 'replace_block_range',
     description:
-      'Atomically replace a range of top-level blocks with a different shape, in a single revision. Use this when swapping a section of blocks for a different shape (e.g., 12 paragraph FAQs → 1 yoast/faq-block) — safer than delete + insert because there is no half-written intermediate state. Pass `start` (top_level_counter of the first block to replace), `count` (how many to remove), and `blocks` (new shape; may be empty for a pure delete or 1+ for a replace). Distinct from `replace_all_blocks` (which rewrites the entire post).',
+      'Atomic single-revision swap of N top-level blocks for M new blocks (M can be 0, 1, or N). Safer than delete+insert (no half-written intermediate state). Distinct from rewrite_post_blocks (which replaces the entire post).',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Replace a range of blocks' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
-          type: 'number',
-          description: 'Post ID.',
-        },
-        start: {
-          type: 'number',
-          description: 'Top-level counter of the first block to replace (zero-based).',
-        },
-        count: {
-          type: 'number',
-          description: 'Number of consecutive top-level blocks to replace. Pass 0 to insert without removing.',
-        },
-        blocks: {
-          type: 'array',
-          description: 'Replacement blocks. May be empty (pure delete) or any length.',
-          items: {
-            type: 'object',
-            properties: {
-              name: {
-                type: 'string',
-                description: 'Fully-qualified block name.',
-              },
-              attributes: {
-                type: 'object',
-                description: 'Block attributes.',
-              },
-              innerHTML: {
-                type: 'string',
-                description: 'Raw HTML content.',
-              },
-            },
-            required: ['name'],
-          },
-        },
+        post_id: { type: 'number', description: 'Post ID.' },
+        start: { type: 'number', description: 'top_level_counter of first block to replace.' },
+        count: { type: 'number', description: 'How many top-level blocks to remove. Pass 0 to insert without removing.' },
+        blocks: { type: 'array', description: 'Replacement blocks. May be empty (pure delete) or any length.', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'start', 'count', 'blocks'],
     },
   },
   {
-    name: 'replace_all_blocks',
-    description:
-      'Replace ALL blocks on a page. Creates a revision. Use for major restructuring; prefer update_block/insert_blocks for edits.',
+    name: 'rewrite_post_blocks',
+    description: 'Replace ALL blocks on a page in one revision. Use for major restructuring; prefer update_block / insert_blocks / replace_block_range for edits.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Rewrite the entire post' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
-          type: 'number',
-          description: 'Post ID.',
-        },
-        blocks: {
-          type: 'array',
-          description: 'Complete blocks array (replaces all).',
-          items: {
-            type: 'object',
-            properties: {
-              name: {
-                type: 'string',
-                description: 'Fully-qualified block name.',
-              },
-              attributes: {
-                type: 'object',
-                description: 'Block attributes.',
-              },
-              innerHTML: {
-                type: 'string',
-                description: 'Raw HTML content.',
-              },
-            },
-            required: ['name'],
-          },
-        },
+        post_id: { type: 'number', description: 'Post ID.' },
+        blocks: { type: 'array', description: 'Complete blocks array (replaces all).', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'blocks'],
     },
   },
   {
     name: 'revert_to_revision',
-    description:
-      'Revert a post to a revision ID returned by a prior write response.',
+    description: 'Restore a post to a revision. Pass `before_revision_id` from a prior write to UNDO that write; pass `revision_id` to REDO it.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Revert post to revision' },
     inputSchema: {
       type: 'object' as const,
       properties: {
-        post_id: {
-          type: 'number',
-          description: 'Post ID.',
-        },
-        revision_id: {
-          type: 'number',
-          description: 'Revision ID to restore.',
-        },
+        post_id: { type: 'number', description: 'Post ID.' },
+        revision_id: { type: 'number', description: 'Revision ID to restore.' },
       },
       required: ['post_id', 'revision_id'],
     },
@@ -218,11 +131,6 @@ export const WRITE_TOOLS = [
 
 /**
  * Handle a write tool call.
- *
- * @param toolName - The name of the tool being called
- * @param args - Tool arguments from the AI agent
- * @param client - WordPress Block API client instance
- * @returns Tool result ready for MCP response
  */
 export async function handleWriteTool(
   toolName: string,
@@ -232,30 +140,22 @@ export async function handleWriteTool(
   switch (toolName) {
     case 'update_block': {
       const postId = args.post_id as number;
-      const blockIndex = args.block_index as number;
+      const flatIndex = args.flat_index as number;
       const attributes = args.attributes as Record<string, unknown> | undefined;
       const innerHTML = args.innerHTML as string | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (blockIndex === undefined || blockIndex === null) {
-        throw new Error('block_index is required');
-      }
+      if (flatIndex === undefined || flatIndex === null) throw new Error('flat_index is required');
       if (!attributes && !innerHTML) {
         throw new Error('At least one of attributes or innerHTML must be provided');
       }
-
-      const result = await client.updateBlock(postId, blockIndex, {
-        attributes,
-        innerHTML,
-      });
-
-      return result;
+      return await client.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
 
     case 'insert_blocks': {
       const postId = args.post_id as number;
-      const after = args.after as number | 'start' | undefined;
-      const before = args.before as number | undefined;
+      const after = args.after_top_level as number | 'start' | undefined;
+      const before = args.before_top_level as number | undefined;
       const blocks = args.blocks as Array<{
         name: string;
         attributes?: Record<string, unknown>;
@@ -263,43 +163,27 @@ export async function handleWriteTool(
       }>;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (!blocks || blocks.length === 0) {
-        throw new Error('At least one block is required in the blocks array');
-      }
+      if (!blocks || blocks.length === 0) throw new Error('At least one block is required in the blocks array');
 
-      const result = await client.insertBlocks(postId, {
-        after,
-        before,
-        blocks,
-      });
-
-      // Enrich warnings with human-readable messages
+      const result = await client.insertBlocks(postId, { after, before, blocks });
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return {
-          ...result,
-          formatted_warnings: formattedWarnings,
-        };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
-
       return result;
     }
 
     case 'delete_block': {
       const postId = args.post_id as number;
-      const blockIndex = args.block_index as number;
+      const topLevelCounter = args.top_level_counter as number;
       const count = args.count as number | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (blockIndex === undefined || blockIndex === null) {
-        throw new Error('block_index is required');
-      }
+      if (topLevelCounter === undefined || topLevelCounter === null) throw new Error('top_level_counter is required');
 
-      const result = await client.deleteBlock(postId, blockIndex, count);
-      return result;
+      return await client.deleteBlock(postId, topLevelCounter, count);
     }
 
-    case 'replace_blocks': {
+    case 'replace_block_range': {
       const postId = args.post_id as number;
       const start = args.start as number;
       const count = args.count as number;
@@ -310,26 +194,18 @@ export async function handleWriteTool(
       }>;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (typeof start !== 'number' || start < 0) {
-        throw new Error('start must be a non-negative integer');
-      }
-      if (typeof count !== 'number' || count < 0) {
-        throw new Error('count must be a non-negative integer');
-      }
-      if (!Array.isArray(blocks)) {
-        throw new Error('blocks must be an array (may be empty for a pure delete)');
-      }
+      if (typeof start !== 'number' || start < 0) throw new Error('start must be a non-negative integer');
+      if (typeof count !== 'number' || count < 0) throw new Error('count must be a non-negative integer');
+      if (!Array.isArray(blocks)) throw new Error('blocks must be an array (may be empty for a pure delete)');
 
       const result = await client.replaceBlocksRange(postId, { start, count, blocks });
-
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return { ...result, formatted_warnings: formattedWarnings };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
       return result;
     }
 
-    case 'replace_all_blocks': {
+    case 'rewrite_post_blocks': {
       const postId = args.post_id as number;
       const blocks = args.blocks as Array<{
         name: string;
@@ -338,21 +214,12 @@ export async function handleWriteTool(
       }>;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (!blocks || blocks.length === 0) {
-        throw new Error('At least one block is required for a full page rewrite');
-      }
+      if (!blocks || blocks.length === 0) throw new Error('At least one block is required for a full page rewrite');
 
       const result = await client.replaceAllBlocks(postId, blocks);
-
-      // Enrich warnings with human-readable messages
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return {
-          ...result,
-          formatted_warnings: formattedWarnings,
-        };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
-
       return result;
     }
 
@@ -361,8 +228,7 @@ export async function handleWriteTool(
       const revisionId = args.revision_id as number;
       if (postId === undefined || postId === null) throw new Error('post_id is required');
       if (revisionId === undefined || revisionId === null) throw new Error('revision_id is required');
-      const result = await client.revertToRevision(postId, revisionId);
-      return result;
+      return await client.revertToRevision(postId, revisionId);
     }
 
     default:

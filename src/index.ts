@@ -70,7 +70,7 @@ const client = new WordPressBlockClient({
 const server = new McpServer(
   {
     name: 'block-mcp',
-    version: '1.3.0',
+    version: '1.4.0',
   },
   {
     capabilities: {
@@ -84,7 +84,7 @@ URL → post ID: when the user gives you a URL on this site, DO NOT shell out to
 - get_page_blocks accepts \`url\` as an alternative to \`post_id\` — the server resolves it internally.
 - For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
 
-Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) → update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
+Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) → update_block / edit_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
 
 Block preferences are server-defined and admin-editable per site:
 - Each block in get_page_blocks results carries an optional \`preference.tier\` (\"legacy\" | \"avoid\") with a \`suggested_replacement\` when one is configured. Read those, don't guess.

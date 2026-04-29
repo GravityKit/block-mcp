@@ -39314,119 +39314,95 @@ function groupByNamespace(types) {
 }
 
 // src/tools/discovery.ts
+var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: "List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content. The full namespace allow/deny policy lives at the `block-mcp://block-preferences` MCP resource \u2014 read it once to avoid trial-and-error rejections.",
+    description: "Registered block types grouped by tier (preferred / acceptable / avoid / legacy). Call before inserting unfamiliar blocks. Live policy comes from the site's Preferences config \u2014 see block-mcp://block-preferences.",
+    annotations: { ...READ_ANNOT, title: "List block types" },
     inputSchema: {
       type: "object",
       properties: {
-        namespace: {
-          type: "string",
-          description: 'Filter by namespace (e.g. "core", "filter", "stackable").'
-        },
-        category: {
-          type: "string",
-          description: 'Filter by category (e.g. "text", "media", "design").'
-        },
-        preferred_only: {
-          type: "boolean",
-          description: "If true, only blocks with score >= 50."
-        }
+        namespace: { type: "string", description: 'Filter by namespace (e.g. "core", "filter").' },
+        category: { type: "string", description: 'Filter by category (e.g. "text", "media").' },
+        preferred_only: { type: "boolean", description: "If true, only blocks with score >= 50." }
       }
     }
   },
   {
     name: "list_patterns",
-    description: "List block patterns sorted by preference score. Check before building from scratch.",
+    description: "Block patterns sorted by preference score. Check before building from scratch.",
+    annotations: { ...READ_ANNOT, title: "List patterns" },
     inputSchema: {
       type: "object",
       properties: {
-        search: {
-          type: "string",
-          description: "Search by name or keyword."
-        },
-        synced: {
-          type: "boolean",
-          description: "true = synced only, false = registered only, omit for all."
-        },
-        min_score: {
-          type: "number",
-          description: "Minimum score; use 0 to exclude legacy."
-        },
-        limit: {
-          type: "number",
-          description: "Max results (default 20)."
-        }
+        search: { type: "string", description: "Search by name or keyword." },
+        synced: { type: "boolean", description: "true = synced only, false = registered only, omit = all." },
+        min_score: { type: "number", description: "Min preference score; 0 excludes legacy." },
+        limit: { type: "number", description: "Max results. Default 20." }
       }
     }
   },
   {
     name: "get_pattern",
-    description: "Get a pattern's full block content and metadata. Use after list_patterns.",
+    description: "Single pattern's full block content + metadata. Use after list_patterns.",
+    annotations: { ...READ_ANNOT, title: "Get pattern" },
     inputSchema: {
       type: "object",
       properties: {
-        pattern_id: {
-          type: ["number", "string"],
-          description: "Numeric post ID (synced) or registered pattern name."
-        }
+        pattern_id: { type: ["number", "string"], description: "Numeric post ID (synced) or registered pattern name." }
       },
       required: ["pattern_id"]
     }
   },
   {
     name: "get_site_usage",
-    description: "Get site-wide block/pattern usage stats. Identifies legacy patterns with zero references.",
+    description: "Site-wide block + pattern inventory: usage counts, namespace totals, pattern reference counts, legacy patterns.",
+    annotations: { ...READ_ANNOT, title: "Get site usage" },
     inputSchema: {
       type: "object",
       properties: {
-        refresh: {
-          type: "boolean",
-          description: "Bust the 1-hour cache and regenerate."
-        }
+        refresh: { type: "boolean", description: "Bust the 1-hour cache and rebuild." }
       }
     }
   },
   {
     name: "scan_storage_modes",
-    description: 'Walk every published post and classify each distinct block name as "static" | "dynamic" | "dual" (writes the result to the gk_block_api_storage_modes WP option). Slow \u2014 runs once after install or when the site\'s block ecosystem changes significantly. After this runs, get_page_blocks `storage_mode` annotations and dual-storage enforcement use the live classification instead of the filter defaults. Returns `{ scanned_posts, unique_blocks, classification, dual_count, dynamic_count, static_count }`.',
-    inputSchema: {
-      type: "object",
-      properties: {}
-    }
+    description: 'Walk every published post and persist a `block_name \u2192 "static"|"dynamic"|"dual"` map (option `gk_block_api_storage_modes`). Slow on large sites; rate-limited to 1/hr. After this runs, get_page_blocks `storage_mode` annotations and dual-storage write enforcement use the live classification. Returns `{scanned_posts, unique_blocks, classification, dual_count, dynamic_count, static_count}`.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Scan storage modes" },
+    inputSchema: { type: "object", properties: {} }
   },
   {
     name: "resolve_url",
-    description: "Resolve a URL or path to a WordPress post ID. Accepts full URLs (https://site.com/path/) or paths (/path/). Handles all post types and pretty permalinks. Use this before any get_page_blocks / update / mutate call when you only have a URL.",
+    description: "URL or path \u2192 post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL.",
+    annotations: { ...READ_ANNOT, title: "Resolve URL to post" },
     inputSchema: {
       type: "object",
       properties: {
-        url: {
-          type: "string",
-          description: 'Full URL or site-relative path (e.g. "/products/gravityedit/").'
-        }
+        url: { type: "string", description: 'Full URL or path (e.g. "/some/page/").' }
       },
       required: ["url"]
     }
   },
   {
-    name: "find_posts",
-    description: "Search posts by title/content. Returns stubs (id, title, slug, post_type, post_status, post_url, modified). Use instead of wp post list / wp-json.",
+    name: "list_posts",
+    description: "Search posts by title/content with pagination. Returns `{posts: [{post_id, title, slug, post_type, post_status, post_url, modified}], total, page, per_page, total_pages}`. Use instead of wp post list / wp-json.",
+    annotations: { ...READ_ANNOT, title: "List/search posts" },
     inputSchema: {
       type: "object",
       properties: {
-        search: { type: "string", description: "Free-text across title + content. Omit to list by filters alone." },
+        search: { type: "string", description: "Free-text across title + content. Omit to list." },
         post_type: { type: "string", description: "Single or comma-separated. Default: public types." },
-        post_status: { type: "string", description: "publish | draft | private | any | comma-separated. Default: publish." },
+        post_status: { type: "string", description: "publish | draft | private | any | csv. Default: publish. (`any` is exclusive.)" },
         per_page: { type: "number", description: "Default 20, max 100." },
         page: { type: "number", description: "Default 1." }
       }
     }
   },
   {
-    name: "post_info",
-    description: "Look up post metadata by post_id, url, or slug+post_type. Returns title, status, post_url, edit_url, modified, parent_id, author. Replaces wp eval / get_permalink() shell-outs.",
+    name: "get_post_info",
+    description: "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count}`. Replaces wp eval / get_permalink() shell-outs.",
+    annotations: { ...READ_ANNOT, title: "Get post info" },
     inputSchema: {
       type: "object",
       properties: {
@@ -39447,11 +39423,7 @@ async function handleDiscoveryTool(toolName, args, client2) {
         preferred: args.preferred_only
       });
       const enriched = enrichBlockTypes(response.block_types);
-      return {
-        block_types: enriched.block_types,
-        count: enriched.block_types.length,
-        guidance: enriched.guidance
-      };
+      return { block_types: enriched.block_types, count: enriched.block_types.length, guidance: enriched.guidance };
     }
     case "list_patterns": {
       const response = await client2.getPatterns({
@@ -39461,35 +39433,23 @@ async function handleDiscoveryTool(toolName, args, client2) {
         limit: args.limit
       });
       const enriched = enrichPatternList(response.patterns);
-      return {
-        patterns: enriched.patterns,
-        count: enriched.patterns.length,
-        summary: enriched.summary
-      };
+      return { patterns: enriched.patterns, count: enriched.patterns.length, summary: enriched.summary };
     }
     case "get_pattern": {
       const patternId = args.pattern_id;
-      if (patternId === void 0 || patternId === null) {
-        throw new Error("pattern_id is required");
-      }
-      const pattern = await client2.getPattern(patternId);
-      return pattern;
+      if (patternId === void 0 || patternId === null) throw new Error("pattern_id is required");
+      return await client2.getPattern(patternId);
     }
-    case "get_site_usage": {
-      const usage = await client2.getSiteUsage(args.refresh);
-      return usage;
-    }
-    case "scan_storage_modes": {
+    case "get_site_usage":
+      return await client2.getSiteUsage(args.refresh);
+    case "scan_storage_modes":
       return await client2.scanStorageModes();
-    }
     case "resolve_url": {
       const url3 = args.url;
-      if (typeof url3 !== "string" || url3.length === 0) {
-        throw new Error("url is required");
-      }
+      if (typeof url3 !== "string" || url3.length === 0) throw new Error("url is required");
       return await client2.resolveUrl(url3);
     }
-    case "find_posts": {
+    case "list_posts":
       return await client2.findPosts({
         search: args.search,
         post_type: args.post_type,
@@ -39497,13 +39457,12 @@ async function handleDiscoveryTool(toolName, args, client2) {
         per_page: args.per_page,
         page: args.page
       });
-    }
-    case "post_info": {
+    case "get_post_info": {
       const postId = args.post_id;
       const url3 = args.url;
       const slug = args.slug;
       if ((postId === void 0 || postId === null) && (typeof url3 !== "string" || url3.length === 0) && (typeof slug !== "string" || slug.length === 0)) {
-        throw new Error("post_info requires one of: post_id, url, or slug");
+        throw new Error("get_post_info requires one of: post_id, url, or slug");
       }
       return await client2.getPostInfo({
         post_id: typeof postId === "number" ? postId : void 0,
@@ -39614,72 +39573,54 @@ async function handleReadTool(toolName, args, client2) {
 }
 
 // src/tools/write.ts
+var BLOCK_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    name: { type: "string", description: 'Fully-qualified block name (e.g. "core/heading").' },
+    attributes: { type: "object", description: "Block attributes." },
+    innerHTML: { type: "string", description: "Raw HTML content." }
+  },
+  required: ["name"]
+};
 var WRITE_TOOLS = [
   {
     name: "update_block",
-    description: "Update a block's attributes and/or innerHTML. Attributes are SHALLOW-merged: top-level keys you don't pass are preserved; top-level keys you DO pass replace existing values wholesale (no deep merge). For array attributes (e.g. `questions: [...]`), pass the FULL new array \u2014 passing one element overwrites the rest. innerHTML replaces atomically. Creates a revision.",
+    description: "Update one block by flat_index. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Update one block" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
+        post_id: { type: "number", description: "Post ID." },
+        flat_index: {
           type: "number",
-          description: "Post ID."
+          description: "Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). For top-level-only addressing, use delete_block / insert_blocks / replace_block_range."
         },
-        block_index: {
-          type: "number",
-          description: "Zero-based flat `index` from get_page_blocks (counts every block including innerBlocks). NOT the `top_level_counter` \u2014 that one is consumed by `delete_block` and `insert_blocks`."
-        },
-        attributes: {
-          type: "object",
-          description: "Partial attributes to SHALLOW-merge. Top-level keys you pass replace existing values wholesale (no deep merge for nested objects or arrays). For array attributes, pass the full new array \u2014 partial arrays overwrite the rest."
-        },
-        innerHTML: {
-          type: "string",
-          description: "Replacement innerHTML (replaces atomically, not merged)."
-        }
+        attributes: { type: "object", description: "Partial attrs (top-level shallow merge)." },
+        innerHTML: { type: "string", description: "Replacement innerHTML." }
       },
-      required: ["post_id", "block_index"]
+      required: ["post_id", "flat_index"]
     }
   },
   {
     name: "insert_blocks",
-    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces (stackable/, ugb/, jetpack/) are hard-rejected \u2014 see the `block-mcp://block-preferences` resource for the full allow/deny policy and replacement map. Response.inserted[] entries include `path` and `top_level_counter` so you can chain a `mutate_block_tree op: insert-child` without an extra `get_page_blocks` round-trip.",
+    description: 'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
-          type: "number",
-          description: "Post ID."
-        },
-        after: {
+        post_id: { type: "number", description: "Post ID." },
+        after_top_level: {
           type: ["number", "string"],
-          description: 'Insert after the block at this top-level counter (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`). -1/omit = append, "start" = prepend.'
+          description: 'top_level_counter to insert AFTER. -1/omit = append, "start" = prepend.'
         },
-        before: {
+        before_top_level: {
           type: "number",
-          description: "Insert before the block at this top-level counter (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`)."
+          description: "top_level_counter to insert BEFORE."
         },
         blocks: {
           type: "array",
           description: "Blocks to insert.",
-          items: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-                description: 'Fully-qualified block name (e.g. "core/heading").'
-              },
-              attributes: {
-                type: "object",
-                description: "Block attributes."
-              },
-              innerHTML: {
-                type: "string",
-                description: "Raw HTML content."
-              }
-            },
-            required: ["name"]
-          }
+          items: BLOCK_INPUT_SCHEMA
         }
       },
       required: ["post_id", "blocks"]
@@ -39687,120 +39628,58 @@ var WRITE_TOOLS = [
   },
   {
     name: "delete_block",
-    description: "Remove block(s) at a top-level counter. For core/block, removes the reference only, not the source pattern.",
+    description: "Remove block(s) at a top_level_counter. For core/block, removes the reference only \u2014 not the source pattern.",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Delete blocks" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
+        post_id: { type: "number", description: "Post ID." },
+        top_level_counter: {
           type: "number",
-          description: "Post ID."
+          description: "Zero-based top_level_counter (sequential position among top-level blocks). NOT the flat index \u2014 that one is for update_block."
         },
-        block_index: {
-          type: "number",
-          description: 'Zero-based **top-level counter** (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries). NOT the flat `index` field \u2014 that one is consumed by `update_block`. Passing a flat index here will land on the wrong block or return "Block index out of range".'
-        },
-        count: {
-          type: "number",
-          description: "Consecutive top-level blocks to remove. Default 1."
-        }
+        count: { type: "number", description: "Consecutive top-level blocks to remove. Default 1." }
       },
-      required: ["post_id", "block_index"]
+      required: ["post_id", "top_level_counter"]
     }
   },
   {
-    name: "replace_blocks",
-    description: "Atomically replace a range of top-level blocks with a different shape, in a single revision. Use this when swapping a section of blocks for a different shape (e.g., 12 paragraph FAQs \u2192 1 yoast/faq-block) \u2014 safer than delete + insert because there is no half-written intermediate state. Pass `start` (top_level_counter of the first block to replace), `count` (how many to remove), and `blocks` (new shape; may be empty for a pure delete or 1+ for a replace). Distinct from `replace_all_blocks` (which rewrites the entire post).",
+    name: "replace_block_range",
+    description: "Atomic single-revision swap of N top-level blocks for M new blocks (M can be 0, 1, or N). Safer than delete+insert (no half-written intermediate state). Distinct from rewrite_post_blocks (which replaces the entire post).",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Replace a range of blocks" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
-          type: "number",
-          description: "Post ID."
-        },
-        start: {
-          type: "number",
-          description: "Top-level counter of the first block to replace (zero-based)."
-        },
-        count: {
-          type: "number",
-          description: "Number of consecutive top-level blocks to replace. Pass 0 to insert without removing."
-        },
-        blocks: {
-          type: "array",
-          description: "Replacement blocks. May be empty (pure delete) or any length.",
-          items: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-                description: "Fully-qualified block name."
-              },
-              attributes: {
-                type: "object",
-                description: "Block attributes."
-              },
-              innerHTML: {
-                type: "string",
-                description: "Raw HTML content."
-              }
-            },
-            required: ["name"]
-          }
-        }
+        post_id: { type: "number", description: "Post ID." },
+        start: { type: "number", description: "top_level_counter of first block to replace." },
+        count: { type: "number", description: "How many top-level blocks to remove. Pass 0 to insert without removing." },
+        blocks: { type: "array", description: "Replacement blocks. May be empty (pure delete) or any length.", items: BLOCK_INPUT_SCHEMA }
       },
       required: ["post_id", "start", "count", "blocks"]
     }
   },
   {
-    name: "replace_all_blocks",
-    description: "Replace ALL blocks on a page. Creates a revision. Use for major restructuring; prefer update_block/insert_blocks for edits.",
+    name: "rewrite_post_blocks",
+    description: "Replace ALL blocks on a page in one revision. Use for major restructuring; prefer update_block / insert_blocks / replace_block_range for edits.",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Rewrite the entire post" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
-          type: "number",
-          description: "Post ID."
-        },
-        blocks: {
-          type: "array",
-          description: "Complete blocks array (replaces all).",
-          items: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-                description: "Fully-qualified block name."
-              },
-              attributes: {
-                type: "object",
-                description: "Block attributes."
-              },
-              innerHTML: {
-                type: "string",
-                description: "Raw HTML content."
-              }
-            },
-            required: ["name"]
-          }
-        }
+        post_id: { type: "number", description: "Post ID." },
+        blocks: { type: "array", description: "Complete blocks array (replaces all).", items: BLOCK_INPUT_SCHEMA }
       },
       required: ["post_id", "blocks"]
     }
   },
   {
     name: "revert_to_revision",
-    description: "Revert a post to a revision ID returned by a prior write response.",
+    description: "Restore a post to a revision. Pass `before_revision_id` from a prior write to UNDO that write; pass `revision_id` to REDO it.",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Revert post to revision" },
     inputSchema: {
       type: "object",
       properties: {
-        post_id: {
-          type: "number",
-          description: "Post ID."
-        },
-        revision_id: {
-          type: "number",
-          description: "Revision ID to restore."
-        }
+        post_id: { type: "number", description: "Post ID." },
+        revision_id: { type: "number", description: "Revision ID to restore." }
       },
       required: ["post_id", "revision_id"]
     }
@@ -39810,92 +39689,60 @@ async function handleWriteTool(toolName, args, client2) {
   switch (toolName) {
     case "update_block": {
       const postId = args.post_id;
-      const blockIndex = args.block_index;
+      const flatIndex = args.flat_index;
       const attributes = args.attributes;
       const innerHTML = args.innerHTML;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (blockIndex === void 0 || blockIndex === null) {
-        throw new Error("block_index is required");
-      }
+      if (flatIndex === void 0 || flatIndex === null) throw new Error("flat_index is required");
       if (!attributes && !innerHTML) {
         throw new Error("At least one of attributes or innerHTML must be provided");
       }
-      const result = await client2.updateBlock(postId, blockIndex, {
-        attributes,
-        innerHTML
-      });
-      return result;
+      return await client2.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
     case "insert_blocks": {
       const postId = args.post_id;
-      const after = args.after;
-      const before = args.before;
+      const after = args.after_top_level;
+      const before = args.before_top_level;
       const blocks = args.blocks;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (!blocks || blocks.length === 0) {
-        throw new Error("At least one block is required in the blocks array");
-      }
-      const result = await client2.insertBlocks(postId, {
-        after,
-        before,
-        blocks
-      });
+      if (!blocks || blocks.length === 0) throw new Error("At least one block is required in the blocks array");
+      const result = await client2.insertBlocks(postId, { after, before, blocks });
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return {
-          ...result,
-          formatted_warnings: formattedWarnings
-        };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
       return result;
     }
     case "delete_block": {
       const postId = args.post_id;
-      const blockIndex = args.block_index;
+      const topLevelCounter = args.top_level_counter;
       const count = args.count;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (blockIndex === void 0 || blockIndex === null) {
-        throw new Error("block_index is required");
-      }
-      const result = await client2.deleteBlock(postId, blockIndex, count);
-      return result;
+      if (topLevelCounter === void 0 || topLevelCounter === null) throw new Error("top_level_counter is required");
+      return await client2.deleteBlock(postId, topLevelCounter, count);
     }
-    case "replace_blocks": {
+    case "replace_block_range": {
       const postId = args.post_id;
       const start = args.start;
       const count = args.count;
       const blocks = args.blocks;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (typeof start !== "number" || start < 0) {
-        throw new Error("start must be a non-negative integer");
-      }
-      if (typeof count !== "number" || count < 0) {
-        throw new Error("count must be a non-negative integer");
-      }
-      if (!Array.isArray(blocks)) {
-        throw new Error("blocks must be an array (may be empty for a pure delete)");
-      }
+      if (typeof start !== "number" || start < 0) throw new Error("start must be a non-negative integer");
+      if (typeof count !== "number" || count < 0) throw new Error("count must be a non-negative integer");
+      if (!Array.isArray(blocks)) throw new Error("blocks must be an array (may be empty for a pure delete)");
       const result = await client2.replaceBlocksRange(postId, { start, count, blocks });
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return { ...result, formatted_warnings: formattedWarnings };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
       return result;
     }
-    case "replace_all_blocks": {
+    case "rewrite_post_blocks": {
       const postId = args.post_id;
       const blocks = args.blocks;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (!blocks || blocks.length === 0) {
-        throw new Error("At least one block is required for a full page rewrite");
-      }
+      if (!blocks || blocks.length === 0) throw new Error("At least one block is required for a full page rewrite");
       const result = await client2.replaceAllBlocks(postId, blocks);
       if (result.warnings && result.warnings.length > 0) {
-        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
-        return {
-          ...result,
-          formatted_warnings: formattedWarnings
-        };
+        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
       return result;
     }
@@ -39904,8 +39751,7 @@ async function handleWriteTool(toolName, args, client2) {
       const revisionId = args.revision_id;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
       if (revisionId === void 0 || revisionId === null) throw new Error("revision_id is required");
-      const result = await client2.revertToRevision(postId, revisionId);
-      return result;
+      return await client2.revertToRevision(postId, revisionId);
     }
     default:
       throw new Error(`Unknown write tool: ${toolName}`);
@@ -39973,7 +39819,7 @@ async function handlePatternTool(toolName, args, client2) {
 }
 
 // src/tools/mutate.ts
-var VALID_OPS = /* @__PURE__ */ new Set([
+var OPS = [
   "update-attrs",
   "update-html",
   "replace-block",
@@ -39983,48 +39829,22 @@ var VALID_OPS = /* @__PURE__ */ new Set([
   "insert-child",
   "duplicate",
   "move"
-]);
+];
 var MUTATE_TOOLS = [{
-  name: "mutate_block_tree",
-  description: "Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Paths are integer arrays ([0,2,1] = block 0 > innerBlock 2 > innerBlock 1) from get_page_blocks. Creates a revision.",
+  name: "edit_block_tree",
+  description: "Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. `path` is an integer array from get_page_blocks ([0,2,1] = block 0 \u2192 innerBlock 2 \u2192 innerBlock 1). Creates a revision.",
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Edit block tree by path" },
   inputSchema: {
     type: "object",
     properties: {
-      post_id: {
-        type: "number",
-        description: "Post ID."
-      },
-      op: {
-        type: "string",
-        enum: [
-          "update-attrs",
-          "update-html",
-          "replace-block",
-          "remove-block",
-          "wrap-in-group",
-          "unwrap-group",
-          "insert-child",
-          "duplicate",
-          "move"
-        ],
-        description: "Operation to perform."
-      },
-      path: {
-        type: "array",
-        items: { type: "integer" },
-        description: "Target block path, e.g. [0,2,1]."
-      },
-      attributes: {
-        type: "object",
-        description: "update-attrs: attributes to merge."
-      },
-      innerHTML: {
-        type: "string",
-        description: "update-html: replacement innerHTML."
-      },
+      post_id: { type: "number", description: "Post ID." },
+      op: { type: "string", enum: [...OPS], description: "Operation to perform." },
+      path: { type: "array", items: { type: "integer" }, description: "Target block path (e.g. [0,2,1])." },
+      attributes: { type: "object", description: "update-attrs: attributes to merge." },
+      innerHTML: { type: "string", description: "update-html: replacement innerHTML." },
       block: {
         type: "object",
-        description: "replace-block/insert-child: { name, attributes?, innerHTML?, innerBlocks? }.",
+        description: "replace-block / insert-child: { name, attributes?, innerHTML?, innerBlocks? }.",
         properties: {
           name: { type: "string", description: "Fully-qualified block name." },
           attributes: { type: "object" },
@@ -40040,24 +39860,10 @@ var MUTATE_TOOLS = [{
           attributes: { type: "object" }
         }
       },
-      position: {
-        type: ["integer", "string"],
-        description: 'insert-child: index, "start", or "end" (default).'
-      },
-      destination: {
-        type: "array",
-        items: { type: "integer" },
-        description: "move: destination path."
-      },
-      before: {
-        type: "array",
-        items: { type: "integer" },
-        description: "move: path to insert BEFORE (pre-move indexing). Alias for destination."
-      },
-      count: {
-        type: "integer",
-        description: "move: consecutive blocks to move. Default 1."
-      }
+      position: { type: ["integer", "string"], description: 'insert-child: index, "start", or "end" (default).' },
+      destination: { type: "array", items: { type: "integer" }, description: "move: destination path." },
+      before: { type: "array", items: { type: "integer" }, description: "move: insert BEFORE this path (pre-move indexing). Alias for destination." },
+      count: { type: "integer", description: "move: consecutive blocks to move. Default 1." }
     },
     required: ["post_id", "op", "path"]
   }
@@ -40077,23 +39883,18 @@ function isStaticBlockWarning(warning) {
   return typeof warning === "object" && warning !== null && warning.type === "static_markup_stale_risk";
 }
 function formatStaticBlockWarning(warning) {
-  const attrs = warning.changed_attrs.join(", ");
-  return `WARNING: Changing ${attrs} on static block ${warning.block_name} without updating innerHTML may leave markup stale.`;
+  return `WARNING: Changing ${warning.changed_attrs.join(", ")} on static block ${warning.block_name} without updating innerHTML may leave markup stale.`;
 }
 async function handleMutateTool(toolName, args, client2) {
-  if (toolName !== "mutate_block_tree") {
+  if (toolName !== "edit_block_tree") {
     throw new Error(`Unknown mutate tool: ${toolName}`);
   }
   const postId = args.post_id;
   const op = args.op;
   const path = args.path;
-  if (postId === void 0 || postId === null) {
-    throw new Error("post_id is required");
-  }
-  if (!op || !VALID_OPS.has(op)) {
-    throw new Error(
-      `op must be one of: ${[...VALID_OPS].join(", ")}. Got: ${JSON.stringify(op)}`
-    );
+  if (postId === void 0 || postId === null) throw new Error("post_id is required");
+  if (!op || !OPS.includes(op)) {
+    throw new Error(`op must be one of: ${OPS.join(", ")}. Got: ${JSON.stringify(op)}`);
   }
   isIntegerArray(path, "path");
   const requestBody = {
@@ -40103,47 +39904,24 @@ async function handleMutateTool(toolName, args, client2) {
   switch (op) {
     case "update-attrs": {
       const attributes = args.attributes;
-      if (!attributes || typeof attributes !== "object") {
-        throw new Error('update-attrs requires an "attributes" object');
-      }
+      if (!attributes || typeof attributes !== "object") throw new Error('update-attrs requires an "attributes" object');
       requestBody.attributes = attributes;
       break;
     }
     case "update-html": {
       const innerHTML = args.innerHTML;
-      if (innerHTML === void 0 || innerHTML === null) {
-        throw new Error('update-html requires an "innerHTML" string');
-      }
+      if (innerHTML === void 0 || innerHTML === null) throw new Error('update-html requires an "innerHTML" string');
       requestBody.innerHTML = innerHTML;
       break;
     }
-    case "replace-block": {
-      const block = args.block;
-      if (!block || typeof block !== "object" || !block.name) {
-        throw new Error('replace-block requires a "block" object with a "name" property');
-      }
-      requestBody.block = block;
-      break;
-    }
-    case "remove-block": {
-      break;
-    }
-    case "wrap-in-group": {
-      if (args.wrapper !== void 0) {
-        requestBody.wrapper = args.wrapper;
-      }
-      break;
-    }
-    case "unwrap-group": {
-      break;
-    }
+    case "replace-block":
     case "insert-child": {
       const block = args.block;
       if (!block || typeof block !== "object" || !block.name) {
-        throw new Error('insert-child requires a "block" object with a "name" property');
+        throw new Error(`${op} requires a "block" object with a "name" property`);
       }
       requestBody.block = block;
-      if (args.position !== void 0) {
+      if (op === "insert-child" && args.position !== void 0) {
         const position = args.position;
         if (typeof position === "number" && Number.isInteger(position)) {
           requestBody.position = position;
@@ -40155,9 +39933,14 @@ async function handleMutateTool(toolName, args, client2) {
       }
       break;
     }
-    case "duplicate": {
+    case "wrap-in-group": {
+      if (args.wrapper !== void 0) requestBody.wrapper = args.wrapper;
       break;
     }
+    case "remove-block":
+    case "unwrap-group":
+    case "duplicate":
+      break;
     case "move": {
       const before = args.before;
       const destination = args.destination;
@@ -40183,15 +39966,10 @@ async function handleMutateTool(toolName, args, client2) {
   const result = await client2.mutateBlockTree(postId, requestBody);
   if (result.warnings && result.warnings.length > 0) {
     const formattedWarnings = result.warnings.map((warning) => {
-      if (isStaticBlockWarning(warning)) {
-        return formatStaticBlockWarning(warning);
-      }
+      if (isStaticBlockWarning(warning)) return formatStaticBlockWarning(warning);
       return formatPreferenceWarning(warning);
     });
-    return {
-      ...result,
-      formatted_warnings: formattedWarnings
-    };
+    return { ...result, formatted_warnings: formattedWarnings };
   }
   return result;
 }
@@ -40681,7 +40459,7 @@ var client = new WordPressBlockClient({
 var server = new McpServer(
   {
     name: "block-mcp",
-    version: "1.3.0"
+    version: "1.4.0"
   },
   {
     capabilities: {
@@ -40695,7 +40473,7 @@ URL \u2192 post ID: when the user gives you a URL on this site, DO NOT shell out
 - get_page_blocks accepts \`url\` as an alternative to \`post_id\` \u2014 the server resolves it internally.
 - For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
 
-Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) \u2192 update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
+Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) \u2192 update_block / edit_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
 
 Block preferences are server-defined and admin-editable per site:
 - Each block in get_page_blocks results carries an optional \`preference.tier\` ("legacy" | "avoid") with a \`suggested_replacement\` when one is configured. Read those, don't guess.

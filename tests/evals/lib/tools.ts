@@ -17,7 +17,7 @@ const KEEP = new Set([
   'update_block',
   'insert_blocks',
   'delete_block',
-  'replace_blocks',
+  'replace_block_range',
 ]);
 
 const SOURCE_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].filter((t) => KEEP.has(t.name));

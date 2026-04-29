@@ -108,9 +108,9 @@ describe('handleDiscoveryTool', () => {
     });
   });
 
-  describe('find_posts', () => {
+  describe('list_posts', () => {
     it('passes all filter params through to client', async () => {
-      await handleDiscoveryTool('find_posts', {
+      await handleDiscoveryTool('list_posts', {
         search: 'gravityview', post_type: 'page,post', post_status: 'draft', per_page: 50, page: 2,
       }, mockClient);
       expect(mockClient.findPosts).toHaveBeenCalledWith({
@@ -119,31 +119,31 @@ describe('handleDiscoveryTool', () => {
     });
 
     it('works with no params', async () => {
-      await handleDiscoveryTool('find_posts', {}, mockClient);
+      await handleDiscoveryTool('list_posts', {}, mockClient);
       expect(mockClient.findPosts).toHaveBeenCalledWith({
         search: undefined, post_type: undefined, post_status: undefined, per_page: undefined, page: undefined,
       });
     });
   });
 
-  describe('post_info', () => {
+  describe('get_post_info', () => {
     it('looks up by post_id', async () => {
-      await handleDiscoveryTool('post_info', { post_id: 42 }, mockClient);
+      await handleDiscoveryTool('get_post_info', { post_id: 42 }, mockClient);
       expect(mockClient.getPostInfo).toHaveBeenCalledWith(expect.objectContaining({ post_id: 42 }));
     });
 
     it('looks up by url', async () => {
-      await handleDiscoveryTool('post_info', { url: '/foo/' }, mockClient);
+      await handleDiscoveryTool('get_post_info', { url: '/foo/' }, mockClient);
       expect(mockClient.getPostInfo).toHaveBeenCalledWith(expect.objectContaining({ url: '/foo/' }));
     });
 
     it('looks up by slug + post_type', async () => {
-      await handleDiscoveryTool('post_info', { slug: 'foo', post_type: 'docs' }, mockClient);
+      await handleDiscoveryTool('get_post_info', { slug: 'foo', post_type: 'docs' }, mockClient);
       expect(mockClient.getPostInfo).toHaveBeenCalledWith(expect.objectContaining({ slug: 'foo', post_type: 'docs' }));
     });
 
     it('throws when no lookup field provided', async () => {
-      await expect(handleDiscoveryTool('post_info', {}, mockClient))
+      await expect(handleDiscoveryTool('get_post_info', {}, mockClient))
         .rejects.toThrow('one of: post_id, url, or slug');
     });
   });

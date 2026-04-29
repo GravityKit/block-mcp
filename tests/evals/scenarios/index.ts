@@ -84,7 +84,7 @@ export const SCENARIOS: Scenario[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
-  // Scenario 4 — atomic replace. Tests `replace_blocks` discoverability:
+  // Scenario 4 — atomic replace. Tests `replace_block_range` discoverability:
   // model should pick the new tool over delete + insert.
   // ──────────────────────────────────────────────────────────────────────
   {
@@ -104,10 +104,10 @@ export const SCENARIOS: Scenario[] = [
       // Original page had 64 top-level blocks; after replacing 3 with 1 we expect 62.
       if (blocks.length !== 62)
         return { passed: false, reason: `expected 62 blocks after replace, got ${blocks.length}` };
-      if (store.callCounts.replace_blocks !== 1)
+      if (store.callCounts.replace_block_range !== 1)
         return {
           passed: false,
-          reason: `expected exactly 1 replace_blocks call (atomic), got ${store.callCounts.replace_blocks} (and ${store.callCounts.delete_block} delete + ${store.callCounts.insert_blocks} insert)`,
+          reason: `expected exactly 1 replace_block_range call (atomic), got ${store.callCounts.replace_block_range} (and ${store.callCounts.delete_block} delete + ${store.callCounts.insert_blocks} insert)`,
         };
       return { passed: true, reason: 'atomic replace in 1 tool call' };
     },

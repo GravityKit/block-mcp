@@ -117,7 +117,7 @@ function dispatch(store: FixtureStore, name: string, input: Record<string, unkno
       return store.deleteBlock(input as Parameters<FixtureStore['deleteBlock']>[0]);
     case 'update_block':
       return store.updateBlock(input as Parameters<FixtureStore['updateBlock']>[0]);
-    case 'replace_blocks':
+    case 'replace_block_range':
       return store.replaceBlocks(input as Parameters<FixtureStore['replaceBlocks']>[0]);
     default:
       throw new Error(`Unknown tool in eval harness: ${name}`);

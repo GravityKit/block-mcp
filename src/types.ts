@@ -111,15 +111,15 @@ export interface Pattern {
 
 /** A single parsed block from a page's post_content. */
 export interface Block {
-  /** Zero-based position in the flat block array (counts every block including innerBlocks). Used by `update_block.block_index`. */
+  /** Zero-based position in the flat block array (counts every block including innerBlocks). Used by `update_block.flat_index`. */
   index: number;
   /**
    * Zero-based sequential position among non-empty top-level blocks only.
    * Only set on top-level blocks (omitted on inner blocks).
-   * Used by `delete_block.block_index`, `insert_blocks.before`/`after`, and `replace_blocks.range`.
+   * Used by `delete_block.top_level_counter`, `insert_blocks.before_top_level`/`after_top_level`, and `replace_block_range.start`.
    */
   top_level_counter?: number;
-  /** Path array (raw `parse_blocks()` indices). e.g. `[0, 2, 1]` = block 0 → innerBlock 2 → innerBlock 1. Used by `mutate_block_tree`. */
+  /** Path array (raw `parse_blocks()` indices). e.g. `[0, 2, 1]` = block 0 → innerBlock 2 → innerBlock 1. Used by `edit_block_tree`. */
   path?: number[];
   /** Fully-qualified block name (e.g. "core/paragraph") */
   name: string;
@@ -177,16 +177,16 @@ export interface BlockUpdateResponse {
   revision_id: number;
 }
 
-/** Single entry describing a block written by `insert_blocks` / `replace_all_blocks`. */
+/** Single entry describing a block written by `insert_blocks` / `rewrite_post_blocks`. */
 export interface InsertedBlockRef {
   /** Top-level visible index — matches `index` from get_page_blocks for top-level blocks. */
   index: number;
   /** Sequential top-level position. Same as `index` for inserts (always top-level). */
   top_level_counter?: number;
   /**
-   * Path array consumable by `mutate_block_tree`. e.g. `[12]` for the 13th
+   * Path array consumable by `edit_block_tree`. e.g. `[12]` for the 13th
    * raw top-level slot. Returned by `insert_blocks` so callers can chain a
-   * `mutate_block_tree op: insert-child` without an extra get_page_blocks lookup.
+   * `edit_block_tree op: insert-child` without an extra get_page_blocks lookup.
    */
   path?: number[];
   /** Fully-qualified block name. */
@@ -217,7 +217,7 @@ export interface BlockDeleteResponse {
   revision_id: number;
 }
 
-/** Response from atomic `replace_blocks` (POST /posts/{id}/blocks/replace). */
+/** Response from atomic `replace_block_range` (POST /posts/{id}/blocks/replace). */
 export interface BlockReplaceRangeResponse {
   success: boolean;
   /** Number of blocks removed before the new shape was inserted. */
