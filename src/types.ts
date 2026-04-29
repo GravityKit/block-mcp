@@ -127,6 +127,16 @@ export interface Block {
   attributes: Record<string, unknown>;
   /** Raw inner HTML content of the block */
   innerHTML?: string;
+  /** Whether the registered block type uses a server-side render callback. */
+  dynamic?: boolean;
+  /**
+   * How this block stores content.
+   * - `"static"`: innerHTML is the source of truth (most core/* blocks).
+   * - `"dynamic"`: attributes is the source of truth; innerHTML is regenerated on render.
+   * - `"dual"`: BOTH attributes and innerHTML carry the same data — sending one without
+   *   the other corrupts the block (e.g., yoast/faq-block, yoast/how-to-block).
+   */
+  storage_mode?: 'static' | 'dynamic' | 'dual';
 }
 
 // ============================================

@@ -847,6 +847,50 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Resolve the storage mode for a block: static, dynamic, or dual.
+	 *
+	 * "Dual" blocks store the same content in both `attributes` and `innerHTML`
+	 * and must be kept in sync — sending only `innerHTML` on update corrupts
+	 * the structured attributes (canonical case: yoast/faq-block.questions).
+	 *
+	 * Site admins can extend the dual-storage list via the
+	 * `gk_block_api_dual_storage_blocks` filter (returns array of block names).
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 * @param bool   $is_dynamic Whether the registered block type is dynamic.
+	 *
+	 * @return string One of "static", "dynamic", "dual".
+	 */
+	private function resolve_storage_mode( $block_name, $is_dynamic ) {
+		static $dual_cache = null;
+
+		if ( null === $dual_cache ) {
+			/**
+			 * Filter the list of block names treated as dual-storage.
+			 *
+			 * Dual-storage blocks store the same content in both `attributes`
+			 * and `innerHTML` and require both to be kept in sync.
+			 *
+			 * @param string[] $dual_blocks Block names considered dual-storage.
+			 */
+			$dual_cache = (array) apply_filters(
+				'gk_block_api_dual_storage_blocks',
+				array(
+					'yoast/faq-block',
+					'yoast/how-to-block',
+				)
+			);
+			$dual_cache = array_flip( $dual_cache );
+		}
+
+		if ( isset( $dual_cache[ $block_name ] ) ) {
+			return 'dual';
+		}
+
+		return $is_dynamic ? 'dynamic' : 'static';
+	}
+
+	/**
 	 * Recursively format blocks with path tracking.
 	 *
 	 * @param array $blocks             Parsed blocks.
@@ -928,6 +972,13 @@ class Block_CRUD {
 			}
 			$is_dynamic = $dynamic_cache[ $block['blockName'] ];
 			$data['dynamic'] = $is_dynamic;
+
+			// storage_mode disambiguates the existing `dynamic` flag for AI consumers:
+			//   - "static": innerHTML is the source of truth (most core/* blocks)
+			//   - "dynamic": attributes is the source of truth; innerHTML is regenerated on render
+			//   - "dual": both attributes AND innerHTML carry the same data and must be kept in sync
+			//             (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
+			$data['storage_mode'] = $this->resolve_storage_mode( $block['blockName'], $is_dynamic );
 
 			$counter++;
 
