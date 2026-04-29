@@ -118,7 +118,7 @@ class REST_Controller {
 		$this->block_registry  = $block_registry;
 		$this->pattern_manager = $pattern_manager;
 		$this->block_crud      = $block_crud;
-		$this->block_inventory     = $block_inventory;
+		$this->block_inventory = $block_inventory;
 		$this->block_mutator   = $block_mutator;
 		$this->post_manager    = $post_manager;
 		$this->term_manager    = $term_manager;
@@ -877,8 +877,8 @@ class REST_Controller {
 		// Always log; never include exception detail in the API response. A
 		// production site that accidentally has WP_DEBUG=true should not leak
 		// filesystem paths or SQL/PHP internals to remote callers.
-		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-			error_log( 'GK Block API error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
+		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+			error_log( 'GK Block API error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 		}
 
 		return new \WP_Error(

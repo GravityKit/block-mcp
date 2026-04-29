@@ -210,8 +210,8 @@ class Post_Manager {
 		if ( is_wp_error( $term_assignment ) ) {
 			$deleted = wp_delete_post( $post_id, true );
 			if ( false === $deleted || null === $deleted ) {
-				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-					error_log( sprintf( 'gk-block-api: orphaned post %d after term assignment failure', $post_id ) );
+				if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+					error_log( sprintf( 'gk-block-api: orphaned post %d after term assignment failure', $post_id ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 				}
 			}
 			return $term_assignment;

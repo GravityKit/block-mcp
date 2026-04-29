@@ -70,7 +70,7 @@ class Block_CRUD {
 	 * @param Preferences      $preferences Preferences instance.
 	 * @param Block_Safety     $safety      Block safety checker.
 	 * @param HTML_Transformer $transformer HTML transformer.
-	 * @param Block_Inventory  $inventory   Block inventory (storage-mode classifier).
+	 * @param Block_Inventory  $inventory   Block inventory.
 	 */
 	public function __construct( Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
 		$this->preferences = $preferences;
@@ -1236,7 +1236,9 @@ class Block_CRUD {
 				} catch ( \Throwable $e ) {
 					// Render failed — skip silently.
 					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-						error_log( 'GK Block API render_block error: ' . $e->getMessage() );
+						if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+						error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+					}
 					}
 				}
 			}
