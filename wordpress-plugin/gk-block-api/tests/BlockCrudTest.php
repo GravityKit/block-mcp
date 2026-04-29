@@ -10,6 +10,7 @@
  */
 
 use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
@@ -30,6 +31,9 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 			'core/heading',
 			'core/group',
 			'core/list',
+			'core/list-item',
+			'core/columns',
+			'core/column',
 			'core/image',
 			'core/block',
 			'stackable/heading',
@@ -43,7 +47,8 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),
-			new HTML_Transformer()
+			new HTML_Transformer(),
+			new Block_Inventory()
 		);
 
 		$this->make_post( array() );
@@ -564,6 +569,122 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		// Stale entries should be filtered; check should pass.
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
 		$this->assertTrue( $result );
+	}
+
+	// ── insert_blocks with innerBlocks (BLOCK-1) ──────────────────
+
+	public function test_insert_blocks_with_inner_blocks_preserved() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<ul class="wp-block-list"></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>One</li>' ),
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>Two</li>' ),
+					),
+				),
+			)
+		);
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+
+		$blocks = $this->current_blocks();
+		$this->assertCount( 1, $blocks );
+		$this->assertEquals( 'core/list', $blocks[0]['blockName'] );
+		$this->assertCount( 2, $blocks[0]['innerBlocks'] );
+		$this->assertEquals( 'core/list-item', $blocks[0]['innerBlocks'][0]['blockName'] );
+		$this->assertEquals( '<li>One</li>', $blocks[0]['innerBlocks'][0]['innerHTML'] );
+		$this->assertEquals( 'core/list-item', $blocks[0]['innerBlocks'][1]['blockName'] );
+		$this->assertEquals( '<li>Two</li>', $blocks[0]['innerBlocks'][1]['innerHTML'] );
+	}
+
+	public function test_insert_blocks_inner_blocks_build_inner_content_nulls() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<ul></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>A</li>' ),
+					),
+				),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		// innerContent must have nulls for each child so serialize_blocks() round-trips correctly.
+		$null_count = count( array_filter( $blocks[0]['innerContent'], fn( $p ) => null === $p ) );
+		$this->assertEquals( 1, $null_count, 'innerContent must have one null placeholder per child.' );
+	}
+
+	public function test_insert_blocks_no_inner_blocks_unchanged() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Hello</p>' ),
+			)
+		);
+
+		$this->assertIsArray( $result );
+		$blocks = $this->current_blocks();
+		$this->assertEquals( '<p>Hello</p>', $blocks[0]['innerHTML'] );
+		$this->assertEmpty( $blocks[0]['innerBlocks'] );
+	}
+
+	public function test_insert_blocks_deeply_nested_inner_blocks() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array(
+					'name'        => 'core/columns',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerBlocks' => array(
+								array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Deep</p>' ),
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		$this->assertEquals( 'core/columns', $blocks[0]['blockName'] );
+		$this->assertEquals( 'core/column', $blocks[0]['innerBlocks'][0]['blockName'] );
+		$this->assertEquals( 'core/paragraph', $blocks[0]['innerBlocks'][0]['innerBlocks'][0]['blockName'] );
+		$this->assertEquals( '<p>Deep</p>', $blocks[0]['innerBlocks'][0]['innerBlocks'][0]['innerHTML'] );
+	}
+
+	public function test_insert_blocks_inner_block_legacy_name_rejected() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array(
+					'name'        => 'core/group',
+					'innerBlocks' => array(
+						array( 'name' => 'ugb/text', 'innerHTML' => '<p>Bad</p>' ),
+					),
+				),
+			)
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'legacy_block', $result->get_error_code() );
 	}
 
 	// ── save_post_content ──────────────────────────────────────────

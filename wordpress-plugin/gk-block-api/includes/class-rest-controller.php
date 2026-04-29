@@ -1565,15 +1565,7 @@ class REST_Controller {
 				);
 			}
 
-			// Sanitize block definitions.
-			$sanitized_blocks = array();
-			foreach ( $blocks as $block_def ) {
-				$sanitized_blocks[] = array(
-					'name'       => isset( $block_def['name'] ) ? sanitize_text_field( $block_def['name'] ) : '',
-					'attributes' => isset( $block_def['attributes'] ) ? $block_def['attributes'] : array(),
-					'innerHTML'  => isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '',
-				);
-			}
+			$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
 
 			$result = $this->block_crud->insert_blocks( $post_id, $position, $sanitized_blocks );
 
@@ -1625,15 +1617,7 @@ class REST_Controller {
 				);
 			}
 
-			// Sanitize block definitions — same shape as insert_blocks.
-			$sanitized_blocks = array();
-			foreach ( $blocks as $block_def ) {
-				$sanitized_blocks[] = array(
-					'name'       => isset( $block_def['name'] ) ? sanitize_text_field( $block_def['name'] ) : '',
-					'attributes' => isset( $block_def['attributes'] ) ? $block_def['attributes'] : array(),
-					'innerHTML'  => isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '',
-				);
-			}
+			$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
 
 			$result = $this->block_crud->replace_blocks_range( $post_id, $start, $count, $sanitized_blocks );
 
@@ -1887,6 +1871,25 @@ class REST_Controller {
 	 *
 	 * @return array Flat list of matching blocks.
 	 */
+	/**
+	 * Recursively sanitizes a block definition from REST input.
+	 * Preserves innerBlocks so nested structures survive sanitization.
+	 *
+	 * @param array $block_def Raw block definition from the request.
+	 * @return array Sanitized block definition.
+	 */
+	private function sanitize_block_def( array $block_def ): array {
+		$sanitized = array(
+			'name'       => isset( $block_def['name'] ) ? sanitize_text_field( $block_def['name'] ) : '',
+			'attributes' => isset( $block_def['attributes'] ) ? $block_def['attributes'] : array(),
+			'innerHTML'  => isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '',
+		);
+		if ( ! empty( $block_def['innerBlocks'] ) && is_array( $block_def['innerBlocks'] ) ) {
+			$sanitized['innerBlocks'] = array_map( array( $this, 'sanitize_block_def' ), $block_def['innerBlocks'] );
+		}
+		return $sanitized;
+	}
+
 	private function search_blocks( $blocks, $search = '', $block_name = '' ) {
 		$results = array();
 

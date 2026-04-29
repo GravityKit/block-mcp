@@ -317,28 +317,12 @@ class Block_CRUD {
 		$warnings   = array();
 		$new_blocks = array();
 
-		// Validate and build each block.
 		foreach ( $blocks as $block_def ) {
-			$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
-
-			// Validate block name and preference tier.
-			$validation = $this->validate_block_def( $name );
-			if ( $validation['error'] ) {
-				return $validation['error'];
+			$built = $this->build_block_from_def( $block_def, $warnings );
+			if ( is_wp_error( $built ) ) {
+				return $built;
 			}
-			$warnings = array_merge( $warnings, $validation['warnings'] );
-
-			// Build the block array.
-			$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-			$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
-
-			$new_blocks[] = array(
-				'blockName'    => $name,
-				'attrs'        => $attrs,
-				'innerHTML'    => $inner_html,
-				'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
-				'innerBlocks'  => array(),
-			);
+			$new_blocks[] = $built;
 		}
 
 		// Determine insertion index (visible index), then map to raw position.
@@ -614,24 +598,11 @@ class Block_CRUD {
 		$warnings   = array();
 		$new_blocks = array();
 		foreach ( $blocks as $block_def ) {
-			$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
-
-			$validation = $this->validate_block_def( $name );
-			if ( $validation['error'] ) {
-				return $validation['error'];
+			$built = $this->build_block_from_def( $block_def, $warnings );
+			if ( is_wp_error( $built ) ) {
+				return $built;
 			}
-			$warnings = array_merge( $warnings, $validation['warnings'] );
-
-			$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-			$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
-
-			$new_blocks[] = array(
-				'blockName'    => $name,
-				'attrs'        => $attrs,
-				'innerHTML'    => $inner_html,
-				'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
-				'innerBlocks'  => array(),
-			);
+			$new_blocks[] = $built;
 		}
 
 		// Resolve the raw splice range. We splice at the raw index of the
@@ -1268,6 +1239,72 @@ class Block_CRUD {
 	 *
 	 * @return array { error: \WP_Error|null, warnings: array }
 	 */
+	/**
+	 * Recursively builds a WP block array from an API block definition.
+	 * Validates block names and collects preference warnings at every depth.
+	 *
+	 * @param array $block_def  Input definition (name, attributes, innerHTML, innerBlocks).
+	 * @param array &$warnings  Accumulated warnings (modified in place).
+	 * @return array|\WP_Error  Built block array ready for serialize_blocks(), or WP_Error.
+	 */
+	private function build_block_from_def( array $block_def, array &$warnings ) {
+		$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
+
+		$validation = $this->validate_block_def( $name );
+		if ( $validation['error'] ) {
+			return $validation['error'];
+		}
+		$warnings = array_merge( $warnings, $validation['warnings'] );
+
+		$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
+		$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
+		$children   = array();
+
+		if ( ! empty( $block_def['innerBlocks'] ) && is_array( $block_def['innerBlocks'] ) ) {
+			foreach ( $block_def['innerBlocks'] as $child_def ) {
+				$child = $this->build_block_from_def( $child_def, $warnings );
+				if ( is_wp_error( $child ) ) {
+					return $child;
+				}
+				$children[] = $child;
+			}
+		}
+
+		if ( ! empty( $children ) ) {
+			$n = count( $children );
+			if ( ! empty( $inner_html ) ) {
+				// Split wrapper HTML into opening/closing halves and interleave nulls.
+				$first_close = strpos( $inner_html, '>' );
+				if ( false !== $first_close ) {
+					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
+					for ( $i = 0; $i < $n; $i++ ) {
+						$inner_content[] = null;
+					}
+					$inner_content[] = substr( $inner_html, $first_close + 1 );
+				} else {
+					$inner_content = array_fill( 0, $n, null );
+				}
+			} else {
+				$inner_content = array_fill( 0, $n, null );
+			}
+			return array(
+				'blockName'    => $name,
+				'attrs'        => $attrs,
+				'innerHTML'    => '',
+				'innerContent' => $inner_content,
+				'innerBlocks'  => $children,
+			);
+		}
+
+		return array(
+			'blockName'    => $name,
+			'attrs'        => $attrs,
+			'innerHTML'    => $inner_html,
+			'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
+			'innerBlocks'  => array(),
+		);
+	}
+
 	public function validate_block_def( $block_name ) {
 		$result = array( 'error' => null, 'warnings' => array() );
 

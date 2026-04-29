@@ -39620,7 +39620,8 @@ var BLOCK_INPUT_SCHEMA = {
   properties: {
     name: { type: "string", description: 'Fully-qualified block name (e.g. "core/heading").' },
     attributes: { type: "object", description: "Block attributes." },
-    innerHTML: { type: "string", description: "Raw HTML content." }
+    innerHTML: { type: "string", description: 'Wrapper HTML for container blocks (e.g. "<ul class="wp-block-list"></ul>"); leaf-block HTML otherwise.' },
+    innerBlocks: { type: "array", description: "Child blocks. Nest recursively to build lists, columns, groups, etc.", items: { type: "object" } }
   },
   required: ["name"]
 };
