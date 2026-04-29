@@ -39608,7 +39608,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "insert_blocks",
-    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces are rejected.",
+    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces are rejected. Response.inserted[] entries include `path` and `top_level_counter` so you can chain a `mutate_block_tree op: insert-child` without an extra `get_page_blocks` round-trip.",
     inputSchema: {
       type: "object",
       properties: {

@@ -357,12 +357,45 @@ class Block_CRUD {
 		$this->record_rate_limit( $post_id, 'write' );
 
 		// Build inserted response.
+		// Re-parse the saved post_content so the path values reflect the post-mutation
+		// raw indices (parse_blocks() may collapse adjacent whitespace differently than
+		// the in-memory $all_existing_blocks array). This guarantees the returned `path`
+		// is immediately usable by mutate_block_tree without an extra get_page_blocks call.
 		$inserted = array();
-		foreach ( $new_blocks as $i => $block ) {
-			$inserted[] = array(
-				'index' => $visible_insert + $i,
-				'name'  => $block['blockName'],
-			);
+		$saved_post = get_post( $post_id );
+		if ( $saved_post ) {
+			$parsed_after = parse_blocks( $saved_post->post_content );
+			if ( ! is_array( $parsed_after ) ) {
+				$parsed_after = array();
+			}
+			// Map from visible index → raw index in the post-mutation array.
+			$post_visible_to_raw = array();
+			foreach ( $parsed_after as $raw_idx => $blk ) {
+				if ( ! empty( $blk['blockName'] ) ) {
+					$post_visible_to_raw[] = $raw_idx;
+				}
+			}
+			foreach ( $new_blocks as $i => $block ) {
+				$visible_index = $visible_insert + $i;
+				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
+					? $post_visible_to_raw[ $visible_index ]
+					: null;
+				$inserted[] = array(
+					'index'             => $visible_index,
+					'top_level_counter' => $visible_index,
+					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
+					'name'              => $block['blockName'],
+				);
+			}
+		} else {
+			foreach ( $new_blocks as $i => $block ) {
+				$inserted[] = array(
+					'index'             => $visible_insert + $i,
+					'top_level_counter' => $visible_insert + $i,
+					'path'              => array( $visible_insert + $i ),
+					'name'              => $block['blockName'],
+				);
+			}
 		}
 
 		return array(

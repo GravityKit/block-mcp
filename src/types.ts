@@ -158,11 +158,27 @@ export interface BlockUpdateResponse {
   revision_id: number;
 }
 
+/** Single entry describing a block written by `insert_blocks` / `replace_all_blocks`. */
+export interface InsertedBlockRef {
+  /** Top-level visible index — matches `index` from get_page_blocks for top-level blocks. */
+  index: number;
+  /** Sequential top-level position. Same as `index` for inserts (always top-level). */
+  top_level_counter?: number;
+  /**
+   * Path array consumable by `mutate_block_tree`. e.g. `[12]` for the 13th
+   * raw top-level slot. Returned by `insert_blocks` so callers can chain a
+   * `mutate_block_tree op: insert-child` without an extra get_page_blocks lookup.
+   */
+  path?: number[];
+  /** Fully-qualified block name. */
+  name: string;
+}
+
 /** Response from block insert (POST) and replace (PUT) operations. */
 export interface BlockWriteResponse {
   success: boolean;
-  /** Inserted blocks with their new indices */
-  inserted: Array<{ index: number; name: string }>;
+  /** Inserted blocks with their new indices, top-level counters, and mutation paths. */
+  inserted: InsertedBlockRef[];
   /** Preference warnings for non-preferred blocks */
   warnings: PreferenceWarning[];
   /** WordPress revision ID of the pre-edit snapshot */
