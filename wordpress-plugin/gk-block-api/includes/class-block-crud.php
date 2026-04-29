@@ -808,21 +808,24 @@ class Block_CRUD {
 	 * @return array Formatted block data.
 	 */
 	public function format_blocks( $blocks, $render = false ) {
-		$counter = 0;
-		return $this->format_blocks_recursive( $blocks, array(), $counter, $render );
+		$counter           = 0;
+		$top_level_counter = 0;
+		return $this->format_blocks_recursive( $blocks, array(), $counter, $top_level_counter, $render );
 	}
 
 	/**
 	 * Recursively format blocks with path tracking.
 	 *
-	 * @param array $blocks      Parsed blocks.
-	 * @param array $parent_path Path to the parent container.
-	 * @param int   &$counter    Flat sequential counter (by reference).
-	 * @param bool  $render      Whether to include rendered output for dynamic blocks.
+	 * @param array $blocks             Parsed blocks.
+	 * @param array $parent_path        Path to the parent container.
+	 * @param int   &$counter           Flat sequential counter (by reference).
+	 * @param int   &$top_level_counter Sequential counter among top-level blocks only (by reference).
+	 *                                  Only incremented when $parent_path is empty.
+	 * @param bool  $render             Whether to include rendered output for dynamic blocks.
 	 *
 	 * @return array Formatted block data.
 	 */
-	private function format_blocks_recursive( $blocks, $parent_path, &$counter, $render = false ) {
+	private function format_blocks_recursive( $blocks, $parent_path, &$counter, &$top_level_counter, $render = false ) {
 		$formatted = array();
 
 		foreach ( $blocks as $raw_index => $block ) {
@@ -838,6 +841,15 @@ class Block_CRUD {
 				'name'       => $block['blockName'],
 				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
 			);
+
+			// Top-level counter: sequential position among non-empty top-level blocks only.
+			// This is the value consumed by `delete_block.block_index`,
+			// `insert_blocks.before`/`after`, and the new atomic `replace_blocks` op.
+			// Only set on depth-0 blocks; inner blocks intentionally omit it.
+			if ( empty( $parent_path ) ) {
+				$data['top_level_counter'] = $top_level_counter;
+				$top_level_counter++;
+			}
 
 			// Surface section name from block metadata for easy scanning.
 			if ( isset( $block['attrs']['metadata']['name'] ) && ! empty( $block['attrs']['metadata']['name'] ) ) {
@@ -857,11 +869,13 @@ class Block_CRUD {
 					if ( $render && ! empty( $ref_post->post_content ) ) {
 						$pattern_blocks = parse_blocks( $ref_post->post_content );
 						if ( is_array( $pattern_blocks ) ) {
-							$pattern_counter      = 0;
-							$pattern_data['blocks'] = $this->format_blocks_recursive(
+							$pattern_counter           = 0;
+							$pattern_top_level_counter = 0;
+							$pattern_data['blocks']    = $this->format_blocks_recursive(
 								$pattern_blocks,
 								array(),
 								$pattern_counter,
+								$pattern_top_level_counter,
 								true
 							);
 						}

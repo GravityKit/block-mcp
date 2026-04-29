@@ -39592,7 +39592,7 @@ var WRITE_TOOLS = [
         },
         block_index: {
           type: "number",
-          description: "Zero-based flat `index` from get_page_blocks (counts every block including innerBlocks). NOT the `top_level_ordinal` \u2014 that one is consumed by `delete_block` and `insert_blocks`."
+          description: "Zero-based flat `index` from get_page_blocks (counts every block including innerBlocks). NOT the `top_level_counter` \u2014 that one is consumed by `delete_block` and `insert_blocks`."
         },
         attributes: {
           type: "object",
@@ -39608,7 +39608,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "insert_blocks",
-    description: "Insert blocks at a position. Use after/before with the top-level ordinal; omit or after:-1 to append. Legacy namespaces are rejected.",
+    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces are rejected.",
     inputSchema: {
       type: "object",
       properties: {
@@ -39618,11 +39618,11 @@ var WRITE_TOOLS = [
         },
         after: {
           type: ["number", "string"],
-          description: 'Insert after the block at this top-level ordinal (sequential position among top-level blocks only \u2014 the `top_level_ordinal` field on get_page_blocks entries; NOT the flat `index`). -1/omit = append, "start" = prepend.'
+          description: 'Insert after the block at this top-level counter (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`). -1/omit = append, "start" = prepend.'
         },
         before: {
           type: "number",
-          description: "Insert before the block at this top-level ordinal (sequential position among top-level blocks only \u2014 the `top_level_ordinal` field on get_page_blocks entries; NOT the flat `index`)."
+          description: "Insert before the block at this top-level counter (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries; NOT the flat `index`)."
         },
         blocks: {
           type: "array",
@@ -39652,7 +39652,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "delete_block",
-    description: "Remove block(s) at a top-level ordinal. For core/block, removes the reference only, not the source pattern.",
+    description: "Remove block(s) at a top-level counter. For core/block, removes the reference only, not the source pattern.",
     inputSchema: {
       type: "object",
       properties: {
@@ -39662,7 +39662,7 @@ var WRITE_TOOLS = [
         },
         block_index: {
           type: "number",
-          description: 'Zero-based **top-level ordinal** (sequential position among top-level blocks only \u2014 the `top_level_ordinal` field on get_page_blocks entries). NOT the flat `index` field \u2014 that one is consumed by `update_block`. Passing a flat index here will land on the wrong block or return "Block index out of range".'
+          description: 'Zero-based **top-level counter** (sequential position among top-level blocks only \u2014 the `top_level_counter` field on get_page_blocks entries). NOT the flat `index` field \u2014 that one is consumed by `update_block`. Passing a flat index here will land on the wrong block or return "Block index out of range".'
         },
         count: {
           type: "number",

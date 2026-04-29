@@ -111,8 +111,16 @@ export interface Pattern {
 
 /** A single parsed block from a page's post_content. */
 export interface Block {
-  /** Zero-based position in the flat block array */
+  /** Zero-based position in the flat block array (counts every block including innerBlocks). Used by `update_block.block_index`. */
   index: number;
+  /**
+   * Zero-based sequential position among non-empty top-level blocks only.
+   * Only set on top-level blocks (omitted on inner blocks).
+   * Used by `delete_block.block_index`, `insert_blocks.before`/`after`, and `replace_blocks.range`.
+   */
+  top_level_counter?: number;
+  /** Path array (raw `parse_blocks()` indices). e.g. `[0, 2, 1]` = block 0 → innerBlock 2 → innerBlock 1. Used by `mutate_block_tree`. */
+  path?: number[];
   /** Fully-qualified block name (e.g. "core/paragraph") */
   name: string;
   /** Block attributes (key-value pairs) */
