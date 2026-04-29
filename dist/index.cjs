@@ -39206,12 +39206,8 @@ function enrichPatternList(patterns) {
   const sorted = [...patterns].sort(
     (a, b) => b.preference.score - a.preference.score
   );
-  const recommended = sorted.filter(
-    (p) => (p.preference.tier === "recommended" || p.preference.score >= 50) && p.preference.tier !== "avoid" && p.preference.tier !== "legacy"
-  );
-  const avoid = sorted.filter(
-    (p) => p.preference.tier === "avoid" || p.preference.tier === "legacy" || p.preference.score < 0 && p.preference.tier !== "recommended"
-  );
+  const recommended = sorted.filter((p) => p.preference.tier === "recommended");
+  const avoid = sorted.filter((p) => p.preference.tier === "avoid" || p.preference.tier === "legacy");
   const lines = [];
   if (recommended.length > 0) {
     lines.push("RECOMMENDED patterns:");
@@ -39814,7 +39810,8 @@ async function handleWriteTool(toolName, args, client2) {
 var PATTERN_TOOLS = [
   {
     name: "insert_pattern",
-    description: "Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits.",
+    description: "Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits. NOTE: registered (non-numeric) patterns cannot be synced \u2014 server forces synced=false. Response includes `synced` (actual mode used) so you can detect the override.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert pattern" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40516,21 +40513,12 @@ var server = new McpServer(
   {
     capabilities: {
       tools: {},
-      resources: {}
+      resources: {},
+      prompts: {}
     },
-    instructions: `Block-level WordPress CRUD via the gk-block-api REST plugin.
+    instructions: `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
-URL \u2192 post ID: when the user gives you a URL on this site, DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
-
-- get_page_blocks accepts \`url\` as an alternative to \`post_id\` \u2014 the server resolves it internally.
-- For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
-
-Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) \u2192 update_block / edit_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
-
-Block preferences are server-defined and admin-editable per site:
-- Each block in get_page_blocks results carries an optional \`preference.tier\` ("legacy" | "avoid") with a \`suggested_replacement\` when one is configured. Read those, don't guess.
-- Call \`list_block_types\` to see the full preferred / acceptable / avoid / legacy classification for the current site.
-- Read the \`block-mcp://block-preferences\` resource for the workflow guide.`
+Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`
   }
 );
 var ALL_TOOLS = [
@@ -40553,8 +40541,9 @@ var POST_TOOL_NAMES = new Set(POST_TOOLS.map((t) => t.name));
 var TERM_TOOL_NAMES = new Set(TERM_TOOLS.map((t) => t.name));
 var MEDIA_TOOL_NAMES = new Set(MEDIA_TOOLS.map((t) => t.name));
 var YOAST_TOOL_NAMES = new Set(YOAST_TOOLS.map((t) => t.name));
-var BLOCK_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-var BLOCK_PREFERENCES_CONTENT = `# Block MCP \u2014 Agent Guide
+var AGENT_GUIDE_RESOURCE_URI = "block-mcp://agent-guide";
+var LEGACY_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
+var AGENT_GUIDE_CONTENT = `# Block MCP \u2014 Agent Guide
 
 ## URL \u2192 post ID resolution
 
@@ -40651,9 +40640,16 @@ server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [
       {
-        uri: BLOCK_PREFERENCES_RESOURCE_URI,
-        name: "GravityKit Block Preferences",
-        description: "System prompt context describing block preference rules for gravitykit.com. Read this before editing any pages to understand which blocks to use and avoid.",
+        uri: AGENT_GUIDE_RESOURCE_URI,
+        name: "Block MCP \u2014 Agent Guide",
+        description: "Editing workflow + how to discover the live block-preference policy on this site. Read this before editing pages.",
+        mimeType: "text/plain"
+      },
+      // Legacy alias kept for one release; resolves to the same content.
+      {
+        uri: LEGACY_PREFERENCES_RESOURCE_URI,
+        name: "Block MCP \u2014 Agent Guide (legacy URI)",
+        description: "Renamed to block-mcp://agent-guide. Same content; kept for backwards compatibility.",
         mimeType: "text/plain"
       }
     ]
@@ -40661,18 +40657,54 @@ server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
 });
 server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
-  if (uri === BLOCK_PREFERENCES_RESOURCE_URI) {
+  if (uri === AGENT_GUIDE_RESOURCE_URI || uri === LEGACY_PREFERENCES_RESOURCE_URI) {
     return {
       contents: [
-        {
-          uri: BLOCK_PREFERENCES_RESOURCE_URI,
-          mimeType: "text/plain",
-          text: BLOCK_PREFERENCES_CONTENT
-        }
+        { uri, mimeType: "text/plain", text: AGENT_GUIDE_CONTENT }
       ]
     };
   }
   throw new Error(`Unknown resource: ${uri}`);
+});
+var PROMPTS = [
+  {
+    name: "edit-block-page",
+    description: "Bundle: workflow guidance + reminder to call get_page_blocks first. Pass `url` to seed a specific page.",
+    arguments: [
+      {
+        name: "url",
+        description: "Optional. Full URL or path of the page being edited.",
+        required: false
+      }
+    ]
+  }
+];
+server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: PROMPTS
+}));
+server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  if (name !== "edit-block-page") {
+    throw new Error(`Unknown prompt: ${name}`);
+  }
+  const url3 = args?.url ?? "";
+  const seed = url3 ? `Editing target: ${url3}
+
+First tool call: get_page_blocks({ url: "${url3}", summary_only: true }) for cheap orientation, then re-fetch with search/block_name filters as needed.
+
+` : "";
+  return {
+    description: "Workflow primer for editing a WordPress page via block-mcp.",
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: `${seed}${AGENT_GUIDE_CONTENT}`
+        }
+      }
+    ]
+  };
 });
 async function main() {
   const transport = new StdioServerTransport();

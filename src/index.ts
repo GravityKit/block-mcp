@@ -25,6 +25,8 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { WordPressBlockClient } from './client.js';
 import { DISCOVERY_TOOLS, handleDiscoveryTool } from './tools/discovery.js';
@@ -76,20 +78,12 @@ const server = new McpServer(
     capabilities: {
       tools: {},
       resources: {},
+      prompts: {},
     },
-    instructions: `Block-level WordPress CRUD via the gk-block-api REST plugin.
+    instructions:
+      `Block-level WordPress CRUD. URL → post_id is resolved server-side — pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
-URL → post ID: when the user gives you a URL on this site, DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
-
-- get_page_blocks accepts \`url\` as an alternative to \`post_id\` — the server resolves it internally.
-- For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
-
-Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) → update_block / edit_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
-
-Block preferences are server-defined and admin-editable per site:
-- Each block in get_page_blocks results carries an optional \`preference.tier\` (\"legacy\" | \"avoid\") with a \`suggested_replacement\` when one is configured. Read those, don't guess.
-- Call \`list_block_types\` to see the full preferred / acceptable / avoid / legacy classification for the current site.
-- Read the \`block-mcp://block-preferences\` resource for the workflow guide.`,
+Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`,
   }
 );
 
@@ -140,9 +134,15 @@ const YOAST_TOOL_NAMES = new Set(YOAST_TOOLS.map((t) => t.name));
 // System prompt context resource
 // ============================================
 
-const BLOCK_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
+// Renamed from `block-mcp://block-preferences` — the content is workflow
+// guidance, not the live policy itself (which lives in wp_options and is
+// surfaced via list_block_types + per-block `preference` annotations).
+const AGENT_GUIDE_RESOURCE_URI = 'block-mcp://agent-guide';
+// Legacy alias — kept in the resources list for one release so existing
+// integrations resolving the old URI don't 404.
+const LEGACY_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
 
-const BLOCK_PREFERENCES_CONTENT = `# Block MCP — Agent Guide
+const AGENT_GUIDE_CONTENT = `# Block MCP — Agent Guide
 
 ## URL → post ID resolution
 
@@ -275,11 +275,17 @@ server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [
       {
-        uri: BLOCK_PREFERENCES_RESOURCE_URI,
-        name: 'GravityKit Block Preferences',
+        uri: AGENT_GUIDE_RESOURCE_URI,
+        name: 'Block MCP — Agent Guide',
         description:
-          'System prompt context describing block preference rules for gravitykit.com. ' +
-          'Read this before editing any pages to understand which blocks to use and avoid.',
+          'Editing workflow + how to discover the live block-preference policy on this site. Read this before editing pages.',
+        mimeType: 'text/plain',
+      },
+      // Legacy alias kept for one release; resolves to the same content.
+      {
+        uri: LEGACY_PREFERENCES_RESOURCE_URI,
+        name: 'Block MCP — Agent Guide (legacy URI)',
+        description: 'Renamed to block-mcp://agent-guide. Same content; kept for backwards compatibility.',
         mimeType: 'text/plain',
       },
     ],
@@ -293,19 +299,65 @@ server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
 server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
 
-  if (uri === BLOCK_PREFERENCES_RESOURCE_URI) {
+  if (uri === AGENT_GUIDE_RESOURCE_URI || uri === LEGACY_PREFERENCES_RESOURCE_URI) {
     return {
       contents: [
-        {
-          uri: BLOCK_PREFERENCES_RESOURCE_URI,
-          mimeType: 'text/plain',
-          text: BLOCK_PREFERENCES_CONTENT,
-        },
+        { uri, mimeType: 'text/plain', text: AGENT_GUIDE_CONTENT },
       ],
     };
   }
 
   throw new Error(`Unknown resource: ${uri}`);
+});
+
+// ============================================
+// Handler: Prompts
+// ============================================
+//
+// Single canonical prompt — `edit-block-page` — that bundles the editing
+// workflow + a one-shot reminder to call get_page_blocks first. Saves a
+// tool call per session for clients that surface prompts in the UI.
+
+const PROMPTS = [
+  {
+    name: 'edit-block-page',
+    description:
+      'Bundle: workflow guidance + reminder to call get_page_blocks first. Pass `url` to seed a specific page.',
+    arguments: [
+      {
+        name: 'url',
+        description: 'Optional. Full URL or path of the page being edited.',
+        required: false,
+      },
+    ],
+  },
+];
+
+server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: PROMPTS,
+}));
+
+server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  if (name !== 'edit-block-page') {
+    throw new Error(`Unknown prompt: ${name}`);
+  }
+  const url = (args?.url as string | undefined) ?? '';
+  const seed = url
+    ? `Editing target: ${url}\n\nFirst tool call: get_page_blocks({ url: "${url}", summary_only: true }) for cheap orientation, then re-fetch with search/block_name filters as needed.\n\n`
+    : '';
+  return {
+    description: 'Workflow primer for editing a WordPress page via block-mcp.',
+    messages: [
+      {
+        role: 'user',
+        content: {
+          type: 'text',
+          text: `${seed}${AGENT_GUIDE_CONTENT}`,
+        },
+      },
+    ],
+  };
 });
 
 // ============================================

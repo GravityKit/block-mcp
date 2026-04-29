@@ -15,7 +15,8 @@ export const PATTERN_TOOLS = [
   {
     name: 'insert_pattern',
     description:
-      'Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits.',
+      'Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits. NOTE: registered (non-numeric) patterns cannot be synced — server forces synced=false. Response includes `synced` (actual mode used) so you can detect the override.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert pattern' },
     inputSchema: {
       type: 'object' as const,
       properties: {

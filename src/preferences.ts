@@ -101,19 +101,18 @@ export function enrichPatternList(patterns: Pattern[]): {
   patterns: Pattern[];
   summary: string;
 } {
-  // Sort descending by score
+  // Sort descending by score for stable display ordering.
   const sorted = [...patterns].sort(
     (a, b) => b.preference.score - a.preference.score
   );
 
-  const recommended = sorted.filter(
-    (p) => (p.preference.tier === 'recommended' || p.preference.score >= 50) &&
-           p.preference.tier !== 'avoid' && p.preference.tier !== 'legacy'
-  );
-  const avoid = sorted.filter(
-    (p) => p.preference.tier === 'avoid' || p.preference.tier === 'legacy' ||
-           (p.preference.score < 0 && p.preference.tier !== 'recommended')
-  );
+  // Classify by tier only — the server is the source of truth and already
+  // applied policy. Mixing in score-based fallbacks (the old logic) caused
+  // mis-bucketing: an `avoid`-tier pattern with score 5 leaked into the
+  // recommended bucket; a `recommended`-tier pattern with negative score
+  // was double-counted. Trust the tier.
+  const recommended = sorted.filter((p) => p.preference.tier === 'recommended');
+  const avoid       = sorted.filter((p) => p.preference.tier === 'avoid' || p.preference.tier === 'legacy');
 
   const lines: string[] = [];
 
