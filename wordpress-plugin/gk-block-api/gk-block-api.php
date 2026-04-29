@@ -3,12 +3,13 @@
  * Plugin Name: GK Block API
  * Plugin URI: https://www.gravitykit.com
  * Description: REST API for block-level CRUD operations with smart preferences for AI agents.
- * Version: 1.3.0
+ * Version: 1.4.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: gk-block-api
+ * Domain Path: /languages
  * Requires PHP: 7.4
  * Requires at least: 6.0
  *
@@ -22,31 +23,37 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GK_BLOCK_API_VERSION', '1.3.0' );
+define( 'GK_BLOCK_API_VERSION', '1.4.0' );
 define( 'GK_BLOCK_API_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
 /**
- * Autoload all classes from the includes/ directory.
+ * PSR-4-style autoloader for the GravityKit\BlockAPI namespace.
+ *
+ * Named function (rather than a closure) so WP.org Plugin Check and
+ * static-analysis tools can trace registrations. Maps
+ * `GravityKit\BlockAPI\Some_Class` → `includes/class-some-class.php`.
+ *
+ * @param string $class Fully-qualified class name being requested.
  */
-spl_autoload_register( function ( $class ) {
-	$prefix    = 'GravityKit\\BlockAPI\\';
-	$base_dir  = GK_BLOCK_API_PLUGIN_DIR . 'includes/';
+function autoload( $class ) {
+	$prefix   = 'GravityKit\\BlockAPI\\';
+	$base_dir = GK_BLOCK_API_PLUGIN_DIR . 'includes/';
 
-	// Only handle classes in our namespace.
 	$len = strlen( $prefix );
 	if ( strncmp( $prefix, $class, $len ) !== 0 ) {
 		return;
 	}
 
-	// Convert class name to file path.
 	$relative_class = substr( $class, $len );
 	$file           = $base_dir . 'class-' . strtolower( str_replace( '_', '-', $relative_class ) ) . '.php';
 
 	if ( file_exists( $file ) ) {
 		require_once $file;
 	}
-} );
+}
+
+spl_autoload_register( __NAMESPACE__ . '\\autoload' );
 
 /**
  * Initialize the plugin on rest_api_init.

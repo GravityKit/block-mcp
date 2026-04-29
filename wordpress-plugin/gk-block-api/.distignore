@@ -1,0 +1,26 @@
+# Files and directories excluded from the WP.org plugin zip.
+# Used by `wp dist-archive` and similar build tooling.
+
+.git
+.github
+.gitignore
+.gitattributes
+.distignore
+.editorconfig
+.phpcs.xml
+.phpunit.cache
+.phpunit.result.cache
+node_modules
+tests
+phpunit.xml
+phpunit.xml.dist
+composer.json
+composer.lock
+package.json
+package-lock.json
+README.md
+CHANGELOG.md
+*.dist
+*.lock
+.DS_Store
+Thumbs.db
