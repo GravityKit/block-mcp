@@ -16,7 +16,7 @@ export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
-      "Update a block's attributes and/or innerHTML. Attributes merge; innerHTML replaces. Creates a revision.",
+      "Update a block's attributes and/or innerHTML. Attributes are SHALLOW-merged: top-level keys you don't pass are preserved; top-level keys you DO pass replace existing values wholesale (no deep merge). For array attributes (e.g. `questions: [...]`), pass the FULL new array — passing one element overwrites the rest. innerHTML replaces atomically. Creates a revision.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -26,15 +26,17 @@ export const WRITE_TOOLS = [
         },
         block_index: {
           type: 'number',
-          description: 'Zero-based flat index from get_page_blocks.',
+          description:
+            'Zero-based flat `index` from get_page_blocks (counts every block including innerBlocks). NOT the `top_level_ordinal` — that one is consumed by `delete_block` and `insert_blocks`.',
         },
         attributes: {
           type: 'object',
-          description: 'Partial attributes to merge.',
+          description:
+            'Partial attributes to SHALLOW-merge. Top-level keys you pass replace existing values wholesale (no deep merge for nested objects or arrays). For array attributes, pass the full new array — partial arrays overwrite the rest.',
         },
         innerHTML: {
           type: 'string',
-          description: 'Replacement innerHTML (not merged).',
+          description: 'Replacement innerHTML (replaces atomically, not merged).',
         },
       },
       required: ['post_id', 'block_index'],
