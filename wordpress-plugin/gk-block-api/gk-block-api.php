@@ -84,3 +84,20 @@ add_action( 'rest_api_init', function () {
 		}
 	}
 } );
+
+/**
+ * Settings page (BLOCK-12). Loaded only when an admin request lands —
+ * no point spinning these up on the front-end. Uses the same Preferences
+ * + Block_Inventory instances the REST init creates, just instantiated
+ * lazily here since admin requests don't go through rest_api_init.
+ */
+add_action( 'admin_init', function () {
+	try {
+		$settings = new Settings_Page( new Block_Inventory() );
+		$settings->register();
+	} catch ( \Throwable $e ) {
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( 'GK Block API settings init error: ' . $e->getMessage() );
+		}
+	}
+}, 0 );
