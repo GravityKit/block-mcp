@@ -73,7 +73,8 @@ add_action( 'rest_api_init', function () {
 			$block_mutator,
 			$post_manager,
 			$term_manager,
-			$media_manager
+			$media_manager,
+			$preferences
 		);
 
 		$controller->register_routes();

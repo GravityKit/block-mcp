@@ -1171,6 +1171,21 @@ class Block_CRUD {
 			//             (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
 			$data['storage_mode'] = $this->resolve_storage_mode( $block['blockName'], $is_dynamic );
 
+			// Preference tier from the (admin-editable, filter-extensible) Preferences
+			// config. Replaces hardcoded namespace lists in client-side enrichment.
+			// Only attach for non-preferred tiers — preferred is the default and adding
+			// the field on every block bloats the response.
+			$pref = $this->preferences->get_block_score( $block['blockName'] );
+			if ( isset( $pref['tier'] ) && 'preferred' !== $pref['tier'] ) {
+				$data['preference'] = array(
+					'tier' => $pref['tier'],
+				);
+				$replacement = $this->preferences->get_replacement( $block['blockName'] );
+				if ( $replacement ) {
+					$data['preference']['suggested_replacement'] = $replacement;
+				}
+			}
+
 			$counter++;
 
 			if ( ! empty( $block['innerHTML'] ) ) {

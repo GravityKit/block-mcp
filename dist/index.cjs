@@ -39153,29 +39153,6 @@ var WordPressBlockClient = class {
 };
 
 // src/preferences.ts
-var REPLACEMENT_MAP = {
-  "stackable/heading": "core/heading",
-  "stackable/text": "core/paragraph",
-  "stackable/button": "core/button",
-  "stackable/button-group": "core/buttons",
-  "stackable/columns": "core/columns",
-  "stackable/column": "core/column",
-  "stackable/image": "core/image",
-  "stackable/spacer": "core/spacer",
-  "stackable/divider": "core/separator",
-  "stackable/testimonial": "filter/testimonial-wall",
-  "stackable/accordion": "filter/accordion",
-  "stackable/icon": "outermost/icon-block",
-  "stackable/icon-label": "outermost/icon-block",
-  "stackable/card": "core/group",
-  "stackable/subtitle": "core/paragraph",
-  "ugb/columns": "core/columns",
-  "ugb/column": "core/column",
-  "ugb/button": "core/button",
-  "ugb/text": "core/paragraph",
-  "ugb/pricing-box": "core/group"
-};
-var LEGACY_NAMESPACES = /* @__PURE__ */ new Set(["stackable", "ugb", "jetpack"]);
 function getNamespace(blockName) {
   return blockName.split("/")[0] ?? blockName;
 }
@@ -39183,23 +39160,22 @@ function getShortName(blockName) {
   const parts = blockName.split("/");
   return parts[1] ?? parts[0];
 }
-function isLegacyBlock(blockName) {
-  return LEGACY_NAMESPACES.has(getNamespace(blockName));
-}
 function enrichBlockList(blocks) {
   const warnings = [];
   for (const block of blocks) {
-    if (isLegacyBlock(block.name)) {
-      const replacement = REPLACEMENT_MAP[block.name];
+    const tier = block.preference?.tier;
+    if (tier === "legacy" || tier === "avoid") {
+      const replacement = block.preference?.suggested_replacement;
+      const verb = tier === "legacy" ? "LEGACY \u2014 do not use" : "AVOID";
       warnings.push({
         block: block.name,
-        message: replacement ? `Block ${block.index}: ${block.name} (AVOID \u2014 use ${replacement} instead)` : `Block ${block.index}: ${block.name} (AVOID \u2014 ${getNamespace(block.name)}/ blocks are legacy on this site)`,
+        message: replacement ? `Block ${block.index}: ${block.name} (${verb} \u2014 use ${replacement} instead)` : `Block ${block.index}: ${block.name} (${verb})`,
         suggested_replacement: replacement
       });
     }
   }
-  const summary = warnings.length > 0 ? `Found ${warnings.length} legacy block(s) on this page that should not be used for new content:
-${warnings.map((w) => `  - ${w.message}`).join("\n")}` : "All blocks on this page use preferred or standard namespaces.";
+  const summary = warnings.length > 0 ? `Found ${warnings.length} non-preferred block(s) on this page:
+${warnings.map((w) => `  - ${w.message}`).join("\n")}` : "All blocks on this page use preferred or acceptable namespaces.";
   return { blocks, warnings, summary };
 }
 function enrichPatternList(patterns) {
@@ -39223,11 +39199,11 @@ function enrichPatternList(patterns) {
     }
   }
   if (avoid.length > 0) {
-    lines.push("AVOID patterns (contain legacy blocks):");
+    lines.push("AVOID patterns (contain non-preferred blocks):");
     for (const p of avoid) {
       const legacyInfo = p.legacy_blocks && p.legacy_blocks.length > 0 ? `, contains ${p.legacy_blocks.slice(0, 3).join(", ")}` : "";
       lines.push(
-        `  Avoid: "${p.name}" (score: ${p.preference.score}, LEGACY${legacyInfo})`
+        `  Avoid: "${p.name}" (score: ${p.preference.score}${legacyInfo})`
       );
     }
   }
@@ -39236,7 +39212,6 @@ function enrichPatternList(patterns) {
 }
 function enrichBlockTypes(types) {
   const preferred = [];
-  const standard = [];
   const acceptable = [];
   const avoid = [];
   const legacy = [];
@@ -39246,11 +39221,7 @@ function enrichBlockTypes(types) {
         preferred.push(t);
         break;
       case "acceptable":
-        if (getNamespace(t.name) === "core") {
-          standard.push(t);
-        } else {
-          acceptable.push(t);
-        }
+        acceptable.push(t);
         break;
       case "avoid":
         avoid.push(t);
@@ -39264,12 +39235,11 @@ function enrichBlockTypes(types) {
   }
   const lines = [];
   if (preferred.length > 0) {
-    const names = preferred.map((t) => getShortName(t.name)).join(", ");
-    lines.push(`PREFERRED (filter/): ${names}`);
-  }
-  if (standard.length > 0) {
-    const names = standard.map((t) => getShortName(t.name)).join(", ");
-    lines.push(`STANDARD (core/): ${names}`);
+    const grouped = groupByNamespace(preferred);
+    for (const [ns, blocks] of Object.entries(grouped)) {
+      const names = blocks.map((t) => getShortName(t.name)).join(", ");
+      lines.push(`PREFERRED (${ns}/): ${names}`);
+    }
   }
   if (acceptable.length > 0) {
     const grouped = groupByNamespace(acceptable);
@@ -39282,7 +39252,7 @@ function enrichBlockTypes(types) {
     const grouped = groupByNamespace(avoid);
     for (const [ns, blocks] of Object.entries(grouped)) {
       const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement || REPLACEMENT_MAP[t.name];
+        const replacement = t.preference.replacement;
         const shortName = getShortName(t.name);
         return replacement ? `${shortName} -> use ${replacement}` : shortName;
       });
@@ -39292,8 +39262,12 @@ function enrichBlockTypes(types) {
   if (legacy.length > 0) {
     const grouped = groupByNamespace(legacy);
     for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(", ");
-      lines.push(`LEGACY \u2014 NEVER USE (${ns}/): ${names}`);
+      const mappings = blocks.map((t) => {
+        const replacement = t.preference.replacement;
+        const shortName = getShortName(t.name);
+        return replacement ? `${shortName} -> use ${replacement}` : shortName;
+      });
+      lines.push(`LEGACY \u2014 DO NOT USE (${ns}/): ${mappings.join(", ")}`);
     }
   }
   const guidance = lines.join("\n");
@@ -39301,7 +39275,7 @@ function enrichBlockTypes(types) {
 }
 function formatPreferenceWarning(warning) {
   if (warning.suggested_replacement) {
-    return `WARNING: ${warning.block} is deprecated. Use ${warning.suggested_replacement} instead.`;
+    return `WARNING: ${warning.block} is non-preferred. Use ${warning.suggested_replacement} instead.`;
   }
   return `WARNING: ${warning.message}`;
 }
@@ -40679,16 +40653,19 @@ var server = new McpServer(
       tools: {},
       resources: {}
     },
-    instructions: `Block-level WordPress CRUD for gravitykit.com.
+    instructions: `Block-level WordPress CRUD via the gk-block-api REST plugin.
 
-URL \u2192 post ID: when the user gives you a URL (e.g. https://www.gravitykit.com/products/gravityedit/), DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
+URL \u2192 post ID: when the user gives you a URL on this site, DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
 
 - get_page_blocks accepts \`url\` as an alternative to \`post_id\` \u2014 the server resolves it internally.
 - For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
 
 Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) \u2192 update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
 
-Block preferences (read the block-mcp://block-preferences resource for details): prefer \`filter/\` and \`core/\`; never insert \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks.`
+Block preferences are server-defined and admin-editable per site:
+- Each block in get_page_blocks results carries an optional \`preference.tier\` ("legacy" | "avoid") with a \`suggested_replacement\` when one is configured. Read those, don't guess.
+- Call \`list_block_types\` to see the full preferred / acceptable / avoid / legacy classification for the current site.
+- Read the \`block-mcp://block-preferences\` resource for the workflow guide.`
   }
 );
 var ALL_TOOLS = [
@@ -40712,7 +40689,7 @@ var TERM_TOOL_NAMES = new Set(TERM_TOOLS.map((t) => t.name));
 var MEDIA_TOOL_NAMES = new Set(MEDIA_TOOLS.map((t) => t.name));
 var YOAST_TOOL_NAMES = new Set(YOAST_TOOLS.map((t) => t.name));
 var BLOCK_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-var BLOCK_PREFERENCES_CONTENT = `# GravityKit Block MCP \u2014 Agent Guide
+var BLOCK_PREFERENCES_CONTENT = `# Block MCP \u2014 Agent Guide
 
 ## URL \u2192 post ID resolution
 
@@ -40722,19 +40699,26 @@ The MCP does this for you:
 - \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
 - For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
 
-If the user says "change X on https://www.gravitykit.com/products/gravityedit/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
+If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
 
-## Block preferences
+## Block preferences (site-defined)
 
-When editing pages on gravitykit.com:
+Block preference policy is configured per-site in the WordPress admin (the
+gk-block-api Preferences option) and exposed dynamically. There is no
+client-side hardcoded list of "good" vs "bad" namespaces.
 
-1. ALWAYS prefer \`filter/\` (theme) blocks over alternatives
-2. Use \`core/\` blocks for standard content (headings, paragraphs, images, buttons)
-3. NEVER use \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks \u2014 they are legacy
-4. When inserting content, check patterns first \u2014 reuse existing patterns before building from scratch
-5. Prefer synced patterns to keep content consistent across pages
-6. When inserting a pattern that needs per-page customization, use \`synced: false\` to inline it
-7. When you encounter legacy blocks on a page, note them but do not replace unless asked`;
+How to discover the policy at runtime:
+
+1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
+2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields \u2014 they reflect the live config.
+3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
+
+How to behave:
+
+- Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
+- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
+- For patterns that need per-page customization, use \`synced: false\` to inline them.
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
 });

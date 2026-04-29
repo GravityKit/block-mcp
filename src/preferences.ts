@@ -2,9 +2,15 @@
  * Client-side Preference Enrichment
  *
  * Functions that add natural-language annotations and AI-friendly context
- * to raw API responses. The WordPress plugin returns numeric scores and
- * tier labels; this module translates them into actionable guidance for
- * AI agents consuming MCP tool results.
+ * to raw API responses. The WordPress plugin (gk-block-api) is the single
+ * source of truth for which namespaces are legacy, avoid, etc. — driven by
+ * admin-editable preferences (`wp_options.gk_block_api_preferences`) and
+ * extensible via the WordPress filter system.
+ *
+ * This module deliberately holds NO hardcoded namespace lists or replacement
+ * maps. It reads `block.preference.tier` and `block.preference.suggested_replacement`
+ * fields the server attaches to non-preferred blocks. Sites that want
+ * different policies just edit their Preferences config — no code change.
  */
 
 import type {
@@ -15,35 +21,8 @@ import type {
 } from './types.js';
 
 // ============================================
-// Known replacement map (mirrors the WordPress plugin config)
+// Helpers
 // ============================================
-
-/** Map of legacy block names to their preferred replacements. */
-const REPLACEMENT_MAP: Record<string, string> = {
-  'stackable/heading': 'core/heading',
-  'stackable/text': 'core/paragraph',
-  'stackable/button': 'core/button',
-  'stackable/button-group': 'core/buttons',
-  'stackable/columns': 'core/columns',
-  'stackable/column': 'core/column',
-  'stackable/image': 'core/image',
-  'stackable/spacer': 'core/spacer',
-  'stackable/divider': 'core/separator',
-  'stackable/testimonial': 'filter/testimonial-wall',
-  'stackable/accordion': 'filter/accordion',
-  'stackable/icon': 'outermost/icon-block',
-  'stackable/icon-label': 'outermost/icon-block',
-  'stackable/card': 'core/group',
-  'stackable/subtitle': 'core/paragraph',
-  'ugb/columns': 'core/columns',
-  'ugb/column': 'core/column',
-  'ugb/button': 'core/button',
-  'ugb/text': 'core/paragraph',
-  'ugb/pricing-box': 'core/group',
-};
-
-/** Namespaces considered legacy and to be avoided. */
-const LEGACY_NAMESPACES = new Set(['stackable', 'ugb', 'jetpack']);
 
 /**
  * Extract the namespace from a fully-qualified block name.
@@ -66,16 +45,6 @@ function getShortName(blockName: string): string {
   return parts[1] ?? parts[0];
 }
 
-/**
- * Check whether a block name belongs to a legacy namespace.
- *
- * @param blockName - Fully-qualified block name
- * @returns True if the block should be avoided
- */
-function isLegacyBlock(blockName: string): boolean {
-  return LEGACY_NAMESPACES.has(getNamespace(blockName));
-}
-
 // ============================================
 // Enrichment Functions
 // ============================================
@@ -83,9 +52,9 @@ function isLegacyBlock(blockName: string): boolean {
 /**
  * Annotate a list of page blocks with preference warnings.
  *
- * When blocks from legacy namespaces (stackable/, ugb/, jetpack/) are
- * present, this adds human-readable warning lines to help AI agents
- * understand which blocks need attention.
+ * Reads the `block.preference.tier` field the server attaches to non-preferred
+ * blocks. No client-side namespace list — whatever the server flags as legacy
+ * gets a warning here.
  *
  * @param blocks - Parsed blocks from a page
  * @returns Object with blocks, warnings array, and a summary string
@@ -98,21 +67,23 @@ export function enrichBlockList(blocks: Block[]): {
   const warnings: PreferenceWarning[] = [];
 
   for (const block of blocks) {
-    if (isLegacyBlock(block.name)) {
-      const replacement = REPLACEMENT_MAP[block.name];
+    const tier = block.preference?.tier;
+    if (tier === 'legacy' || tier === 'avoid') {
+      const replacement = block.preference?.suggested_replacement;
+      const verb = tier === 'legacy' ? 'LEGACY — do not use' : 'AVOID';
       warnings.push({
         block: block.name,
         message: replacement
-          ? `Block ${block.index}: ${block.name} (AVOID — use ${replacement} instead)`
-          : `Block ${block.index}: ${block.name} (AVOID — ${getNamespace(block.name)}/ blocks are legacy on this site)`,
+          ? `Block ${block.index}: ${block.name} (${verb} — use ${replacement} instead)`
+          : `Block ${block.index}: ${block.name} (${verb})`,
         suggested_replacement: replacement,
       });
     }
   }
 
   const summary = warnings.length > 0
-    ? `Found ${warnings.length} legacy block(s) on this page that should not be used for new content:\n${warnings.map((w) => `  - ${w.message}`).join('\n')}`
-    : 'All blocks on this page use preferred or standard namespaces.';
+    ? `Found ${warnings.length} non-preferred block(s) on this page:\n${warnings.map((w) => `  - ${w.message}`).join('\n')}`
+    : 'All blocks on this page use preferred or acceptable namespaces.';
 
   return { blocks, warnings, summary };
 }
@@ -159,13 +130,13 @@ export function enrichPatternList(patterns: Pattern[]): {
   }
 
   if (avoid.length > 0) {
-    lines.push('AVOID patterns (contain legacy blocks):');
+    lines.push('AVOID patterns (contain non-preferred blocks):');
     for (const p of avoid) {
       const legacyInfo = p.legacy_blocks && p.legacy_blocks.length > 0
         ? `, contains ${p.legacy_blocks.slice(0, 3).join(', ')}`
         : '';
       lines.push(
-        `  Avoid: "${p.name}" (score: ${p.preference.score}, LEGACY${legacyInfo})`
+        `  Avoid: "${p.name}" (score: ${p.preference.score}${legacyInfo})`
       );
     }
   }
@@ -180,6 +151,9 @@ export function enrichPatternList(patterns: Pattern[]): {
 /**
  * Group block types by preference tier with natural-language guidance.
  *
+ * Tier classification comes from the server (which reads from the
+ * Preferences config). No hardcoded namespace tables here.
+ *
  * @param types - Block types from the API
  * @returns Grouped types with a guidance summary string
  */
@@ -188,7 +162,6 @@ export function enrichBlockTypes(types: BlockType[]): {
   guidance: string;
 } {
   const preferred: BlockType[] = [];
-  const standard: BlockType[] = [];
   const acceptable: BlockType[] = [];
   const avoid: BlockType[] = [];
   const legacy: BlockType[] = [];
@@ -199,12 +172,7 @@ export function enrichBlockTypes(types: BlockType[]): {
         preferred.push(t);
         break;
       case 'acceptable':
-        // Split core/ into "standard" for clearer guidance
-        if (getNamespace(t.name) === 'core') {
-          standard.push(t);
-        } else {
-          acceptable.push(t);
-        }
+        acceptable.push(t);
         break;
       case 'avoid':
         avoid.push(t);
@@ -220,12 +188,11 @@ export function enrichBlockTypes(types: BlockType[]): {
   const lines: string[] = [];
 
   if (preferred.length > 0) {
-    const names = preferred.map((t) => getShortName(t.name)).join(', ');
-    lines.push(`PREFERRED (filter/): ${names}`);
-  }
-  if (standard.length > 0) {
-    const names = standard.map((t) => getShortName(t.name)).join(', ');
-    lines.push(`STANDARD (core/): ${names}`);
+    const grouped = groupByNamespace(preferred);
+    for (const [ns, blocks] of Object.entries(grouped)) {
+      const names = blocks.map((t) => getShortName(t.name)).join(', ');
+      lines.push(`PREFERRED (${ns}/): ${names}`);
+    }
   }
   if (acceptable.length > 0) {
     const grouped = groupByNamespace(acceptable);
@@ -238,7 +205,7 @@ export function enrichBlockTypes(types: BlockType[]): {
     const grouped = groupByNamespace(avoid);
     for (const [ns, blocks] of Object.entries(grouped)) {
       const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement || REPLACEMENT_MAP[t.name];
+        const replacement = t.preference.replacement;
         const shortName = getShortName(t.name);
         return replacement ? `${shortName} -> use ${replacement}` : shortName;
       });
@@ -248,8 +215,12 @@ export function enrichBlockTypes(types: BlockType[]): {
   if (legacy.length > 0) {
     const grouped = groupByNamespace(legacy);
     for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(', ');
-      lines.push(`LEGACY — NEVER USE (${ns}/): ${names}`);
+      const mappings = blocks.map((t) => {
+        const replacement = t.preference.replacement;
+        const shortName = getShortName(t.name);
+        return replacement ? `${shortName} -> use ${replacement}` : shortName;
+      });
+      lines.push(`LEGACY — DO NOT USE (${ns}/): ${mappings.join(', ')}`);
     }
   }
 
@@ -266,7 +237,7 @@ export function enrichBlockTypes(types: BlockType[]): {
  */
 export function formatPreferenceWarning(warning: PreferenceWarning): string {
   if (warning.suggested_replacement) {
-    return `WARNING: ${warning.block} is deprecated. Use ${warning.suggested_replacement} instead.`;
+    return `WARNING: ${warning.block} is non-preferred. Use ${warning.suggested_replacement} instead.`;
   }
   return `WARNING: ${warning.message}`;
 }

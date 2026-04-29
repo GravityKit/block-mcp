@@ -5,7 +5,10 @@ const mockClient = {
   getPageBlocks: vi.fn().mockResolvedValue({
     blocks: [
       { index: 0, path: [0], name: 'core/paragraph', attributes: {} },
-      { index: 1, path: [1], name: 'stackable/heading', attributes: {} },
+      {
+        index: 1, path: [1], name: 'stackable/heading', attributes: {},
+        preference: { tier: 'legacy', suggested_replacement: 'core/heading' },
+      },
     ],
     summary: {
       total_blocks: 2,

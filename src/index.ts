@@ -77,16 +77,19 @@ const server = new McpServer(
       tools: {},
       resources: {},
     },
-    instructions: `Block-level WordPress CRUD for gravitykit.com.
+    instructions: `Block-level WordPress CRUD via the gk-block-api REST plugin.
 
-URL → post ID: when the user gives you a URL (e.g. https://www.gravitykit.com/products/gravityedit/), DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
+URL → post ID: when the user gives you a URL on this site, DO NOT shell out to curl, wp-json, the REST API, or any bash command to look up the post ID. Pass the URL directly:
 
 - get_page_blocks accepts \`url\` as an alternative to \`post_id\` — the server resolves it internally.
 - For explicit resolution (e.g. to surface title/post_type before editing), call \`resolve_url\`.
 
 Editing workflow: given "change text X on URL Y", go straight to get_page_blocks({ url: Y, search: "keyword" }) → update_block / mutate_block_tree. Do not ask the user for a post ID, and do not look it up yourself via shell.
 
-Block preferences (read the block-mcp://block-preferences resource for details): prefer \`filter/\` and \`core/\`; never insert \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks.`,
+Block preferences are server-defined and admin-editable per site:
+- Each block in get_page_blocks results carries an optional \`preference.tier\` (\"legacy\" | \"avoid\") with a \`suggested_replacement\` when one is configured. Read those, don't guess.
+- Call \`list_block_types\` to see the full preferred / acceptable / avoid / legacy classification for the current site.
+- Read the \`block-mcp://block-preferences\` resource for the workflow guide.`,
   }
 );
 
@@ -139,7 +142,7 @@ const YOAST_TOOL_NAMES = new Set(YOAST_TOOLS.map((t) => t.name));
 
 const BLOCK_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
 
-const BLOCK_PREFERENCES_CONTENT = `# GravityKit Block MCP — Agent Guide
+const BLOCK_PREFERENCES_CONTENT = `# Block MCP — Agent Guide
 
 ## URL → post ID resolution
 
@@ -149,19 +152,26 @@ The MCP does this for you:
 - \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
 - For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
 
-If the user says "change X on https://www.gravitykit.com/products/gravityedit/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` — not a shell command.
+If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` — not a shell command.
 
-## Block preferences
+## Block preferences (site-defined)
 
-When editing pages on gravitykit.com:
+Block preference policy is configured per-site in the WordPress admin (the
+gk-block-api Preferences option) and exposed dynamically. There is no
+client-side hardcoded list of "good" vs "bad" namespaces.
 
-1. ALWAYS prefer \`filter/\` (theme) blocks over alternatives
-2. Use \`core/\` blocks for standard content (headings, paragraphs, images, buttons)
-3. NEVER use \`stackable/\`, \`ugb/\`, or \`jetpack/\` blocks — they are legacy
-4. When inserting content, check patterns first — reuse existing patterns before building from scratch
-5. Prefer synced patterns to keep content consistent across pages
-6. When inserting a pattern that needs per-page customization, use \`synced: false\` to inline it
-7. When you encounter legacy blocks on a page, note them but do not replace unless asked`;
+How to discover the policy at runtime:
+
+1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
+2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields — they reflect the live config.
+3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
+
+How to behave:
+
+- Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
+- Reuse existing patterns before building from scratch — call \`list_patterns\` first.
+- For patterns that need per-page customization, use \`synced: false\` to inline them.
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
 
 // ============================================
 // Handler: List tools

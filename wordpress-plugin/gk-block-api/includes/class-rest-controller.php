@@ -86,6 +86,12 @@ class REST_Controller {
 	private $media_manager;
 
 	/**
+	 * @var Preferences Used by the summary builder to classify blocks by tier
+	 *                  without hardcoded namespace lists.
+	 */
+	private $preferences;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Block_Registry  $block_registry  Block registry.
@@ -96,6 +102,7 @@ class REST_Controller {
 	 * @param Post_Manager    $post_manager    Post manager.
 	 * @param Term_Manager    $term_manager    Term manager.
 	 * @param Media_Manager   $media_manager   Media manager.
+	 * @param Preferences     $preferences     Preferences (tier classification source).
 	 */
 	public function __construct(
 		Block_Registry $block_registry,
@@ -105,7 +112,8 @@ class REST_Controller {
 		Block_Mutator $block_mutator,
 		Post_Manager $post_manager,
 		Term_Manager $term_manager,
-		Media_Manager $media_manager
+		Media_Manager $media_manager,
+		Preferences $preferences
 	) {
 		$this->block_registry  = $block_registry;
 		$this->pattern_manager = $pattern_manager;
@@ -115,6 +123,7 @@ class REST_Controller {
 		$this->post_manager    = $post_manager;
 		$this->term_manager    = $term_manager;
 		$this->media_manager   = $media_manager;
+		$this->preferences     = $preferences;
 	}
 
 	/**
@@ -1391,12 +1400,13 @@ class REST_Controller {
 
 			// Track legacy blocks (aggregate counts by default; full
 			// path list only when `include_legacy_paths` is requested).
-			// Per-namespace counts are sparse — only namespaces that
-			// actually appear on the page get a key. Empty/zero entries
-			// are noise for AI consumers.
-			if ( $name && 0 !== strpos( $name, 'core/' ) ) {
-				$namespace = explode( '/', $name )[0];
-				if ( in_array( $namespace, array( 'stackable', 'ugb', 'jetpack' ), true ) ) {
+			// Tier classification comes from the Preferences config (option-
+			// backed, admin-editable, filter-extensible) — there are no
+			// hardcoded namespace lists in this scanner.
+			if ( $name && $this->preferences ) {
+				$tier = $this->preferences->get_block_score( $name );
+				if ( isset( $tier['tier'] ) && 'legacy' === $tier['tier'] ) {
+					$namespace = explode( '/', $name )[0];
 					$summary['legacy_blocks']['total']++;
 					if ( ! isset( $summary['legacy_blocks']['by_namespace'][ $namespace ] ) ) {
 						$summary['legacy_blocks']['by_namespace'][ $namespace ] = 0;

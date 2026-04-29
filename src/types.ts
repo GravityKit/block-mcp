@@ -137,6 +137,15 @@ export interface Block {
    *   the other corrupts the block (e.g., yoast/faq-block, yoast/how-to-block).
    */
   storage_mode?: 'static' | 'dynamic' | 'dual';
+  /**
+   * Per-block preference info attached by the server when the block is non-preferred.
+   * Driven by the (admin-editable) Preferences config — no client-side namespace
+   * hardcoding. Absent when tier === 'preferred' (the common case).
+   */
+  preference?: {
+    tier: 'preferred' | 'acceptable' | 'avoid' | 'legacy';
+    suggested_replacement?: string;
+  };
 }
 
 // ============================================
