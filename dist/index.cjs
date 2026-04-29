@@ -38940,6 +38940,32 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Atomically replace a range of top-level blocks with a new shape, in a
+   * single revision. Distinct from `replaceAllBlocks` (which rewrites the
+   * entire post).
+   *
+   * @param postId - WordPress post/page ID
+   * @param data   - { start, count, blocks } range descriptor
+   * @returns Result with `removed`, `inserted[]`, warnings, revision IDs
+   */
+  async replaceBlocksRange(postId, data) {
+    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    if (typeof data.start !== "number" || data.start < 0) {
+      throw new Error("start must be a non-negative integer");
+    }
+    if (typeof data.count !== "number" || data.count < 0) {
+      throw new Error("count must be a non-negative integer");
+    }
+    if (!Array.isArray(data.blocks)) {
+      throw new Error("blocks must be an array (may be empty for a pure delete)");
+    }
+    const response = await this.client.post(
+      `/posts/${postId}/blocks/replace`,
+      data
+    );
+    return response.data;
+  }
+  /**
    * Replace all blocks on a page (full rewrite).
    *
    * Creates a revision before overwriting. Validates all block names and
@@ -39673,6 +39699,50 @@ var WRITE_TOOLS = [
     }
   },
   {
+    name: "replace_blocks",
+    description: "Atomically replace a range of top-level blocks with a different shape, in a single revision. Use this when swapping a section of blocks for a different shape (e.g., 12 paragraph FAQs \u2192 1 yoast/faq-block) \u2014 safer than delete + insert because there is no half-written intermediate state. Pass `start` (top_level_counter of the first block to replace), `count` (how many to remove), and `blocks` (new shape; may be empty for a pure delete or 1+ for a replace). Distinct from `replace_all_blocks` (which rewrites the entire post).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: {
+          type: "number",
+          description: "Post ID."
+        },
+        start: {
+          type: "number",
+          description: "Top-level counter of the first block to replace (zero-based)."
+        },
+        count: {
+          type: "number",
+          description: "Number of consecutive top-level blocks to replace. Pass 0 to insert without removing."
+        },
+        blocks: {
+          type: "array",
+          description: "Replacement blocks. May be empty (pure delete) or any length.",
+          items: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "Fully-qualified block name."
+              },
+              attributes: {
+                type: "object",
+                description: "Block attributes."
+              },
+              innerHTML: {
+                type: "string",
+                description: "Raw HTML content."
+              }
+            },
+            required: ["name"]
+          }
+        }
+      },
+      required: ["post_id", "start", "count", "blocks"]
+    }
+  },
+  {
     name: "replace_all_blocks",
     description: "Replace ALL blocks on a page. Creates a revision. Use for major restructuring; prefer update_block/insert_blocks for edits.",
     inputSchema: {
@@ -39779,6 +39849,28 @@ async function handleWriteTool(toolName, args, client2) {
         throw new Error("block_index is required");
       }
       const result = await client2.deleteBlock(postId, blockIndex, count);
+      return result;
+    }
+    case "replace_blocks": {
+      const postId = args.post_id;
+      const start = args.start;
+      const count = args.count;
+      const blocks = args.blocks;
+      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (typeof start !== "number" || start < 0) {
+        throw new Error("start must be a non-negative integer");
+      }
+      if (typeof count !== "number" || count < 0) {
+        throw new Error("count must be a non-negative integer");
+      }
+      if (!Array.isArray(blocks)) {
+        throw new Error("blocks must be an array (may be empty for a pure delete)");
+      }
+      const result = await client2.replaceBlocksRange(postId, { start, count, blocks });
+      if (result.warnings && result.warnings.length > 0) {
+        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
+        return { ...result, formatted_warnings: formattedWarnings };
+      }
       return result;
     }
     case "replace_all_blocks": {

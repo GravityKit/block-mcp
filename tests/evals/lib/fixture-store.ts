@@ -51,6 +51,7 @@ export class FixtureStore {
     update_block: 0,
     insert_blocks: 0,
     delete_block: 0,
+    replace_blocks: 0,
   };
 
   constructor(path: string) {
@@ -175,6 +176,47 @@ export class FixtureStore {
     return {
       success: true,
       block: { index: target.index, name: target.name, attributes: target.attributes },
+      before_revision_id: 0,
+      revision_id: 1,
+    };
+  }
+
+  replaceBlocks(args: {
+    start: number;
+    count: number;
+    blocks: Array<{ name: string; attributes?: Record<string, unknown>; innerHTML?: string }>;
+  }): unknown {
+    this.callCounts.replace_blocks++;
+    const all = this.payload.response.blocks;
+    if (args.start < 0 || args.start > all.length) throw new Error('range.start out of bounds');
+    const count = Math.max(0, Math.min(args.count, all.length - args.start));
+
+    const newBlocks: FixtureBlock[] = args.blocks.map((b, i) => ({
+      index: args.start + i,
+      top_level_counter: args.start + i,
+      path: [args.start + i],
+      name: b.name,
+      attributes: b.attributes ?? {},
+      innerHTML: b.innerHTML,
+    }));
+
+    all.splice(args.start, count, ...newBlocks);
+    all.forEach((blk, idx) => {
+      blk.index = idx;
+      blk.top_level_counter = idx;
+      blk.path = [idx];
+    });
+
+    return {
+      success: true,
+      removed: count,
+      inserted: newBlocks.map((b) => ({
+        index: b.index,
+        top_level_counter: b.top_level_counter,
+        path: b.path,
+        name: b.name,
+      })),
+      warnings: [],
       before_revision_id: 0,
       revision_id: 1,
     };

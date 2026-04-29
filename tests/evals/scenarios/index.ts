@@ -84,6 +84,36 @@ export const SCENARIOS: Scenario[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // Scenario 4 — atomic replace. Tests `replace_blocks` discoverability:
+  // model should pick the new tool over delete + insert.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'replace-first-three-with-single-paragraph',
+    prompt: (store) =>
+      `${preamble(store)} Replace the first 3 top-level blocks on this page with a SINGLE ` +
+      `core/paragraph block whose innerHTML is "<p>EVAL_REPLACE_OK</p>". Use the most ` +
+      `efficient single tool call for this — there is one designed exactly for replacing ` +
+      `a range of blocks atomically.`,
+    assert: (store) => {
+      const blocks = store.blocksSnapshot();
+      const first = blocks[0];
+      if (!first || first.name !== 'core/paragraph')
+        return { passed: false, reason: `first block is ${first?.name ?? 'missing'}, not core/paragraph` };
+      if (!/EVAL_REPLACE_OK/.test(first.innerHTML ?? ''))
+        return { passed: false, reason: 'EVAL_REPLACE_OK not in first block innerHTML' };
+      // Original page had 64 top-level blocks; after replacing 3 with 1 we expect 62.
+      if (blocks.length !== 62)
+        return { passed: false, reason: `expected 62 blocks after replace, got ${blocks.length}` };
+      if (store.callCounts.replace_blocks !== 1)
+        return {
+          passed: false,
+          reason: `expected exactly 1 replace_blocks call (atomic), got ${store.callCounts.replace_blocks} (and ${store.callCounts.delete_block} delete + ${store.callCounts.insert_blocks} insert)`,
+        };
+      return { passed: true, reason: 'atomic replace in 1 tool call' };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // Scenario 3 — delete the first separator. Tests addressing scheme
   // (top_level_counter vs. flat index) — the trap that motivated BLOCK-2/6.
   // ──────────────────────────────────────────────────────────────────────

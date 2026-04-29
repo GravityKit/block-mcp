@@ -208,6 +208,18 @@ export interface BlockDeleteResponse {
   revision_id: number;
 }
 
+/** Response from atomic `replace_blocks` (POST /posts/{id}/blocks/replace). */
+export interface BlockReplaceRangeResponse {
+  success: boolean;
+  /** Number of blocks removed before the new shape was inserted. */
+  removed: number;
+  /** New block refs (same shape as `BlockWriteResponse.inserted`). */
+  inserted: InsertedBlockRef[];
+  warnings: PreferenceWarning[];
+  before_revision_id: number;
+  revision_id: number;
+}
+
 /** Response from URL resolution (GET /resolve). */
 export interface ResolveUrlResponse {
   post_id: number;

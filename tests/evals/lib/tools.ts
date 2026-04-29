@@ -12,7 +12,13 @@
 import { READ_TOOLS } from '../../../src/tools/read.js';
 import { WRITE_TOOLS } from '../../../src/tools/write.js';
 
-const KEEP = new Set(['get_page_blocks', 'update_block', 'insert_blocks', 'delete_block']);
+const KEEP = new Set([
+  'get_page_blocks',
+  'update_block',
+  'insert_blocks',
+  'delete_block',
+  'replace_blocks',
+]);
 
 const SOURCE_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].filter((t) => KEEP.has(t.name));
 

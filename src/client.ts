@@ -16,6 +16,7 @@ import type {
   BlockUpdateResponse,
   BlockWriteResponse,
   BlockDeleteResponse,
+  BlockReplaceRangeResponse,
   PatternInsertResponse,
   MutationRequest,
   MutationResponse,
@@ -468,6 +469,45 @@ export class WordPressBlockClient {
     const response = await this.client.delete<BlockDeleteResponse>(
       `/posts/${postId}/blocks/${index}`,
       { params }
+    );
+    return response.data;
+  }
+
+  /**
+   * Atomically replace a range of top-level blocks with a new shape, in a
+   * single revision. Distinct from `replaceAllBlocks` (which rewrites the
+   * entire post).
+   *
+   * @param postId - WordPress post/page ID
+   * @param data   - { start, count, blocks } range descriptor
+   * @returns Result with `removed`, `inserted[]`, warnings, revision IDs
+   */
+  async replaceBlocksRange(
+    postId: number,
+    data: {
+      start: number;
+      count: number;
+      blocks: Array<{
+        name: string;
+        attributes?: Record<string, unknown>;
+        innerHTML?: string;
+      }>;
+    }
+  ): Promise<BlockReplaceRangeResponse> {
+    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    if (typeof data.start !== 'number' || data.start < 0) {
+      throw new Error('start must be a non-negative integer');
+    }
+    if (typeof data.count !== 'number' || data.count < 0) {
+      throw new Error('count must be a non-negative integer');
+    }
+    if (!Array.isArray(data.blocks)) {
+      throw new Error('blocks must be an array (may be empty for a pure delete)');
+    }
+
+    const response = await this.client.post<BlockReplaceRangeResponse>(
+      `/posts/${postId}/blocks/replace`,
+      data
     );
     return response.data;
   }

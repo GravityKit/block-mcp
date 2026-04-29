@@ -114,6 +114,51 @@ export const WRITE_TOOLS = [
     },
   },
   {
+    name: 'replace_blocks',
+    description:
+      'Atomically replace a range of top-level blocks with a different shape, in a single revision. Use this when swapping a section of blocks for a different shape (e.g., 12 paragraph FAQs → 1 yoast/faq-block) — safer than delete + insert because there is no half-written intermediate state. Pass `start` (top_level_counter of the first block to replace), `count` (how many to remove), and `blocks` (new shape; may be empty for a pure delete or 1+ for a replace). Distinct from `replace_all_blocks` (which rewrites the entire post).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        post_id: {
+          type: 'number',
+          description: 'Post ID.',
+        },
+        start: {
+          type: 'number',
+          description: 'Top-level counter of the first block to replace (zero-based).',
+        },
+        count: {
+          type: 'number',
+          description: 'Number of consecutive top-level blocks to replace. Pass 0 to insert without removing.',
+        },
+        blocks: {
+          type: 'array',
+          description: 'Replacement blocks. May be empty (pure delete) or any length.',
+          items: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Fully-qualified block name.',
+              },
+              attributes: {
+                type: 'object',
+                description: 'Block attributes.',
+              },
+              innerHTML: {
+                type: 'string',
+                description: 'Raw HTML content.',
+              },
+            },
+            required: ['name'],
+          },
+        },
+      },
+      required: ['post_id', 'start', 'count', 'blocks'],
+    },
+  },
+  {
     name: 'replace_all_blocks',
     description:
       'Replace ALL blocks on a page. Creates a revision. Use for major restructuring; prefer update_block/insert_blocks for edits.',
@@ -251,6 +296,36 @@ export async function handleWriteTool(
       }
 
       const result = await client.deleteBlock(postId, blockIndex, count);
+      return result;
+    }
+
+    case 'replace_blocks': {
+      const postId = args.post_id as number;
+      const start = args.start as number;
+      const count = args.count as number;
+      const blocks = args.blocks as Array<{
+        name: string;
+        attributes?: Record<string, unknown>;
+        innerHTML?: string;
+      }>;
+
+      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (typeof start !== 'number' || start < 0) {
+        throw new Error('start must be a non-negative integer');
+      }
+      if (typeof count !== 'number' || count < 0) {
+        throw new Error('count must be a non-negative integer');
+      }
+      if (!Array.isArray(blocks)) {
+        throw new Error('blocks must be an array (may be empty for a pure delete)');
+      }
+
+      const result = await client.replaceBlocksRange(postId, { start, count, blocks });
+
+      if (result.warnings && result.warnings.length > 0) {
+        const formattedWarnings = result.warnings.map(formatPreferenceWarning);
+        return { ...result, formatted_warnings: formattedWarnings };
+      }
       return result;
     }
 

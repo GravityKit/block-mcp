@@ -508,6 +508,197 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Atomically replace a range of top-level blocks with a different shape.
+	 *
+	 * Single-revision swap: one save_post_content call regardless of whether
+	 * the new shape contains 0, 1, or N blocks. Use this when you want to
+	 * swap a section's worth of blocks (e.g., 12 FAQ paragraph blocks → 1
+	 * yoast/faq-block) without a delete + insert race that leaves the page
+	 * half-written if the second op fails.
+	 *
+	 * Distinct from `replace_all_blocks`: scoped to a range of top-level
+	 * blocks, not the entire post.
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param int   $start   Top-level counter of the first block to replace (0-based).
+	 * @param int   $count   Number of consecutive top-level blocks to replace.
+	 *                       Pass 0 to insert without removing (equivalent to insert_blocks).
+	 * @param array $blocks  New block definitions to splice in. May be empty
+	 *                       to delete the range without inserting anything.
+	 *
+	 * @return array|\WP_Error Result with revision_id, or WP_Error.
+	 */
+	public function replace_blocks_range( $post_id, $start, $count, $blocks ) {
+		$rate_check = $this->check_rate_limit( $post_id, 'write' );
+		if ( is_wp_error( $rate_check ) ) {
+			return $rate_check;
+		}
+
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error(
+				'post_not_found',
+				__( 'Post not found.', 'gk-block-api' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		$start = (int) $start;
+		$count = max( 0, (int) $count );
+
+		if ( $start < 0 ) {
+			return new \WP_Error(
+				'invalid_range',
+				__( 'range.start must be >= 0.', 'gk-block-api' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$all_existing_blocks = parse_blocks( $post->post_content );
+		if ( ! is_array( $all_existing_blocks ) ) {
+			$all_existing_blocks = array();
+		}
+
+		// Map visible (top-level counter) → raw index, mirroring insert_blocks
+		// and delete_blocks. Whitespace blocks are preserved at their raw indices.
+		$visible_to_raw = array();
+		foreach ( $all_existing_blocks as $raw_idx => $blk ) {
+			if ( ! empty( $blk['blockName'] ) ) {
+				$visible_to_raw[] = $raw_idx;
+			}
+		}
+		$visible_count = count( $visible_to_raw );
+
+		if ( $start > $visible_count ) {
+			return new \WP_Error(
+				'invalid_range',
+				sprintf(
+					/* translators: 1: start value, 2: maximum visible index */
+					__( 'range.start (%1$d) is past the end of the page (max %2$d).', 'gk-block-api' ),
+					$start,
+					$visible_count
+				),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Clamp count to what's actually available.
+		if ( ( $start + $count ) > $visible_count ) {
+			$count = $visible_count - $start;
+		}
+
+		// Validate every replacement block BEFORE touching post_content. A
+		// legacy block in the new shape must abort the whole op so the post
+		// is never partially mutated.
+		$warnings   = array();
+		$new_blocks = array();
+		foreach ( $blocks as $block_def ) {
+			$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
+
+			$validation = $this->validate_block_def( $name );
+			if ( $validation['error'] ) {
+				return $validation['error'];
+			}
+			$warnings = array_merge( $warnings, $validation['warnings'] );
+
+			$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
+			$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
+
+			$new_blocks[] = array(
+				'blockName'    => $name,
+				'attrs'        => $attrs,
+				'innerHTML'    => $inner_html,
+				'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
+				'innerBlocks'  => array(),
+			);
+		}
+
+		// Resolve the raw splice range. We splice at the raw index of the
+		// first removed block (or end-of-array if start === visible_count),
+		// removing `count` raw entries by walking visible_to_raw.
+		if ( $start >= $visible_count ) {
+			$raw_splice_start = count( $all_existing_blocks );
+			$raw_splice_count = 0;
+		} else {
+			$raw_splice_start = $visible_to_raw[ $start ];
+			if ( $count === 0 ) {
+				$raw_splice_count = 0;
+			} else {
+				$last_raw_idx = ( $start + $count - 1 < $visible_count )
+					? $visible_to_raw[ $start + $count - 1 ]
+					: $visible_to_raw[ $visible_count - 1 ];
+				$raw_splice_count = ( $last_raw_idx - $raw_splice_start ) + 1;
+			}
+		}
+
+		// Detect synced pattern references being removed — same warning as delete_blocks.
+		for ( $i = 0; $i < $raw_splice_count; $i++ ) {
+			$raw_idx = $raw_splice_start + $i;
+			if ( isset( $all_existing_blocks[ $raw_idx ] ) && 'core/block' === $all_existing_blocks[ $raw_idx ]['blockName'] ) {
+				$ref_id  = isset( $all_existing_blocks[ $raw_idx ]['attrs']['ref'] ) ? $all_existing_blocks[ $raw_idx ]['attrs']['ref'] : 0;
+				$pattern = $ref_id ? get_post( $ref_id ) : null;
+				$warnings[] = array(
+					'message' => sprintf(
+						/* translators: %s: pattern name */
+						__( 'Removing synced pattern reference "%s" from this page. The pattern itself is not deleted.', 'gk-block-api' ),
+						$pattern ? $pattern->post_title : '#' . $ref_id
+					),
+				);
+			}
+		}
+
+		// Atomic splice — one operation, one save, one revision.
+		array_splice( $all_existing_blocks, $raw_splice_start, $raw_splice_count, $new_blocks );
+
+		$new_content = serialize_blocks( $all_existing_blocks );
+		$result      = $this->save_post_content( $post_id, $new_content );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$this->record_rate_limit( $post_id, 'write' );
+
+		// Build inserted refs with the same shape insert_blocks returns
+		// (so callers can chain mutate_block_tree without an extra fetch).
+		$inserted = array();
+		$saved_post = get_post( $post_id );
+		if ( $saved_post ) {
+			$parsed_after = parse_blocks( $saved_post->post_content );
+			if ( ! is_array( $parsed_after ) ) {
+				$parsed_after = array();
+			}
+			$post_visible_to_raw = array();
+			foreach ( $parsed_after as $raw_idx => $blk ) {
+				if ( ! empty( $blk['blockName'] ) ) {
+					$post_visible_to_raw[] = $raw_idx;
+				}
+			}
+			foreach ( $new_blocks as $i => $block ) {
+				$visible_index = $start + $i;
+				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
+					? $post_visible_to_raw[ $visible_index ]
+					: null;
+				$inserted[] = array(
+					'index'             => $visible_index,
+					'top_level_counter' => $visible_index,
+					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
+					'name'              => $block['blockName'],
+				);
+			}
+		}
+
+		return array(
+			'success'              => true,
+			'removed'              => $count,
+			'inserted'             => $inserted,
+			'warnings'             => $warnings,
+			'before_revision_id'   => $result['before_revision_id'],
+			'revision_id'          => $result['revision_id'],
+		);
+	}
+
+	/**
 	 * Replace all blocks on a post (full page rewrite).
 	 *
 	 * @param int   $post_id Post ID.

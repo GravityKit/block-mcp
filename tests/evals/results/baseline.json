@@ -1,26 +1,27 @@
 {
   "model": "claude-haiku-4-5-20251001",
   "fixture": "gravitycalendar-creating-a-calendar",
-  "ran_at": "2026-04-29T19:14:26.977Z",
-  "pass_count": 3,
-  "total": 3,
-  "avg_duration_ms": 2508,
-  "avg_input_tokens": 7735,
-  "avg_output_tokens": 178,
+  "ran_at": "2026-04-29T19:19:58.771Z",
+  "pass_count": 4,
+  "total": 4,
+  "avg_duration_ms": 2625,
+  "avg_input_tokens": 11083,
+  "avg_output_tokens": 188,
   "results": [
     {
       "scenario": "find-prefer-to-watch-heading",
       "passed": true,
       "reason": "read page in 1 call(s); target at counter 2",
       "turns": 2,
-      "duration_ms": 2173,
-      "input_tokens": 11458,
-      "output_tokens": 79,
+      "duration_ms": 1688,
+      "input_tokens": 12227,
+      "output_tokens": 80,
       "tool_calls": {
         "get_page_blocks": 1,
         "update_block": 0,
         "insert_blocks": 0,
-        "delete_block": 0
+        "delete_block": 0,
+        "replace_blocks": 0
       },
       "finish_reason": "end_turn"
     },
@@ -29,14 +30,32 @@
       "passed": true,
       "reason": "paragraph appended in 1 insert call",
       "turns": 2,
-      "duration_ms": 2162,
-      "input_tokens": 4180,
-      "output_tokens": 198,
+      "duration_ms": 1986,
+      "input_tokens": 4928,
+      "output_tokens": 187,
       "tool_calls": {
         "get_page_blocks": 0,
         "update_block": 0,
         "insert_blocks": 1,
-        "delete_block": 0
+        "delete_block": 0,
+        "replace_blocks": 0
+      },
+      "finish_reason": "end_turn"
+    },
+    {
+      "scenario": "replace-first-three-with-single-paragraph",
+      "passed": true,
+      "reason": "atomic replace in 1 tool call",
+      "turns": 2,
+      "duration_ms": 2054,
+      "input_tokens": 4990,
+      "output_tokens": 203,
+      "tool_calls": {
+        "get_page_blocks": 0,
+        "update_block": 0,
+        "insert_blocks": 0,
+        "delete_block": 0,
+        "replace_blocks": 1
       },
       "finish_reason": "end_turn"
     },
@@ -45,14 +64,15 @@
       "passed": true,
       "reason": "first separator removed cleanly",
       "turns": 3,
-      "duration_ms": 3189,
-      "input_tokens": 7566,
-      "output_tokens": 256,
+      "duration_ms": 4773,
+      "input_tokens": 22188,
+      "output_tokens": 281,
       "tool_calls": {
         "get_page_blocks": 1,
         "update_block": 0,
         "insert_blocks": 0,
-        "delete_block": 1
+        "delete_block": 1,
+        "replace_blocks": 0
       },
       "finish_reason": "end_turn"
     }

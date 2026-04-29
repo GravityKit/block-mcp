@@ -331,6 +331,43 @@ class REST_Controller {
 			)
 		);
 
+		// POST — atomic replace of a top-level block range.
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)/blocks/replace',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'replace_blocks_range' ),
+					'permission_callback' => array( $this, 'check_edit_permissions' ),
+					'args'                => array(
+						'id' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'start' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'count' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'blocks' => array(
+							'type'     => 'array',
+							'required' => true,
+							'items'    => array(
+								'type' => 'object',
+							),
+						),
+					),
+				),
+			)
+		);
+
 		// PATCH — update a single block.
 		register_rest_route(
 			self::NAMESPACE,
@@ -1540,6 +1577,59 @@ class REST_Controller {
 	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
+	/**
+	 * POST /posts/{id}/blocks/replace
+	 *
+	 * Atomically replace a range of top-level blocks with a new shape, in a
+	 * single revision. Distinct from `replace_all_blocks` (which rewrites
+	 * the entire post).
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function replace_blocks_range( $request ) {
+		try {
+			$post_id = (int) $request->get_param( 'id' );
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$start  = (int) $request->get_param( 'start' );
+			$count  = (int) $request->get_param( 'count' );
+			$blocks = $request->get_param( 'blocks' );
+
+			if ( ! is_array( $blocks ) ) {
+				return new \WP_Error(
+					'missing_blocks',
+					__( 'The "blocks" parameter is required and must be an array (may be empty for a pure delete).', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+
+			// Sanitize block definitions — same shape as insert_blocks.
+			$sanitized_blocks = array();
+			foreach ( $blocks as $block_def ) {
+				$sanitized_blocks[] = array(
+					'name'       => isset( $block_def['name'] ) ? sanitize_text_field( $block_def['name'] ) : '',
+					'attributes' => isset( $block_def['attributes'] ) ? $block_def['attributes'] : array(),
+					'innerHTML'  => isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '',
+				);
+			}
+
+			$result = $this->block_crud->replace_blocks_range( $post_id, $start, $count, $sanitized_blocks );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
 	public function delete_block( $request ) {
 		try {
 			$post_id = (int) $request->get_param( 'id' );
