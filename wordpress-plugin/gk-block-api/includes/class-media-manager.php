@@ -339,59 +339,177 @@ class Media_Manager {
 	private function guard_ssrf( $url ) {
 		$host = wp_parse_url( $url, PHP_URL_HOST );
 		if ( ! $host ) {
-			return new \WP_Error( 'invalid_url', 'URL has no host.', array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_url', __( 'URL has no host.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
-		// Resolve to all A records (some hosts use round-robin DNS to bypass).
-		// Fall back to gethostbyname when dns_get_record is unavailable.
-		$ips = array();
+		// Resolve A and AAAA records — both IPv4 and IPv6 must be checked.
+		// A host that resolves to both a public IPv4 and link-local IPv6
+		// could otherwise bypass the guard (cURL may pick IPv6 by default).
+		$ipv4 = array();
+		$ipv6 = array();
 		if ( function_exists( 'dns_get_record' ) ) {
-			$records = @dns_get_record( $host, DNS_A );
-			if ( is_array( $records ) ) {
-				foreach ( $records as $r ) {
+			$a_records = @dns_get_record( $host, DNS_A ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			if ( is_array( $a_records ) ) {
+				foreach ( $a_records as $r ) {
 					if ( ! empty( $r['ip'] ) ) {
-						$ips[] = $r['ip'];
+						$ipv4[] = $r['ip'];
+					}
+				}
+			}
+			$aaaa_records = @dns_get_record( $host, DNS_AAAA ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			if ( is_array( $aaaa_records ) ) {
+				foreach ( $aaaa_records as $r ) {
+					if ( ! empty( $r['ipv6'] ) ) {
+						$ipv6[] = $r['ipv6'];
 					}
 				}
 			}
 		}
-		if ( empty( $ips ) ) {
-			$resolved = @gethostbyname( $host );
+		// Last-resort IPv4 fallback (gethostbyname is IPv4-only).
+		if ( empty( $ipv4 ) && empty( $ipv6 ) ) {
+			$resolved = @gethostbyname( $host ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 			if ( $resolved && filter_var( $resolved, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) ) {
-				$ips[] = $resolved;
+				$ipv4[] = $resolved;
 			}
 		}
-		if ( empty( $ips ) ) {
-			return new \WP_Error( 'invalid_url', sprintf( 'Could not resolve host "%s".', $host ), array( 'status' => 400 ) );
+		if ( empty( $ipv4 ) && empty( $ipv6 ) ) {
+			return new \WP_Error(
+				'invalid_url',
+				sprintf(
+					/* translators: %s: hostname */
+					__( 'Could not resolve host "%s".', 'gk-block-api' ),
+					$host
+				),
+				array( 'status' => 400 )
+			);
 		}
 
-		$ranges = self::SSRF_BLOCKED_IPV4_RANGES;
+		// IPv4 ranges (filterable).
+		$v4_ranges = self::SSRF_BLOCKED_IPV4_RANGES;
 		if ( function_exists( 'apply_filters' ) ) {
-			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ranges', $ranges );
+			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ranges', $v4_ranges );
 			if ( is_array( $filtered ) ) {
-				$ranges = $filtered;
+				$v4_ranges = $filtered;
 			}
 		}
 
-		foreach ( $ips as $ip ) {
+		foreach ( $ipv4 as $ip ) {
 			$ip_long = ip2long( $ip );
 			if ( false === $ip_long ) {
-				// Non-IPv4 (or invalid) — be conservative and reject.
-				return new \WP_Error( 'invalid_url', sprintf( 'Could not validate IP "%s" for "%s".', $ip, $host ), array( 'status' => 400 ) );
+				return new \WP_Error(
+					'invalid_url',
+					sprintf(
+						/* translators: 1: IP address, 2: hostname */
+						__( 'Could not validate IP "%1$s" for "%2$s".', 'gk-block-api' ),
+						$ip,
+						$host
+					),
+					array( 'status' => 400 )
+				);
 			}
-			foreach ( $ranges as $range ) {
+			foreach ( $v4_ranges as $range ) {
 				$start = ip2long( $range[0] );
 				$end   = ip2long( $range[1] );
 				if ( false !== $start && false !== $end && $ip_long >= $start && $ip_long <= $end ) {
 					return new \WP_Error(
 						'invalid_url',
-						sprintf( 'URL host "%s" resolves to a reserved or private IP (%s).', $host, $ip ),
+						sprintf(
+							/* translators: 1: hostname, 2: IPv4 address */
+							__( 'URL host "%1$s" resolves to a reserved or private IPv4 (%2$s).', 'gk-block-api' ),
+							$host,
+							$ip
+						),
+						array( 'status' => 400 )
+					);
+				}
+			}
+		}
+
+		// IPv6 reserved-range check. CIDRs cover the same classes as IPv4:
+		//   ::/128             unspecified
+		//   ::1/128            loopback
+		//   fc00::/7           unique-local (private)
+		//   fe80::/10          link-local
+		//   ::ffff:0:0/96      IPv4-mapped (catch the IPv4 ranges via wrapper too)
+		//   100::/64           discard-only
+		//   2001::/23          IETF protocol assignments
+		//   ff00::/8           multicast
+		// Filterable via `gk_block_api_url_sideload_blocked_ipv6_cidrs`.
+		$v6_cidrs = array(
+			'::/128',
+			'::1/128',
+			'fc00::/7',
+			'fe80::/10',
+			'::ffff:0:0/96',
+			'100::/64',
+			'2001::/23',
+			'ff00::/8',
+		);
+		if ( function_exists( 'apply_filters' ) ) {
+			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ipv6_cidrs', $v6_cidrs );
+			if ( is_array( $filtered ) ) {
+				$v6_cidrs = $filtered;
+			}
+		}
+
+		foreach ( $ipv6 as $ip ) {
+			$ip_packed = @inet_pton( $ip ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			if ( false === $ip_packed ) {
+				return new \WP_Error(
+					'invalid_url',
+					sprintf(
+						/* translators: 1: IPv6 address, 2: hostname */
+						__( 'Could not validate IPv6 "%1$s" for "%2$s".', 'gk-block-api' ),
+						$ip,
+						$host
+					),
+					array( 'status' => 400 )
+				);
+			}
+			foreach ( $v6_cidrs as $cidr ) {
+				if ( $this->ipv6_in_cidr( $ip_packed, $cidr ) ) {
+					return new \WP_Error(
+						'invalid_url',
+						sprintf(
+							/* translators: 1: hostname, 2: IPv6 address, 3: CIDR */
+							__( 'URL host "%1$s" resolves to a reserved or private IPv6 (%2$s, in %3$s).', 'gk-block-api' ),
+							$host,
+							$ip,
+							$cidr
+						),
 						array( 'status' => 400 )
 					);
 				}
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Test whether a packed-binary IPv6 address falls inside a CIDR block.
+	 *
+	 * @param string $ip_packed 16-byte binary IPv6 from `inet_pton()`.
+	 * @param string $cidr      e.g. `fe80::/10`.
+	 * @return bool
+	 */
+	private function ipv6_in_cidr( $ip_packed, $cidr ) {
+		$parts = explode( '/', $cidr, 2 );
+		if ( count( $parts ) !== 2 ) {
+			return false;
+		}
+		$net_packed = @inet_pton( $parts[0] ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$prefix     = (int) $parts[1];
+		if ( false === $net_packed || $prefix < 0 || $prefix > 128 ) {
+			return false;
+		}
+		// Build a 16-byte mask with `$prefix` MSBs set.
+		$mask     = str_repeat( "\xff", intdiv( $prefix, 8 ) );
+		$rem_bits = $prefix % 8;
+		if ( $rem_bits ) {
+			$mask .= chr( 0xff << ( 8 - $rem_bits ) & 0xff );
+		}
+		$mask = str_pad( $mask, 16, "\x00" );
+		return ( $ip_packed & $mask ) === ( $net_packed & $mask );
 	}
 
 	private function require_admin_includes() {
