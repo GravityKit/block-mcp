@@ -222,6 +222,21 @@ class REST_Controller {
 			)
 		);
 
+		// Storage-mode auto-discovery scan (BLOCK-13). The scan response
+		// returns the full classification, and per-block storage_mode is
+		// already inline on get_page_blocks — no separate GET endpoint
+		// is needed.
+		register_rest_route(
+			self::NAMESPACE,
+			'/storage-modes/scan',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'scan_storage_modes' ),
+				'permission_callback' => array( $this, 'check_edit_permissions' ),
+				'args'                => array(),
+			)
+		);
+
 		// Site usage.
 		register_rest_route(
 			self::NAMESPACE,
@@ -1027,6 +1042,29 @@ class REST_Controller {
 			return $this->handle_error( $e );
 		}
 	}
+
+	/**
+	 * POST /storage-modes/scan (BLOCK-13)
+	 *
+	 * Walks every published post, samples each distinct block name, and
+	 * persists `block_name => storage_mode` to wp_options. Subsequent
+	 * `get_page_blocks` annotations and BLOCK-14 dual-storage enforcement
+	 * use the live classification instead of the filter defaults.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function scan_storage_modes( $request ) {
+		unset( $request );
+		try {
+			$result = $this->block_inventory->scan_storage_modes();
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
 
 	// =========================================================================
 	// URL Resolver Endpoint

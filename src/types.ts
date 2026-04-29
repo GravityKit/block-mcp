@@ -342,6 +342,16 @@ export interface LegacyPatternEntry {
   legacy_blocks: string[];
 }
 
+/** Result of `scan_storage_modes` — block_name → "static" | "dynamic" | "dual". */
+export interface StorageModeScanResult {
+  scanned_posts: number;
+  unique_blocks: number;
+  classification: Record<string, 'static' | 'dynamic' | 'dual'>;
+  dual_count: number;
+  dynamic_count: number;
+  static_count: number;
+}
+
 /** Site-wide block and pattern usage statistics. */
 export interface SiteUsage {
   /** Per-block-type usage counts */

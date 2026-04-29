@@ -50,6 +50,16 @@ class Block_Inventory {
 	const STORAGE_MODE_DYNAMIC = 'dynamic';
 	const STORAGE_MODE_DUAL    = 'dual';
 
+	/**
+	 * Option key for the BLOCK-13 storage-mode scan results.
+	 *
+	 * Persists a `block_name => storage_mode` map produced by walking the
+	 * site once and applying the dynamic+innerHTML heuristic. Read first
+	 * by `is_block_dual_storage()` so the live classification beats the
+	 * filter defaults.
+	 */
+	const STORAGE_MODES_OPTION = 'gk_block_api_storage_modes';
+
 	// ──────────────────────────────────────────────────────────────────
 	// Storage-mode classification.
 	//
@@ -80,7 +90,7 @@ class Block_Inventory {
 	 * @return string
 	 */
 	public function resolve_storage_mode( $block_name, $is_dynamic ) {
-		if ( $this->is_dual_storage_block( $block_name ) ) {
+		if ( $this->is_block_dual_storage( $block_name ) ) {
 			return self::STORAGE_MODE_DUAL;
 		}
 		return $is_dynamic ? self::STORAGE_MODE_DYNAMIC : self::STORAGE_MODE_STATIC;
@@ -92,7 +102,14 @@ class Block_Inventory {
 	 * @param string $block_name Fully-qualified block name.
 	 * @return bool
 	 */
-	public function is_dual_storage_block( $block_name ) {
+	public function is_block_dual_storage( $block_name ) {
+		// 1. Authoritative: if a site-scan has run (BLOCK-13), trust it.
+		$scanned = get_option( self::STORAGE_MODES_OPTION, array() );
+		if ( is_array( $scanned ) && isset( $scanned[ $block_name ] ) ) {
+			return self::STORAGE_MODE_DUAL === $scanned[ $block_name ];
+		}
+
+		// 2. Fallback: filterable static defaults. Cached per-request.
 		static $cache = null;
 		if ( null === $cache ) {
 			/**
@@ -100,7 +117,7 @@ class Block_Inventory {
 			 *
 			 * Dual-storage blocks store the same content in both
 			 * `attributes` and `innerHTML` and require both to be kept
-			 * in sync.
+			 * in sync. Used when the BLOCK-13 site-scan has not run yet.
 			 *
 			 * @param string[] $dual_blocks Block names considered dual-storage.
 			 */
@@ -117,6 +134,118 @@ class Block_Inventory {
 	}
 
 	/**
+	 * Scan all published content and classify every distinct block name
+	 * as static, dynamic, or dual.
+	 *
+	 * Heuristic (no JS validateBlock available server-side):
+	 *   - is_dynamic === true  AND innerHTML non-empty → DUAL (pre-rendered)
+	 *   - is_dynamic === true  AND innerHTML empty     → DYNAMIC
+	 *   - is_dynamic === false AND innerHTML present   → STATIC
+	 *   - is_dynamic === false AND innerHTML empty     → STATIC (placeholder)
+	 *
+	 * Persists results to `wp_options.gk_block_api_storage_modes` so
+	 * subsequent calls to `is_block_dual_storage()` use the live data
+	 * instead of the filter defaults.
+	 *
+	 * @return array {
+	 *     @type int   $scanned_posts Number of posts walked.
+	 *     @type int   $unique_blocks Count of distinct block names found.
+	 *     @type array $classification block_name => storage_mode.
+	 *     @type int   $dual_count     How many blocks were classified as dual.
+	 *     @type int   $dynamic_count  How many blocks were classified as dynamic.
+	 *     @type int   $static_count   How many blocks were classified as static.
+	 * }
+	 */
+	public function scan_storage_modes() {
+		$post_types = get_post_types( array( 'public' => true ), 'names' );
+		$query      = new \WP_Query(
+			array(
+				'post_type'      => array_values( $post_types ),
+				'post_status'    => 'publish',
+				'posts_per_page' => -1,
+				'no_found_rows'  => true,
+				'fields'         => 'ids',
+			)
+		);
+
+		$samples       = array(); // block_name => first {is_dynamic, has_inner} encountered
+		$scanned_posts = 0;
+
+		foreach ( $query->posts as $post_id ) {
+			$content = get_post_field( 'post_content', $post_id );
+			if ( empty( $content ) ) {
+				continue;
+			}
+			$scanned_posts++;
+			$blocks = parse_blocks( $content );
+			if ( is_array( $blocks ) ) {
+				$this->collect_storage_samples( $blocks, $samples );
+			}
+		}
+
+		$classification = array();
+		$counts         = array(
+			self::STORAGE_MODE_STATIC  => 0,
+			self::STORAGE_MODE_DYNAMIC => 0,
+			self::STORAGE_MODE_DUAL    => 0,
+		);
+		foreach ( $samples as $name => $sample ) {
+			if ( $sample['is_dynamic'] && $sample['has_inner'] ) {
+				$mode = self::STORAGE_MODE_DUAL;
+			} elseif ( $sample['is_dynamic'] ) {
+				$mode = self::STORAGE_MODE_DYNAMIC;
+			} else {
+				$mode = self::STORAGE_MODE_STATIC;
+			}
+			$classification[ $name ] = $mode;
+			$counts[ $mode ]++;
+		}
+
+		ksort( $classification );
+		update_option( self::STORAGE_MODES_OPTION, $classification, false );
+
+		return array(
+			'scanned_posts'  => $scanned_posts,
+			'unique_blocks'  => count( $classification ),
+			'classification' => $classification,
+			'dual_count'     => $counts[ self::STORAGE_MODE_DUAL ],
+			'dynamic_count'  => $counts[ self::STORAGE_MODE_DYNAMIC ],
+			'static_count'   => $counts[ self::STORAGE_MODE_STATIC ],
+		);
+	}
+
+	/**
+	 * Walk a parsed-block tree and record one sample per distinct block name.
+	 *
+	 * "has_inner" is `true` when `innerHTML` contains anything beyond
+	 * whitespace and HTML comments — this is the signal that a server-
+	 * rendered block is also pre-rendered for SEO (i.e., dual-storage).
+	 *
+	 * @param array $blocks  parse_blocks() output.
+	 * @param array &$samples Accumulator: block_name => { is_dynamic, has_inner }.
+	 */
+	private function collect_storage_samples( $blocks, array &$samples ) {
+		foreach ( $blocks as $block ) {
+			if ( empty( $block['blockName'] ) ) {
+				continue;
+			}
+			$name = $block['blockName'];
+			if ( ! isset( $samples[ $name ] ) ) {
+				$inner       = isset( $block['innerHTML'] ) ? $block['innerHTML'] : '';
+				// Strip HTML comments + whitespace for the "non-empty" test.
+				$stripped    = trim( preg_replace( '/<!--.*?-->/s', '', $inner ) );
+				$samples[ $name ] = array(
+					'is_dynamic' => $this->is_block_dynamic( $name ),
+					'has_inner'  => '' !== $stripped,
+				);
+			}
+			if ( ! empty( $block['innerBlocks'] ) ) {
+				$this->collect_storage_samples( $block['innerBlocks'], $samples );
+			}
+		}
+	}
+
+	/**
 	 * Whether a registered block type is server-rendered.
 	 *
 	 * Cached per block name. Wraps WP_Block_Type_Registry to give
@@ -126,7 +255,7 @@ class Block_Inventory {
 	 * @param string $block_name Fully-qualified block name.
 	 * @return bool
 	 */
-	public function is_dynamic_block( $block_name ) {
+	public function is_block_dynamic( $block_name ) {
 		static $cache = array();
 		if ( ! isset( $cache[ $block_name ] ) ) {
 			$registry        = \WP_Block_Type_Registry::get_instance();

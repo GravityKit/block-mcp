@@ -188,7 +188,7 @@ class Block_CRUD {
 			null !== $inner_html
 			&& empty( $attributes )
 			&& isset( $block['blockName'] )
-			&& $this->is_dual_storage_block( $block['blockName'] )
+			&& $this->is_block_dual_storage( $block['blockName'] )
 		) {
 			return $this->dual_storage_error( $block['blockName'] );
 		}
@@ -1065,8 +1065,8 @@ class Block_CRUD {
 	 * @param string $block_name Fully-qualified block name.
 	 * @return bool
 	 */
-	public function is_dual_storage_block( $block_name ) {
-		return $this->inventory->is_dual_storage_block( $block_name );
+	public function is_block_dual_storage( $block_name ) {
+		return $this->inventory->is_block_dual_storage( $block_name );
 	}
 
 	/**

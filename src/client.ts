@@ -17,6 +17,7 @@ import type {
   BlockWriteResponse,
   BlockDeleteResponse,
   BlockReplaceRangeResponse,
+  StorageModeScanResult,
   PatternInsertResponse,
   MutationRequest,
   MutationResponse,
@@ -278,6 +279,20 @@ export class WordPressBlockClient {
     const response = await this.client.get<ResolveUrlResponse>('/resolve', {
       params: { url },
     });
+    return response.data;
+  }
+
+  /**
+   * Scan all published content and classify every distinct block name as
+   * static / dynamic / dual. Persists results to a WP option so subsequent
+   * `get_page_blocks` annotations and dual-storage enforcement use the
+   * live classification instead of the filter defaults.
+   *
+   * Slow (walks every published post). Run once after install or when
+   * significantly changing the site's block-using content.
+   */
+  async scanStorageModes(): Promise<StorageModeScanResult> {
+    const response = await this.client.post<StorageModeScanResult>('/storage-modes/scan', {});
     return response.data;
   }
 

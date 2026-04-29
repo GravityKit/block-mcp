@@ -38804,6 +38804,19 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Scan all published content and classify every distinct block name as
+   * static / dynamic / dual. Persists results to a WP option so subsequent
+   * `get_page_blocks` annotations and dual-storage enforcement use the
+   * live classification instead of the filter defaults.
+   *
+   * Slow (walks every published post). Run once after install or when
+   * significantly changing the site's block-using content.
+   */
+  async scanStorageModes() {
+    const response = await this.client.post("/storage-modes/scan", {});
+    return response.data;
+  }
+  /**
    * Get site-wide block and pattern usage statistics.
    *
    * @param refresh - If true, bust the transient cache and regenerate stats
@@ -39365,6 +39378,14 @@ var DISCOVERY_TOOLS = [
     }
   },
   {
+    name: "scan_storage_modes",
+    description: 'Walk every published post and classify each distinct block name as "static" | "dynamic" | "dual" (writes the result to the gk_block_api_storage_modes WP option). Slow \u2014 runs once after install or when the site\'s block ecosystem changes significantly. After this runs, get_page_blocks `storage_mode` annotations and dual-storage enforcement use the live classification instead of the filter defaults. Returns `{ scanned_posts, unique_blocks, classification, dual_count, dynamic_count, static_count }`.',
+    inputSchema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
     name: "resolve_url",
     description: "Resolve a URL or path to a WordPress post ID. Accepts full URLs (https://site.com/path/) or paths (/path/). Handles all post types and pretty permalinks. Use this before any get_page_blocks / update / mutate call when you only have a URL.",
     inputSchema: {
@@ -39446,6 +39467,9 @@ async function handleDiscoveryTool(toolName, args, client2) {
     case "get_site_usage": {
       const usage = await client2.getSiteUsage(args.refresh);
       return usage;
+    }
+    case "scan_storage_modes": {
+      return await client2.scanStorageModes();
     }
     case "resolve_url": {
       const url3 = args.url;

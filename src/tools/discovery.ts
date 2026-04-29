@@ -93,6 +93,15 @@ export const DISCOVERY_TOOLS = [
     },
   },
   {
+    name: 'scan_storage_modes',
+    description:
+      'Walk every published post and classify each distinct block name as "static" | "dynamic" | "dual" (writes the result to the gk_block_api_storage_modes WP option). Slow — runs once after install or when the site\'s block ecosystem changes significantly. After this runs, get_page_blocks `storage_mode` annotations and dual-storage enforcement use the live classification instead of the filter defaults. Returns `{ scanned_posts, unique_blocks, classification, dual_count, dynamic_count, static_count }`.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
     name: 'resolve_url',
     description:
       'Resolve a URL or path to a WordPress post ID. Accepts full URLs (https://site.com/path/) or paths (/path/). Handles all post types and pretty permalinks. Use this before any get_page_blocks / update / mutate call when you only have a URL.',
@@ -197,6 +206,10 @@ export async function handleDiscoveryTool(
     case 'get_site_usage': {
       const usage = await client.getSiteUsage(args.refresh as boolean | undefined);
       return usage;
+    }
+
+    case 'scan_storage_modes': {
+      return await client.scanStorageModes();
     }
 
     case 'resolve_url': {

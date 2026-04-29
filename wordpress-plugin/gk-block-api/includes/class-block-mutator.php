@@ -251,7 +251,7 @@ class Block_Mutator {
 				// or `replace-block` (with both fields).
 				if (
 					isset( $parent[ $target_index ]['blockName'] )
-					&& $this->crud->is_dual_storage_block( $parent[ $target_index ]['blockName'] )
+					&& $this->crud->is_block_dual_storage( $parent[ $target_index ]['blockName'] )
 				) {
 					return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
 				}
