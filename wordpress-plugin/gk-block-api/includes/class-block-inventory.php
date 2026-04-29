@@ -60,6 +60,18 @@ class Block_Inventory {
 	 */
 	const STORAGE_MODES_OPTION = 'gk_block_api_storage_modes';
 
+	/** Last-run timestamp for the storage-mode scan (used for rate limiting). */
+	const STORAGE_SCAN_LAST_RUN_OPTION = 'gk_block_api_storage_modes_last_run';
+
+	/**
+	 * Hard chunk size for site-wide post scans. Picked to keep peak memory
+	 * predictable on shared hosting (~256MB) regardless of avg post size.
+	 */
+	const SCAN_BATCH_SIZE = 200;
+
+	/** Minimum interval between full storage-mode scans (seconds). */
+	const STORAGE_SCAN_MIN_INTERVAL = HOUR_IN_SECONDS;
+
 	// ──────────────────────────────────────────────────────────────────
 	// Storage-mode classification.
 	//
@@ -156,53 +168,128 @@ class Block_Inventory {
 	 *     @type int   $static_count   How many blocks were classified as static.
 	 * }
 	 */
-	public function scan_storage_modes() {
-		$post_types = get_post_types( array( 'public' => true ), 'names' );
-		$query      = new \WP_Query(
-			array(
-				'post_type'      => array_values( $post_types ),
-				'post_status'    => 'publish',
-				'posts_per_page' => -1,
-				'no_found_rows'  => true,
-				'fields'         => 'ids',
-			)
-		);
+	public function scan_storage_modes( $force = false ) {
+		// Rate limit: the optional content sweep is unbounded across post count.
+		// Even though most of the work now comes from `WP_Block_Type_Registry`,
+		// we still want to cap how often this can be triggered.
+		$last_run = (int) get_option( self::STORAGE_SCAN_LAST_RUN_OPTION, 0 );
+		if ( ! $force && $last_run && ( time() - $last_run ) < self::STORAGE_SCAN_MIN_INTERVAL ) {
+			$retry_after = self::STORAGE_SCAN_MIN_INTERVAL - ( time() - $last_run );
+			return new \WP_Error(
+				'scan_rate_limited',
+				sprintf(
+					/* translators: %d: seconds until the next scan is allowed */
+					__( 'Storage-mode scan ran recently. Try again in %d seconds.', 'gk-block-api' ),
+					$retry_after
+				),
+				array( 'status' => 429, 'retry_after' => $retry_after )
+			);
+		}
 
-		$samples       = array(); // block_name => first {is_dynamic, has_inner} encountered
-		$scanned_posts = 0;
-
-		foreach ( $query->posts as $post_id ) {
-			$content = get_post_field( 'post_content', $post_id );
-			if ( empty( $content ) ) {
-				continue;
-			}
-			$scanned_posts++;
-			$blocks = parse_blocks( $content );
-			if ( is_array( $blocks ) ) {
-				$this->collect_storage_samples( $blocks, $samples );
+		// ── Pass 1: registry-based baseline.
+		// `WP_Block_Type_Registry` knows every block's render_callback (→ dynamic)
+		// and its `attributes` schema. Blocks with `attributes[*].source` set to
+		// 'html' / 'attribute' / 'children' / 'node' / 'rich-text' / 'tag' read
+		// from innerHTML at edit time — that's the structural dual-storage
+		// signal. Combine with `is_dynamic()` and we cover the whole registered
+		// surface without touching post_content.
+		$classification     = array();
+		$registry           = \WP_Block_Type_Registry::get_instance();
+		$dynamic_candidates = array();
+		if ( $registry ) {
+			foreach ( $registry->get_all_registered() as $name => $block_type ) {
+				$is_dynamic  = $block_type->is_dynamic();
+				$reads_inner = $this->block_reads_innerhtml_via_attributes( $block_type );
+				if ( $is_dynamic && $reads_inner ) {
+					$classification[ $name ] = self::STORAGE_MODE_DUAL;
+				} elseif ( $is_dynamic ) {
+					// Dynamic blocks may still be dual via custom JS save() that
+					// PHP can't see (e.g., yoast/faq-block). Mark as dynamic
+					// here; pass 2 may upgrade to dual based on evidence.
+					$classification[ $name ]     = self::STORAGE_MODE_DYNAMIC;
+					$dynamic_candidates[ $name ] = true;
+				} else {
+					$classification[ $name ] = self::STORAGE_MODE_STATIC;
+				}
 			}
 		}
 
-		$classification = array();
-		$counts         = array(
+		// ── Pass 2: evidence sweep — single content walk that does TWO jobs.
+		//
+		//   (a) Upgrade dynamic candidates → dual when we see a stored
+		//       instance with non-empty innerHTML (custom JS save() pattern,
+		//       e.g., yoast/faq-block).
+		//
+		//   (b) Discover orphan blocks — names present in post_content but
+		//       NOT in the live registry. These come from deactivated /
+		//       uninstalled plugins. Without a registration we can't run
+		//       `is_dynamic()`, so we classify by the only signal we have:
+		//         - any stored instance with non-empty innerHTML → static
+		//           (innerHTML is the only thing surviving; an AI can edit
+		//           it as text)
+		//         - all stored instances empty → dynamic (was server-
+		//           rendered, now renders nothing — broken)
+		//
+		// Skip the walk entirely if there are no dynamic candidates AND we
+		// already classified every live block — we still walk in that case
+		// because orphans are invisible to the registry but visible to AI
+		// agents reading pages. The walk short-circuits via remaining-set
+		// checks once everything is confirmed.
+		$scanned_posts = 0;
+		$orphan_state  = array(); // orphan_name => array( 'mode' => static|dynamic, 'has_inner' => bool )
+		$post_types    = array_values( get_post_types( array( 'public' => true ), 'names' ) );
+		$paged         = 1;
+		$remaining     = $dynamic_candidates;
+		do {
+			$batch = get_posts(
+				array(
+					'post_type'           => $post_types,
+					'post_status'         => 'publish',
+					'posts_per_page'      => self::SCAN_BATCH_SIZE,
+					'paged'               => $paged,
+					'fields'              => 'ids',
+					'no_found_rows'       => true,
+					'orderby'             => 'ID',
+					'order'               => 'ASC',
+					'ignore_sticky_posts' => true,
+				)
+			);
+			foreach ( $batch as $post_id ) {
+				$content = get_post_field( 'post_content', $post_id, 'raw' );
+				if ( empty( $content ) ) {
+					continue;
+				}
+				$scanned_posts++;
+				$blocks = parse_blocks( $content );
+				if ( is_array( $blocks ) ) {
+					$this->scan_evidence_recursive( $blocks, $remaining, $classification, $orphan_state );
+				}
+			}
+			if ( function_exists( 'wp_cache_flush_runtime' ) ) {
+				wp_cache_flush_runtime();
+			}
+			$paged++;
+		} while ( count( $batch ) === self::SCAN_BATCH_SIZE );
+
+		// Promote orphan_state into classification with a final mode decision.
+		foreach ( $orphan_state as $name => $state ) {
+			$classification[ $name ] = $state['has_inner'] ? self::STORAGE_MODE_STATIC : self::STORAGE_MODE_DYNAMIC;
+		}
+
+		ksort( $classification );
+		$counts = array(
 			self::STORAGE_MODE_STATIC  => 0,
 			self::STORAGE_MODE_DYNAMIC => 0,
 			self::STORAGE_MODE_DUAL    => 0,
 		);
-		foreach ( $samples as $name => $sample ) {
-			if ( $sample['is_dynamic'] && $sample['has_inner'] ) {
-				$mode = self::STORAGE_MODE_DUAL;
-			} elseif ( $sample['is_dynamic'] ) {
-				$mode = self::STORAGE_MODE_DYNAMIC;
-			} else {
-				$mode = self::STORAGE_MODE_STATIC;
+		foreach ( $classification as $mode ) {
+			if ( isset( $counts[ $mode ] ) ) {
+				$counts[ $mode ]++;
 			}
-			$classification[ $name ] = $mode;
-			$counts[ $mode ]++;
 		}
 
-		ksort( $classification );
 		update_option( self::STORAGE_MODES_OPTION, $classification, false );
+		update_option( self::STORAGE_SCAN_LAST_RUN_OPTION, time(), false );
 
 		return array(
 			'scanned_posts'  => $scanned_posts,
@@ -215,35 +302,75 @@ class Block_Inventory {
 	}
 
 	/**
-	 * Walk a parsed-block tree and record one sample per distinct block name.
+	 * Whether any of the block type's registered attributes declares a
+	 * `source` that pulls from innerHTML — the structural signal of a
+	 * block whose attributes mirror its rendered HTML.
 	 *
-	 * "has_inner" is `true` when `innerHTML` contains anything beyond
-	 * whitespace and HTML comments — this is the signal that a server-
-	 * rendered block is also pre-rendered for SEO (i.e., dual-storage).
-	 *
-	 * @param array $blocks  parse_blocks() output.
-	 * @param array &$samples Accumulator: block_name => { is_dynamic, has_inner }.
+	 * @param \WP_Block_Type $block_type
+	 * @return bool
 	 */
-	private function collect_storage_samples( $blocks, array &$samples ) {
+	private function block_reads_innerhtml_via_attributes( $block_type ) {
+		if ( empty( $block_type->attributes ) || ! is_array( $block_type->attributes ) ) {
+			return false;
+		}
+		// Sources that read from the saved markup (per Block API spec).
+		static $inner_sources = array( 'html' => 1, 'attribute' => 1, 'children' => 1, 'node' => 1, 'rich-text' => 1, 'tag' => 1, 'text' => 1 );
+		foreach ( $block_type->attributes as $attr ) {
+			if ( is_array( $attr ) && isset( $attr['source'] ) && isset( $inner_sources[ $attr['source'] ] ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Combined evidence walker (pass 2 of scan_storage_modes).
+	 *
+	 * For each parsed block:
+	 *   - If the block is in `$remaining` (a registered dynamic candidate),
+	 *     non-empty innerHTML upgrades it to `dual` and removes it from the
+	 *     remaining set.
+	 *   - If the block is NOT in `$classification` (orphan from a
+	 *     deactivated plugin), accumulate `has_inner` so the caller can
+	 *     classify it static (any non-empty seen) or dynamic (all empty).
+	 *
+	 * @param array $blocks          parse_blocks() output.
+	 * @param array &$remaining      block_name => true; unconfirmed dual candidates.
+	 * @param array &$classification block_name => storage_mode; mutated on dual upgrade.
+	 * @param array &$orphan_state   orphan_name => array('has_inner' => bool); mutated.
+	 */
+	private function scan_evidence_recursive( $blocks, array &$remaining, array &$classification, array &$orphan_state ) {
 		foreach ( $blocks as $block ) {
 			if ( empty( $block['blockName'] ) ) {
 				continue;
 			}
-			$name = $block['blockName'];
-			if ( ! isset( $samples[ $name ] ) ) {
-				$inner       = isset( $block['innerHTML'] ) ? $block['innerHTML'] : '';
-				// Strip HTML comments + whitespace for the "non-empty" test.
-				$stripped    = trim( preg_replace( '/<!--.*?-->/s', '', $inner ) );
-				$samples[ $name ] = array(
-					'is_dynamic' => $this->is_block_dynamic( $name ),
-					'has_inner'  => '' !== $stripped,
-				);
+			$name      = $block['blockName'];
+			$inner     = isset( $block['innerHTML'] ) ? $block['innerHTML'] : '';
+			$stripped  = trim( preg_replace( '/<!--.*?-->/s', '', $inner ) );
+			$has_inner = '' !== $stripped;
+
+			if ( isset( $remaining[ $name ] ) ) {
+				if ( $has_inner ) {
+					$classification[ $name ] = self::STORAGE_MODE_DUAL;
+					unset( $remaining[ $name ] );
+				}
+			} elseif ( ! isset( $classification[ $name ] ) ) {
+				// Orphan: seen in content but absent from the live registry.
+				// Track whether we've seen any non-empty stored instance.
+				if ( ! isset( $orphan_state[ $name ] ) ) {
+					$orphan_state[ $name ] = array( 'has_inner' => false );
+				}
+				if ( $has_inner ) {
+					$orphan_state[ $name ]['has_inner'] = true;
+				}
 			}
+
 			if ( ! empty( $block['innerBlocks'] ) ) {
-				$this->collect_storage_samples( $block['innerBlocks'], $samples );
+				$this->scan_evidence_recursive( $block['innerBlocks'], $remaining, $classification, $orphan_state );
 			}
 		}
 	}
+
 
 	/**
 	 * Whether a registered block type is server-rendered.
@@ -334,37 +461,45 @@ class Block_Inventory {
 	 * @return array Structured usage stats.
 	 */
 	private function build_stats() {
-		$block_usage        = array();
-		$namespace_totals   = array();
-		$pattern_refs       = array();
-		$posts_per_block    = array();
+		$block_usage      = array();
+		$namespace_totals = array();
+		$pattern_refs     = array();
+		$posts_per_block  = array();
 
-		// Query all published posts and pages with block content.
-		$post_types = get_post_types( array( 'public' => true ), 'names' );
-
-		$query_args = array(
-			'post_type'      => array_values( $post_types ),
-			'post_status'    => 'publish',
-			'posts_per_page' => -1,
-			'no_found_rows'  => true,
-			'fields'         => 'ids',
-		);
-
-		$post_ids = get_posts( $query_args );
-
-		foreach ( $post_ids as $post_id ) {
-			$content = get_post_field( 'post_content', $post_id );
-
-			if ( empty( $content ) || ! has_blocks( $content ) ) {
-				continue;
+		// Chunked walk — see scan_storage_modes() for rationale. Same memory
+		// ceiling, no full-table scan in a single shot.
+		$post_types = array_values( get_post_types( array( 'public' => true ), 'names' ) );
+		$paged      = 1;
+		do {
+			$batch = get_posts(
+				array(
+					'post_type'           => $post_types,
+					'post_status'         => 'publish',
+					'posts_per_page'      => self::SCAN_BATCH_SIZE,
+					'paged'               => $paged,
+					'fields'              => 'ids',
+					'no_found_rows'       => true,
+					'orderby'             => 'ID',
+					'order'               => 'ASC',
+					'ignore_sticky_posts' => true,
+				)
+			);
+			foreach ( $batch as $post_id ) {
+				$content = get_post_field( 'post_content', $post_id, 'raw' );
+				if ( empty( $content ) || ! has_blocks( $content ) ) {
+					continue;
+				}
+				$blocks = parse_blocks( $content );
+				if ( ! is_array( $blocks ) ) {
+					continue;
+				}
+				$this->count_blocks( $blocks, $post_id, $block_usage, $posts_per_block, $namespace_totals, $pattern_refs );
 			}
-
-			$blocks = parse_blocks( $content );
-			if ( ! is_array( $blocks ) ) {
-				continue;
+			if ( function_exists( 'wp_cache_flush_runtime' ) ) {
+				wp_cache_flush_runtime();
 			}
-			$this->count_blocks( $blocks, $post_id, $block_usage, $posts_per_block, $namespace_totals, $pattern_refs );
-		}
+			$paged++;
+		} while ( count( $batch ) === self::SCAN_BATCH_SIZE );
 
 		// Merge post_count into block_usage.
 		foreach ( $block_usage as $name => &$data ) {
@@ -494,11 +629,17 @@ class Block_Inventory {
 		$preferences = new Preferences();
 		$legacy      = array();
 
+		// Synced patterns are user-created — typically dozens, occasionally
+		// hundreds. Hard-cap at 500 to keep memory bounded; sites with more
+		// can extend via the `gk_block_api_legacy_patterns_scan_limit` filter.
 		$patterns = get_posts( array(
-			'post_type'      => 'wp_block',
-			'post_status'    => 'publish',
-			'posts_per_page' => -1,
-			'no_found_rows'  => true,
+			'post_type'           => 'wp_block',
+			'post_status'         => 'publish',
+			'posts_per_page'      => (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 ),
+			'no_found_rows'       => true,
+			'orderby'             => 'ID',
+			'order'               => 'ASC',
+			'ignore_sticky_posts' => true,
 		) );
 
 		foreach ( $patterns as $pattern ) {

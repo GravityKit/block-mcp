@@ -167,11 +167,17 @@ class Pattern_Manager {
 	 * @return array Formatted pattern data.
 	 */
 	private function get_synced_patterns( $args ) {
+		// Synced patterns are user-created; capped to keep memory bounded
+		// even on edge-case sites with thousands. Extend via the
+		// `gk_block_api_synced_patterns_query_limit` filter if needed.
 		$query_args = array(
-			'post_type'      => 'wp_block',
-			'post_status'    => 'publish',
-			'posts_per_page' => -1,
-			'no_found_rows'  => true,
+			'post_type'           => 'wp_block',
+			'post_status'         => 'publish',
+			'posts_per_page'      => (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 ),
+			'no_found_rows'       => true,
+			'orderby'             => 'modified',
+			'order'               => 'DESC',
+			'ignore_sticky_posts' => true,
 		);
 
 		// Search by name.
@@ -396,20 +402,40 @@ class Pattern_Manager {
 	 * @return int Number of pages/posts referencing this pattern.
 	 */
 	private function count_pattern_references( $pattern_id ) {
+		$pattern_id = (int) $pattern_id;
+		if ( $pattern_id <= 0 ) {
+			return 0;
+		}
+
+		// Per-request memoization. `format_synced_pattern()` calls this once
+		// per pattern in a list; without memoization an /patterns response
+		// of N items triggers N table scans.
+		static $cache = array();
+		if ( isset( $cache[ $pattern_id ] ) ) {
+			return $cache[ $pattern_id ];
+		}
+
 		global $wpdb;
 
-		// Search for core/block with this ref ID in post_content.
+		// Match `"ref":<id>` regardless of surrounding attribute order or
+		// whitespace. `esc_like` neutralizes `%`/`_` if a future ID format
+		// ever contains them, and properly escapes the JSON colon/quotes
+		// for LIKE matching. Direct query because there's no WP API for
+		// content full-text search and post_meta would still require this
+		// pattern across post_content.
+		$needle = '%' . $wpdb->esc_like( '"ref":' . $pattern_id ) . '%';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$count = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT( DISTINCT ID ) FROM {$wpdb->posts}
 				WHERE post_status = 'publish'
 				AND post_content LIKE %s",
-				'%<!-- wp:block {"ref":' . $pattern_id . '} /-->%'
+				$needle
 			)
 		);
 
-		return (int) $count;
+		$cache[ $pattern_id ] = (int) $count;
+		return $cache[ $pattern_id ];
 	}
 
 	/**

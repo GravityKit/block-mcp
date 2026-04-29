@@ -157,7 +157,10 @@ class REST_Controller {
 
 		register_rest_route(
 			self::NAMESPACE,
-			'/block-types/(?P<namespace>[a-zA-Z0-9_-]+)',
+			// Block namespaces are lowercase per the WordPress Block API spec.
+			// Allowing uppercase here lets case-different URLs hit different
+			// cache keys upstream (CDN poisoning). Restrict to lowercase.
+			'/block-types/(?P<namespace>[a-z0-9_-]+)',
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'get_block_types_by_namespace' ),
@@ -222,17 +225,17 @@ class REST_Controller {
 			)
 		);
 
-		// Storage-mode auto-discovery scan (BLOCK-13). The scan response
-		// returns the full classification, and per-block storage_mode is
-		// already inline on get_page_blocks — no separate GET endpoint
-		// is needed.
+		// Storage-mode auto-discovery scan (BLOCK-13). Capability is
+		// `manage_options` (not `edit_posts`) — the scan walks every public
+		// post type and writes a site-wide option. Editor-role users should
+		// not be able to trigger it.
 		register_rest_route(
 			self::NAMESPACE,
 			'/storage-modes/scan',
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'scan_storage_modes' ),
-				'permission_callback' => array( $this, 'check_edit_permissions' ),
+				'permission_callback' => function () { return current_user_can( 'manage_options' ); },
 				'args'                => array(),
 			)
 		);
@@ -1139,11 +1142,19 @@ class REST_Controller {
 				? array_filter( array_map( 'trim', explode( ',', $post_type ) ) )
 				: get_post_types( array( 'public' => true ), 'names' );
 
+			// `any` is exclusive — combining it with explicit statuses (e.g.,
+			// "publish,any") used to silently drop the explicit ones. Treat
+			// `any` as "any" only when it's the sole value.
 			$ps_param = $post_status
 				? array_filter( array_map( 'trim', explode( ',', $post_status ) ) )
 				: array( 'publish' );
-			if ( in_array( 'any', $ps_param, true ) ) {
+			if ( count( $ps_param ) === 1 && reset( $ps_param ) === 'any' ) {
 				$ps_param = 'any';
+			} else {
+				$ps_param = array_values( array_diff( $ps_param, array( 'any' ) ) );
+				if ( empty( $ps_param ) ) {
+					$ps_param = array( 'publish' );
+				}
 			}
 
 			$args = array(
