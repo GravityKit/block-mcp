@@ -1,0 +1,843 @@
+{
+  "source_url": "https://www.gravitykit.com/docs/gravitycalendar/creating-a-calendar/",
+  "post_id": 883438,
+  "post_type": "docs",
+  "title": "Getting Started with GravityCalendar",
+  "slug": "creating-a-calendar",
+  "fetched_at": "2026-04-29T19:08:51.385Z",
+  "response": {
+    "summary": {
+      "total_blocks": 64,
+      "top_level_blocks": 64,
+      "block_types": {
+        "core/paragraph": 29,
+        "core/heading": 12,
+        "core/image": 9,
+        "core/list": 8,
+        "core/separator": 5,
+        "core/embed": 1
+      },
+      "sections": [],
+      "headings": [
+        {
+          "path": [
+            4
+          ],
+          "level": 3,
+          "text": "Prefer to Watch?"
+        },
+        {
+          "path": [
+            10
+          ],
+          "level": 3,
+          "text": "How GravityCalendar Works"
+        },
+        {
+          "path": [
+            16
+          ],
+          "level": 3,
+          "text": "What You Will Need"
+        },
+        {
+          "path": [
+            22
+          ],
+          "level": 3,
+          "text": "Step 1: Create a Form with Date Fields"
+        },
+        {
+          "path": [
+            46
+          ],
+          "level": 3,
+          "text": "Step 2: Create a Calendar Feed"
+        },
+        {
+          "path": [
+            56
+          ],
+          "level": 4,
+          "text": "Required Fields"
+        },
+        {
+          "path": [
+            64
+          ],
+          "level": 4,
+          "text": "Optional Fields"
+        },
+        {
+          "path": [
+            68
+          ],
+          "level": 4,
+          "text": "Customizing the Calendar Appearance"
+        },
+        {
+          "path": [
+            90
+          ],
+          "level": 4,
+          "text": "Additional Options"
+        },
+        {
+          "path": [
+            102
+          ],
+          "level": 3,
+          "text": "Step 3: Add Entries to Your Form"
+        },
+        {
+          "path": [
+            114
+          ],
+          "level": 3,
+          "text": "Step 4: Display Your Calendar"
+        },
+        {
+          "path": [
+            124
+          ],
+          "level": 3,
+          "text": "Next Steps"
+        }
+      ],
+      "legacy_blocks": {
+        "total": 0,
+        "by_namespace": {
+          "stackable": 0,
+          "ugb": 0,
+          "jetpack": 0
+        },
+        "by_block_name": []
+      },
+      "max_path_depth": 0
+    },
+    "blocks": [
+      {
+        "index": 0,
+        "path": [
+          0
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>GravityCalendar displays your Gravity Forms entries in a calendar format. If you are collecting dates through a form (event registrations, project deadlines, staff schedules, class signups), GravityCalendar lets you visualize that data on an interactive calendar your visitors can browse.</p>",
+        "text_preview": "GravityCalendar displays your Gravity Forms entries in a calendar format. If you are collecting date"
+      },
+      {
+        "index": 1,
+        "path": [
+          2
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Think of it like a GravityView for calendars: your form collects the data, and GravityCalendar presents it visually.</p>",
+        "text_preview": "Think of it like a GravityView for calendars: your form collects the data, and GravityCalendar prese"
+      },
+      {
+        "index": 2,
+        "path": [
+          4
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Prefer-to-Watch-vxud5\" class=\"wp-block-heading\">Prefer to Watch?</h3>",
+        "text_preview": "Prefer to Watch?"
+      },
+      {
+        "index": 3,
+        "path": [
+          6
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>This video walks through the entire process:</p>",
+        "text_preview": "This video walks through the entire process:"
+      },
+      {
+        "index": 4,
+        "path": [
+          8
+        ],
+        "name": "core/embed",
+        "attributes": {
+          "url": "https://www.youtube.com/watch?v=_Uok7E2Yg0c",
+          "type": "video",
+          "providerNameSlug": "youtube",
+          "responsive": true,
+          "className": "wp-embed-aspect-16-9 wp-has-aspect-ratio"
+        },
+        "dynamic": false,
+        "innerHTML": "<figure class=\"wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio\"><div class=\"wp-block-embed__wrapper\">\nhttps://www.youtube.com/watch?v=_Uok7E2Yg0c\n</div></figure>",
+        "text_preview": "https://www.youtube.com/watch?v=_Uok7E2Yg0c"
+      },
+      {
+        "index": 5,
+        "path": [
+          10
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"How-GravityCalendar-Works-SonAq\" class=\"wp-block-heading\">How GravityCalendar Works</h3>",
+        "text_preview": "How GravityCalendar Works"
+      },
+      {
+        "index": 6,
+        "path": [
+          12
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>GravityCalendar connects to your form as a \"feed\" similar to how notifications or other add-on integrations work. You configure which form fields map to calendar event properties (start date, end date, title, description), and every entry with valid dates automatically appears as an event on the calendar.</p>",
+        "text_preview": "GravityCalendar connects to your form as a \"feed\" similar to how notifications or other add-on integ"
+      },
+      {
+        "index": 7,
+        "path": [
+          14
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Because the calendar reads directly from your form entries rather than storing events separately, changes happen instantly: new entries appear on the calendar, and deleted entries disappear.</p>",
+        "text_preview": "Because the calendar reads directly from your form entries rather than storing events separately, ch"
+      },
+      {
+        "index": 8,
+        "path": [
+          16
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"What-You-Will-Need-nnDjm\" class=\"wp-block-heading\">What You Will Need</h3>",
+        "text_preview": "What You Will Need"
+      },
+      {
+        "index": 9,
+        "path": [
+          18
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li>Gravity Forms installed and activated</li><li>GravityCalendar installed and activated</li><li>A form with at least one date field (see Step 1 below)</li></ul>",
+        "text_preview": "Gravity Forms installed and activatedGravityCalendar installed and activatedA form with at least one"
+      },
+      {
+        "index": 10,
+        "path": [
+          20
+        ],
+        "name": "core/separator",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+      },
+      {
+        "index": 11,
+        "path": [
+          22
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Step-1-Create-a-Form-with-Date-Fields-T0zJO\" class=\"wp-block-heading\">Step 1: Create a Form with Date Fields</h3>",
+        "text_preview": "Step 1: Create a Form with Date Fields"
+      },
+      {
+        "index": 12,
+        "path": [
+          24
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Your form needs at least one field that GravityCalendar can map to event dates.</p>",
+        "text_preview": "Your form needs at least one field that GravityCalendar can map to event dates."
+      },
+      {
+        "index": 13,
+        "path": [
+          26
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>You have two options:</p>",
+        "text_preview": "You have two options:"
+      },
+      {
+        "index": 14,
+        "path": [
+          28
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Option A: Use the Event Field (Recommended)</strong></p>",
+        "text_preview": "Option A: Use the Event Field (Recommended)"
+      },
+      {
+        "index": 15,
+        "path": [
+          30
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>The <a href=\"https://docs.gravitykit.com/article/938-configuring-the-gravity-forms-event-field\" target=\"_blank\">Event field</a> bundles start date, end date, times, timezone, and repeat options into a single field, making it the fastest way to get started.</p>",
+        "text_preview": "The Event field bundles start date, end date, times, timezone, and repeat options into a single fiel"
+      },
+      {
+        "index": 16,
+        "path": [
+          32
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-MsFh8GIOYH.png\" alt=\"Gravity Forms interface showing Event field with options for date, time, and timezone selection\"/></figure>"
+      },
+      {
+        "index": 17,
+        "path": [
+          34
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>To add it, edit your form and look for \"Event\" under Advanced Fields. For configuration details, see <a href=\"https://docs.gravitykit.com/article/938-configuring-the-gravity-forms-event-field\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Getting started with the Gravity Forms Event field</a>.</p>",
+        "text_preview": "To add it, edit your form and look for \"Event\" under Advanced Fields. For configuration details, see"
+      },
+      {
+        "index": 18,
+        "path": [
+          36
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Option B: Use Separate Date and Time Fields</strong></p>",
+        "text_preview": "Option B: Use Separate Date and Time Fields"
+      },
+      {
+        "index": 19,
+        "path": [
+          38
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>If you have an existing form or need more flexibility, use individual fields:</p>",
+        "text_preview": "If you have an existing form or need more flexibility, use individual fields:"
+      },
+      {
+        "index": 20,
+        "path": [
+          40
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><strong>Start Date</strong> (Date field) - Required for all events</li><li><strong>End Date</strong> (Date field) - Optional; for multi-day events</li><li><strong>Start Time</strong> (Time field) - Optional; without it, events display as all-day</li><li><strong>End Time</strong> (Time field) - Optional</li></ul>",
+        "text_preview": "Start Date (Date field) - Required for all eventsEnd Date (Date field) - Optional; for multi-day eve"
+      },
+      {
+        "index": 21,
+        "path": [
+          42
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>You'll also need a field for the event title (a Single Line Text field works well).</p>",
+        "text_preview": "You'll also need a field for the event title (a Single Line Text field works well)."
+      },
+      {
+        "index": 22,
+        "path": [
+          44
+        ],
+        "name": "core/separator",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+      },
+      {
+        "index": 23,
+        "path": [
+          46
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Step-2-Create-a-Calendar-Feed--m9k3\" class=\"wp-block-heading\">Step 2: Create a Calendar Feed</h3>",
+        "text_preview": "Step 2: Create a Calendar Feed"
+      },
+      {
+        "index": 24,
+        "path": [
+          48
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>With your form ready, create a calendar feed by going to <strong>Forms</strong> in your WordPress admin, hovering over your form, and clicking <strong>Settings → GravityCalendar</strong>. Then click <strong>Add New</strong>.</p>",
+        "text_preview": "With your form ready, create a calendar feed by going to Forms in your WordPress admin, hovering ove"
+      },
+      {
+        "index": 25,
+        "path": [
+          50
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-xKBlFUaQAw.png\" alt=\"GravityCalendar section with Add New button to create calendar feeds\"/></figure>"
+      },
+      {
+        "index": 26,
+        "path": [
+          52
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>The Feed Settings screen will open:</p>",
+        "text_preview": "The Feed Settings screen will open:"
+      },
+      {
+        "index": 27,
+        "path": [
+          54
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2026/04/file-rOCqwiMIFZ-scaled.png\" alt=\"Gravity Forms Calendar fields and options\"/></figure>"
+      },
+      {
+        "index": 28,
+        "path": [
+          56
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 4
+        },
+        "dynamic": true,
+        "innerHTML": "<h4 id=\"Required-Fields-aTc5u\" class=\"wp-block-heading\">Required Fields</h4>",
+        "text_preview": "Required Fields"
+      },
+      {
+        "index": 29,
+        "path": [
+          58
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Three fields are required to create a calendar feed:</p>",
+        "text_preview": "Three fields are required to create a calendar feed:"
+      },
+      {
+        "index": 30,
+        "path": [
+          60
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><strong>Feed Name</strong> - An internal name to identify this feed (not shown to visitors)</li><li><strong>Start Date</strong> - Select the Date or Event field that contains when each event begins</li><li><strong>Event Title</strong> - The text displayed on the calendar for each event. You can type static text or use merge tags like <code class=\"inline-code\">{Name (First):1.3}</code>   to pull values from form fields.</li></ul>",
+        "text_preview": "Feed Name - An internal name to identify this feed (not shown to visitors)Start Date - Select the Da"
+      },
+      {
+        "index": 31,
+        "path": [
+          62
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Tip:</strong> If the Start Date dropdown only shows \"Select a Field\" with no options, your form does not have Date fields yet. Go back to Step 1 and add an Event field or Date fields first.</p>",
+        "text_preview": "Tip: If the Start Date dropdown only shows \"Select a Field\" with no options, your form does not have"
+      },
+      {
+        "index": 32,
+        "path": [
+          64
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 4
+        },
+        "dynamic": true,
+        "innerHTML": "<h4 id=\"Optional-Fields-uWlBK\" class=\"wp-block-heading\">Optional Fields</h4>",
+        "text_preview": "Optional Fields"
+      },
+      {
+        "index": 33,
+        "path": [
+          66
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><strong>End Date</strong> - For multi-day events. If left blank, the Start Date is used (creating single-day events).</li><li><strong>Start Time</strong> - When the event begins. If left blank, events display as all-day.</li><li><strong>End Time</strong> - When the event ends.</li><li><p><strong>Event Description</strong> - Additional text shown when visitors click or hover over an event. Supports merge tags.</p><p><strong>Event Location</strong> - Where the event takes place. Supports merge tags.</p><p><strong>Event URL</strong> - Where visitors go when they click an event. Choose from:</p><ul><li><em>URL from Form Field</em> - Uses a Website field value</li><li><em>Custom URL</em> - A URL you specify (supports merge tags)</li><li><em>Link to Single Entry</em> - Opens a GravityView single entry page</li></ul></li><li><strong>Event Color</strong> - The background and border color for events on this calendar (9 color options available)</li></ul>",
+        "text_preview": "End Date - For multi-day events. If left blank, the Start Date is used (creating single-day events)."
+      },
+      {
+        "index": 34,
+        "path": [
+          68
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 4
+        },
+        "dynamic": true,
+        "innerHTML": "<h4 id=\"Customizing-the-Calendar-Appearance-II3Hl\" class=\"wp-block-heading\">Customizing the Calendar Appearance</h4>",
+        "text_preview": "Customizing the Calendar Appearance"
+      },
+      {
+        "index": 35,
+        "path": [
+          70
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-KLyZiCvmur.png\" alt=\"Calendar settings showing layout options and navigation controls configuration\"/></figure>"
+      },
+      {
+        "index": 36,
+        "path": [
+          72
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Default Layout</strong> sets the default view visitors see when the calendar loads:</p>",
+        "text_preview": "Default Layout sets the default view visitors see when the calendar loads:"
+      },
+      {
+        "index": 37,
+        "path": [
+          74
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><em>Grid</em> - Monthly view showing days in a traditional calendar grid (default)</li><li><em>Agenda</em> - Weekly view with a time axis showing when events occur during each day</li><li><p><em>List</em> - A chronological list of upcoming events</p><br></li></ul>",
+        "text_preview": "Grid - Monthly view showing days in a traditional calendar grid (default)Agenda - Weekly view with a"
+      },
+      {
+        "index": 38,
+        "path": [
+          76
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Calendar Controls</strong> are the navigation elements visitors use to browse the calendar (buttons for previous/next month, a \"today\" button, the current month/year label, etc.). You can drag and drop these controls into six different positions around the calendar: top-left, top-center, top-right, bottom-left, bottom-center, and bottom-right.</p>",
+        "text_preview": "Calendar Controls are the navigation elements visitors use to browse the calendar (buttons for previ"
+      },
+      {
+        "index": 39,
+        "path": [
+          78
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-IIsSz7wWcp.png\" alt=\"Calendar interface for March 2022 with navigation buttons and sample events\"/></figure>"
+      },
+      {
+        "index": 40,
+        "path": [
+          80
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Allow Event Editing</strong> lets logged-in users reschedule events by dragging them to a different date or time on the calendar. When a user drags an event, the underlying form entry is updated with the new date values. You can restrict this feature to specific user roles.</p>",
+        "text_preview": "Allow Event Editing lets logged-in users reschedule events by dragging them to a different date or t"
+      },
+      {
+        "index": 41,
+        "path": [
+          82
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Sizing</strong> controls the calendar height. Choose \"Automatic\" to let the calendar adjust based on content, or set a fixed height in pixels.</p>",
+        "text_preview": "Sizing controls the calendar height. Choose \"Automatic\" to let the calendar adjust based on content,"
+      },
+      {
+        "index": 42,
+        "path": [
+          84
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Conditional Logic</strong> lets you show or hide events based on form field values. This works like Gravity Forms conditional logic: you set rules (e.g., \"show event if Status field equals Confirmed\") and only matching entries appear on the calendar.</p>",
+        "text_preview": "Conditional Logic lets you show or hide events based on form field values. This works like Gravity F"
+      },
+      {
+        "index": 43,
+        "path": [
+          86
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>As you configure these options, changes appear immediately in the preview window below:</p>",
+        "text_preview": "As you configure these options, changes appear immediately in the preview window below:"
+      },
+      {
+        "index": 44,
+        "path": [
+          88
+        ],
+        "name": "core/image",
+        "attributes": {
+          "width": "740px"
+        },
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image is-resized\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-Jtm7wLPEA9.png\" alt=\"March 2022 calendar displaying events created with Gravity Forms\" style=\"width:740px\"/></figure>"
+      },
+      {
+        "index": 45,
+        "path": [
+          90
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 4
+        },
+        "dynamic": true,
+        "innerHTML": "<h4 id=\"Additional-Options-vVY0z\" class=\"wp-block-heading\">Additional Options</h4>",
+        "text_preview": "Additional Options"
+      },
+      {
+        "index": 46,
+        "path": [
+          92
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-T54hVPXOO2.png\" alt=\"Checkbox to enable calendar subscription link for event updates in calendar apps\"/></figure>"
+      },
+      {
+        "index": 47,
+        "path": [
+          94
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><strong>Allow HTML Content</strong> - Renders HTML tags in event titles and descriptions instead of displaying them as plain text. Enable this if your merge tags contain HTML formatting.</li><li><strong>Dynamically Load Events</strong> - Loads events via AJAX as visitors navigate the calendar instead of loading all events upfront. Recommended for calendars with many events.</li><li><strong>Enable Subscription URL</strong> - Generates a URL that visitors can use to <a href=\"https://docs.gravitykit.com/article/829-subscribing-vs-downloading\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">subscribe to your calendar</a> in Google Calendar, Apple Calendar, or other calendar apps.</li></ul>",
+        "text_preview": "Allow HTML Content - Renders HTML tags in event titles and descriptions instead of displaying them a"
+      },
+      {
+        "index": 48,
+        "path": [
+          96
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Click <strong>Update Settings</strong> to save. You will see your calendar listed in the feeds table with its shortcode:</p>",
+        "text_preview": "Click Update Settings to save. You will see your calendar listed in the feeds table with its shortco"
+      },
+      {
+        "index": 49,
+        "path": [
+          98
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-hOXGoiOt8f.png\" alt=\"GravityCalendar interface displaying active feed with shortcode\"/></figure>"
+      },
+      {
+        "index": 50,
+        "path": [
+          100
+        ],
+        "name": "core/separator",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+      },
+      {
+        "index": 51,
+        "path": [
+          102
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Step-3-Add-Entries-to-Your-Form-z1MRX\" class=\"wp-block-heading\">Step 3: Add Entries to Your Form</h3>",
+        "text_preview": "Step 3: Add Entries to Your Form"
+      },
+      {
+        "index": 52,
+        "path": [
+          104
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Your calendar displays form entries, so you'll need some entries before events appear. You can add them two ways:</p>",
+        "text_preview": "Your calendar displays form entries, so you'll need some entries before events appear. You can add t"
+      },
+      {
+        "index": 53,
+        "path": [
+          106
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Frontend submission:</strong> Embed your form on a page and have users submit entries.</p>",
+        "text_preview": "Frontend submission: Embed your form on a page and have users submit entries."
+      },
+      {
+        "index": 54,
+        "path": [
+          108
+        ],
+        "name": "core/image",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<figure class=\"wp-block-image\"><img src=\"https://www.gravitykit.com/wp-content/uploads/2025/10/file-z6NK5r6k6M.png\" alt=\"Event form with fields for start date, end date, times, and submit button\"/></figure>"
+      },
+      {
+        "index": 55,
+        "path": [
+          110
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p><strong>Manual entry:</strong> Go to <strong>Forms → Entries</strong>, select your form, and click <strong>Add New</strong>.</p>",
+        "text_preview": "Manual entry: Go to Forms → Entries, select your form, and click Add New."
+      },
+      {
+        "index": 56,
+        "path": [
+          112
+        ],
+        "name": "core/separator",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+      },
+      {
+        "index": 57,
+        "path": [
+          114
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Step-4-Display-Your-Calendar-nnGLM\" class=\"wp-block-heading\">Step 4: Display Your Calendar</h3>",
+        "text_preview": "Step 4: Display Your Calendar"
+      },
+      {
+        "index": 58,
+        "path": [
+          116
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>Embed your calendar using any of these methods:</p>",
+        "text_preview": "Embed your calendar using any of these methods:"
+      },
+      {
+        "index": 59,
+        "path": [
+          118
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><strong>Gutenberg block</strong> - Add the \"GravityCalendar\" block to any page</li><li><strong>Shortcode</strong> - Use <code class=\"inline-code\">[gravitycalendar id=\"X\"]</code>   (find the ID in your feed settings)</li><li><strong>Widget</strong> - Add to any sidebar or widget area in your theme</li><li><strong>GravityView widget</strong> - Embed inside a View</li></ul>",
+        "text_preview": "Gutenberg block - Add the \"GravityCalendar\" block to any pageShortcode - Use [gravitycalendar id=\"X\""
+      },
+      {
+        "index": 60,
+        "path": [
+          120
+        ],
+        "name": "core/paragraph",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<p>For step-by-step instructions, see <a href=\"https://docs.gravitykit.com/article/651-displaying-a-calendar\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Displaying a calendar</a>.</p>",
+        "text_preview": "For step-by-step instructions, see Displaying a calendar."
+      },
+      {
+        "index": 61,
+        "path": [
+          122
+        ],
+        "name": "core/separator",
+        "attributes": [],
+        "dynamic": false,
+        "innerHTML": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+      },
+      {
+        "index": 62,
+        "path": [
+          124
+        ],
+        "name": "core/heading",
+        "attributes": {
+          "level": 3
+        },
+        "dynamic": true,
+        "innerHTML": "<h3 id=\"Next-Steps-YgAgs\" class=\"wp-block-heading\">Next Steps</h3>",
+        "text_preview": "Next Steps"
+      },
+      {
+        "index": 63,
+        "path": [
+          126
+        ],
+        "name": "core/list",
+        "attributes": [],
+        "dynamic": true,
+        "innerHTML": "<ul><li><a href=\"https://docs.gravitykit.com/article/681-modifying-a-single-event\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Customize event colors</a></li><li><a href=\"https://docs.gravitykit.com/article/770-linking-an-event-to-a-single-entry-page\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Link events to a detail page</a></li><li><a href=\"https://docs.gravitykit.com/article/829-subscribing-vs-downloading\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Enable calendar subscriptions</a> (Google Calendar, Apple Calendar)</li><li><a href=\"https://docs.gravitykit.com/article/812-calendar-developer-hooks\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">Developer hooks</a> for advanced customization</li></ul>",
+        "text_preview": "Customize event colorsLink events to a detail pageEnable calendar subscriptions (Google Calendar, Ap"
+      }
+    ]
+  }
+}
