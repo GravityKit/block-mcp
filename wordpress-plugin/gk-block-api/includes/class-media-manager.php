@@ -60,14 +60,14 @@ class Media_Manager {
 		if ( 0 === $mode_count ) {
 			return new \WP_Error(
 				'missing_file',
-				'Provide one of: multipart "file" field, "url", or "data_base64".',
+				__( 'Provide one of: multipart "file" field, "url", or "data_base64".', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
 		if ( $mode_count > 1 ) {
 			return new \WP_Error(
 				'multiple_inputs',
-				'Only one of "file", "url", or "data_base64" may be supplied.',
+				__( 'Only one of "file", "url", or "data_base64" may be supplied.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -106,7 +106,7 @@ class Media_Manager {
 			@unlink( $file['tmp_name'] );
 			return new \WP_Error(
 				'file_too_large',
-				'Uploaded file exceeds the site upload limit.',
+				__( 'Uploaded file exceeds the site upload limit.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -118,7 +118,7 @@ class Media_Manager {
 			@unlink( $file['tmp_name'] );
 			return new \WP_Error(
 				'disallowed_mime',
-				sprintf( 'Disallowed file type for "%s".', sanitize_file_name( $file['name'] ) ),
+				sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), sanitize_file_name(  ) ),
 				array( 'status' => 400 )
 			);
 		}
@@ -133,7 +133,7 @@ class Media_Manager {
 	private function handle_url( array $args ) {
 		$url = esc_url_raw( $args['url'] );
 		if ( ! $url || ! wp_http_validate_url( $url ) ) {
-			return new \WP_Error( 'invalid_url', 'URL is not valid or not allowed.', array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_url', __( 'URL is not valid or not allowed.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		// SSRF defense: resolve host and reject reserved/private/link-local IPs.
@@ -153,7 +153,7 @@ class Media_Manager {
 
 		if ( filesize( $tmp ) > self::URL_DOWNLOAD_MAX_BYTES ) {
 			@unlink( $tmp );
-			return new \WP_Error( 'file_too_large', 'Downloaded file exceeds size cap.', array( 'status' => 400 ) );
+			return new \WP_Error( 'file_too_large', __( 'Downloaded file exceeds size cap.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		$path     = wp_parse_url( $url, PHP_URL_PATH );
@@ -165,7 +165,7 @@ class Media_Manager {
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
 			@unlink( $tmp );
-			return new \WP_Error( 'disallowed_mime', sprintf( 'Disallowed file type for "%s".', $filename ), array( 'status' => 400 ) );
+			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
 		$post_parent = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
@@ -184,7 +184,7 @@ class Media_Manager {
 	 */
 	private function handle_base64( array $args ) {
 		if ( empty( $args['filename'] ) ) {
-			return new \WP_Error( 'invalid_filename', '"filename" is required for base64 uploads.', array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_filename', __( '"filename" is required for base64 uploads.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		// Bound the encoded payload BEFORE decoding to limit memory consumption.
@@ -194,14 +194,14 @@ class Media_Manager {
 		if ( strlen( (string) $args['data_base64'] ) > $encoded_max ) {
 			return new \WP_Error(
 				'file_too_large',
-				'data_base64 exceeds size cap before decoding.',
+				__( 'data_base64 exceeds size cap before decoding.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
 
 		$decoded = base64_decode( $args['data_base64'], true );
 		if ( false === $decoded || '' === $decoded ) {
-			return new \WP_Error( 'invalid_base64', 'data_base64 is not valid base64.', array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_base64', __( 'data_base64 is not valid base64.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		// Enforce both the URL-mode cap and the site upload limit on the decoded
@@ -209,24 +209,24 @@ class Media_Manager {
 		$max     = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
 		$cap     = $max > 0 ? min( $max, self::URL_DOWNLOAD_MAX_BYTES ) : self::URL_DOWNLOAD_MAX_BYTES;
 		if ( strlen( $decoded ) > $cap ) {
-			return new \WP_Error( 'file_too_large', 'Decoded data exceeds size cap.', array( 'status' => 400 ) );
+			return new \WP_Error( 'file_too_large', __( 'Decoded data exceeds size cap.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		$filename = sanitize_file_name( (string) $args['filename'] );
 		$tmp      = wp_tempnam( $filename );
 		if ( ! $tmp ) {
-			return new \WP_Error( 'sideload_failed', 'Could not create temp file.', array( 'status' => 500 ) );
+			return new \WP_Error( 'sideload_failed', __( 'Could not create temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
 		$bytes_written = file_put_contents( $tmp, $decoded );
 		if ( false === $bytes_written ) {
 			@unlink( $tmp );
-			return new \WP_Error( 'sideload_failed', 'Could not write temp file.', array( 'status' => 500 ) );
+			return new \WP_Error( 'sideload_failed', __( 'Could not write temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
 			@unlink( $tmp );
-			return new \WP_Error( 'disallowed_mime', sprintf( 'Disallowed file type for "%s".', $filename ), array( 'status' => 400 ) );
+			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
 		$post_parent   = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
@@ -269,7 +269,7 @@ class Media_Manager {
 	private function format_attachment( $attachment_id ) {
 		$post = get_post( $attachment_id );
 		if ( ! $post ) {
-			return new \WP_Error( 'attachment_missing', 'Attachment not found after upload.', array( 'status' => 500 ) );
+			return new \WP_Error( 'attachment_missing', __( 'Attachment not found after upload.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
 		$meta     = function_exists( 'wp_get_attachment_metadata' ) ? wp_get_attachment_metadata( $attachment_id ) : array();
 		$src      = function_exists( 'wp_get_attachment_url' ) ? wp_get_attachment_url( $attachment_id ) : '';

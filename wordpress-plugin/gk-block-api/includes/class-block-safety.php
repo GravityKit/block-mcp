@@ -87,7 +87,7 @@ class Block_Safety {
 				'block_name'    => $block_name,
 				'changed_attrs' => array_values( $render_affecting ),
 				'message'       => sprintf(
-					'Changing render-affecting attributes (%s) on static block "%s" without updating innerHTML may leave markup inconsistent. Consider also providing innerHTML or using replace-block.',
+					/* translators: 1: changed attribute names, 2: block name */ __( 'Changing render-affecting attributes (%1$s) on static block "%2$s" without updating innerHTML may leave markup inconsistent. Consider also providing innerHTML or using replace-block.', 'gk-block-api' ),
 					implode( ', ', $render_affecting ),
 					$block_name
 				),

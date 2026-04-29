@@ -54,7 +54,7 @@ class Post_Manager {
 		if ( ! in_array( $post_type, $this->default_allowed_post_types(), true ) ) {
 			return new \WP_Error(
 				'invalid_post_type',
-				sprintf( 'Post type "%s" is not allowed.', $post_type ),
+				sprintf( /* translators: %s: post type slug */ __( 'Post type "%s" is not allowed.', 'gk-block-api' ), $post_type ),
 				array( 'status' => 400 )
 			);
 		}
@@ -75,7 +75,7 @@ class Post_Manager {
 		if ( ! in_array( $status, self::ALLOWED_STATUSES_CREATE, true ) ) {
 			return new \WP_Error(
 				'invalid_status',
-				sprintf( 'Status "%s" is not allowed on create. Use update_post for trash transitions.', $status ),
+				sprintf( /* translators: %s: status slug */ __( 'Status "%s" is not allowed on create. Use update_post for trash transitions.', 'gk-block-api' ), $status ),
 				array( 'status' => 400 )
 			);
 		}
@@ -103,7 +103,7 @@ class Post_Manager {
 		if ( isset( $args['content'] ) && isset( $args['blocks'] ) ) {
 			return new \WP_Error(
 				'mutually_exclusive',
-				'"content" and "blocks" are mutually exclusive.',
+				__( '"content" and "blocks" are mutually exclusive.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -178,7 +178,7 @@ class Post_Manager {
 			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
 				return new \WP_Error(
 					'invalid_featured_media',
-					'featured_media is not a valid image attachment.',
+					__( 'featured_media is not a valid image attachment.', 'gk-block-api' ),
 					array( 'status' => 400 )
 				);
 			}
@@ -192,7 +192,7 @@ class Post_Manager {
 		if ( $post_id <= 0 ) {
 			return new \WP_Error(
 				'wp_insert_post_failed',
-				'wp_insert_post returned a non-positive ID.',
+				__( 'wp_insert_post returned a non-positive ID.', 'gk-block-api' ),
 				array( 'status' => 500 )
 			);
 		}
@@ -248,7 +248,7 @@ class Post_Manager {
 		if ( ! $post ) {
 			return new \WP_Error(
 				'post_not_found',
-				sprintf( 'Post %d does not exist.', $post_id ),
+				sprintf( /* translators: %d: post ID */ __( 'Post %d does not exist.', 'gk-block-api' ), $post_id ),
 				array( 'status' => 404 )
 			);
 		}
@@ -275,7 +275,7 @@ class Post_Manager {
 			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
 				return new \WP_Error(
 					'invalid_featured_media',
-					'featured_media is not a valid image attachment.',
+					__( 'featured_media is not a valid image attachment.', 'gk-block-api' ),
 					array( 'status' => 400 )
 				);
 			}
@@ -292,7 +292,7 @@ class Post_Manager {
 			if ( ! in_array( $new_status, self::ALLOWED_STATUSES_UPDATE, true ) ) {
 				return new \WP_Error(
 					'invalid_status',
-					sprintf( 'Status "%s" is not allowed.', $new_status ),
+					sprintf( /* translators: %s: status slug */ __( 'Status "%s" is not allowed.', 'gk-block-api' ), $new_status ),
 					array( 'status' => 400 )
 				);
 			}
@@ -478,7 +478,7 @@ class Post_Manager {
 		foreach ( $blocks as $block ) {
 			$name = isset( $block['name'] ) ? (string) $block['name'] : '';
 			if ( '' === $name ) {
-				return new \WP_Error( 'invalid_block', 'Each block requires a "name".', array( 'status' => 400 ) );
+				return new \WP_Error( 'invalid_block', __( 'Each block requires a "name".', 'gk-block-api' ), array( 'status' => 400 ) );
 			}
 			$check = $this->block_crud->validate_block_def( $name );
 			if ( $check['error'] instanceof \WP_Error ) {
@@ -514,7 +514,7 @@ class Post_Manager {
 		if ( empty( $date ) || ! is_string( $date ) ) {
 			return new \WP_Error(
 				'invalid_status',
-				'Status "future" requires a "date" set in the future.',
+				__( 'Status "future" requires a "date" set in the future.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -522,7 +522,7 @@ class Post_Manager {
 		if ( false === $timestamp || $timestamp <= time() ) {
 			return new \WP_Error(
 				'invalid_status',
-				'Status "future" requires a "date" set in the future.',
+				__( 'Status "future" requires a "date" set in the future.', 'gk-block-api' ),
 				array( 'status' => 400 )
 			);
 		}
@@ -586,13 +586,13 @@ class Post_Manager {
 			);
 		}
 		if ( $self_id && $parent_id === $self_id ) {
-			return new \WP_Error( 'cycle_parent', 'A post cannot be its own parent.', array( 'status' => 400 ) );
+			return new \WP_Error( 'cycle_parent', __( 'A post cannot be its own parent.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 		$parent = get_post( $parent_id );
 		if ( ! $parent || $parent->post_type !== $post_type ) {
 			return new \WP_Error(
 				'invalid_parent',
-				sprintf( 'Parent post %d does not exist or is not of type "%s".', $parent_id, $post_type ),
+				sprintf( /* translators: 1: parent ID, 2: post type slug */ __( 'Parent post %1$d does not exist or is not of type "%2$s".', 'gk-block-api' ), $parent_id, $post_type ),
 				array( 'status' => 400 )
 			);
 		}
@@ -627,7 +627,7 @@ class Post_Manager {
 			if ( ! taxonomy_exists( $taxonomy ) ) {
 				return new \WP_Error(
 					'invalid_taxonomy',
-					sprintf( 'Taxonomy "%s" does not exist.', $taxonomy ),
+					sprintf( /* translators: %s: taxonomy slug */ __( 'Taxonomy "%s" does not exist.', 'gk-block-api' ), $taxonomy ),
 					array( 'status' => 400 )
 				);
 			}
@@ -635,7 +635,7 @@ class Post_Manager {
 			if ( ! in_array( $taxonomy, (array) $registered_for_type, true ) ) {
 				return new \WP_Error(
 					'invalid_taxonomy',
-					sprintf( 'Taxonomy "%s" is not registered for post type "%s".', $taxonomy, $post_type ),
+					sprintf( /* translators: 1: taxonomy slug, 2: post type slug */ __( 'Taxonomy "%1$s" is not registered for post type "%2$s".', 'gk-block-api' ), $taxonomy, $post_type ),
 					array( 'status' => 400 )
 				);
 			}
@@ -648,7 +648,7 @@ class Post_Manager {
 				if ( ! $term || is_wp_error( $term ) ) {
 					return new \WP_Error(
 						'invalid_term',
-						sprintf( 'Term %d does not exist in taxonomy "%s".', $term_id, $taxonomy ),
+						sprintf( /* translators: 1: term ID, 2: taxonomy slug */ __( 'Term %1$d does not exist in taxonomy "%2$s".', 'gk-block-api' ), $term_id, $taxonomy ),
 						array( 'status' => 400 )
 					);
 				}

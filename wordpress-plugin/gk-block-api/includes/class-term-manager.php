@@ -31,7 +31,7 @@ class Term_Manager {
 		if ( ! taxonomy_exists( $taxonomy ) ) {
 			return new \WP_Error(
 				'invalid_taxonomy',
-				sprintf( 'Taxonomy "%s" does not exist.', $taxonomy ),
+				sprintf( /* translators: %s: taxonomy slug */ __( 'Taxonomy "%s" does not exist.', 'gk-block-api' ), $taxonomy ),
 				array( 'status' => 400 )
 			);
 		}
