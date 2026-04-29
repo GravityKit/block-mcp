@@ -223,9 +223,17 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ],
     };
   } catch (error) {
-    const err = error as Error & { response?: { status?: number; data?: unknown } };
-    const errorMessage = err.message || 'Unknown error occurred';
-    const statusCode = err.response?.status;
+    // Surface the full WordPress error envelope (code, data, status) when
+    // the client decorated it. Critical for AI agents — `legacy_block`
+    // carries `suggested_replacement`, `dual_storage_requires_both`
+    // carries the policy_resource pointer, etc. Without forwarding `data`
+    // the agent only sees the prose message and re-prompts blindly.
+    const err = error as Error & {
+      wpCode?: string;
+      wpData?: unknown;
+      wpStatus?: number;
+      response?: { status?: number; data?: unknown };
+    };
 
     return {
       content: [
@@ -234,9 +242,11 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
           text: JSON.stringify(
             {
               error: true,
-              message: errorMessage,
-              statusCode: statusCode,
               tool: name,
+              message: err.message || 'Unknown error occurred',
+              code: err.wpCode,
+              statusCode: err.wpStatus ?? err.response?.status,
+              hint: err.wpData ?? null,
             },
             null,
             2

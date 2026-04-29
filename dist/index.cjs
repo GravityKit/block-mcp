@@ -38667,43 +38667,54 @@ var WordPressBlockClient = class {
       timeout: 3e4
     });
     const errorInterceptor = (error2) => {
-      throw new Error(this.formatError(error2));
+      throw this.formatError(error2);
     };
     this.yoastClient.interceptors.response.use((r) => r, errorInterceptor);
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error2) => {
-        throw new Error(this.formatError(error2));
-      }
-    );
+    this.client.interceptors.response.use((r) => r, errorInterceptor);
   }
   /**
-   * Format an Axios error into a human-readable message.
+   * Format an Axios error into a thrown Error that carries the full
+   * WordPress `{ code, message, data }` payload, not just the message.
+   *
+   * Without this, agents lose the actionable hints the PHP plugin attaches
+   * to errors (e.g. `legacy_block` carries `suggested_replacement`,
+   * `policy_resource`, `namespace`; `dual_storage_requires_both` carries
+   * `block`, `storage_mode`). The Error message is human-readable; the
+   * `wpCode` and `wpData` properties expose the structured payload to the
+   * server-level catch in src/index.ts so it can surface them in the
+   * tool response.
    *
    * @param error - The Axios error to format
-   * @returns Formatted error string
+   * @returns Error to throw
    */
   formatError(error2) {
     if (error2.response) {
       const { status, data } = error2.response;
       const body = data;
       let detail = "Unknown error";
-      if (body && typeof body === "object" && "message" in body) {
-        detail = String(body.message);
-      } else if (body && typeof body === "object" && "error" in body) {
-        detail = String(body.error);
+      let code;
+      let wpData = null;
+      if (body && typeof body === "object") {
+        if ("message" in body) detail = String(body.message);
+        else if ("error" in body) detail = String(body.error);
+        if ("code" in body && typeof body.code === "string") code = body.code;
+        if ("data" in body) wpData = body.data;
       } else if (typeof body === "string") {
         detail = body;
       }
-      return `Block API Error (${status}): ${detail}`;
+      const err = new Error(`Block API Error (${status}): ${detail}`);
+      err.wpCode = code;
+      err.wpData = wpData;
+      err.wpStatus = status;
+      return err;
     }
     if (error2.code === "ECONNREFUSED") {
-      return "Block API Error: Connection refused. Is the WordPress site reachable?";
+      return new Error("Block API Error: Connection refused. Is the WordPress site reachable?");
     }
     if (error2.code === "ETIMEDOUT") {
-      return "Block API Error: Request timed out after 30 seconds.";
+      return new Error("Block API Error: Request timed out after 30 seconds.");
     }
-    return `Block API Error: ${error2.message}`;
+    return new Error(`Block API Error: ${error2.message}`);
   }
   // ============================================
   // Registry & Discovery
@@ -40782,8 +40793,6 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   } catch (error2) {
     const err = error2;
-    const errorMessage = err.message || "Unknown error occurred";
-    const statusCode = err.response?.status;
     return {
       content: [
         {
@@ -40791,9 +40800,11 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
           text: JSON.stringify(
             {
               error: true,
-              message: errorMessage,
-              statusCode,
-              tool: name
+              tool: name,
+              message: err.message || "Unknown error occurred",
+              code: err.wpCode,
+              statusCode: err.wpStatus ?? err.response?.status,
+              hint: err.wpData ?? null
             },
             null,
             2
