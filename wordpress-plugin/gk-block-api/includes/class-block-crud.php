@@ -58,16 +58,25 @@ class Block_CRUD {
 	private $transformer;
 
 	/**
+	 * Site-wide block inventory (storage_mode classification + dual-storage list).
+	 *
+	 * @var Block_Inventory
+	 */
+	private $inventory;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Preferences      $preferences Preferences instance.
 	 * @param Block_Safety     $safety      Block safety checker.
 	 * @param HTML_Transformer $transformer HTML transformer.
+	 * @param Block_Inventory  $inventory   Block inventory (storage-mode classifier).
 	 */
-	public function __construct( Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer ) {
+	public function __construct( Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
 		$this->preferences = $preferences;
 		$this->safety      = $safety;
 		$this->transformer = $transformer;
+		$this->inventory   = $inventory;
 	}
 
 	/**
@@ -171,6 +180,18 @@ class Block_CRUD {
 		// Get reference to the actual block in the nested structure.
 		$path  = $flat[ $index ]['path'];
 		$block = &$this->get_block_by_path( $blocks, $path );
+
+		// BLOCK-14: refuse innerHTML-only updates on dual-storage blocks.
+		// Sending innerHTML alone on yoast/faq-block et al. silently desyncs
+		// the structured attributes (questions[], etc.) — see BLOCK-3.
+		if (
+			null !== $inner_html
+			&& empty( $attributes )
+			&& isset( $block['blockName'] )
+			&& $this->is_dual_storage_block( $block['blockName'] )
+		) {
+			return $this->dual_storage_error( $block['blockName'] );
+		}
 
 		// Merge attributes.
 		if ( ! empty( $attributes ) ) {
@@ -1038,48 +1059,39 @@ class Block_CRUD {
 	}
 
 	/**
-	 * Resolve the storage mode for a block: static, dynamic, or dual.
-	 *
-	 * "Dual" blocks store the same content in both `attributes` and `innerHTML`
-	 * and must be kept in sync — sending only `innerHTML` on update corrupts
-	 * the structured attributes (canonical case: yoast/faq-block.questions).
-	 *
-	 * Site admins can extend the dual-storage list via the
-	 * `gk_block_api_dual_storage_blocks` filter (returns array of block names).
+	 * Whether a block name is dual-storage. Thin delegate to Block_Inventory
+	 * so callers (Block_Mutator etc.) have one entry point on the CRUD layer.
 	 *
 	 * @param string $block_name Fully-qualified block name.
-	 * @param bool   $is_dynamic Whether the registered block type is dynamic.
-	 *
-	 * @return string One of "static", "dynamic", "dual".
+	 * @return bool
 	 */
-	private function resolve_storage_mode( $block_name, $is_dynamic ) {
-		static $dual_cache = null;
-
-		if ( null === $dual_cache ) {
-			/**
-			 * Filter the list of block names treated as dual-storage.
-			 *
-			 * Dual-storage blocks store the same content in both `attributes`
-			 * and `innerHTML` and require both to be kept in sync.
-			 *
-			 * @param string[] $dual_blocks Block names considered dual-storage.
-			 */
-			$dual_cache = (array) apply_filters(
-				'gk_block_api_dual_storage_blocks',
-				array(
-					'yoast/faq-block',
-					'yoast/how-to-block',
-				)
-			);
-			$dual_cache = array_flip( $dual_cache );
-		}
-
-		if ( isset( $dual_cache[ $block_name ] ) ) {
-			return 'dual';
-		}
-
-		return $is_dynamic ? 'dynamic' : 'static';
+	public function is_dual_storage_block( $block_name ) {
+		return $this->inventory->is_dual_storage_block( $block_name );
 	}
+
+	/**
+	 * Build the BLOCK-14 dual-storage rejection error.
+	 *
+	 * @param string $block_name The dual-storage block being mutated.
+	 * @return \WP_Error
+	 */
+	public function dual_storage_error( $block_name ) {
+		return new \WP_Error(
+			'dual_storage_requires_both',
+			sprintf(
+				/* translators: %s: block name (e.g., yoast/faq-block) */
+				__( 'Block "%s" is dual-storage: both `attributes` and `innerHTML` carry the same data and must be kept in sync. Sending only `innerHTML` will silently desync the structured attributes (the canonical case is yoast/faq-block losing its questions[] array). Pass both fields together. See block-mcp://block-preferences for the dual-storage list.', 'gk-block-api' ),
+				$block_name
+			),
+			array(
+				'status'          => 400,
+				'block'           => $block_name,
+				'storage_mode'    => Block_Inventory::STORAGE_MODE_DUAL,
+				'policy_resource' => 'block-mcp://block-preferences',
+			)
+		);
+	}
+
 
 	/**
 	 * Recursively format blocks with path tracking.
@@ -1169,7 +1181,7 @@ class Block_CRUD {
 			//   - "dynamic": attributes is the source of truth; innerHTML is regenerated on render
 			//   - "dual": both attributes AND innerHTML carry the same data and must be kept in sync
 			//             (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
-			$data['storage_mode'] = $this->resolve_storage_mode( $block['blockName'], $is_dynamic );
+			$data['storage_mode'] = $this->inventory->resolve_storage_mode( $block['blockName'], $is_dynamic );
 
 			// Preference tier from the (admin-editable, filter-extensible) Preferences
 			// config. Replaces hardcoded namespace lists in client-side enrichment.

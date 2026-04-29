@@ -34,14 +34,14 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 	private $controller;
 
 	protected function setUp(): void {
-		$preferences = new Preferences();
-		$safety      = new Block_Safety();
-		$transformer = new HTML_Transformer();
+		$preferences     = new Preferences();
+		$safety          = new Block_Safety();
+		$transformer     = new HTML_Transformer();
 		$block_inventory = new Block_Inventory();
-		$crud        = new Block_CRUD( $preferences, $safety, $transformer );
-		$mutator     = new Block_Mutator( $crud, $preferences, $safety, $transformer );
-		$registry    = new Block_Registry( $preferences, $block_inventory );
-		$patterns    = new Pattern_Manager( $preferences );
+		$crud            = new Block_CRUD( $preferences, $safety, $transformer, $block_inventory );
+		$mutator         = new Block_Mutator( $crud, $preferences, $safety, $transformer );
+		$registry        = new Block_Registry( $preferences, $block_inventory );
+		$patterns        = new Pattern_Manager( $preferences );
 
 		$this->controller = new REST_Controller(
 			$registry,
@@ -51,7 +51,8 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 			$mutator,
 			new Post_Manager( $crud ),
 			new Term_Manager(),
-			new Media_Manager()
+			new Media_Manager(),
+			$preferences
 		);
 	}
 

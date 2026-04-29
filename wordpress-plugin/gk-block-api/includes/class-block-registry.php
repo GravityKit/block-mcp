@@ -30,7 +30,7 @@ class Block_Registry {
 	private $preferences;
 
 	/**
-	 * Usage stats instance.
+	 * Site-wide block inventory.
 	 *
 	 * @var Block_Inventory
 	 */
@@ -39,8 +39,8 @@ class Block_Registry {
 	/**
 	 * Constructor.
 	 *
-	 * @param Preferences $preferences Preferences instance.
-	 * @param Block_Inventory $block_inventory Usage stats instance.
+	 * @param Preferences     $preferences     Preferences instance.
+	 * @param Block_Inventory $block_inventory Site-wide block inventory.
 	 */
 	public function __construct( Preferences $preferences, Block_Inventory $block_inventory ) {
 		$this->preferences = $preferences;

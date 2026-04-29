@@ -42,6 +42,101 @@ class Block_Inventory {
 	const CACHE_TTL = HOUR_IN_SECONDS;
 
 	/**
+	 * Storage-mode constants. Use these instead of the bare strings so
+	 * a typo doesn't silently mis-classify a block. Surface in API
+	 * responses as the underlying string value.
+	 */
+	const STORAGE_MODE_STATIC  = 'static';
+	const STORAGE_MODE_DYNAMIC = 'dynamic';
+	const STORAGE_MODE_DUAL    = 'dual';
+
+	// ──────────────────────────────────────────────────────────────────
+	// Storage-mode classification.
+	//
+	// "What kind of block is this?" — static / dynamic / dual. Lives here
+	// (not in Block_CRUD) because it's inventory metadata about block
+	// types, not a write-time concern. Block_CRUD consults this layer
+	// when annotating get_page_blocks responses and when enforcing the
+	// "dual blocks need both fields" rule (BLOCK-14).
+	//
+	// BLOCK-13 will extend this with site-scan auto-discovery that
+	// persists findings to `wp_options.gk_block_api_storage_modes`.
+	// ──────────────────────────────────────────────────────────────────
+
+	/**
+	 * Resolve the storage mode for a block: "static" | "dynamic" | "dual".
+	 *
+	 * - "static": innerHTML is the source of truth (most core/* blocks).
+	 * - "dynamic": attributes is the source of truth; innerHTML is
+	 *   regenerated on render (e.g., core/post-title, query loops).
+	 * - "dual": BOTH attributes and innerHTML carry the same data and
+	 *   must be kept in sync (e.g., yoast/faq-block.questions[]).
+	 *
+	 * Site admins can extend the dual-storage list via the
+	 * `gk_block_api_dual_storage_blocks` filter.
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 * @param bool   $is_dynamic Whether the registered block is server-rendered.
+	 * @return string
+	 */
+	public function resolve_storage_mode( $block_name, $is_dynamic ) {
+		if ( $this->is_dual_storage_block( $block_name ) ) {
+			return self::STORAGE_MODE_DUAL;
+		}
+		return $is_dynamic ? self::STORAGE_MODE_DYNAMIC : self::STORAGE_MODE_STATIC;
+	}
+
+	/**
+	 * Whether a block name is configured (or auto-discovered) as dual-storage.
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 * @return bool
+	 */
+	public function is_dual_storage_block( $block_name ) {
+		static $cache = null;
+		if ( null === $cache ) {
+			/**
+			 * Filter the list of block names treated as dual-storage.
+			 *
+			 * Dual-storage blocks store the same content in both
+			 * `attributes` and `innerHTML` and require both to be kept
+			 * in sync.
+			 *
+			 * @param string[] $dual_blocks Block names considered dual-storage.
+			 */
+			$dual_blocks = (array) apply_filters(
+				'gk_block_api_dual_storage_blocks',
+				array(
+					'yoast/faq-block',
+					'yoast/how-to-block',
+				)
+			);
+			$cache = array_flip( $dual_blocks );
+		}
+		return isset( $cache[ $block_name ] );
+	}
+
+	/**
+	 * Whether a registered block type is server-rendered.
+	 *
+	 * Cached per block name. Wraps WP_Block_Type_Registry to give
+	 * Block_CRUD a single discovery point that can be replaced by the
+	 * scan-cached map once BLOCK-13 lands.
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 * @return bool
+	 */
+	public function is_dynamic_block( $block_name ) {
+		static $cache = array();
+		if ( ! isset( $cache[ $block_name ] ) ) {
+			$registry        = \WP_Block_Type_Registry::get_instance();
+			$type            = $registry ? $registry->get_registered( $block_name ) : null;
+			$cache[ $block_name ] = $type ? $type->is_dynamic() : false;
+		}
+		return $cache[ $block_name ];
+	}
+
+	/**
 	 * Get block and pattern usage statistics.
 	 *
 	 * Returns cached data unless $refresh is true, in which case the cache

@@ -245,6 +245,17 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_html', __( 'update-html requires an "innerHTML" string.', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
+				// BLOCK-14: refuse update-html on dual-storage blocks. There is
+				// no `attributes` companion field on this op — the only safe
+				// path for dual blocks is `update-attrs` (with both fields)
+				// or `replace-block` (with both fields).
+				if (
+					isset( $parent[ $target_index ]['blockName'] )
+					&& $this->crud->is_dual_storage_block( $parent[ $target_index ]['blockName'] )
+				) {
+					return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
+				}
+
 				$parent[ $target_index ]['innerHTML'] = wp_kses_post( $inner_html );
 				// Preserve innerBlock placeholders (null) in innerContent for container blocks.
 				if ( ! empty( $parent[ $target_index ]['innerBlocks'] ) && ! empty( $parent[ $target_index ]['innerContent'] ) ) {

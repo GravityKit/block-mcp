@@ -58,7 +58,7 @@ class REST_Controller {
 	private $block_mutator;
 
 	/**
-	 * Usage stats instance.
+	 * Site-wide block inventory.
 	 *
 	 * @var Block_Inventory
 	 */
@@ -97,7 +97,7 @@ class REST_Controller {
 	 * @param Block_Registry  $block_registry  Block registry.
 	 * @param Pattern_Manager $pattern_manager Pattern manager.
 	 * @param Block_CRUD      $block_crud      Block CRUD.
-	 * @param Block_Inventory     $block_inventory     Usage stats.
+	 * @param Block_Inventory $block_inventory Site-wide block inventory.
 	 * @param Block_Mutator   $block_mutator   Block mutator.
 	 * @param Post_Manager    $post_manager    Post manager.
 	 * @param Term_Manager    $term_manager    Term manager.
