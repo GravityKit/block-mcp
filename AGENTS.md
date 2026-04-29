@@ -43,8 +43,8 @@ MCPs/block-mcp/
 │   └── tools/
 │       ├── discovery.ts               # list_block_types, list_patterns, get_pattern, get_site_usage
 │       ├── read.ts                    # get_page_blocks
-│       ├── write.ts                   # update_block, insert_blocks, delete_block, replace_all_blocks
-│       ├── mutate.ts                  # mutate_block_tree (9 operations)
+│       ├── write.ts                   # update_block, insert_blocks, delete_block, rewrite_post_blocks
+│       ├── mutate.ts                  # edit_block_tree (9 operations)
 │       └── patterns.ts               # insert_pattern
 ├── dist/
 │   └── index.cjs                      # Built bundle (esbuild, CJS, single file)
@@ -184,8 +184,8 @@ The server (`src/index.ts`) aggregates tools from five modules, each exporting a
 |--------|-------|----------|
 | `discovery.ts` | `list_block_types`, `list_patterns`, `get_pattern`, `get_site_usage` | Read-only exploration |
 | `read.ts` | `get_page_blocks` | Page content reading |
-| `write.ts` | `update_block`, `insert_blocks`, `delete_block`, `replace_all_blocks` | Index-based CRUD |
-| `mutate.ts` | `mutate_block_tree` | Path-based structural operations |
+| `write.ts` | `update_block`, `insert_blocks`, `delete_block`, `rewrite_post_blocks` | Index-based CRUD |
+| `mutate.ts` | `edit_block_tree` | Path-based structural operations |
 | `patterns.ts` | `insert_pattern` | Pattern insertion |
 | `posts.ts` (v1.2) | `create_post`, `update_post` | Post lifecycle |
 | `terms.ts` (v1.2) | `list_terms` | Taxonomy term discovery |
@@ -252,7 +252,7 @@ The server also exposes a **resource** (`block-mcp://block-preferences`) contain
 Blocks are addressed two ways:
 
 1. **Flat index** — sequential counter across all blocks (skipping empty/whitespace). Used by `update_block`, `insert_blocks`, `delete_block` (the write tools).
-2. **Path** — integer array describing position in the nested tree. `[0, 2, 1]` means "top-level block 0 → innerBlock 2 → innerBlock 1". Used by `mutate_block_tree`.
+2. **Path** — integer array describing position in the nested tree. `[0, 2, 1]` means "top-level block 0 → innerBlock 2 → innerBlock 1". Used by `edit_block_tree`.
 
 Both are returned by `get_page_blocks`. The `path` field uses raw `parse_blocks()` indices (preserving whitespace-only block positions), while `index` is a sequential counter that skips empty blocks.
 
@@ -297,7 +297,7 @@ Pattern scoring (`class-preferences.php` lines 199-246) combines:
 
 ### Static Block Safety
 
-When `mutate_block_tree` runs `update-attrs` on a static block (no PHP render callback), `Block_Safety::check_mutation()` checks whether the changed attributes affect rendered markup. If they do and no new innerHTML is provided, a `static_markup_stale_risk` warning is returned.
+When `edit_block_tree` runs `update-attrs` on a static block (no PHP render callback), `Block_Safety::check_mutation()` checks whether the changed attributes affect rendered markup. If they do and no new innerHTML is provided, a `static_markup_stale_risk` warning is returned.
 
 **Editor-only attributes** (never affect innerHTML): `lock`, `templateLock`, `allowedBlocks`, `metadata`, `className`, `anchor`, `align`, `fontFamily`, `fontSize`.
 
@@ -402,7 +402,7 @@ case 'my-op':
 4. Add the op to the `enum` in `REST_Controller::register_routes()` (`class-rest-controller.php`, line 401)
 5. Add client-side validation in `handleMutateTool()` (`src/tools/mutate.ts`)
 6. Add the op to `VALID_OPS` set in `src/tools/mutate.ts` (line 16)
-7. Add the op to the `enum` in the `mutate_block_tree` tool's `inputSchema` (`src/tools/mutate.ts`, line 50)
+7. Add the op to the `enum` in the `edit_block_tree` tool's `inputSchema` (`src/tools/mutate.ts`, line 50)
 
 ### Adding a New Auto-Transform
 

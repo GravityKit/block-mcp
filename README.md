@@ -100,11 +100,11 @@ Then register the server with your MCP client (Claude Code, etc.) pointing at `d
 | Tool | Purpose |
 |---|---|
 | `get_page_blocks` | Read a post's blocks — supports `outline`, `summary_only`, `search`, `block_name`, `render`, `fields` params |
-| `mutate_block_tree` | Path-based structural edits (9 operations) |
+| `edit_block_tree` | Path-based structural edits (9 operations) |
 | `update_block` | Flat-index single block update |
 | `insert_blocks` | Insert blocks at a position |
 | `delete_block` | Remove block(s) by index |
-| `replace_all_blocks` | Full page rewrite |
+| `rewrite_post_blocks` | Full page rewrite |
 | `insert_pattern` | Insert a pattern, synced or inline |
 | `revert_to_revision` | Roll back to a prior revision ID |
 | `list_block_types` | Browse registered blocks with tiers |
@@ -143,7 +143,7 @@ Once configured with your MCP client:
 
 1. Agent calls `resolve_url({ url: "/about/" })` → gets post ID
 2. Agent calls `get_page_blocks({ post_id: 42, outline: true })` → finds heading at `path: [4]`
-3. Agent calls `mutate_block_tree({ post_id: 42, op: "update-attrs", path: [4], attributes: { content: "About Us" } })` → done, revision created
+3. Agent calls `edit_block_tree({ post_id: 42, op: "update-attrs", path: [4], attributes: { content: "About Us" } })` → done, revision created
 
 The auto-transform updates both the `content` attribute and the inner `<h2>...</h2>` text so the block editor stays consistent.
 
