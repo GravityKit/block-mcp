@@ -1068,15 +1068,32 @@ class Block_CRUD {
 		$pref = $this->preferences->get_block_score( $block_name );
 
 		if ( 'legacy' === $pref['tier'] ) {
-			$replacement = $this->preferences->get_replacement( $block_name );
-			$result['error'] = new \WP_Error(
-				'legacy_block',
+			$replacement   = $this->preferences->get_replacement( $block_name );
+			$namespace     = $this->preferences->extract_namespace( $block_name );
+			$message_parts = array(
 				sprintf(
+					/* translators: 1: legacy block name, 2: suggested replacement block name */
 					__( 'Block "%1$s" is legacy. Use "%2$s" instead.', 'gk-block-api' ),
 					$block_name,
-					$replacement ? $replacement : 'a preferred block'
+					$replacement ? $replacement : __( 'a preferred block', 'gk-block-api' )
 				),
-				array( 'status' => 400 )
+				sprintf(
+					/* translators: %s: rejected namespace */
+					__( 'The %s/ namespace is blocked by site policy.', 'gk-block-api' ),
+					$namespace
+				),
+				__( 'See the block-mcp://block-preferences resource for the full allow/deny list.', 'gk-block-api' ),
+			);
+			$result['error'] = new \WP_Error(
+				'legacy_block',
+				implode( ' ', $message_parts ),
+				array(
+					'status'                => 400,
+					'block'                 => $block_name,
+					'namespace'             => $namespace,
+					'suggested_replacement' => $replacement,
+					'policy_resource'       => 'block-mcp://block-preferences',
+				)
 			);
 			return $result;
 		}
@@ -1090,6 +1107,7 @@ class Block_CRUD {
 					$this->preferences->extract_namespace( $block_name ) . '/'
 				),
 				'suggested_replacement' => $replacement,
+				'policy_resource'       => 'block-mcp://block-preferences',
 			);
 		}
 

@@ -18,7 +18,7 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_block_types',
     description:
-      'List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content.',
+      'List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content. The full namespace allow/deny policy lives at the `block-mcp://block-preferences` MCP resource — read it once to avoid trial-and-error rejections.',
     inputSchema: {
       type: 'object' as const,
       properties: {

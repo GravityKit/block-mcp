@@ -39293,7 +39293,7 @@ function groupByNamespace(types) {
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: "List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content.",
+    description: "List registered block types grouped by preference tier (preferred/standard/acceptable/avoid/legacy). Call before inserting content. The full namespace allow/deny policy lives at the `block-mcp://block-preferences` MCP resource \u2014 read it once to avoid trial-and-error rejections.",
     inputSchema: {
       type: "object",
       properties: {
@@ -39608,7 +39608,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "insert_blocks",
-    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces are rejected. Response.inserted[] entries include `path` and `top_level_counter` so you can chain a `mutate_block_tree op: insert-child` without an extra `get_page_blocks` round-trip.",
+    description: "Insert blocks at a position. Use after/before with the top-level counter; omit or after:-1 to append. Legacy namespaces (stackable/, ugb/, jetpack/) are hard-rejected \u2014 see the `block-mcp://block-preferences` resource for the full allow/deny policy and replacement map. Response.inserted[] entries include `path` and `top_level_counter` so you can chain a `mutate_block_tree op: insert-child` without an extra `get_page_blocks` round-trip.",
     inputSchema: {
       type: "object",
       properties: {

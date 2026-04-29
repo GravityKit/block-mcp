@@ -1273,17 +1273,15 @@ class REST_Controller {
 			'block_types'      => array(),
 			'sections'         => array(),
 			'headings'         => array(),
-			// Aggregate counters: small payload by default. Pass
-			// `include_legacy_paths=true` to also surface the per-block
-			// path list (`legacy_blocks.paths`), which is useful for
-			// migration audits but heavy on Stackable-rich pages.
+			// Aggregate counters built up by the walker. The whole
+			// `legacy_blocks` key is dropped at the end if total === 0
+			// (clean pages don't need the empty stub) and per-namespace
+			// zero counts are pruned. Pass `include_legacy_paths=true`
+			// to also surface the per-block path list (`paths`), which is
+			// useful for migration audits but heavy on Stackable-rich pages.
 			'legacy_blocks'    => array(
 				'total'         => 0,
-				'by_namespace'  => array(
-					'stackable' => 0,
-					'ugb'       => 0,
-					'jetpack'   => 0,
-				),
+				'by_namespace'  => array(),
 				'by_block_name' => array(),
 			),
 			'max_path_depth'   => 0,
@@ -1299,9 +1297,18 @@ class REST_Controller {
 		arsort( $summary['block_types'] );
 		$summary['block_types'] = array_map( 'intval', $summary['block_types'] );
 
-		// Sort by_block_name descending too — most-used legacy block first.
-		arsort( $summary['legacy_blocks']['by_block_name'] );
-		$summary['legacy_blocks']['by_block_name'] = array_map( 'intval', $summary['legacy_blocks']['by_block_name'] );
+		// Drop the `legacy_blocks` key entirely on clean pages — no point
+		// padding every response with an empty stub. Saves ~80 bytes per
+		// response on the common case.
+		if ( 0 === $summary['legacy_blocks']['total'] && ! $include_legacy_paths ) {
+			unset( $summary['legacy_blocks'] );
+		} else {
+			// Sort by_block_name descending too — most-used legacy block first.
+			arsort( $summary['legacy_blocks']['by_block_name'] );
+			$summary['legacy_blocks']['by_block_name'] = array_map( 'intval', $summary['legacy_blocks']['by_block_name'] );
+			arsort( $summary['legacy_blocks']['by_namespace'] );
+			$summary['legacy_blocks']['by_namespace']  = array_map( 'intval', $summary['legacy_blocks']['by_namespace'] );
+		}
 
 		return $summary;
 	}
@@ -1347,10 +1354,16 @@ class REST_Controller {
 
 			// Track legacy blocks (aggregate counts by default; full
 			// path list only when `include_legacy_paths` is requested).
+			// Per-namespace counts are sparse — only namespaces that
+			// actually appear on the page get a key. Empty/zero entries
+			// are noise for AI consumers.
 			if ( $name && 0 !== strpos( $name, 'core/' ) ) {
 				$namespace = explode( '/', $name )[0];
 				if ( in_array( $namespace, array( 'stackable', 'ugb', 'jetpack' ), true ) ) {
 					$summary['legacy_blocks']['total']++;
+					if ( ! isset( $summary['legacy_blocks']['by_namespace'][ $namespace ] ) ) {
+						$summary['legacy_blocks']['by_namespace'][ $namespace ] = 0;
+					}
 					$summary['legacy_blocks']['by_namespace'][ $namespace ]++;
 					if ( ! isset( $summary['legacy_blocks']['by_block_name'][ $name ] ) ) {
 						$summary['legacy_blocks']['by_block_name'][ $name ] = 0;
