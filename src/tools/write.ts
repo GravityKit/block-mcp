@@ -43,7 +43,7 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a position. Use after/before index; omit or after:-1 to append. Legacy namespaces are rejected.',
+      'Insert blocks at a position. Use after/before with the top-level ordinal; omit or after:-1 to append. Legacy namespaces are rejected.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -53,11 +53,13 @@ export const WRITE_TOOLS = [
         },
         after: {
           type: ['number', 'string'],
-          description: 'Insert after index. -1/omit = append, "start" = prepend.',
+          description:
+            'Insert after the block at this top-level ordinal (sequential position among top-level blocks only — the `top_level_ordinal` field on get_page_blocks entries; NOT the flat `index`). -1/omit = append, "start" = prepend.',
         },
         before: {
           type: 'number',
-          description: 'Insert before index (alternative to after).',
+          description:
+            'Insert before the block at this top-level ordinal (sequential position among top-level blocks only — the `top_level_ordinal` field on get_page_blocks entries; NOT the flat `index`).',
         },
         blocks: {
           type: 'array',
@@ -88,7 +90,7 @@ export const WRITE_TOOLS = [
   {
     name: 'delete_block',
     description:
-      'Remove block(s) at index. For core/block, removes the reference only, not the source pattern.',
+      'Remove block(s) at a top-level ordinal. For core/block, removes the reference only, not the source pattern.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -98,11 +100,12 @@ export const WRITE_TOOLS = [
         },
         block_index: {
           type: 'number',
-          description: 'Zero-based index.',
+          description:
+            'Zero-based **top-level ordinal** (sequential position among top-level blocks only — the `top_level_ordinal` field on get_page_blocks entries). NOT the flat `index` field — that one is consumed by `update_block`. Passing a flat index here will land on the wrong block or return "Block index out of range".',
         },
         count: {
           type: 'number',
-          description: 'Consecutive blocks to remove. Default 1.',
+          description: 'Consecutive top-level blocks to remove. Default 1.',
         },
       },
       required: ['post_id', 'block_index'],
