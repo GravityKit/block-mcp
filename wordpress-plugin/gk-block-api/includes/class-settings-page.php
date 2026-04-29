@@ -57,9 +57,6 @@ class Settings_Page {
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_post_gk_block_api_scan_storage_modes', array( $this, 'handle_scan' ) );
 		add_action( 'admin_post_gk_block_api_reset_defaults', array( $this, 'handle_reset' ) );
-
-		// Augment the dual-storage filter list with the UI-editable manual entries.
-		add_filter( 'gk_block_api_dual_storage_blocks', array( $this, 'merge_manual_dual_list' ) );
 	}
 
 	/**
@@ -119,7 +116,12 @@ class Settings_Page {
 	// ──────────────────────────────────────────────────────────────────
 
 	/**
-	 * Sanitize the namespace_scores + replacement_map sub-arrays.
+	 * Sanitize the indexed-row form input back into the canonical
+	 * `namespace_scores` + `replacement_map` shape Preferences expects.
+	 *
+	 * Form input is row-indexed so we can rename namespaces/blocks safely
+	 * and so a new row's values are correlated. Rows flagged with `delete:1`
+	 * are dropped.
 	 *
 	 * @param mixed $input Raw POST value.
 	 * @return array
@@ -131,25 +133,33 @@ class Settings_Page {
 
 		$out = array();
 
-		if ( isset( $input['namespace_scores'] ) && is_array( $input['namespace_scores'] ) ) {
+		// Namespace tier scores — indexed rows: [{name, score, delete?}, ...].
+		if ( isset( $input['namespace_rows'] ) && is_array( $input['namespace_rows'] ) ) {
 			$out['namespace_scores'] = array();
-			foreach ( $input['namespace_scores'] as $namespace => $score ) {
-				$ns_clean = sanitize_key( $namespace );
-				if ( '' === $ns_clean ) {
+			foreach ( $input['namespace_rows'] as $row ) {
+				if ( ! is_array( $row ) || ! empty( $row['delete'] ) ) {
 					continue;
 				}
-				$score_clean = max( 0, min( 100, (int) $score ) );
-				$out['namespace_scores'][ $ns_clean ] = $score_clean;
+				$ns = isset( $row['name'] ) ? sanitize_key( $row['name'] ) : '';
+				if ( '' === $ns ) {
+					continue;
+				}
+				$score = isset( $row['score'] ) ? (int) $row['score'] : 0;
+				$out['namespace_scores'][ $ns ] = max( 0, min( 100, $score ) );
 			}
 		}
 
-		if ( isset( $input['replacement_map'] ) && is_array( $input['replacement_map'] ) ) {
+		// Replacement map — indexed rows: [{from, to, delete?}, ...].
+		if ( isset( $input['replacement_rows'] ) && is_array( $input['replacement_rows'] ) ) {
 			$out['replacement_map'] = array();
-			foreach ( $input['replacement_map'] as $from => $to ) {
-				$from_clean = $this->sanitize_block_name( $from );
-				$to_clean   = $this->sanitize_block_name( $to );
-				if ( '' !== $from_clean && '' !== $to_clean ) {
-					$out['replacement_map'][ $from_clean ] = $to_clean;
+			foreach ( $input['replacement_rows'] as $row ) {
+				if ( ! is_array( $row ) || ! empty( $row['delete'] ) ) {
+					continue;
+				}
+				$from = isset( $row['from'] ) ? $this->sanitize_block_name( $row['from'] ) : '';
+				$to   = isset( $row['to'] ) ? $this->sanitize_block_name( $row['to'] ) : '';
+				if ( '' !== $from && '' !== $to ) {
+					$out['replacement_map'][ $from ] = $to;
 				}
 			}
 		}
@@ -220,24 +230,6 @@ class Settings_Page {
 	}
 
 	// ──────────────────────────────────────────────────────────────────
-	// Filter integration.
-	// ──────────────────────────────────────────────────────────────────
-
-	/**
-	 * Merge the UI-editable manual list into the canonical dual-storage list.
-	 *
-	 * @param string[] $defaults
-	 * @return string[]
-	 */
-	public function merge_manual_dual_list( $defaults ) {
-		$manual = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
-		if ( empty( $manual ) ) {
-			return $defaults;
-		}
-		return array_values( array_unique( array_merge( (array) $defaults, $manual ) ) );
-	}
-
-	// ──────────────────────────────────────────────────────────────────
 	// Action handlers (admin-post.php).
 	// ──────────────────────────────────────────────────────────────────
 
@@ -246,12 +238,13 @@ class Settings_Page {
 	 */
 	public function handle_scan() {
 		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-api' ), 403 );
+			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-api' ), '', array( 'response' => 403 ) );
 		}
 		check_admin_referer( 'gk_block_api_scan_storage_modes' );
 
 		$result = $this->inventory->scan_storage_modes();
 
+		nocache_headers();
 		$args = array(
 			'page'    => self::PAGE_SLUG,
 			'scanned' => 1,
@@ -263,12 +256,13 @@ class Settings_Page {
 	}
 
 	/**
-	 * "Reset to defaults" button handler. Deletes all UI-managed options;
-	 * the next read will fall back to the hard-coded Preferences defaults.
+	 * "Reset to defaults" button handler. Deletes all UI-managed options
+	 * AND the inventory transients + per-post rate-limit transients so
+	 * the next read starts from a true clean slate.
 	 */
 	public function handle_reset() {
 		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-api' ), 403 );
+			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-api' ), '', array( 'response' => 403 ) );
 		}
 		check_admin_referer( 'gk_block_api_reset_defaults' );
 
@@ -278,8 +272,18 @@ class Settings_Page {
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
 		delete_transient( Block_Inventory::CACHE_KEY );
 
+		// Per-post rate-limit transients accumulate per write activity. Sweep
+		// them too so reset is a true clean slate.
+		global $wpdb;
+		$wpdb->query(
+			"DELETE FROM {$wpdb->options}
+				WHERE option_name LIKE '_transient_gk_block_api_rate_%'
+				   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'"
+		);
+
+		nocache_headers();
 		$args = array(
-			'page' => self::PAGE_SLUG,
+			'page'  => self::PAGE_SLUG,
 			'reset' => 1,
 		);
 		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
@@ -295,7 +299,7 @@ class Settings_Page {
 	 */
 	public function render_page() {
 		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to view this page.', 'gk-block-api' ), 403 );
+			wp_die( esc_html__( 'You do not have permission to view this page.', 'gk-block-api' ), '', array( 'response' => 403 ) );
 		}
 
 		$defaults         = Preferences::get_defaults();
@@ -312,24 +316,31 @@ class Settings_Page {
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
-		// Notices from action handlers.
-		$scanned_notice = isset( $_GET['scanned'] ) ? sprintf(
-			/* translators: 1: total unique blocks, 2: dual-storage count */
-			esc_html__( 'Storage-mode scan complete. %1$d unique blocks classified (%2$d dual-storage).', 'gk-block-api' ),
-			(int) ( $_GET['unique'] ?? 0 ),
-			(int) ( $_GET['dual'] ?? 0 )
-		) : '';
-		$reset_notice = isset( $_GET['reset'] ) ? esc_html__( 'Settings reset to defaults.', 'gk-block-api' ) : '';
+		// Notices from action handlers. All inputs unslashed and clamped via
+		// absint before composition; the message itself never contains user data.
+		$scanned       = isset( $_GET['scanned'] ) ? absint( wp_unslash( $_GET['scanned'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag from our own redirect.
+		$unique_count  = isset( $_GET['unique'] )  ? absint( wp_unslash( $_GET['unique'] ) )  : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$dual_count    = isset( $_GET['dual'] )    ? absint( wp_unslash( $_GET['dual'] ) )    : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$reset_flag    = isset( $_GET['reset'] )   ? absint( wp_unslash( $_GET['reset'] ) )   : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 
-			<?php if ( $scanned_notice ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php echo $scanned_notice; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped — already escaped above. ?></p></div>
+			<?php if ( $scanned ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php
+					echo esc_html(
+						sprintf(
+							/* translators: 1: total unique blocks, 2: dual-storage count */
+							__( 'Storage-mode scan complete. %1$d unique blocks classified (%2$d dual-storage).', 'gk-block-api' ),
+							$unique_count,
+							$dual_count
+						)
+					);
+				?></p></div>
 			<?php endif; ?>
-			<?php if ( $reset_notice ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $reset_notice ); ?></p></div>
+			<?php if ( $reset_flag ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings reset to defaults.', 'gk-block-api' ); ?></p></div>
 			<?php endif; ?>
 
 			<p><?php esc_html_e( 'These settings drive how the Block MCP server classifies blocks (preferred / acceptable / avoid / legacy), suggests replacements, and detects dual-storage blocks that need both attributes and innerHTML on every update.', 'gk-block-api' ); ?></p>
@@ -339,50 +350,100 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Namespace tier scores', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = avoid (warning), < 10 = legacy (hard reject on insert).', 'gk-block-api' ); ?></p>
-				<table class="widefat striped" style="max-width: 600px;">
-					<thead><tr><th><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></th><th><?php esc_html_e( 'Score', 'gk-block-api' ); ?></th></tr></thead>
-					<tbody>
-						<?php foreach ( $namespace_scores as $ns => $score ) : ?>
-							<tr>
-								<td><code><?php echo esc_html( $ns ); ?>/</code><input type="hidden" name="gk_block_api_preferences[namespace_scores][<?php echo esc_attr( $ns ); ?>]" value="<?php echo esc_attr( $ns ); ?>" /></td>
-								<td><input type="number" min="0" max="100" name="gk_block_api_preferences[namespace_scores][<?php echo esc_attr( $ns ); ?>]" value="<?php echo esc_attr( (string) $score ); ?>" class="small-text" /></td>
-							</tr>
-						<?php endforeach; ?>
+				<table class="widefat striped" style="max-width: 700px;">
+					<thead>
 						<tr>
-							<td><input type="text" name="gk_block_api_preferences[namespace_scores][__new_namespace]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" /></td>
-							<td><input type="number" min="0" max="100" name="gk_block_api_preferences[namespace_scores][__new_score]" placeholder="0" class="small-text" /></td>
+							<th scope="col"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 80px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php $ns_index = 0; foreach ( $namespace_scores as $ns => $score ) : ?>
+							<tr>
+								<td>
+									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="regular-text" />
+								</td>
+								<td>
+									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></label>
+									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
+								</td>
+								<td>
+									<label><input type="checkbox" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
+								</td>
+							</tr>
+						<?php $ns_index++; endforeach; ?>
+						<tr>
+							<td>
+								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New namespace', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" class="regular-text" />
+							</td>
+							<td>
+								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-api' ); ?></label>
+								<input type="number" id="gk-ns-score-new" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" placeholder="0" class="small-text" />
+							</td>
+							<td></td>
 						</tr>
 					</tbody>
 				</table>
 
 				<h2><?php esc_html_e( 'Replacement map', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'When a legacy block is rejected on insert, the error suggests its mapped replacement. Format: legacy/block-name → preferred/block-name.', 'gk-block-api' ); ?></p>
-				<table class="widefat striped" style="max-width: 700px;">
-					<thead><tr><th><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></th><th><?php esc_html_e( 'Replacement', 'gk-block-api' ); ?></th></tr></thead>
+				<table class="widefat striped" style="max-width: 800px;">
+					<thead>
+						<tr>
+							<th scope="col"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Replacement', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 80px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+						</tr>
+					</thead>
 					<tbody>
-						<?php foreach ( $replacement_map as $from => $to ) : ?>
+						<?php $rm_index = 0; foreach ( $replacement_map as $from => $to ) : ?>
 							<tr>
-								<td><input type="text" name="gk_block_api_preferences[replacement_map][<?php echo esc_attr( $from ); ?>][from]" value="<?php echo esc_attr( $from ); ?>" /></td>
-								<td><input type="text" name="gk_block_api_preferences[replacement_map][<?php echo esc_attr( $from ); ?>]" value="<?php echo esc_attr( $to ); ?>" /></td>
+								<td>
+									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="regular-text" />
+								</td>
+								<td>
+									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" value="<?php echo esc_attr( (string) $to ); ?>" class="regular-text" />
+								</td>
+								<td>
+									<label><input type="checkbox" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
+								</td>
 							</tr>
-						<?php endforeach; ?>
+						<?php $rm_index++; endforeach; ?>
+						<tr>
+							<td>
+								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-api' ); ?>" class="regular-text" />
+							</td>
+							<td>
+								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-api' ); ?>" class="regular-text" />
+							</td>
+							<td></td>
+						</tr>
 					</tbody>
 				</table>
 
 				<h2><?php esc_html_e( 'Manual dual-storage blocks', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Block names (one per line) that should be treated as dual-storage in addition to whatever the site-scan and the gk_block_api_dual_storage_blocks filter contribute. Use this to force-classify a block before running a full scan.', 'gk-block-api' ); ?></p>
-				<textarea name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="yoast/faq-block&#10;namespace/block"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
+				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block"; ?>
+				<textarea name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
 
 				<h2><?php esc_html_e( 'create_post post-type allow-list', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Limit which post types the create_post tool can create. Leave all unchecked to allow any public post type with REST support.', 'gk-block-api' ); ?></p>
-				<fieldset>
+				<fieldset class="gk-block-api-allowlist">
 					<?php foreach ( $registered_post_types as $slug => $type_obj ) : ?>
-						<label style="margin-right: 16px;">
+						<label>
 							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> />
 							<?php echo esc_html( $type_obj->labels->singular_name ); ?> <code><?php echo esc_html( $slug ); ?></code>
 						</label>
 					<?php endforeach; ?>
 				</fieldset>
+				<style>.gk-block-api-allowlist label { margin-right: 16px; }</style>
 
 				<?php submit_button(); ?>
 			</form>
@@ -393,8 +454,13 @@ class Settings_Page {
 			<p class="description"><?php esc_html_e( 'Walks every published post and classifies each distinct block name as static / dynamic / dual. After running, get_page_blocks annotations and dual-storage enforcement use the live classification instead of the filter defaults. Slow on large sites.', 'gk-block-api' ); ?></p>
 			<?php if ( ! empty( $scan_results ) ) : ?>
 				<p><strong><?php
-					/* translators: %d: number of distinct block names persisted */
-					echo esc_html( sprintf( __( 'Last scan classified %d distinct block name(s).', 'gk-block-api' ), count( $scan_results ) ) );
+					echo esc_html(
+						sprintf(
+							/* translators: %d: number of distinct block names persisted */
+							__( 'Last scan classified %d distinct block name(s).', 'gk-block-api' ),
+							count( $scan_results )
+						)
+					);
 				?></strong></p>
 			<?php endif; ?>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -406,7 +472,7 @@ class Settings_Page {
 			<hr />
 
 			<h2><?php esc_html_e( 'Reset to defaults', 'gk-block-api' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Deletes all settings stored above (preferences, post-type allow-list, manual dual-storage list, scan results, inventory cache). The next read falls back to the hard-coded Preferences defaults.', 'gk-block-api' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Deletes all settings stored above (preferences, post-type allow-list, manual dual-storage list, scan results, inventory cache, and per-post rate-limit transients). The next read falls back to the hard-coded Preferences defaults.', 'gk-block-api' ); ?></p>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'Reset all Block MCP settings? This cannot be undone.', 'gk-block-api' ) ); ?>');">
 				<input type="hidden" name="action" value="gk_block_api_reset_defaults" />
 				<?php wp_nonce_field( 'gk_block_api_reset_defaults' ); ?>
