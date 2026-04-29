@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', '/tmp/' );
 }
 
-// Common WordPress time constants (referenced by Usage_Stats::CACHE_TTL, etc.).
+// Common WordPress time constants (referenced by Block_Inventory::CACHE_TTL, etc.).
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
 	define( 'MINUTE_IN_SECONDS', 60 );
 }

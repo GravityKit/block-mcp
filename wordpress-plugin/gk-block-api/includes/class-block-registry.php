@@ -32,19 +32,19 @@ class Block_Registry {
 	/**
 	 * Usage stats instance.
 	 *
-	 * @var Usage_Stats
+	 * @var Block_Inventory
 	 */
-	private $usage_stats;
+	private $block_inventory;
 
 	/**
 	 * Constructor.
 	 *
 	 * @param Preferences $preferences Preferences instance.
-	 * @param Usage_Stats $usage_stats Usage stats instance.
+	 * @param Block_Inventory $block_inventory Usage stats instance.
 	 */
-	public function __construct( Preferences $preferences, Usage_Stats $usage_stats ) {
+	public function __construct( Preferences $preferences, Block_Inventory $block_inventory ) {
 		$this->preferences = $preferences;
-		$this->usage_stats = $usage_stats;
+		$this->block_inventory = $block_inventory;
 	}
 
 	/**
@@ -130,7 +130,7 @@ class Block_Registry {
 		$name = $block_type->name;
 
 		// Get usage data.
-		$usage      = $this->usage_stats->get_block_usage( $name );
+		$usage      = $this->block_inventory->get_block_usage( $name );
 		$usage_data = array(
 			'count' => isset( $usage['count'] ) ? $usage['count'] : 0,
 		);

@@ -23,7 +23,7 @@ use GravityKit\BlockAPI\Block_Mutator;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Usage_Stats;
+use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Post_Manager;
 use GravityKit\BlockAPI\Term_Manager;
 use GravityKit\BlockAPI\Media_Manager;
@@ -37,17 +37,17 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 		$preferences = new Preferences();
 		$safety      = new Block_Safety();
 		$transformer = new HTML_Transformer();
-		$usage_stats = new Usage_Stats();
+		$block_inventory = new Block_Inventory();
 		$crud        = new Block_CRUD( $preferences, $safety, $transformer );
 		$mutator     = new Block_Mutator( $crud, $preferences, $safety, $transformer );
-		$registry    = new Block_Registry( $preferences, $usage_stats );
+		$registry    = new Block_Registry( $preferences, $block_inventory );
 		$patterns    = new Pattern_Manager( $preferences );
 
 		$this->controller = new REST_Controller(
 			$registry,
 			$patterns,
 			$crud,
-			$usage_stats,
+			$block_inventory,
 			$mutator,
 			new Post_Manager( $crud ),
 			new Term_Manager(),

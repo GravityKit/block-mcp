@@ -59,7 +59,7 @@ MCPs/block-mcp/
             ├── class-block-registry.php     # Block type discovery with preference enrichment
             ├── class-pattern-manager.php    # Pattern listing, scoring, legacy detection
             ├── class-preferences.php        # Namespace scoring, tier system, replacement map
-            └── class-usage-stats.php        # Site-wide block/pattern analytics (cached)
+            └── class-block-inventory.php    # Site-wide block + pattern inventory (cached)
 ```
 
 ## Architecture
@@ -80,12 +80,12 @@ The MCP server is a thin orchestration layer. It validates inputs, delegates to 
 Defined in `gk-block-api.php` (lines 54-76). On `rest_api_init`:
 
 1. `Preferences` — loads namespace scores and replacement map from `wp_options`
-2. `Usage_Stats` — cached site-wide block usage (1-hour transient)
-3. `Block_Registry(Preferences, Usage_Stats)` — enriched block type discovery
+2. `Block_Inventory` — cached site-wide block + pattern inventory (1-hour transient)
+3. `Block_Registry(Preferences, Block_Inventory)` — enriched block type discovery
 4. `Pattern_Manager(Preferences)` — pattern listing with scoring
 5. `Block_Safety` — static block markup staleness checker
 6. `Block_CRUD(Preferences, Block_Safety)` — all read/write operations
-7. `REST_Controller(Block_Registry, Pattern_Manager, Block_CRUD, Usage_Stats)` — registers routes
+7. `REST_Controller(Block_Registry, Pattern_Manager, Block_CRUD, Block_Inventory, Block_Mutator, Post_Manager, Term_Manager, Media_Manager, Preferences)` — registers routes
 
 All classes use the `GravityKit\BlockAPI` namespace with PSR-4-style autoloading via `spl_autoload_register` (class name → `includes/class-{name}.php`).
 
@@ -156,10 +156,10 @@ GET `/posts/{id}/blocks` supports query params:
 - Scores patterns by: recency bonus, reference count multiplier, legacy block penalty
 - Counts cross-site pattern references via `wpdb` query
 
-**`Usage_Stats`** (`class-usage-stats.php`) — analytics.
+**`Block_Inventory`** (`class-block-inventory.php`) — site-wide block + pattern inventory.
 - Scans all published content, counts blocks per post, tracks namespace totals
 - Detects legacy patterns (synced patterns containing avoid/legacy blocks)
-- Cached in transient `gk_block_usage_stats` (1-hour TTL)
+- Cached in transient `gk_block_inventory` (1-hour TTL)
 
 **`Post_Manager`** (`class-post-manager.php`, v1.2, ~696 lines) — post lifecycle.
 - `create_post( $args )` — create a new post or page. Validates: title required, post_type allow-list (overridable via `gk_block_api_post_types_allowlist` option), status enum (no `trash` on create), `future` status requires future `date`, parent must be hierarchical type and not self, terms must exist in their taxonomy, featured_media must be an image attachment.
@@ -444,7 +444,7 @@ The plugin does not define custom action/filter hooks. It relies on these WordPr
 
 **Stored data**:
 - `wp_options` key `gk_block_api_preferences` — preference config (namespace scores, pattern scoring, replacement map)
-- Transient `gk_block_usage_stats` — cached usage analytics (1-hour TTL)
+- Transient `gk_block_inventory` — cached site-wide block + pattern inventory (1-hour TTL)
 - Transient `gk_block_api_rate_{post_id}` — per-post rate limiting data (auto-expires)
 
 ## Development
@@ -505,9 +505,9 @@ Copy the `wordpress-plugin/gk-block-api/` directory to the target site's `wp-con
 
 - **Duplicate deep-clones via PHP serialize**: The `duplicate` operation uses `unserialize(serialize($original))` for deep cloning (`class-block-crud.php`, line 1169). This handles nested structures but assumes all values are serializable (they always are for parsed blocks).
 
-- **Uninstall cleanup**: Deleting the plugin via WordPress admin removes `gk_block_api_preferences` option and `gk_block_usage_stats` transient (`uninstall.php`).
+- **Uninstall cleanup**: Deleting the plugin via WordPress admin removes `gk_block_api_preferences` option and `gk_block_inventory` transient (`uninstall.php`).
 
-- **Usage stats scan is expensive**: `Usage_Stats::build_stats()` queries ALL published posts with `posts_per_page: -1` and parses every one. The 1-hour transient cache is important. Use `refresh: true` sparingly.
+- **Block inventory scan is expensive**: `Block_Inventory::build_stats()` queries ALL published posts with `posts_per_page: -1` and parses every one. The 1-hour transient cache is important. Use `refresh: true` sparingly.
 
 - **Pattern reference counting uses LIKE**: `Pattern_Manager::count_pattern_references()` searches post_content with `LIKE '%<!-- wp:block {"ref":ID} /-->%'`. This is accurate but not indexed — avoid calling it on sites with tens of thousands of posts without the transient cache.
 

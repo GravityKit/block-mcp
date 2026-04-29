@@ -54,8 +54,8 @@ spl_autoload_register( function ( $class ) {
 add_action( 'rest_api_init', function () {
 	try {
 		$preferences      = new Preferences();
-		$usage_stats      = new Usage_Stats();
-		$block_registry   = new Block_Registry( $preferences, $usage_stats );
+		$block_inventory      = new Block_Inventory();
+		$block_registry   = new Block_Registry( $preferences, $block_inventory );
 		$pattern_manager  = new Pattern_Manager( $preferences );
 		$block_safety     = new Block_Safety();
 		$html_transformer = new HTML_Transformer();
@@ -69,7 +69,7 @@ add_action( 'rest_api_init', function () {
 			$block_registry,
 			$pattern_manager,
 			$block_crud,
-			$usage_stats,
+			$block_inventory,
 			$block_mutator,
 			$post_manager,
 			$term_manager,

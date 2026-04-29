@@ -1,9 +1,14 @@
 <?php
 /**
- * Site-wide block and pattern usage analytics.
+ * Site-wide block and pattern inventory.
  *
  * Scans all published posts/pages to gather block usage counts, namespace
- * totals, pattern references, and legacy pattern detection.
+ * totals, pattern references, and non-preferred pattern detection. Future
+ * home for storage-mode auto-discovery and other "what blocks live on this
+ * site, and what do we know about them" intelligence.
+ *
+ * Renamed from Usage_Stats — the original name implied dashboard-style
+ * numeric rollups, but this class actually owns broader inventory data.
  *
  * @package GravityKit\BlockAPI
  */
@@ -16,18 +21,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Class Usage_Stats
+ * Class Block_Inventory
  *
- * Provides cached site-wide block usage statistics.
+ * Cached site-wide block + pattern inventory.
  */
-class Usage_Stats {
+class Block_Inventory {
 
 	/**
-	 * Transient key for cached usage stats.
+	 * Transient key for the cached inventory.
 	 *
 	 * @var string
 	 */
-	const CACHE_KEY = 'gk_block_usage_stats';
+	const CACHE_KEY = 'gk_block_inventory';
 
 	/**
 	 * Cache TTL in seconds (1 hour).

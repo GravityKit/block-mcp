@@ -60,9 +60,9 @@ class REST_Controller {
 	/**
 	 * Usage stats instance.
 	 *
-	 * @var Usage_Stats
+	 * @var Block_Inventory
 	 */
-	private $usage_stats;
+	private $block_inventory;
 
 	/**
 	 * Post manager instance (create_post, update_post).
@@ -97,7 +97,7 @@ class REST_Controller {
 	 * @param Block_Registry  $block_registry  Block registry.
 	 * @param Pattern_Manager $pattern_manager Pattern manager.
 	 * @param Block_CRUD      $block_crud      Block CRUD.
-	 * @param Usage_Stats     $usage_stats     Usage stats.
+	 * @param Block_Inventory     $block_inventory     Usage stats.
 	 * @param Block_Mutator   $block_mutator   Block mutator.
 	 * @param Post_Manager    $post_manager    Post manager.
 	 * @param Term_Manager    $term_manager    Term manager.
@@ -108,7 +108,7 @@ class REST_Controller {
 		Block_Registry $block_registry,
 		Pattern_Manager $pattern_manager,
 		Block_CRUD $block_crud,
-		Usage_Stats $usage_stats,
+		Block_Inventory $block_inventory,
 		Block_Mutator $block_mutator,
 		Post_Manager $post_manager,
 		Term_Manager $term_manager,
@@ -118,7 +118,7 @@ class REST_Controller {
 		$this->block_registry  = $block_registry;
 		$this->pattern_manager = $pattern_manager;
 		$this->block_crud      = $block_crud;
-		$this->usage_stats     = $usage_stats;
+		$this->block_inventory     = $block_inventory;
 		$this->block_mutator   = $block_mutator;
 		$this->post_manager    = $post_manager;
 		$this->term_manager    = $term_manager;
@@ -1020,7 +1020,7 @@ class REST_Controller {
 	public function get_site_usage( $request ) {
 		try {
 			$refresh = (bool) $request->get_param( 'refresh' );
-			$stats   = $this->usage_stats->get_stats( $refresh );
+			$stats   = $this->block_inventory->get_stats( $refresh );
 
 			return new \WP_REST_Response( $stats, 200 );
 		} catch ( \Throwable $e ) {

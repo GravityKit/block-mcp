@@ -26,7 +26,7 @@ gk-block-api/
     ├── class-block-safety.php    # Static block safety guards (~132 lines)
     ├── class-block-registry.php  # Block type discovery with enrichment (~196 lines)
     ├── class-pattern-manager.php # Synced + registered pattern management (~477 lines)
-    ├── class-usage-stats.php     # Site-wide block/pattern analytics (~331 lines)
+    ├── class-block-inventory.php # Site-wide block + pattern inventory (~331 lines)
     ├── class-post-manager.php    # (v1.2) create_post / update_post (~696 lines)
     ├── class-term-manager.php    # (v1.2) list_terms (~107 lines)
     └── class-media-manager.php   # (v1.2) upload_media — multipart/URL/base64 with SSRF guard (~404 lines)
@@ -41,10 +41,10 @@ gk-block-api/
 On `rest_api_init` (line 54), the bootstrap creates all service objects and wires them together:
 
 ```
-Preferences → Block_Registry (+ Usage_Stats)
+Preferences → Block_Registry (+ Block_Inventory)
 Preferences → Pattern_Manager
 Preferences + Block_Safety → Block_CRUD
-Block_Registry + Pattern_Manager + Block_CRUD + Usage_Stats → REST_Controller
+Block_Registry + Pattern_Manager + Block_CRUD + Block_Inventory → REST_Controller
 ```
 
 ### Class Dependency Graph
@@ -53,13 +53,13 @@ Block_Registry + Pattern_Manager + Block_CRUD + Usage_Stats → REST_Controller
 REST_Controller
 ├── Block_Registry
 │   ├── Preferences
-│   └── Usage_Stats
+│   └── Block_Inventory
 ├── Pattern_Manager
 │   └── Preferences
 ├── Block_CRUD
 │   ├── Preferences
 │   └── Block_Safety
-└── Usage_Stats
+└── Block_Inventory
 ```
 
 ### REST Endpoint Registration
@@ -195,10 +195,10 @@ Manages both synced patterns (`wp_block` CPT) and registered patterns (`WP_Block
 - **`format_synced_pattern()`** (line 250) — Includes reference count (cross-site search for `core/block` refs), legacy block detection, and preview HTML (first 500 chars).
 - **`count_pattern_references()`** (line 398) — Direct `$wpdb` query searching published post_content for `<!-- wp:block {"ref":ID} /-->`.
 
-### Usage_Stats
-**File**: `includes/class-usage-stats.php` (~331 lines)
+### Block_Inventory
+**File**: `includes/class-block-inventory.php` (~331 lines)
 
-Site-wide block usage analytics cached in transient `gk_block_usage_stats` (1 hour TTL).
+Site-wide block + pattern inventory cached in transient `gk_block_inventory` (1 hour TTL).
 
 - **`get_stats()`** (line 54) — Returns `block_usage`, `namespace_totals`, `pattern_references`, `legacy_patterns`.
 - **`build_stats()`** (line 107) — Scans all published posts of all public post types. Counts blocks recursively, tracks per-block post counts, and detects synced patterns with legacy blocks.
@@ -442,7 +442,7 @@ The plugin does not define custom WordPress hooks/filters. It relies on:
 |------|-------|-----|
 | Preference config | WP option `gk_block_api_preferences` | Permanent |
 | Post-type allow-list (v1.2) | WP option `gk_block_api_post_types_allowlist` | Permanent |
-| Usage stats cache | Transient `gk_block_usage_stats` | 1 hour |
+| Block inventory cache | Transient `gk_block_inventory` | 1 hour |
 | Rate limit counters | Transient `gk_block_api_rate_{post_id}` | 2 minutes |
 
 Both options and the usage transient are cleaned on uninstall. Rate-limit transients expire naturally.
@@ -465,8 +465,8 @@ Both options and the usage transient are cleaned on uninstall. Rate-limit transi
 - **Rate limit scope**: Limits are per-post, not per-user. Multiple agents editing the same post share the same budget.
 - **Pattern insert mode**: When `synced=true`, inserts a `core/block` reference (changes propagate). When `synced=false`, inlines the pattern's blocks as independent copies. Registered patterns (non-CPT) are always inlined regardless of the `synced` flag.
 - **Render mode global state**: `get_blocks()` temporarily sets `$GLOBALS['post']` and calls `setup_postdata()` when `render=true`. It restores the original, but nested REST calls during the same request could see unexpected post context.
-- **Uninstall**: `uninstall.php` deletes the `gk_block_api_preferences` option and `gk_block_usage_stats` transient. Rate limit transients (`gk_block_api_rate_{post_id}`) are not cleaned — they expire naturally (2 min TTL).
-- **Usage_Stats scans all content**: `build_stats()` queries ALL published posts across ALL public post types with `posts_per_page => -1`. On large sites this can be slow. Results are cached for 1 hour, but a `refresh=true` call triggers a full rescan.
+- **Uninstall**: `uninstall.php` deletes the `gk_block_api_preferences` option and `gk_block_inventory` transient. Rate limit transients (`gk_block_api_rate_{post_id}`) are not cleaned — they expire naturally (2 min TTL).
+- **Block_Inventory scans all content**: `build_stats()` queries ALL published posts across ALL public post types with `posts_per_page => -1`. On large sites this can be slow. Results are cached for 1 hour, but a `refresh=true` call triggers a full rescan.
 - **wp_kses_post strips some HTML**: All innerHTML passes through `wp_kses_post()`, which strips script tags, event handlers, and other disallowed content. This is intentional for security but may surprise agents trying to insert embeds or custom scripts.
 - **Move destination adjustment**: The `move` operation adjusts destination indices to account for the source block being removed first (class-block-crud.php:1260-1301). This handles both same-parent and cross-level moves, but the logic is complex — test moves carefully, especially when count > 1.
 - **Preference enforcement is insert-only**: Legacy/avoid checks run on `insert_blocks`, `replace_all_blocks`, `replace-block`, `insert-child`, and `wrap-in-group`. They do NOT run on `update-attrs` or `update-html` — you can update attributes on a legacy block that already exists on the page.
