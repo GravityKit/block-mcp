@@ -20,6 +20,7 @@ export const POST_TOOLS = [
     name: 'create_post',
     description:
       'Create a new post or page. Returns ID, slug, permalink, and edit link. Provide either `content` (raw HTML or block markup) OR `blocks` (structured), not both. Status defaults to draft. Use update_post for trash transitions.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Create post' },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -81,6 +82,7 @@ export const POST_TOOLS = [
     name: 'update_post',
     description:
       'Partial update of post metadata, status, or terms. Block content edits stay on the per-block tools. Use status: "trash" to trash; any non-trash status untrashes a trashed post. At least one mutating field besides post_id is required.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Update post' },
     inputSchema: {
       type: 'object' as const,
       properties: {

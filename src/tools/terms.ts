@@ -10,6 +10,7 @@ export const TERM_TOOLS = [
     name: 'list_terms',
     description:
       'List terms in a taxonomy (default: category). Useful for discovering category and tag IDs to pass to create_post or update_post.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'List terms' },
     inputSchema: {
       type: 'object' as const,
       properties: {

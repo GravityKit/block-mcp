@@ -28,13 +28,13 @@ export const PATTERN_TOOLS = [
           type: ['number', 'string'],
           description: 'Numeric post ID (synced) or registered pattern name.',
         },
-        after: {
+        after_top_level: {
           type: 'number',
-          description: 'Insert after index. -1/omit = append.',
+          description: 'top_level_counter to insert AFTER. -1/omit = append. Matches insert_blocks naming.',
         },
-        before: {
+        before_top_level: {
           type: 'number',
-          description: 'Insert before index (alternative to after).',
+          description: 'top_level_counter to insert BEFORE. Matches insert_blocks naming.',
         },
         synced: {
           type: 'boolean',
@@ -63,8 +63,8 @@ export async function handlePatternTool(
     case 'insert_pattern': {
       const postId = args.post_id as number;
       const patternId = args.pattern_id as number | string;
-      const after = args.after as number | undefined;
-      const before = args.before as number | undefined;
+      const after = args.after_top_level as number | undefined;
+      const before = args.before_top_level as number | undefined;
       const synced = args.synced as boolean | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');

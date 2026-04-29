@@ -30,6 +30,19 @@ export const MUTATE_TOOLS = [{
   description:
     'Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. `path` is an integer array from get_page_blocks ([0,2,1] = block 0 → innerBlock 2 → innerBlock 1). Creates a revision.',
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Edit block tree by path' },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success:            { type: 'boolean' },
+      op:                 { type: 'string' },
+      path:               { type: 'array', items: { type: 'integer' } },
+      block:              { type: 'object', properties: { name: { type: 'string' }, attributes: { type: 'object' } } },
+      warnings:           { type: 'array' },
+      formatted_warnings: { type: 'array', items: { type: 'string' } },
+      before_revision_id: { type: 'number' },
+      revision_id:        { type: 'number' },
+    },
+  },
   inputSchema: {
     type: 'object' as const,
     properties: {

@@ -39624,7 +39624,6 @@ var INSERTED_REFS_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          index: { type: "number" },
           top_level_counter: { type: "number" },
           path: { type: "array", items: { type: "integer" } },
           name: { type: "string" }
@@ -39648,7 +39647,10 @@ var WRITE_TOOLS = [
   {
     name: "update_block",
     description: "Update one block by flat_index. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Update one block" },
+    // idempotentHint is false: every call creates a new revision, and
+    // revision history is observable to other readers. Same-input/same-state
+    // is true at the block level but not at the post level.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Update one block" },
     outputSchema: {
       type: "object",
       properties: {
@@ -39674,7 +39676,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "insert_blocks",
-    description: 'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+    description: 'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://agent-guide). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
@@ -39701,7 +39703,9 @@ var WRITE_TOOLS = [
   {
     name: "delete_block",
     description: "Remove block(s) at a top_level_counter. For core/block, removes the reference only \u2014 not the source pattern.",
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Delete blocks" },
+    // idempotentHint is false: deleting at counter N twice removes a
+    // *different* block the second time (indices shift after the first).
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Delete blocks" },
     outputSchema: { type: "object", properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: "number" } } },
     inputSchema: {
       type: "object",
@@ -39735,7 +39739,10 @@ var WRITE_TOOLS = [
   {
     name: "rewrite_post_blocks",
     description: "Replace ALL blocks on a page in one revision. Use for major restructuring; prefer update_block / insert_blocks / replace_block_range for edits.",
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Rewrite the entire post" },
+    // idempotentHint is false for the same reason as update_block: every
+    // call creates a revision; history is observable.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Rewrite the entire post" },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: "object",
       properties: {
@@ -39849,13 +39856,13 @@ var PATTERN_TOOLS = [
           type: ["number", "string"],
           description: "Numeric post ID (synced) or registered pattern name."
         },
-        after: {
+        after_top_level: {
           type: "number",
-          description: "Insert after index. -1/omit = append."
+          description: "top_level_counter to insert AFTER. -1/omit = append. Matches insert_blocks naming."
         },
-        before: {
+        before_top_level: {
           type: "number",
-          description: "Insert before index (alternative to after)."
+          description: "top_level_counter to insert BEFORE. Matches insert_blocks naming."
         },
         synced: {
           type: "boolean",
@@ -39871,8 +39878,8 @@ async function handlePatternTool(toolName, args, client2) {
     case "insert_pattern": {
       const postId = args.post_id;
       const patternId = args.pattern_id;
-      const after = args.after;
-      const before = args.before;
+      const after = args.after_top_level;
+      const before = args.before_top_level;
       const synced = args.synced;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
       if (patternId === void 0 || patternId === null) throw new Error("pattern_id is required");
@@ -39909,6 +39916,19 @@ var MUTATE_TOOLS = [{
   name: "edit_block_tree",
   description: "Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. `path` is an integer array from get_page_blocks ([0,2,1] = block 0 \u2192 innerBlock 2 \u2192 innerBlock 1). Creates a revision.",
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Edit block tree by path" },
+  outputSchema: {
+    type: "object",
+    properties: {
+      success: { type: "boolean" },
+      op: { type: "string" },
+      path: { type: "array", items: { type: "integer" } },
+      block: { type: "object", properties: { name: { type: "string" }, attributes: { type: "object" } } },
+      warnings: { type: "array" },
+      formatted_warnings: { type: "array", items: { type: "string" } },
+      before_revision_id: { type: "number" },
+      revision_id: { type: "number" }
+    }
+  },
   inputSchema: {
     type: "object",
     properties: {
@@ -40056,6 +40076,7 @@ var POST_TOOLS = [
   {
     name: "create_post",
     description: "Create a new post or page. Returns ID, slug, permalink, and edit link. Provide either `content` (raw HTML or block markup) OR `blocks` (structured), not both. Status defaults to draft. Use update_post for trash transitions.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Create post" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40115,6 +40136,7 @@ var POST_TOOLS = [
   {
     name: "update_post",
     description: 'Partial update of post metadata, status, or terms. Block content edits stay on the per-block tools. Use status: "trash" to trash; any non-trash status untrashes a trashed post. At least one mutating field besides post_id is required.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Update post" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40225,6 +40247,7 @@ var TERM_TOOLS = [
   {
     name: "list_terms",
     description: "List terms in a taxonomy (default: category). Useful for discovering category and tag IDs to pass to create_post or update_post.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "List terms" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40257,6 +40280,7 @@ var MEDIA_TOOLS = [
   {
     name: "upload_media",
     description: "Upload an item to the WordPress media library. Provide exactly one of: `path` (local filesystem on the MCP host, sent as multipart), `url` (server-side sideload, 25 MB cap), or `data_base64` (with `filename`). Returns the attachment ID and URL ready for core/image blocks.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Upload media" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40385,6 +40409,7 @@ var YOAST_TOOLS = [
   {
     name: "yoast_get_seo",
     description: "Read all Yoast SEO metadata for a post or page (title, description, robots, Open Graph, Twitter card, schema types, cornerstone flag, breadcrumb, redirect, scores, primary terms).",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Get Yoast SEO metadata" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40396,6 +40421,7 @@ var YOAST_TOOLS = [
   {
     name: "yoast_update_seo",
     description: "Update one or more Yoast SEO fields on a single post or page. Only supplied fields are written. `noindex` is tri-state (true / false / null).",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Update Yoast SEO metadata" },
     inputSchema: {
       type: "object",
       properties: {
@@ -40408,6 +40434,7 @@ var YOAST_TOOLS = [
   {
     name: "yoast_bulk_update_seo",
     description: "Update Yoast SEO fields on multiple posts in one call. Each item must include `post_id` plus any fields to update. Response preserves order.",
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Bulk-update Yoast SEO metadata" },
     inputSchema: {
       type: "object",
       properties: {

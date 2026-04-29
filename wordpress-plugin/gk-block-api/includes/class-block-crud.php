@@ -1080,14 +1080,14 @@ class Block_CRUD {
 			'dual_storage_requires_both',
 			sprintf(
 				/* translators: %s: block name (e.g., yoast/faq-block) */
-				__( 'Block "%s" is dual-storage: both `attributes` and `innerHTML` carry the same data and must be kept in sync. Sending only `innerHTML` will silently desync the structured attributes (the canonical case is yoast/faq-block losing its questions[] array). Pass both fields together. See block-mcp://block-preferences for the dual-storage list.', 'gk-block-api' ),
+				__( 'Block "%s" is dual-storage: both `attributes` and `innerHTML` carry the same data and must be kept in sync. Sending only `innerHTML` will silently desync the structured attributes (the canonical case is yoast/faq-block losing its questions[] array). Pass both fields together. See block-mcp://agent-guide for the dual-storage list.', 'gk-block-api' ),
 				$block_name
 			),
 			array(
 				'status'          => 400,
 				'block'           => $block_name,
 				'storage_mode'    => Block_Inventory::STORAGE_MODE_DUAL,
-				'policy_resource' => 'block-mcp://block-preferences',
+				'policy_resource' => 'block-mcp://agent-guide',
 			)
 		);
 	}
@@ -1302,7 +1302,7 @@ class Block_CRUD {
 					__( 'The %s/ namespace is blocked by site policy.', 'gk-block-api' ),
 					$namespace
 				),
-				__( 'See the block-mcp://block-preferences resource for the full allow/deny list.', 'gk-block-api' ),
+				__( 'See the block-mcp://agent-guide resource for the full allow/deny list.', 'gk-block-api' ),
 			);
 			$result['error'] = new \WP_Error(
 				'legacy_block',
@@ -1312,7 +1312,7 @@ class Block_CRUD {
 					'block'                 => $block_name,
 					'namespace'             => $namespace,
 					'suggested_replacement' => $replacement,
-					'policy_resource'       => 'block-mcp://block-preferences',
+					'policy_resource'       => 'block-mcp://agent-guide',
 				)
 			);
 			return $result;
@@ -1327,7 +1327,7 @@ class Block_CRUD {
 					$this->preferences->extract_namespace( $block_name ) . '/'
 				),
 				'suggested_replacement' => $replacement,
-				'policy_resource'       => 'block-mcp://block-preferences',
+				'policy_resource'       => 'block-mcp://agent-guide',
 			);
 		}
 

@@ -22,7 +22,14 @@ const BLOCK_INPUT_SCHEMA = {
   required: ['name'],
 } as const;
 
-/** Output schema for write ops that return inserted-block refs (insert + replace). */
+/**
+ * Output schema for write ops that return inserted-block refs (insert + replace).
+ *
+ * Per-ref shape mirrors the disambiguated 1.4.0 surface: `top_level_counter`
+ * for ordinal addressing, `path` for `edit_block_tree` chaining. The legacy
+ * `index` field was dropped from the schema in 1.4.0 so typed clients see
+ * exactly the two canonical addressing modes.
+ */
 const INSERTED_REFS_SCHEMA = {
   type: 'object',
   properties: {
@@ -32,7 +39,6 @@ const INSERTED_REFS_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          index:             { type: 'number' },
           top_level_counter: { type: 'number' },
           path:              { type: 'array', items: { type: 'integer' } },
           name:              { type: 'string' },
@@ -60,7 +66,10 @@ export const WRITE_TOOLS = [
     name: 'update_block',
     description:
       'Update one block by flat_index. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Update one block' },
+    // idempotentHint is false: every call creates a new revision, and
+    // revision history is observable to other readers. Same-input/same-state
+    // is true at the block level but not at the post level.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Update one block' },
     outputSchema: {
       type: 'object',
       properties: {
@@ -87,7 +96,7 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+      'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://agent-guide). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
@@ -114,7 +123,9 @@ export const WRITE_TOOLS = [
   {
     name: 'delete_block',
     description: 'Remove block(s) at a top_level_counter. For core/block, removes the reference only — not the source pattern.',
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Delete blocks' },
+    // idempotentHint is false: deleting at counter N twice removes a
+    // *different* block the second time (indices shift after the first).
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Delete blocks' },
     outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: 'number' } } },
     inputSchema: {
       type: 'object' as const,
@@ -149,7 +160,10 @@ export const WRITE_TOOLS = [
   {
     name: 'rewrite_post_blocks',
     description: 'Replace ALL blocks on a page in one revision. Use for major restructuring; prefer update_block / insert_blocks / replace_block_range for edits.',
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Rewrite the entire post' },
+    // idempotentHint is false for the same reason as update_block: every
+    // call creates a revision; history is observable.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Rewrite the entire post' },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: 'object' as const,
       properties: {

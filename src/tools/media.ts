@@ -10,6 +10,7 @@ export const MEDIA_TOOLS = [
     name: 'upload_media',
     description:
       'Upload an item to the WordPress media library. Provide exactly one of: `path` (local filesystem on the MCP host, sent as multipart), `url` (server-side sideload, 25 MB cap), or `data_base64` (with `filename`). Returns the attachment ID and URL ready for core/image blocks.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Upload media' },
     inputSchema: {
       type: 'object' as const,
       properties: {

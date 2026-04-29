@@ -74,6 +74,7 @@ export const YOAST_TOOLS = [
     name: 'yoast_get_seo',
     description:
       'Read all Yoast SEO metadata for a post or page (title, description, robots, Open Graph, Twitter card, schema types, cornerstone flag, breadcrumb, redirect, scores, primary terms).',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get Yoast SEO metadata' },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -86,6 +87,7 @@ export const YOAST_TOOLS = [
     name: 'yoast_update_seo',
     description:
       'Update one or more Yoast SEO fields on a single post or page. Only supplied fields are written. `noindex` is tri-state (true / false / null).',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Update Yoast SEO metadata' },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -99,6 +101,7 @@ export const YOAST_TOOLS = [
     name: 'yoast_bulk_update_seo',
     description:
       'Update Yoast SEO fields on multiple posts in one call. Each item must include `post_id` plus any fields to update. Response preserves order.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Bulk-update Yoast SEO metadata' },
     inputSchema: {
       type: 'object' as const,
       properties: {
