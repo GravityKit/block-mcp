@@ -38720,34 +38720,24 @@ var WordPressBlockClient = class {
   // Registry & Discovery
   // ============================================
   /**
-   * Get all registered block types with preference metadata.
+   * Get registered block types with preference + storage_mode metadata.
    *
-   * @param params - Optional filters (namespace, category, preferred)
+   * @param params - Optional filters (namespace, category, tier, storage_mode,
+   *                 preferred_only, search, usage_only).
    * @returns Array of block types
    */
   async getBlockTypes(params) {
     const queryParams = {};
     if (params?.namespace) queryParams.namespace = params.namespace;
     if (params?.category) queryParams.category = params.category;
-    if (params?.preferred) queryParams.preferred = "true";
+    if (params?.preferred_only) queryParams.preferred_only = "true";
+    if (params?.tier) queryParams.tier = params.tier;
+    if (params?.storage_mode) queryParams.storage_mode = params.storage_mode;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.usage_only) queryParams.usage_only = "true";
     const response = await this.client.get("/block-types", {
       params: queryParams
     });
-    return response.data;
-  }
-  /**
-   * Get block types filtered by namespace.
-   *
-   * @param namespace - Block namespace (e.g. "filter", "core", "stackable")
-   * @returns Array of block types in the namespace
-   */
-  async getBlockTypesByNamespace(namespace) {
-    if (!namespace) {
-      throw new Error("Namespace is required");
-    }
-    const response = await this.client.get(
-      `/block-types/${encodeURIComponent(namespace)}`
-    );
     return response.data;
   }
   /**
@@ -39314,16 +39304,31 @@ var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: "Registered block types grouped by tier (preferred / acceptable / avoid / legacy). Call before inserting unfamiliar blocks. Live policy comes from the site's Preferences config \u2014 see block-mcp://agent-guide. Sliced client-side via limit/offset (default 50/0).",
+    description: 'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset \u2192 next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: "List block types" },
+    outputSchema: {
+      type: "object",
+      properties: {
+        block_types: { type: "array" },
+        count: { type: "number" },
+        total: { type: "number" },
+        offset: { type: "number" },
+        next_offset: { type: ["number", "null"] },
+        guidance: { type: "string" }
+      }
+    },
     inputSchema: {
       type: "object",
       properties: {
         namespace: { type: "string", description: 'Filter by namespace (e.g. "core", "filter").' },
         category: { type: "string", description: 'Filter by category (e.g. "text", "media").' },
-        preferred_only: { type: "boolean", description: "If true, only blocks with score >= 50." },
-        limit: { type: "number", description: "Max results to return. Default 50." },
-        offset: { type: "number", description: "Skip this many results. Default 0." }
+        tier: { type: "string", enum: ["preferred", "acceptable", "avoid", "legacy"], description: "Exact tier match. Use for migration audits." },
+        storage_mode: { type: "string", enum: ["static", "dynamic", "dual"], description: 'Filter by storage mode. "dual" surfaces blocks needing both attrs+innerHTML on update.' },
+        search: { type: "string", description: "Case-insensitive substring match against name + title." },
+        preferred_only: { type: "boolean", description: "Shorthand for `tier in {preferred,acceptable}` (score \u2265 50)." },
+        usage_only: { type: "boolean", description: "Only blocks with usage.count > 0 on this site." },
+        limit: { type: "number", description: "Max results. Default 50." },
+        offset: { type: "number", description: "Skip this many. Default 0." }
       }
     }
   },
@@ -39419,7 +39424,11 @@ async function handleDiscoveryTool(toolName, args, client2) {
       const response = await client2.getBlockTypes({
         namespace: args.namespace,
         category: args.category,
-        preferred: args.preferred_only
+        preferred_only: args.preferred_only,
+        tier: args.tier,
+        storage_mode: args.storage_mode,
+        search: args.search,
+        usage_only: args.usage_only
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total = enriched.block_types.length;

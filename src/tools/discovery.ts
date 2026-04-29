@@ -15,16 +15,31 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_block_types',
     description:
-      'Registered block types grouped by tier (preferred / acceptable / avoid / legacy). Call before inserting unfamiliar blocks. Live policy comes from the site\'s Preferences config — see block-mcp://agent-guide. Sliced client-side via limit/offset (default 50/0).',
+      'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: 'List block types' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        block_types: { type: 'array' },
+        count:       { type: 'number' },
+        total:       { type: 'number' },
+        offset:      { type: 'number' },
+        next_offset: { type: ['number', 'null'] },
+        guidance:    { type: 'string' },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {
         namespace:      { type: 'string',  description: 'Filter by namespace (e.g. "core", "filter").' },
         category:       { type: 'string',  description: 'Filter by category (e.g. "text", "media").' },
-        preferred_only: { type: 'boolean', description: 'If true, only blocks with score >= 50.' },
-        limit:          { type: 'number',  description: 'Max results to return. Default 50.' },
-        offset:         { type: 'number',  description: 'Skip this many results. Default 0.' },
+        tier:           { type: 'string',  enum: ['preferred', 'acceptable', 'avoid', 'legacy'], description: 'Exact tier match. Use for migration audits.' },
+        storage_mode:   { type: 'string',  enum: ['static', 'dynamic', 'dual'], description: 'Filter by storage mode. "dual" surfaces blocks needing both attrs+innerHTML on update.' },
+        search:         { type: 'string',  description: 'Case-insensitive substring match against name + title.' },
+        preferred_only: { type: 'boolean', description: 'Shorthand for `tier in {preferred,acceptable}` (score ≥ 50).' },
+        usage_only:     { type: 'boolean', description: 'Only blocks with usage.count > 0 on this site.' },
+        limit:          { type: 'number',  description: 'Max results. Default 50.' },
+        offset:         { type: 'number',  description: 'Skip this many. Default 0.' },
       },
     },
   },
@@ -124,9 +139,13 @@ export async function handleDiscoveryTool(
   switch (toolName) {
     case 'list_block_types': {
       const response = await client.getBlockTypes({
-        namespace: args.namespace as string | undefined,
-        category: args.category as string | undefined,
-        preferred: args.preferred_only as boolean | undefined,
+        namespace:      args.namespace as string | undefined,
+        category:       args.category as string | undefined,
+        preferred_only: args.preferred_only as boolean | undefined,
+        tier:           args.tier as 'preferred' | 'acceptable' | 'avoid' | 'legacy' | undefined,
+        storage_mode:   args.storage_mode as 'static' | 'dynamic' | 'dual' | undefined,
+        search:         args.search as string | undefined,
+        usage_only:     args.usage_only as boolean | undefined,
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total  = enriched.block_types.length;

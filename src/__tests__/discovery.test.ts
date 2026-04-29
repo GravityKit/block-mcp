@@ -17,10 +17,10 @@ describe('handleDiscoveryTool', () => {
   beforeEach(() => vi.clearAllMocks());
 
   describe('list_block_types', () => {
-    it('passes namespace and preferred params', async () => {
+    it('passes namespace and preferred_only params', async () => {
       await handleDiscoveryTool('list_block_types', { namespace: 'core', preferred_only: true }, mockClient);
       expect(mockClient.getBlockTypes).toHaveBeenCalledWith(expect.objectContaining({
-        namespace: 'core', preferred: true
+        namespace: 'core', preferred_only: true
       }));
     });
 
@@ -28,6 +28,15 @@ describe('handleDiscoveryTool', () => {
       await handleDiscoveryTool('list_block_types', { category: 'text' }, mockClient);
       expect(mockClient.getBlockTypes).toHaveBeenCalledWith(expect.objectContaining({
         category: 'text'
+      }));
+    });
+
+    it('passes new 1.4.0 filters (tier, storage_mode, search, usage_only)', async () => {
+      await handleDiscoveryTool('list_block_types', {
+        tier: 'legacy', storage_mode: 'dual', search: 'faq', usage_only: true
+      }, mockClient);
+      expect(mockClient.getBlockTypes).toHaveBeenCalledWith(expect.objectContaining({
+        tier: 'legacy', storage_mode: 'dual', search: 'faq', usage_only: true
       }));
     });
 
@@ -46,7 +55,13 @@ describe('handleDiscoveryTool', () => {
     it('works with no params', async () => {
       await handleDiscoveryTool('list_block_types', {}, mockClient);
       expect(mockClient.getBlockTypes).toHaveBeenCalledWith({
-        namespace: undefined, category: undefined, preferred: undefined
+        namespace:      undefined,
+        category:       undefined,
+        preferred_only: undefined,
+        tier:           undefined,
+        storage_mode:   undefined,
+        search:         undefined,
+        usage_only:     undefined,
       });
     });
   });

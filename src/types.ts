@@ -55,12 +55,22 @@ export interface BlockType {
   category: string;
   /** Short description of the block's purpose */
   description?: string;
-  /** Block attribute definitions */
-  attributes?: Record<string, { type: string; default?: unknown }>;
+  /**
+   * Block attribute definitions.
+   * `source` (when present) signals the attribute reads from innerHTML at
+   * edit time — strong hint a block is dual-storage.
+   */
+  attributes?: Record<string, { type: string; default?: unknown; source?: string }>;
   /** Preference scoring metadata */
   preference: BlockPreference;
   /** Site-wide usage statistics */
   usage?: BlockTypeUsage;
+  /**
+   * Storage mode — `"static"` (innerHTML is source of truth),
+   * `"dynamic"` (server-rendered, attributes are source of truth),
+   * `"dual"` (both must stay in sync — write enforcement applies).
+   */
+  storage_mode?: 'static' | 'dynamic' | 'dual';
   /** Block names this block replaces (e.g. legacy equivalents) */
   replaces?: string[];
 }

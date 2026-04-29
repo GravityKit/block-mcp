@@ -182,41 +182,33 @@ export class WordPressBlockClient {
   // ============================================
 
   /**
-   * Get all registered block types with preference metadata.
+   * Get registered block types with preference + storage_mode metadata.
    *
-   * @param params - Optional filters (namespace, category, preferred)
+   * @param params - Optional filters (namespace, category, tier, storage_mode,
+   *                 preferred_only, search, usage_only).
    * @returns Array of block types
    */
   async getBlockTypes(params?: {
     namespace?: string;
     category?: string;
-    preferred?: boolean;
+    preferred_only?: boolean;
+    tier?: 'preferred' | 'acceptable' | 'avoid' | 'legacy';
+    storage_mode?: 'static' | 'dynamic' | 'dual';
+    search?: string;
+    usage_only?: boolean;
   }): Promise<BlockTypesResponse> {
     const queryParams: Record<string, string> = {};
-    if (params?.namespace) queryParams.namespace = params.namespace;
-    if (params?.category) queryParams.category = params.category;
-    if (params?.preferred) queryParams.preferred = 'true';
+    if (params?.namespace)      queryParams.namespace      = params.namespace;
+    if (params?.category)       queryParams.category       = params.category;
+    if (params?.preferred_only) queryParams.preferred_only = 'true';
+    if (params?.tier)           queryParams.tier           = params.tier;
+    if (params?.storage_mode)   queryParams.storage_mode   = params.storage_mode;
+    if (params?.search)         queryParams.search         = params.search;
+    if (params?.usage_only)     queryParams.usage_only     = 'true';
 
     const response = await this.client.get<BlockTypesResponse>('/block-types', {
       params: queryParams,
     });
-    return response.data;
-  }
-
-  /**
-   * Get block types filtered by namespace.
-   *
-   * @param namespace - Block namespace (e.g. "filter", "core", "stackable")
-   * @returns Array of block types in the namespace
-   */
-  async getBlockTypesByNamespace(namespace: string): Promise<BlockTypesResponse> {
-    if (!namespace) {
-      throw new Error('Namespace is required');
-    }
-
-    const response = await this.client.get<BlockTypesResponse>(
-      `/block-types/${encodeURIComponent(namespace)}`
-    );
     return response.data;
   }
 

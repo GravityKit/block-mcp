@@ -65,6 +65,10 @@ class Block_Registry {
 			'namespace'      => '',
 			'category'       => '',
 			'preferred_only' => false,
+			'tier'           => '',           // 'preferred' | 'acceptable' | 'avoid' | 'legacy'
+			'storage_mode'   => '',           // 'static' | 'dynamic' | 'dual'
+			'search'         => '',           // substring match against name + title
+			'usage_only'     => false,        // only blocks actually present on the site
 		);
 
 		$args = wp_parse_args( $args, $defaults );
@@ -77,6 +81,20 @@ class Block_Registry {
 		if ( ! is_array( $block_types ) ) {
 			return array();
 		}
+
+		// Build the inverse replacement map ONCE per call (was O(N²) when
+		// `get_blocks_replaced_by` ran a fresh scan per block).
+		$inverse_replacement_map = array();
+		foreach ( $this->preferences->get_replacement_map() as $legacy => $replacement ) {
+			if ( ! isset( $inverse_replacement_map[ $replacement ] ) ) {
+				$inverse_replacement_map[ $replacement ] = array();
+			}
+			$inverse_replacement_map[ $replacement ][] = $legacy;
+		}
+
+		// Cheap lowercase needle for search; '' falsy short-circuits below.
+		$needle = $args['search'] !== '' ? strtolower( (string) $args['search'] ) : '';
+
 		$results = array();
 
 		foreach ( $block_types as $block_type ) {
@@ -95,6 +113,15 @@ class Block_Registry {
 				continue;
 			}
 
+			// Substring search on name + title (case-insensitive).
+			if ( $needle !== '' ) {
+				$title = (string) ( $block_type->title ?? '' );
+				if ( false === strpos( strtolower( $name ), $needle )
+					&& false === strpos( strtolower( $title ), $needle ) ) {
+					continue;
+				}
+			}
+
 			// Get preference data.
 			$preference = $this->preferences->get_block_score( $name );
 
@@ -103,10 +130,36 @@ class Block_Registry {
 				continue;
 			}
 
-			// Build enriched block data.
-			$block_data = $this->format_block_type( $block_type, $preference );
+			// Filter by exact tier.
+			if ( ! empty( $args['tier'] ) && $preference['tier'] !== $args['tier'] ) {
+				continue;
+			}
 
-			$results[] = $block_data;
+			// storage_mode + usage_only require the inventory; resolve once.
+			$is_dynamic = null;
+			if ( ! empty( $args['storage_mode'] ) ) {
+				$is_dynamic   = $this->block_inventory->is_block_dynamic( $name );
+				$mode         = $this->block_inventory->resolve_storage_mode( $name, $is_dynamic );
+				if ( $mode !== $args['storage_mode'] ) {
+					continue;
+				}
+			}
+
+			$usage_count = null;
+			if ( $args['usage_only'] ) {
+				$usage_lookup = $this->block_inventory->get_block_usage( $name );
+				$usage_count  = isset( $usage_lookup['count'] ) ? (int) $usage_lookup['count'] : 0;
+				if ( $usage_count <= 0 ) {
+					continue;
+				}
+			}
+
+			$results[] = $this->format_block_type(
+				$block_type,
+				$preference,
+				$inverse_replacement_map,
+				$is_dynamic
+			);
 		}
 
 		// Sort by preference score descending, then alphabetically.
@@ -121,76 +174,76 @@ class Block_Registry {
 	/**
 	 * Format a single WP_Block_Type into an enriched array.
 	 *
-	 * @param \WP_Block_Type $block_type Block type object.
-	 * @param array          $preference Preference data from Preferences::get_block_score().
+	 * @param \WP_Block_Type $block_type              Block type object.
+	 * @param array          $preference              Preference data from Preferences::get_block_score().
+	 * @param array          $inverse_replacement_map Replacement → [legacy_blocks] map (precomputed by caller).
+	 * @param bool|null      $is_dynamic              Cached is-dynamic from get_block_types(); resolved here when null.
 	 *
 	 * @return array Enriched block type data.
 	 */
-	private function format_block_type( $block_type, $preference ) {
+	private function format_block_type( $block_type, $preference, array $inverse_replacement_map = array(), $is_dynamic = null ) {
 		$name = $block_type->name;
 
 		// Get usage data.
 		$usage      = $this->block_inventory->get_block_usage( $name );
 		$usage_data = array(
-			'count' => isset( $usage['count'] ) ? $usage['count'] : 0,
+			'count' => isset( $usage['count'] ) ? (int) $usage['count'] : 0,
 		);
+		if ( isset( $usage['post_count'] ) ) {
+			$usage_data['post_count'] = (int) $usage['post_count'];
+		}
 
-		// Build attributes summary.
+		// Build attributes summary. Forward `source` when the block declares
+		// one — it's the structural signal that the attribute reads from
+		// innerHTML at edit time (used by storage-mode classification and
+		// useful for AI agents reasoning about static vs dual blocks).
 		$attributes = array();
 		if ( ! empty( $block_type->attributes ) && is_array( $block_type->attributes ) ) {
 			foreach ( $block_type->attributes as $attr_name => $attr_config ) {
-				$attributes[ $attr_name ] = array(
+				$attr_summary = array(
 					'type' => isset( $attr_config['type'] ) ? $attr_config['type'] : 'string',
 				);
-
 				if ( isset( $attr_config['default'] ) ) {
-					$attributes[ $attr_name ]['default'] = $attr_config['default'];
+					$attr_summary['default'] = $attr_config['default'];
 				}
+				if ( isset( $attr_config['source'] ) && is_string( $attr_config['source'] ) ) {
+					$attr_summary['source'] = $attr_config['source'];
+				}
+				$attributes[ $attr_name ] = $attr_summary;
 			}
 		}
 
+		// Storage mode — re-uses the cached is_dynamic from the caller when
+		// available so we don't double-resolve.
+		if ( null === $is_dynamic ) {
+			$is_dynamic = $this->block_inventory->is_block_dynamic( $name );
+		}
+		$storage_mode = $this->block_inventory->resolve_storage_mode( $name, $is_dynamic );
+
 		$data = array(
-			'name'        => $name,
-			'title'       => $block_type->title ? $block_type->title : $name,
-			'category'    => $block_type->category ? $block_type->category : '',
-			'description' => $block_type->description ? $block_type->description : '',
-			'attributes'  => $attributes,
-			'preference'  => $preference,
-			'usage'       => $usage_data,
+			'name'         => $name,
+			'title'        => $block_type->title ? $block_type->title : $name,
+			'category'     => $block_type->category ? $block_type->category : '',
+			'description'  => $block_type->description ? $block_type->description : '',
+			'attributes'   => $attributes,
+			'preference'   => $preference,
+			'usage'        => $usage_data,
+			'storage_mode' => $storage_mode,
 		);
 
-		// Add replacement info if this is an avoid/legacy block.
+		// Replacement info (if this block has a configured replacement).
 		$replacement = $this->preferences->get_replacement( $name );
 		if ( null !== $replacement ) {
 			$data['preference']['replacement'] = $replacement;
 		}
 
-		// Add replaces info: list blocks that this block replaces.
-		$replaces = $this->get_blocks_replaced_by( $name );
-		if ( ! empty( $replaces ) ) {
-			$data['replaces'] = $replaces;
+		// `replaces`: blocks that THIS block is the suggested replacement
+		// for. Resolved via the precomputed inverse map (O(1) instead of
+		// O(N) per block).
+		if ( isset( $inverse_replacement_map[ $name ] ) ) {
+			$data['replaces'] = $inverse_replacement_map[ $name ];
 		}
 
 		return $data;
-	}
-
-	/**
-	 * Find all blocks that the given block replaces (reverse lookup of replacement_map).
-	 *
-	 * @param string $block_name Block name to check.
-	 *
-	 * @return string[] Block names that are replaced by $block_name.
-	 */
-	private function get_blocks_replaced_by( $block_name ) {
-		$map      = $this->preferences->get_replacement_map();
-		$replaces = array();
-
-		foreach ( $map as $legacy => $replacement ) {
-			if ( $replacement === $block_name ) {
-				$replaces[] = $legacy;
-			}
-		}
-
-		return $replaces;
 	}
 }

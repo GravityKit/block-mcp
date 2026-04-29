@@ -39,15 +39,15 @@ describe('handlePatternTool', () => {
     }));
   });
 
-  it('passes after position', async () => {
-    await handlePatternTool('insert_pattern', { post_id: 1, pattern_id: 123, after: 3 }, mockClient);
+  it('passes after_top_level position', async () => {
+    await handlePatternTool('insert_pattern', { post_id: 1, pattern_id: 123, after_top_level: 3 }, mockClient);
     expect(mockClient.insertPattern).toHaveBeenCalledWith(1, expect.objectContaining({
       after: 3
     }));
   });
 
-  it('passes before position', async () => {
-    await handlePatternTool('insert_pattern', { post_id: 1, pattern_id: 123, before: 2 }, mockClient);
+  it('passes before_top_level position', async () => {
+    await handlePatternTool('insert_pattern', { post_id: 1, pattern_id: 123, before_top_level: 2 }, mockClient);
     expect(mockClient.insertPattern).toHaveBeenCalledWith(1, expect.objectContaining({
       before: 2
     }));
