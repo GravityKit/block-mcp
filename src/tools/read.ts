@@ -16,7 +16,18 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      "Get a post's blocks. Pass post_id OR url (resolved server-side — don't shell out). Returns summary (block counts, headings, sections, legacy_blocks aggregate) and nested blocks with path, name, attributes, innerHTML, text_preview. Path is consumed by mutate_block_tree. Start with outline=true or summary_only=true for cheap inspection. legacy_blocks paths are opt-in via include_legacy_paths.",
+      "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Use outline:true or summary_only:true for cheap inspection.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get post blocks' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        post_id:     { type: 'number' },
+        summary:     { type: 'object' },
+        blocks:      { type: 'array' },
+        block_count: { type: 'number' },
+        warnings:    { type: 'array' },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {

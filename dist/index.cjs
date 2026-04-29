@@ -39480,7 +39480,18 @@ async function handleDiscoveryTool(toolName, args, client2) {
 var READ_TOOLS = [
   {
     name: "get_page_blocks",
-    description: "Get a post's blocks. Pass post_id OR url (resolved server-side \u2014 don't shell out). Returns summary (block counts, headings, sections, legacy_blocks aggregate) and nested blocks with path, name, attributes, innerHTML, text_preview. Path is consumed by mutate_block_tree. Start with outline=true or summary_only=true for cheap inspection. legacy_blocks paths are opt-in via include_legacy_paths.",
+    description: 'Get a post\'s blocks. Pass post_id OR url (server resolves URL \u2014 don\'t shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, name, attributes, innerHTML?, dynamic, storage_mode ("static"|"dynamic"|"dual"), preference? (when non-preferred)}`. Use outline:true or summary_only:true for cheap inspection.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Get post blocks" },
+    outputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "number" },
+        summary: { type: "object" },
+        blocks: { type: "array" },
+        block_count: { type: "number" },
+        warnings: { type: "array" }
+      }
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -39582,11 +39593,49 @@ var BLOCK_INPUT_SCHEMA = {
   },
   required: ["name"]
 };
+var INSERTED_REFS_SCHEMA = {
+  type: "object",
+  properties: {
+    success: { type: "boolean" },
+    inserted: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "number" },
+          top_level_counter: { type: "number" },
+          path: { type: "array", items: { type: "integer" } },
+          name: { type: "string" }
+        }
+      }
+    },
+    warnings: { type: "array" },
+    before_revision_id: { type: "number" },
+    revision_id: { type: "number" }
+  }
+};
+var REVISION_ONLY_SCHEMA = {
+  type: "object",
+  properties: {
+    success: { type: "boolean" },
+    before_revision_id: { type: "number" },
+    revision_id: { type: "number" }
+  }
+};
 var WRITE_TOOLS = [
   {
     name: "update_block",
     description: "Update one block by flat_index. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Update one block" },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        block: { type: "object", properties: { index: { type: "number" }, name: { type: "string" }, attributes: { type: "object" } } },
+        before_revision_id: { type: "number" },
+        revision_id: { type: "number" }
+      }
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -39605,6 +39654,7 @@ var WRITE_TOOLS = [
     name: "insert_blocks",
     description: 'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: "object",
       properties: {
@@ -39630,6 +39680,7 @@ var WRITE_TOOLS = [
     name: "delete_block",
     description: "Remove block(s) at a top_level_counter. For core/block, removes the reference only \u2014 not the source pattern.",
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: "Delete blocks" },
+    outputSchema: { type: "object", properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: "number" } } },
     inputSchema: {
       type: "object",
       properties: {
@@ -39647,6 +39698,7 @@ var WRITE_TOOLS = [
     name: "replace_block_range",
     description: "Atomic single-revision swap of N top-level blocks for M new blocks (M can be 0, 1, or N). Safer than delete+insert (no half-written intermediate state). Distinct from rewrite_post_blocks (which replaces the entire post).",
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Replace a range of blocks" },
+    outputSchema: { ...INSERTED_REFS_SCHEMA, properties: { ...INSERTED_REFS_SCHEMA.properties, removed: { type: "number" } } },
     inputSchema: {
       type: "object",
       properties: {
@@ -40561,14 +40613,16 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }
-    return {
+    const toolDef = ALL_TOOLS.find((t) => t.name === name);
+    const response = {
       content: [
-        {
-          type: "text",
-          text: JSON.stringify(result, null, 2)
-        }
+        { type: "text", text: JSON.stringify(result, null, 2) }
       ]
     };
+    if (toolDef && toolDef.outputSchema !== void 0 && result !== null && typeof result === "object") {
+      response.structuredContent = result;
+    }
+    return response;
   } catch (error2) {
     const err = error2;
     return {

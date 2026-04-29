@@ -22,12 +22,54 @@ const BLOCK_INPUT_SCHEMA = {
   required: ['name'],
 } as const;
 
+/** Output schema for write ops that return inserted-block refs (insert + replace). */
+const INSERTED_REFS_SCHEMA = {
+  type: 'object',
+  properties: {
+    success:            { type: 'boolean' },
+    inserted: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          index:             { type: 'number' },
+          top_level_counter: { type: 'number' },
+          path:              { type: 'array', items: { type: 'integer' } },
+          name:              { type: 'string' },
+        },
+      },
+    },
+    warnings:           { type: 'array' },
+    before_revision_id: { type: 'number' },
+    revision_id:        { type: 'number' },
+  },
+} as const;
+
+/** Output schema for write ops that report a single revision result. */
+const REVISION_ONLY_SCHEMA = {
+  type: 'object',
+  properties: {
+    success:            { type: 'boolean' },
+    before_revision_id: { type: 'number' },
+    revision_id:        { type: 'number' },
+  },
+} as const;
+
 export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
       'Update one block by flat_index. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Update one block' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        block: { type: 'object', properties: { index: { type: 'number' }, name: { type: 'string' }, attributes: { type: 'object' } } },
+        before_revision_id: { type: 'number' },
+        revision_id: { type: 'number' },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -47,6 +89,7 @@ export const WRITE_TOOLS = [
     description:
       'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://block-preferences). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -72,6 +115,7 @@ export const WRITE_TOOLS = [
     name: 'delete_block',
     description: 'Remove block(s) at a top_level_counter. For core/block, removes the reference only — not the source pattern.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Delete blocks' },
+    outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: 'number' } } },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -90,6 +134,7 @@ export const WRITE_TOOLS = [
     description:
       'Atomic single-revision swap of N top-level blocks for M new blocks (M can be 0, 1, or N). Safer than delete+insert (no half-written intermediate state). Distinct from rewrite_post_blocks (which replaces the entire post).',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Replace a range of blocks' },
+    outputSchema: { ...INSERTED_REFS_SCHEMA, properties: { ...INSERTED_REFS_SCHEMA.properties, removed: { type: 'number' } } },
     inputSchema: {
       type: 'object' as const,
       properties: {

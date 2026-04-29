@@ -214,14 +214,23 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error(`Unknown tool: ${name}`);
     }
 
-    return {
+    // Emit `structuredContent` alongside the text fallback when the tool
+    // declared an `outputSchema`. Clients that parse structured output
+    // (MCP Inspector, programmatic agents) get typed data; LLM clients
+    // still see the same JSON-stringified text.
+    const toolDef = ALL_TOOLS.find((t) => t.name === name) as { outputSchema?: unknown } | undefined;
+    const response: {
+      content: Array<{ type: string; text: string }>;
+      structuredContent?: unknown;
+    } = {
       content: [
-        {
-          type: 'text',
-          text: JSON.stringify(result, null, 2),
-        },
+        { type: 'text', text: JSON.stringify(result, null, 2) },
       ],
     };
+    if (toolDef && toolDef.outputSchema !== undefined && result !== null && typeof result === 'object') {
+      response.structuredContent = result;
+    }
+    return response;
   } catch (error) {
     // Surface the full WordPress error envelope (code, data, status) when
     // the client decorated it. Critical for AI agents — `legacy_block`
