@@ -114,6 +114,28 @@ export const SCENARIOS: Scenario[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // Scenario — find-then-update via flat index. Exercises the rename:
+  // model must use update_block.flat_index (NOT top_level_counter).
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'find-and-update-heading-text',
+    prompt: (store) =>
+      `${preamble(store)} Find the heading on this page that says "Prefer to Watch?" and ` +
+      `change its innerHTML to "<h3 class=\\"wp-block-heading\\">Watch the video</h3>". Use ` +
+      `the most efficient minimum number of tool calls.`,
+    assert: (store) => {
+      const target = store.blocksSnapshot().find((b) =>
+        b.name === 'core/heading' && /watch the video/i.test(b.innerHTML ?? ''),
+      );
+      if (!target) return { passed: false, reason: 'heading was not updated' };
+      if (store.callCounts.update_block !== 1) {
+        return { passed: false, reason: `expected exactly 1 update_block call, got ${store.callCounts.update_block}` };
+      }
+      return { passed: true, reason: 'find-then-update completed cleanly' };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // Scenario 3 — delete the first separator. Tests addressing scheme
   // (top_level_counter vs. flat index) — the trap that motivated BLOCK-2/6.
   // ──────────────────────────────────────────────────────────────────────

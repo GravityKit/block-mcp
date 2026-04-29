@@ -39314,20 +39314,22 @@ var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: "Registered block types grouped by tier (preferred / acceptable / avoid / legacy). Call before inserting unfamiliar blocks. Live policy comes from the site's Preferences config \u2014 see block-mcp://block-preferences.",
+    description: "Registered block types grouped by tier (preferred / acceptable / avoid / legacy). Call before inserting unfamiliar blocks. Live policy comes from the site's Preferences config \u2014 see block-mcp://agent-guide. Sliced client-side via limit/offset (default 50/0).",
     annotations: { ...READ_ANNOT, title: "List block types" },
     inputSchema: {
       type: "object",
       properties: {
         namespace: { type: "string", description: 'Filter by namespace (e.g. "core", "filter").' },
         category: { type: "string", description: 'Filter by category (e.g. "text", "media").' },
-        preferred_only: { type: "boolean", description: "If true, only blocks with score >= 50." }
+        preferred_only: { type: "boolean", description: "If true, only blocks with score >= 50." },
+        limit: { type: "number", description: "Max results to return. Default 50." },
+        offset: { type: "number", description: "Skip this many results. Default 0." }
       }
     }
   },
   {
     name: "list_patterns",
-    description: "Block patterns sorted by preference score. Check before building from scratch.",
+    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side.",
     annotations: { ...READ_ANNOT, title: "List patterns" },
     inputSchema: {
       type: "object",
@@ -39335,7 +39337,8 @@ var DISCOVERY_TOOLS = [
         search: { type: "string", description: "Search by name or keyword." },
         synced: { type: "boolean", description: "true = synced only, false = registered only, omit = all." },
         min_score: { type: "number", description: "Min preference score; 0 excludes legacy." },
-        limit: { type: "number", description: "Max results. Default 20." }
+        limit: { type: "number", description: "Max results. Default 20." },
+        offset: { type: "number", description: "Skip this many results. Default 0." }
       }
     }
   },
@@ -39419,17 +39422,40 @@ async function handleDiscoveryTool(toolName, args, client2) {
         preferred: args.preferred_only
       });
       const enriched = enrichBlockTypes(response.block_types);
-      return { block_types: enriched.block_types, count: enriched.block_types.length, guidance: enriched.guidance };
+      const total = enriched.block_types.length;
+      const limit = args.limit ?? 50;
+      const offset = args.offset ?? 0;
+      const page = enriched.block_types.slice(offset, offset + limit);
+      return {
+        block_types: page,
+        count: page.length,
+        total,
+        offset,
+        next_offset: offset + page.length < total ? offset + page.length : null,
+        guidance: enriched.guidance
+      };
     }
     case "list_patterns": {
+      const limit = args.limit ?? 20;
+      const offset = args.offset ?? 0;
       const response = await client2.getPatterns({
         q: args.search,
         synced: args.synced,
         min_score: args.min_score,
-        limit: args.limit
+        // Fetch enough to honor offset+limit. Server caps respond too.
+        limit: offset + limit
       });
       const enriched = enrichPatternList(response.patterns);
-      return { patterns: enriched.patterns, count: enriched.patterns.length, summary: enriched.summary };
+      const total = enriched.patterns.length;
+      const page = enriched.patterns.slice(offset, offset + limit);
+      return {
+        patterns: page,
+        count: page.length,
+        total,
+        offset,
+        next_offset: offset + page.length < total ? offset + page.length : null,
+        summary: enriched.summary
+      };
     }
     case "get_pattern": {
       const patternId = args.pattern_id;
