@@ -74,6 +74,11 @@ const CURRENT_DB_VERSION = '1.4.1';
  */
 function register_global_filters() {
 	add_filter( 'gk_block_api_dual_storage_blocks', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
+
+	// Block-type integrations — each file registers its own gk_block_api_* filters.
+	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
+		require_once $integration;
+	}
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );
 

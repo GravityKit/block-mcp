@@ -1223,6 +1223,17 @@ class Block_CRUD {
 				);
 			}
 
+			/**
+			 * Filter a formatted block before it is included in the response.
+			 *
+			 * Use this to strip computed/derived fields (e.g. codeHTML, innerHTML)
+			 * from specific block types so agents never see large noise payloads.
+			 *
+			 * @param array  $data       Formatted block data.
+			 * @param string $block_name Fully-qualified block type name.
+			 */
+			$data = apply_filters( 'gk_block_api_format_block', $data, $block['blockName'] );
+
 			$formatted[] = $data;
 		}
 
