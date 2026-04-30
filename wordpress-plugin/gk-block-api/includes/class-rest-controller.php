@@ -1326,12 +1326,8 @@ class REST_Controller {
 			'block_types'      => array(),
 			'sections'         => array(),
 			'headings'         => array(),
-			// Aggregate counters built up by the walker. The whole
-			// `legacy_blocks` key is dropped at the end if total === 0
-			// (clean pages don't need the empty stub) and per-namespace
-			// zero counts are pruned. Pass `include_legacy_paths=true`
-			// to also surface the per-block path list (`paths`), which is
-			// useful for migration audits but heavy on Stackable-rich pages.
+			// `legacy_blocks` is dropped entirely when total === 0.
+			// Pass `include_legacy_paths=true` to also surface per-block paths.
 			'legacy_blocks'    => array(
 				'total'         => 0,
 				'by_namespace'  => array(),
@@ -1351,12 +1347,10 @@ class REST_Controller {
 		$summary['block_types'] = array_map( 'intval', $summary['block_types'] );
 
 		// Drop the `legacy_blocks` key entirely on clean pages — no point
-		// padding every response with an empty stub. Saves ~80 bytes per
-		// response on the common case.
+		// padding every response with an empty stub.
 		if ( 0 === $summary['legacy_blocks']['total'] && ! $include_legacy_paths ) {
 			unset( $summary['legacy_blocks'] );
 		} else {
-			// Sort by_block_name descending too — most-used legacy block first.
 			arsort( $summary['legacy_blocks']['by_block_name'] );
 			$summary['legacy_blocks']['by_block_name'] = array_map( 'intval', $summary['legacy_blocks']['by_block_name'] );
 			arsort( $summary['legacy_blocks']['by_namespace'] );
@@ -1412,7 +1406,7 @@ class REST_Controller {
 			// hardcoded namespace lists in this scanner.
 			if ( $name && $this->preferences ) {
 				$tier = $this->preferences->get_block_score( $name );
-				if ( isset( $tier['tier'] ) && 'legacy' === $tier['tier'] ) {
+				if ( isset( $tier['tier'] ) && in_array( $tier['tier'], array( 'avoid', 'legacy' ), true ) ) {
 					$namespace = explode( '/', $name )[0];
 					$summary['legacy_blocks']['total']++;
 					if ( ! isset( $summary['legacy_blocks']['by_namespace'][ $namespace ] ) ) {

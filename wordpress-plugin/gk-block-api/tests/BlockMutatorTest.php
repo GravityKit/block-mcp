@@ -10,6 +10,7 @@
 
 use GravityKit\BlockAPI\Block_Mutator;
 use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
@@ -54,7 +55,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$preferences       = new Preferences();
 		$safety            = new Block_Safety();
 		$transformer       = new HTML_Transformer();
-		$this->crud        = new Block_CRUD( $preferences, $safety, $transformer );
+		$this->crud        = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
 		$this->mutator     = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
 
 		// Reset test post content at start of each test.

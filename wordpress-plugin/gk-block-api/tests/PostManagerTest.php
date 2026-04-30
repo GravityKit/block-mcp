@@ -14,6 +14,7 @@
 use GravityKit\BlockAPI\Post_Manager;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
 // Note: Preferences only used inside the test setUp to construct Block_CRUD.
@@ -43,7 +44,7 @@ class PostManagerTest extends \PHPUnit\Framework\TestCase {
 		}
 
 		$preferences = new Preferences();
-		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer() );
+		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
 		$this->pm    = new Post_Manager( $block_crud );
 	}
 

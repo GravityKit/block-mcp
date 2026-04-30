@@ -52,6 +52,9 @@ if ( ! function_exists( 'has_shortcode' ) ) {
 if ( ! function_exists( 'do_shortcode' ) ) {
 	function do_shortcode( $content ) { return $content; }
 }
+if ( ! function_exists( 'apply_filters' ) ) {
+	function apply_filters( $tag, $value ) { return $value; }
+}
 
 // Options storage for Preferences class.
 $_test_options = array();

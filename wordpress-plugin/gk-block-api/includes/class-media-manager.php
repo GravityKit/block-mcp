@@ -118,7 +118,7 @@ class Media_Manager {
 			@unlink( $file['tmp_name'] );
 			return new \WP_Error(
 				'disallowed_mime',
-				sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), sanitize_file_name(  ) ),
+				sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), sanitize_file_name( $file['name'] ) ),
 				array( 'status' => 400 )
 			);
 		}

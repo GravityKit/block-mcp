@@ -261,9 +261,8 @@ class RestSummaryTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( array(), $summary['block_types'] );
 		$this->assertEquals( array(), $summary['sections'] );
 		$this->assertEquals( array(), $summary['headings'] );
-		$this->assertEquals( 0, $summary['legacy_blocks']['total'] );
-		$this->assertEquals( array(), $summary['legacy_blocks']['by_block_name'] );
-		$this->assertEquals( array( 'stackable' => 0, 'ugb' => 0, 'jetpack' => 0 ), $summary['legacy_blocks']['by_namespace'] );
+		// Clean pages have no legacy_blocks key — omitted to keep responses lean.
+		$this->assertArrayNotHasKey( 'legacy_blocks', $summary );
 		$this->assertEquals( 0, $summary['max_path_depth'] );
 	}
 
