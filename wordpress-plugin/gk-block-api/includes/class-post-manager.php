@@ -184,7 +184,10 @@ class Post_Manager {
 			}
 		}
 
-		$post_id = wp_insert_post( $postarr, true );
+		// wp_insert_post() runs wp_unslash() on string fields. Our $postarr is
+		// unslashed (serialize_blocks() output / decoded JSON args), so wp_slash
+		// it first to keep escapes like \n, \" and -- intact.
+		$post_id = wp_insert_post( wp_slash( $postarr ), true );
 		if ( is_wp_error( $post_id ) ) {
 			return $this->ensure_status( $post_id, 400, 'wp_insert_post_failed' );
 		}
@@ -418,7 +421,9 @@ class Post_Manager {
 		}
 
 		if ( count( $postarr ) > 1 ) {
-			$updated = wp_update_post( $postarr, true );
+			// wp_update_post() runs wp_unslash() on string fields; slash to keep
+			// values like titles or excerpts containing backslashes intact.
+			$updated = wp_update_post( wp_slash( $postarr ), true );
 			if ( is_wp_error( $updated ) ) {
 				return $this->ensure_status( $updated, 400, 'wp_update_post_failed' );
 			}

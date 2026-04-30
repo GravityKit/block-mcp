@@ -262,15 +262,21 @@ class Block_CRUD {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
-		return array(
-			'success'              => true,
-			'block'                => array(
+		$block_data = apply_filters(
+			'gk_block_api_format_block',
+			array(
 				'index'      => $index,
 				'name'       => $block['blockName'],
 				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
 			),
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			$block['blockName']
+		);
+
+		return array(
+			'success'            => true,
+			'block'              => $block_data,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -978,6 +984,18 @@ class Block_CRUD {
 	 * @return array|\WP_Error Array with before_revision_id and revision_id on success, or WP_Error.
 	 */
 	public function save_post_content( $post_id, $new_content ) {
+		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
+		// correctly escapes newlines as \n in block comment JSON. Some
+		// content_save_pre filters (notably WPCom_Markdown::preserve_code_blocks)
+		// strip those backslashes, corrupting \n → n. Stash and remove all
+		// content_save_pre callbacks for the duration of the save; block content
+		// needs no further content processing after serialize_blocks().
+		global $wp_filter;
+		$saved_content_save_pre = isset( $wp_filter['content_save_pre'] ) ? $wp_filter['content_save_pre'] : null;
+		if ( $saved_content_save_pre ) {
+			remove_all_filters( 'content_save_pre' );
+		}
+
 		// Get the current latest revision as the "before" snapshot.
 		$before_revisions = wp_get_post_revisions( $post_id, array(
 			'posts_per_page' => 1,
@@ -986,14 +1004,22 @@ class Block_CRUD {
 		) );
 		$before_revision_id = is_array( $before_revisions ) && ! empty( $before_revisions ) ? key( $before_revisions ) : 0;
 
-		// Update the post (WordPress creates a revision automatically).
+		// wp_update_post() runs wp_unslash() on post_content (it expects $_POST-shaped
+		// input). serialize_blocks() output is unslashed JSON, so without wp_slash()
+		// every \n, ", and the -- that serialize_block_attributes()
+		// uses to escape `--` would be stripped of their leading backslash.
 		$result = wp_update_post(
 			array(
 				'ID'           => $post_id,
-				'post_content' => $new_content,
+				'post_content' => wp_slash( $new_content ),
 			),
 			true
 		);
+
+		// Restore content_save_pre so subsequent saves in the same request are unaffected.
+		if ( $saved_content_save_pre ) {
+			$wp_filter['content_save_pre'] = $saved_content_save_pre;
+		}
 
 		if ( is_wp_error( $result ) ) {
 			return $result;

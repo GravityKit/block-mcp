@@ -57431,10 +57431,14 @@ async function getHighlighter() {
   _hlLangs = new Set(_hl.getLoadedLanguages());
   return { hl: _hl, langs: _hlLangs };
 }
-async function shikiHighlight(code, language) {
+async function shikiHighlight(code, language, themeName) {
   const { hl, langs } = await getHighlighter();
   const lang254 = langs.has(language) ? language : "plaintext";
-  return hl.codeToHtml(code, { lang: lang254, theme: "css-variables" }).replace(/var\(--shiki-foreground\)/g, "var(--shiki-color-text)").replace(/var\(--shiki-background\)/g, "var(--shiki-color-background)");
+  let html5 = hl.codeToHtml(code, { lang: lang254, theme: "css-variables" }).replace(/var\(--shiki-foreground\)/g, "var(--shiki-color-text)").replace(/var\(--shiki-background\)/g, "var(--shiki-color-background)");
+  if (themeName && themeName !== "css-variables") {
+    html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, `$1 ${themeName}$2`);
+  }
+  return html5;
 }
 var _langRules = [];
 function inferLanguage(code) {
@@ -57461,7 +57465,7 @@ function inferLanguage(code) {
   if (phpSignals.reduce((n, re3) => n + (re3.test(head2) ? 1 : 0), 0) >= 1) return "php";
   if (/^<!DOCTYPE\s|<html[\s>]|<body[\s>]|<div\s[^>]*>|<p>[\s\S]*<\/p>/i.test(head2)) return "html";
   if (/<script\b|<style\b/i.test(head2)) return "html";
-  if (/^\s*[.#@][\w-]+\s*\{|:\s*[-\w#]+\s*;|@media\s|@import\s/.test(head2)) return "css";
+  if (/[.#@][\w-]+\s*\{|:\s*[^;{}\n]+;|@media\s|@import\s/.test(head2)) return "css";
   if (/\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN)\b/i.test(head2) && /\b(FROM|WHERE)\b/i.test(head2)) return "sql";
   if (/^\s*(const|let|var|function|import|export|=>)\b/.test(head2) || /console\.log\s*\(/.test(head2)) return "javascript";
   if (/^\s*\{[\s\S]*?"[\w-]+"\s*:/.test(head2)) return "json";
@@ -57476,7 +57480,8 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const { langs } = await getHighlighter();
   const lang254 = rawLang === "plaintext" || rawLang === "text" || rawLang === "" ? inferLanguage(code) : rawLang;
   const effectiveLang = langs.has(lang254) ? lang254 : "plaintext";
-  const codeHTML = await shikiHighlight(code, effectiveLang);
+  const themeName = attrs.theme || void 0;
+  const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split("\n").length;
   if (codeHTML === attrs.codeHTML && lang254 === rawLang) return null;
   const updatedAttrs = { ...attrs, language: lang254, codeHTML, highestLineNumber };

@@ -72,13 +72,22 @@ async function getHighlighter() {
  * Render code as a syntax-highlighted <pre> block using the css-variables
  * Shiki theme, with variable names normalised to match Code Block Pro's
  * expected --shiki-color-text / --shiki-color-background convention.
+ *
+ * @param themeName  Optional theme name to use as the <pre> class instead of
+ *                   "css-variables". CBP custom themes (gravitykit-dark, etc.)
+ *                   are registered as css-variables themes in the browser — the
+ *                   class name must match so block validation passes.
  */
-export async function shikiHighlight(code: string, language: string): Promise<string> {
+export async function shikiHighlight(code: string, language: string, themeName?: string): Promise<string> {
   const { hl, langs } = await getHighlighter();
   const lang = langs.has(language) ? language : 'plaintext';
-  return hl.codeToHtml(code, { lang, theme: 'css-variables' })
+  let html = hl.codeToHtml(code, { lang, theme: 'css-variables' })
     .replace(/var\(--shiki-foreground\)/g, 'var(--shiki-color-text)')
     .replace(/var\(--shiki-background\)/g, 'var(--shiki-color-background)');
+  if (themeName && themeName !== 'css-variables') {
+    html = html.replace(/(<pre[^>]*class="shiki) css-variables(")/, `$1 ${themeName}$2`);
+  }
+  return html;
 }
 
 // ── Language inference ────────────────────────────────────────────────────────
@@ -110,7 +119,7 @@ export function inferLanguage(code: string): string {
   if (phpSignals.reduce((n, re) => n + (re.test(head) ? 1 : 0), 0) >= 1) return 'php';
   if (/^<!DOCTYPE\s|<html[\s>]|<body[\s>]|<div\s[^>]*>|<p>[\s\S]*<\/p>/i.test(head)) return 'html';
   if (/<script\b|<style\b/i.test(head)) return 'html';
-  if (/^\s*[.#@][\w-]+\s*\{|:\s*[-\w#]+\s*;|@media\s|@import\s/.test(head)) return 'css';
+  if (/[.#@][\w-]+\s*\{|:\s*[^;{}\n]+;|@media\s|@import\s/.test(head)) return 'css';
   if (/\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN)\b/i.test(head) && /\b(FROM|WHERE)\b/i.test(head)) return 'sql';
   if (/^\s*(const|let|var|function|import|export|=>)\b/.test(head) || /console\.log\s*\(/.test(head)) return 'javascript';
   if (/^\s*\{[\s\S]*?"[\w-]+"\s*:/.test(head)) return 'json';
@@ -134,7 +143,8 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
     : rawLang;
   const effectiveLang = langs.has(lang) ? lang : 'plaintext';
 
-  const codeHTML = await shikiHighlight(code, effectiveLang);
+  const themeName = (attrs.theme as string | undefined) || undefined;
+  const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split('\n').length;
   if (codeHTML === attrs.codeHTML && lang === rawLang) return null;
 
