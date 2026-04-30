@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleWriteTool } from '../tools/write.js';
+import { enrichBlock, enrichBlocks } from '../enrichers.js';
+
+vi.mock('../enrichers.js', () => ({
+  enrichBlock: vi.fn(async (block: any) => ({
+    ...block,
+    attributes: { ...block.attributes, enriched: true },
+  })),
+  enrichBlocks: vi.fn(async (blocks: any[]) =>
+    blocks.map((b: any) => ({ ...b, attributes: { ...b.attributes, enriched: true } }))
+  ),
+}));
 
 const mockClient = {
   updateBlock: vi.fn().mockResolvedValue({ success: true, block: { index: 0, name: 'core/heading', attributes: {} }, before_revision_id: 1, revision_id: 2 }),
@@ -68,10 +79,12 @@ describe('handleWriteTool', () => {
       await handleWriteTool('insert_blocks', {
         post_id: 1, after_top_level: 5, blocks: [{ name: 'core/paragraph', attributes: { content: 'Hi' } }]
       }, mockClient);
-      expect(mockClient.insertBlocks).toHaveBeenCalledWith(1, {
+      expect(mockClient.insertBlocks).toHaveBeenCalledWith(1, expect.objectContaining({
         after: 5, before: undefined,
-        blocks: [{ name: 'core/paragraph', attributes: { content: 'Hi' } }],
-      });
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ name: 'core/paragraph', attributes: expect.objectContaining({ content: 'Hi' }) }),
+        ]),
+      }));
     });
 
     it('enriches warnings with formatted messages', async () => {
@@ -136,7 +149,11 @@ describe('handleWriteTool', () => {
     it('calls client with blocks', async () => {
       const blocks = [{ name: 'core/heading', attributes: { level: 1 } }];
       await handleWriteTool('rewrite_post_blocks', { post_id: 1, blocks }, mockClient);
-      expect(mockClient.replaceAllBlocks).toHaveBeenCalledWith(1, blocks);
+      expect(mockClient.replaceAllBlocks).toHaveBeenCalledWith(1,
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'core/heading', attributes: expect.objectContaining({ level: 1 }) }),
+        ])
+      );
     });
 
     it('enriches warnings', async () => {
@@ -171,5 +188,86 @@ describe('handleWriteTool', () => {
 
   it('throws on unknown tool', async () => {
     await expect(handleWriteTool('unknown', {}, mockClient)).rejects.toThrow('Unknown write tool');
+  });
+
+  describe('enricher wiring', () => {
+    it('update_block with block_name enriches attributes', async () => {
+      await handleWriteTool('update_block', {
+        post_id: 1,
+        flat_index: 0,
+        block_name: 'core/heading',
+        attributes: { level: 2 },
+      }, mockClient);
+      expect(enrichBlock).toHaveBeenCalledWith({ name: 'core/heading', attributes: { level: 2 } });
+      expect(mockClient.updateBlock).toHaveBeenCalledWith(
+        1, 0, expect.objectContaining({ attributes: expect.objectContaining({ enriched: true }) })
+      );
+    });
+
+    it('update_block without block_name skips enricher', async () => {
+      await handleWriteTool('update_block', {
+        post_id: 1,
+        flat_index: 0,
+        attributes: { level: 2 },
+      }, mockClient);
+      expect(enrichBlock).not.toHaveBeenCalled();
+    });
+
+    it('update_block enricher can update innerHTML', async () => {
+      (enrichBlock as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        name: 'core/heading',
+        attributes: { level: 2, enriched: true },
+        innerHTML: '<h2>Enriched</h2>',
+      });
+      await handleWriteTool('update_block', {
+        post_id: 1,
+        flat_index: 0,
+        block_name: 'core/heading',
+        attributes: { level: 2 },
+        innerHTML: '<h2>Original</h2>',
+      }, mockClient);
+      expect(mockClient.updateBlock).toHaveBeenCalledWith(
+        1, 0, { attributes: { level: 2, enriched: true }, innerHTML: '<h2>Enriched</h2>' }
+      );
+    });
+
+    it('insert_blocks enriches blocks', async () => {
+      await handleWriteTool('insert_blocks', {
+        post_id: 1,
+        blocks: [{ name: 'core/paragraph', attributes: { content: 'Hi' } }],
+      }, mockClient);
+      expect(enrichBlocks).toHaveBeenCalled();
+      expect(mockClient.insertBlocks).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          blocks: expect.arrayContaining([expect.objectContaining({ attributes: expect.objectContaining({ enriched: true }) })]),
+        })
+      );
+    });
+
+    it('replace_block_range enriches blocks', async () => {
+      mockClient.replaceBlocksRange = vi.fn().mockResolvedValue({
+        success: true, inserted: [], warnings: [], before_revision_id: 1, revision_id: 2,
+      });
+      await handleWriteTool('replace_block_range', {
+        post_id: 1,
+        start: 0,
+        count: 1,
+        blocks: [{ name: 'core/paragraph', attributes: {} }],
+      }, mockClient);
+      expect(enrichBlocks).toHaveBeenCalled();
+    });
+
+    it('rewrite_post_blocks enriches blocks', async () => {
+      await handleWriteTool('rewrite_post_blocks', {
+        post_id: 1,
+        blocks: [{ name: 'core/heading', attributes: { level: 1 } }],
+      }, mockClient);
+      expect(enrichBlocks).toHaveBeenCalled();
+      expect(mockClient.replaceAllBlocks).toHaveBeenCalledWith(
+        1,
+        expect.arrayContaining([expect.objectContaining({ attributes: expect.objectContaining({ enriched: true }) })])
+      );
+    });
   });
 });

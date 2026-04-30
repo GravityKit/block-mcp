@@ -246,4 +246,100 @@ class HtmlTransformerTest extends \PHPUnit\Framework\TestCase {
 		$this->assertNull( $result[1] );
 		$this->assertStringContainsString( '<section', $result[0] );
 	}
+
+	// ── CBP auto-transform tests ──
+
+	public function test_cbp_codehtml_replaces_pre() {
+		$t = $this->get_transformer();
+		$html = '<div class="wp-block-kevinbatdorf-code-block-pro">'
+			. '<pre class="shiki css-variables" style="background:#fff"><code>OLD</code></pre>'
+			. '</div>';
+		$new_pre = '<pre class="shiki css-variables" style="background:#000"><code>NEW</code></pre>';
+		$result = $t->auto_transform_html(
+			'kevinbatdorf/code-block-pro',
+			array( 'codeHTML' => $new_pre ),
+			$html
+		);
+		$this->assertNotNull( $result );
+		$this->assertStringContainsString( 'NEW', $result );
+		$this->assertStringNotContainsString( 'OLD', $result );
+	}
+
+	public function test_cbp_code_updates_textarea() {
+		$t = $this->get_transformer();
+		$html = '<div class="wp-block-kevinbatdorf-code-block-pro">'
+			. '<textarea class="code-block-pro-copy-button-textarea" tabindex="-1" aria-hidden="true" readonly>old code</textarea>'
+			. '</div>';
+		$result = $t->auto_transform_html(
+			'kevinbatdorf/code-block-pro',
+			array( 'code' => 'new code' ),
+			$html
+		);
+		$this->assertNotNull( $result );
+		$this->assertStringContainsString( 'new code', $result );
+		$this->assertStringNotContainsString( 'old code', $result );
+	}
+
+	public function test_cbp_codehtml_and_code_together() {
+		$t = $this->get_transformer();
+		$html = '<div class="wp-block-kevinbatdorf-code-block-pro">'
+			. '<pre class="shiki css-variables" style="background:#fff"><code>OLD_PRE</code></pre>'
+			. '<textarea class="code-block-pro-copy-button-textarea" tabindex="-1" aria-hidden="true" readonly>OLD_CODE</textarea>'
+			. '</div>';
+		$new_pre = '<pre class="shiki css-variables" style="background:#000"><code>NEW_PRE</code></pre>';
+		$result = $t->auto_transform_html(
+			'kevinbatdorf/code-block-pro',
+			array(
+				'codeHTML' => $new_pre,
+				'code'     => 'NEW_CODE',
+			),
+			$html
+		);
+		$this->assertNotNull( $result );
+		$this->assertStringContainsString( 'NEW_PRE', $result );
+		$this->assertStringNotContainsString( 'OLD_PRE', $result );
+		$this->assertStringContainsString( 'NEW_CODE', $result );
+		$this->assertStringNotContainsString( 'OLD_CODE', $result );
+	}
+
+	public function test_cbp_no_pre_returns_null() {
+		$t = $this->get_transformer();
+		// innerHTML has no <pre class="shiki"> — the codeHTML replacement finds nothing to swap.
+		$html = '<div class="wp-block-kevinbatdorf-code-block-pro"><p>placeholder</p></div>';
+		$result = $t->auto_transform_html(
+			'kevinbatdorf/code-block-pro',
+			array( 'codeHTML' => '<pre class="shiki css-variables"><code>X</code></pre>' ),
+			$html
+		);
+		// preg_replace with no match returns the original string unchanged → null.
+		$this->assertNull( $result );
+	}
+
+	public function test_cbp_other_block_unaffected() {
+		$t = $this->get_transformer();
+		$html = '<p class="">Hello</p>';
+		// core/paragraph doesn't have a CBP transform; codeHTML is not handled for it.
+		$result = $t->auto_transform_html(
+			'core/paragraph',
+			array( 'codeHTML' => '<pre class="shiki css-variables"><code>X</code></pre>' ),
+			$html
+		);
+		$this->assertNull( $result );
+	}
+
+	public function test_cbp_code_with_dollar_sign() {
+		$t = $this->get_transformer();
+		$html = '<div class="wp-block-kevinbatdorf-code-block-pro">'
+			. '<textarea class="code-block-pro-copy-button-textarea" tabindex="-1" aria-hidden="true" readonly>old</textarea>'
+			. '</div>';
+		$result = $t->auto_transform_html(
+			'kevinbatdorf/code-block-pro',
+			array( 'code' => '$var = \'hello\';' ),
+			$html
+		);
+		$this->assertNotNull( $result );
+		// esc_html encodes ' as &#039; — assert the dollar sign and variable name appear literally.
+		$this->assertStringContainsString( '$var', $result );
+		$this->assertStringNotContainsString( 'old', $result );
+	}
 }
