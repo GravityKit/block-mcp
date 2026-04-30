@@ -10,6 +10,7 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import { formatPreferenceWarning } from '../preferences.js';
+import { enrichBlock, enrichBlocks, type BlockDef } from '../enrichers.js';
 
 /** Shape shared by every block-input arg in this module. */
 const BLOCK_INPUT_SCHEMA = {
@@ -88,7 +89,11 @@ export const WRITE_TOOLS = [
           type: 'number',
           description: 'Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). For top-level-only addressing, use delete_block / insert_blocks / replace_block_range.',
         },
-        attributes: { type: 'object', description: 'Partial attrs (top-level shallow merge).' },
+        block_name: {
+          type: 'string',
+          description: 'Block type being updated (e.g. "kevinbatdorf/code-block-pro"). Required to activate enrichers — e.g. auto-generating codeHTML from code + language.',
+        },
+        attributes: { type: 'object', description: 'Partial attrs (top-level shallow merge). Enrichers derive computed fields (e.g. codeHTML) automatically when block_name is provided.' },
         innerHTML: { type: 'string', description: 'Replacement innerHTML.' },
       },
       required: ['post_id', 'flat_index'],
@@ -201,14 +206,27 @@ export async function handleWriteTool(
     case 'update_block': {
       const postId = args.post_id as number;
       const flatIndex = args.flat_index as number;
-      const attributes = args.attributes as Record<string, unknown> | undefined;
-      const innerHTML = args.innerHTML as string | undefined;
+      const blockName = args.block_name as string | undefined;
+      let attributes = args.attributes as Record<string, unknown> | undefined;
+      let innerHTML = args.innerHTML as string | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
       if (flatIndex === undefined || flatIndex === null) throw new Error('flat_index is required');
       if (!attributes && !innerHTML) {
         throw new Error('At least one of attributes or innerHTML must be provided');
       }
+
+      // When block_name is provided, run enrichers so computed fields (e.g.
+      // codeHTML for CBP) are derived automatically from the supplied attrs.
+      // Pass innerHTML so enrichers can splice updated codeHTML into the
+      // wrapper HTML (copy-button textarea + <pre>) for dual-storage blocks.
+      if (blockName && attributes) {
+        const blockDef: BlockDef = { name: blockName, attributes, ...(innerHTML ? { innerHTML } : {}) };
+        const enriched = await enrichBlock(blockDef);
+        attributes = enriched.attributes;
+        if (enriched.innerHTML !== undefined) innerHTML = enriched.innerHTML;
+      }
+
       return await client.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
 
@@ -225,7 +243,7 @@ export async function handleWriteTool(
       if (postId === undefined || postId === null) throw new Error('post_id is required');
       if (!blocks || blocks.length === 0) throw new Error('At least one block is required in the blocks array');
 
-      const result = await client.insertBlocks(postId, { after, before, blocks });
+      const result = await client.insertBlocks(postId, { after, before, blocks: await enrichBlocks(blocks as BlockDef[]) });
       if (result.warnings && result.warnings.length > 0) {
         return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
@@ -258,7 +276,7 @@ export async function handleWriteTool(
       if (typeof count !== 'number' || count < 0) throw new Error('count must be a non-negative integer');
       if (!Array.isArray(blocks)) throw new Error('blocks must be an array (may be empty for a pure delete)');
 
-      const result = await client.replaceBlocksRange(postId, { start, count, blocks });
+      const result = await client.replaceBlocksRange(postId, { start, count, blocks: await enrichBlocks(blocks as BlockDef[]) });
       if (result.warnings && result.warnings.length > 0) {
         return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
@@ -276,7 +294,7 @@ export async function handleWriteTool(
       if (postId === undefined || postId === null) throw new Error('post_id is required');
       if (!blocks || blocks.length === 0) throw new Error('At least one block is required for a full page rewrite');
 
-      const result = await client.replaceAllBlocks(postId, blocks);
+      const result = await client.replaceAllBlocks(postId, await enrichBlocks(blocks as BlockDef[]));
       if (result.warnings && result.warnings.length > 0) {
         return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }

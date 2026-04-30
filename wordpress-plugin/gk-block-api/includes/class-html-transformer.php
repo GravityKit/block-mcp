@@ -277,6 +277,34 @@ class HTML_Transformer {
 			}
 		}
 
+		// kevinbatdorf/code-block-pro: `codeHTML` replaces the <pre class="shiki">
+		// block embedded in innerHTML; `code` updates the copy-button <textarea>.
+		// CBP is dual-storage — attributes hold codeHTML for the editor, innerHTML
+		// holds the full rendered widget. Syncing both here lets callers pass only
+		// attributes without needing to rebuild the wrapper div.
+		if ( 'kevinbatdorf/code-block-pro' === $block_name ) {
+			if ( array_key_exists( 'codeHTML', $changed_attrs ) ) {
+				$new_pre = $changed_attrs['codeHTML'];
+				$html    = preg_replace(
+					'/<pre class="shiki[\s\S]*?<\/pre>/',
+					$new_pre,
+					$html,
+					1
+				);
+			}
+			if ( array_key_exists( 'code', $changed_attrs ) ) {
+				$raw_code = $changed_attrs['code'];
+				$html     = preg_replace_callback(
+					'/(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/i',
+					function ( $matches ) use ( $raw_code ) {
+						return $matches[1] . esc_html( $raw_code ) . $matches[3];
+					},
+					$html,
+					1
+				);
+			}
+		}
+
 		// Return transformed HTML if anything changed.
 		if ( $html !== $current_html ) {
 			return $html;
@@ -369,6 +397,9 @@ class HTML_Transformer {
 		);
 
 		} catch ( \Throwable $e ) {
+			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+				error_log( 'GK Block API rebuild_inner_content error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
 			// Fallback: simple array with the new HTML.
 			return array( $new_inner_html );
 		}
