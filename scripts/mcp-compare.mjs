@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+/**
+ * Live comparison: Block MCP vs the standard wp/v2 REST API (the surface that
+ * REST-API-wrapping MCPs like InstaWP/mcp-wp expose). Same WordPress site,
+ * same auth, same network, same target page — what differs is the API shape.
+ *
+ * Phases:
+ *   1. Read one page  — 5 trials each, time + response size
+ *   2. Update one heading-level — single edit, time + bytes uploaded
+ *   3. Chain of 5 edits (1 read + 5 writes) — time + bytes uploaded
+ *
+ * Required env:
+ *   WP_BASE      Site URL (e.g. https://example.com)
+ *   WP_USER      WordPress username with edit_posts/edit_pages capability
+ *   WP_PASS      Application Password for that user
+ *   POST_ID      Post/page ID to benchmark against (must own the post or
+ *                have edit_others_* caps; uses ?context=edit so the WP REST
+ *                workflow gets raw block markup, not lossy rendered HTML)
+ *
+ * Usage:
+ *   WP_BASE=https://example.com WP_USER=admin WP_PASS=xxx POST_ID=123 \
+ *     node scripts/mcp-compare.mjs
+ */
+import axios from 'axios';
+import https from 'node:https';
+
+const BASE = process.env.WP_BASE;
+const POST_ID = parseInt(process.env.POST_ID || '0', 10);
+const USER = process.env.WP_USER;
+const PASS = process.env.WP_PASS;
+
+if (!BASE || !USER || !PASS || !POST_ID) {
+  console.error('Required env: WP_BASE, WP_USER, WP_PASS, POST_ID');
+  process.exit(1);
+}
+
+const auth = Buffer.from(`${USER}:${PASS}`).toString('base64');
+const baseHeaders = {
+  Authorization: `Basic ${auth}`,
+  Connection: 'keep-alive',
+  'Content-Type': 'application/json',
+};
+const httpsAgent = new https.Agent({ rejectUnauthorized: false, keepAlive: true });
+const wp = axios.create({ baseURL: `${BASE}/wp-json/wp/v2`,           timeout: 60000, httpsAgent, headers: baseHeaders });
+const gk = axios.create({ baseURL: `${BASE}/wp-json/gk-block-api/v1`, timeout: 60000, httpsAgent, headers: baseHeaders });
+
+const ns = () => process.hrtime.bigint();
+const ms = (start) => Number(ns() - start) / 1e6;
+const fmt = (n) => `${n.toFixed(0).padStart(4)} ms`;
+const kb = (b) => `${(b / 1024).toFixed(1)} KB`;
+
+function summarize(samples) {
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+  return { mean, p50: sorted[Math.floor(sorted.length * 0.5)] };
+}
+
+async function timed(fn) {
+  const t0 = ns();
+  const out = await fn();
+  return { ms: ms(t0), out };
+}
+
+// Walk the block tree and collect refs for the first N top-level core/heading blocks.
+function collectHeadingRefs(blocksResp, n) {
+  const out = [];
+  function walk(arr) {
+    for (const b of arr) {
+      if (out.length >= n) return;
+      if (b.name === 'core/heading' && b.path && b.path.length === 1 && b.ref) out.push(b.ref);
+      if (b.innerBlocks) walk(b.innerBlocks);
+    }
+  }
+  walk(blocksResp.blocks || []);
+  return out;
+}
+
+async function main() {
+  console.log(`\n=== Block MCP vs wp/v2 REST API live comparison ===`);
+  console.log(`target: ${BASE}, page ${POST_ID}\n`);
+
+  // Warm-up so the first measured trial doesn't pay TCP/PHP cold-start cost.
+  for (let i = 0; i < 3; i++) {
+    await wp.get(`/pages/${POST_ID}?context=edit`).catch(() => {});
+    await gk.get(`/posts/${POST_ID}/blocks`).catch(() => {});
+  }
+
+  // ── Phase 1: read latency × 5 each ─────────────────────────────────────────
+  // context=edit returns raw block-comment markup. Without it, wp/v2 returns
+  // rendered HTML (block boundaries dissolved) — fine for read-only display,
+  // but writing rendered HTML back via update_page silently strips block
+  // markers. Using ?context=edit gives the WP REST workflow a fair shot at
+  // round-tripping content losslessly.
+  const wpReads = [], gkReads = [];
+  let wpReadBytes = 0, gkReadBytes = 0, totalBlocks = 0;
+  for (let i = 0; i < 5; i++) {
+    const a = await timed(() => wp.get(`/pages/${POST_ID}?context=edit`));
+    wpReads.push(a.ms);
+    wpReadBytes = JSON.stringify(a.out.data).length;
+    const b = await timed(() => gk.get(`/posts/${POST_ID}/blocks`));
+    gkReads.push(b.ms);
+    gkReadBytes = JSON.stringify(b.out.data).length;
+    totalBlocks = b.out.data.summary.total_blocks;
+  }
+
+  // Capture refs for 5 heading blocks for Phase 3.
+  const blocksResp = (await gk.get(`/posts/${POST_ID}/blocks`)).data;
+  const refs = collectHeadingRefs(blocksResp, 5);
+  if (refs.length < 5) { console.error('Need at least 5 top-level headings on the page; got', refs.length); process.exit(1); }
+
+  // ── Phase 2: single heading-level change ───────────────────────────────────
+  const wpFull = (await wp.get(`/pages/${POST_ID}?context=edit`)).data;
+  const wpContent = wpFull.content.raw;
+  if (!wpContent) { console.error('No raw content returned (auth user lacks edit cap?)'); process.exit(1); }
+  const newContent = wpContent.replace(
+    /<h2 class="wp-block-heading">Code samples<\/h2>/,
+    '<h3 class="wp-block-heading">Code samples</h3>'
+  );
+  const wpEditBytes = JSON.stringify({ content: newContent }).length;
+  const wpSingleEdit = await timed(() => wp.post(`/pages/${POST_ID}`, { content: newContent }));
+
+  const gkEditBody = { attributes: { level: 3 } };
+  const gkEditBytes = JSON.stringify(gkEditBody).length;
+  const gkSingleEdit = await timed(() =>
+    gk.patch(`/posts/${POST_ID}/blocks/by-ref/${encodeURIComponent(refs[3])}`, gkEditBody)
+  );
+
+  // ── Phase 3: 5 chained edits ───────────────────────────────────────────────
+  // wp/v2 workflow: 1 GET + 5 PUTs of whole content (cache between edits).
+  // The agent CAN keep the whole post in memory and avoid re-reading, but each
+  // write still ships the entire post body.
+  const t0wp = ns();
+  let mut = (await wp.get(`/pages/${POST_ID}?context=edit`)).data.content.raw;
+  let wpChainBytesUploaded = 0;
+  for (let i = 0; i < 5; i++) {
+    // Toggle the same heading so iterations are deterministic.
+    mut = mut.replace(/<h2 class="wp-block-heading">Conclusion<\/h2>/, '<h3 class="wp-block-heading">Conclusion</h3>');
+    const body = JSON.stringify({ content: mut });
+    wpChainBytesUploaded += body.length;
+    await wp.post(`/pages/${POST_ID}`, { content: mut });
+  }
+  const wpChainMs = ms(t0wp);
+
+  // Block MCP workflow: 1 GET + 5 ref-based PATCHes.
+  const t0gk = ns();
+  await gk.get(`/posts/${POST_ID}/blocks`);
+  let gkChainBytesUploaded = 0;
+  for (let i = 0; i < 5; i++) {
+    const body = JSON.stringify({ attributes: { level: (i % 4) + 2 } });
+    gkChainBytesUploaded += body.length;
+    await gk.patch(`/posts/${POST_ID}/blocks/by-ref/${encodeURIComponent(refs[i])}`, JSON.parse(body));
+  }
+  const gkChainMs = ms(t0gk);
+
+  // ── Report ──────────────────────────────────────────────────────────────
+  const wpR = summarize(wpReads);
+  const gkR = summarize(gkReads);
+
+  console.log(`PHASE 1: Read one page (5 trials)\n`);
+  console.log(`  ${'mean'.padStart(8)} ${'p50'.padStart(8)}  response`);
+  console.log(`  wp/v2 (?context=edit):  ${fmt(wpR.mean)} ${fmt(wpR.p50)}  ${kb(wpReadBytes).padStart(8)}   raw HTML + Yoast schema + ACF + links`);
+  console.log(`  Block MCP:              ${fmt(gkR.mean)} ${fmt(gkR.p50)}  ${kb(gkReadBytes).padStart(8)}   ${totalBlocks} structured blocks with refs`);
+
+  console.log(`\nPHASE 2: One heading-level change\n`);
+  console.log(`                            time      uploaded`);
+  console.log(`  wp/v2 workflow:         ${fmt(wpSingleEdit.ms)}  ${kb(wpEditBytes).padStart(8)}   (whole post body re-sent)`);
+  console.log(`  Block MCP workflow:     ${fmt(gkSingleEdit.ms)}  ${kb(gkEditBytes).padStart(8)}   (single-block PATCH)`);
+
+  console.log(`\nPHASE 3: Chain of 5 edits (1 read + 5 writes)\n`);
+  console.log(`                            total time    total uploaded`);
+  console.log(`  wp/v2 workflow:         ${fmt(wpChainMs)}    ${kb(wpChainBytesUploaded).padStart(8)}`);
+  console.log(`  Block MCP workflow:     ${fmt(gkChainMs)}    ${kb(gkChainBytesUploaded).padStart(8)}`);
+  console.log(`  bytes uploaded: ${(wpChainBytesUploaded / gkChainBytesUploaded).toFixed(0)}× less with Block MCP`);
+  console.log();
+}
+
+main().catch((e) => {
+  console.error('FAIL:', e?.response?.status, JSON.stringify(e?.response?.data) || e.message);
+  process.exit(1);
+});
