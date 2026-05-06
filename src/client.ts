@@ -74,16 +74,16 @@ export class WordPressBlockClient {
     const { wordpress_url, auth } = config;
 
     if (!wordpress_url) {
-      throw new Error('WordPress site URL is required (GK_SITE_URL)');
+      throw new Error('WordPress site URL is required (WORDPRESS_URL)');
     }
     if (!auth) {
-      throw new Error('WordPress authentication credentials are required (GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD)');
+      throw new Error('WordPress authentication credentials are required (WORDPRESS_USER, WORDPRESS_APP_PASSWORD)');
     }
     if (!auth.username) {
-      throw new Error('WordPress API username is required (GK_BLOCK_API_USER)');
+      throw new Error('WordPress API username is required (WORDPRESS_USER)');
     }
     if (!auth.application_password) {
-      throw new Error('WordPress Application Password is required (GK_BLOCK_API_APP_PASSWORD)');
+      throw new Error('WordPress Application Password is required (WORDPRESS_APP_PASSWORD)');
     }
 
     // Build base64-encoded Basic Auth header

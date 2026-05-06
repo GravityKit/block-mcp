@@ -12,9 +12,9 @@ cd MCPs/block-mcp && npm install
 npm run build          # → dist/index.cjs
 
 # 3. Set environment variables (or copy .env.example → .env)
-export GK_SITE_URL=https://www.gravitykit.com
-export GK_BLOCK_API_USER=<wordpress-username>
-export GK_BLOCK_API_APP_PASSWORD=<app-password>
+export WORDPRESS_URL=https://www.gravitykit.com
+export WORDPRESS_USER=<wordpress-username>
+export WORDPRESS_APP_PASSWORD=<app-password>
 
 # 4. Start the server (stdio transport — used by Claude Code / Hermes)
 npm start              # node dist/index.cjs
@@ -201,7 +201,7 @@ Tool routing in `index.ts` uses `Set<string>` lookups per category (lines 92-104
 The server also exposes a **resource** (`block-mcp://block-preferences`) containing block preference rules as a system prompt context.
 
 **Client** (`src/client.ts`) — typed HTTP wrapper using axios.
-- Base URL: `{GK_SITE_URL}/wp-json/gk-block-api/v1`
+- Base URL: `{WORDPRESS_URL}/wp-json/gk-block-api/v1`
 - Auth: Basic Auth with Application Password (base64-encoded)
 - 30-second timeout, meaningful error formatting for connection/timeout/HTTP errors
 - Response interceptor converts `AxiosError` into human-readable messages

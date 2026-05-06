@@ -19,9 +19,9 @@
  *  11. cleanup           — re-trash the post (attachment retained)
  *
  * Env: source `.env.gkclone` first.
- *   GK_SITE_URL=http://localhost:7701
- *   GK_BLOCK_API_USER=admin
- *   GK_BLOCK_API_APP_PASSWORD=<redacted>
+ *   WORDPRESS_URL=http://localhost:7701
+ *   WORDPRESS_USER=admin
+ *   WORDPRESS_APP_PASSWORD=<redacted>
  *
  * Run: node scripts/e2e-gkclone.mjs
  */
@@ -32,12 +32,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const SITE = process.env.GK_SITE_URL;
-const USER = process.env.GK_BLOCK_API_USER;
-const PW = process.env.GK_BLOCK_API_APP_PASSWORD;
+const SITE = process.env.WORDPRESS_URL || process.env.GK_SITE_URL;
+const USER = process.env.WORDPRESS_USER || process.env.GK_BLOCK_API_USER;
+const PW = process.env.WORDPRESS_APP_PASSWORD || process.env.GK_BLOCK_API_APP_PASSWORD;
 
 if (!SITE || !USER || !PW) {
-  console.error('Missing env: GK_SITE_URL, GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD');
+  console.error('Missing env: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD');
   process.exit(2);
 }
 

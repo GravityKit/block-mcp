@@ -114,9 +114,9 @@ Register the server in your MCP client. Example for Claude Code's `~/.claude.jso
       "command": "node",
       "args": ["/absolute/path/to/block-mcp/dist/index.cjs"],
       "env": {
-        "GK_SITE_URL": "https://example.com",
-        "GK_BLOCK_API_USER": "your-wp-username",
-        "GK_BLOCK_API_APP_PASSWORD": "xxxx xxxx xxxx xxxx xxxx xxxx"
+        "WORDPRESS_URL": "https://example.com",
+        "WORDPRESS_USER": "your-wp-username",
+        "WORDPRESS_APP_PASSWORD": "xxxx xxxx xxxx xxxx xxxx xxxx"
       }
     }
   }
@@ -284,7 +284,7 @@ cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
 
 The PHP suite uses a minimal WordPress stub layer (no full WP install required) to exercise validation, error paths, mutation engine, ref resolution, HTML auto-transforms, post lifecycle, term listing, media validation, and REST summary/outline.
 
-An end-to-end smoke script is included under `scripts/` for live-WordPress validation; point it at any WordPress site by setting `GK_SITE_URL`, `GK_BLOCK_API_USER`, and `GK_BLOCK_API_APP_PASSWORD`.
+An end-to-end smoke script is included under `scripts/` for live-WordPress validation; point it at any WordPress site by setting `WORDPRESS_URL`, `WORDPRESS_USER`, and `WORDPRESS_APP_PASSWORD`.
 
 ## Requirements
 
@@ -298,6 +298,12 @@ An end-to-end smoke script is included under `scripts/` for live-WordPress valid
 - Edits work on posts stored as blocks. Block-theme templates (`wp_template`, `wp_template_part`) and widget areas are not yet supported.
 - Rate limits are per-post, not per-user — multiple agents editing the same post share the budget.
 - Static block innerHTML cannot be regenerated server-side (WordPress has no PHP equivalent of the React `save` function). Auto-transforms cover the common cases; for anything else, supply innerHTML explicitly.
+
+## Translations
+
+The WordPress plugin ships with translations for the 20 most-used WordPress locales: Arabic, Chinese (simplified), Czech, Danish, Dutch, Finnish, French, German, Hungarian, Indonesian, Italian, Japanese, Korean, Polish, Portuguese (BR), Romanian, Russian, Spanish, Swedish, Turkish.
+
+The translations were generated with [Potomatic](https://www.gravitykit.com/potomatic/) — an open-source CLI for AI-translating `.pot` files at scale.
 
 ## License
 

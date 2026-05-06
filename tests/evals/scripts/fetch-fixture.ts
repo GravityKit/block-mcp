@@ -9,7 +9,7 @@
  * is needed at eval time.
  *
  * Usage:
- *   GK_SITE_URL=... GK_BLOCK_API_USER=... GK_BLOCK_API_APP_PASSWORD=... \
+ *   WORDPRESS_URL=... WORDPRESS_USER=... WORDPRESS_APP_PASSWORD=... \
  *     tsx tests/evals/scripts/fetch-fixture.ts
  */
 
@@ -25,15 +25,17 @@ const FIXTURES = [
 ];
 
 async function main(): Promise<void> {
-  const { GK_SITE_URL, GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD } = process.env;
-  if (!GK_SITE_URL || !GK_BLOCK_API_USER || !GK_BLOCK_API_APP_PASSWORD) {
-    console.error('Missing GK_SITE_URL, GK_BLOCK_API_USER, or GK_BLOCK_API_APP_PASSWORD');
+  const url = process.env.WORDPRESS_URL || process.env.GK_SITE_URL;
+  const user = process.env.WORDPRESS_USER || process.env.GK_BLOCK_API_USER;
+  const pass = process.env.WORDPRESS_APP_PASSWORD || process.env.GK_BLOCK_API_APP_PASSWORD;
+  if (!url || !user || !pass) {
+    console.error('Missing WORDPRESS_URL, WORDPRESS_USER, or WORDPRESS_APP_PASSWORD');
     process.exit(1);
   }
 
   const client = new WordPressBlockClient({
-    wordpress_url: GK_SITE_URL,
-    auth: { username: GK_BLOCK_API_USER, application_password: GK_BLOCK_API_APP_PASSWORD },
+    wordpress_url: url,
+    auth: { username: user, application_password: pass },
   });
 
   const fixturesDir = join(import.meta.dirname, '..', 'fixtures');

@@ -43633,16 +43633,16 @@ var WordPressBlockClient = class {
   constructor(config2) {
     const { wordpress_url, auth } = config2;
     if (!wordpress_url) {
-      throw new Error("WordPress site URL is required (GK_SITE_URL)");
+      throw new Error("WordPress site URL is required (WORDPRESS_URL)");
     }
     if (!auth) {
-      throw new Error("WordPress authentication credentials are required (GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD)");
+      throw new Error("WordPress authentication credentials are required (WORDPRESS_USER, WORDPRESS_APP_PASSWORD)");
     }
     if (!auth.username) {
-      throw new Error("WordPress API username is required (GK_BLOCK_API_USER)");
+      throw new Error("WordPress API username is required (WORDPRESS_USER)");
     }
     if (!auth.application_password) {
-      throw new Error("WordPress Application Password is required (GK_BLOCK_API_APP_PASSWORD)");
+      throw new Error("WordPress Application Password is required (WORDPRESS_APP_PASSWORD)");
     }
     const credentials = Buffer.from(
       `${auth.username}:${auth.application_password}`
@@ -43852,6 +43852,7 @@ var WordPressBlockClient = class {
     if (params?.summary_only) queryParams.summary_only = "true";
     if (params?.include_legacy_paths) queryParams.include_legacy_paths = "true";
     if (params?.persist_refs === false) queryParams.persist_refs = "false";
+    else if (params?.persist_refs === true) queryParams.persist_refs = "true";
     const response = await this.client.get(
       `/posts/${postId}/blocks`,
       { params: queryParams }
@@ -57758,10 +57759,10 @@ async function handleWriteTool(toolName, args, client2) {
       let attributes = args.attributes;
       let innerHTML = args.innerHTML;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      const hasIndex = flatIndex !== void 0 && flatIndex !== null;
+      const hasIndex = typeof flatIndex === "number" && Number.isFinite(flatIndex) && flatIndex >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasIndex && !hasRef) {
-        throw new Error("Provide either flat_index or ref");
+        throw new Error("Provide either flat_index (non-negative integer) or ref");
       }
       if (hasIndex && hasRef) {
         throw new Error("Provide flat_index OR ref, not both");
@@ -57807,13 +57808,18 @@ async function handleWriteTool(toolName, args, client2) {
       const ref = args.ref;
       const count = args.count;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      const hasCounter = topLevelCounter !== void 0 && topLevelCounter !== null;
+      const hasCounter = typeof topLevelCounter === "number" && Number.isFinite(topLevelCounter) && topLevelCounter >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasCounter && !hasRef) {
-        throw new Error("Provide either top_level_counter or ref");
+        throw new Error("Provide either top_level_counter (non-negative integer) or ref");
       }
       if (hasCounter && hasRef) {
         throw new Error("Provide top_level_counter OR ref, not both");
+      }
+      if (count !== void 0 && count !== null) {
+        if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
+          throw new Error("count must be a positive integer");
+        }
       }
       if (hasRef) {
         return await client2.deleteBlockByRef(postId, ref, count);
@@ -58089,15 +58095,25 @@ async function handleMutateTool(toolName, args, client2) {
       const destination = args.destination;
       const beforeRef = args.before_ref;
       const destRef = args.destination_ref;
-      if (before !== void 0 && before !== null) {
+      const hasBefore = before !== void 0 && before !== null;
+      const hasDestination = destination !== void 0 && destination !== null;
+      const hasBeforeRef = typeof beforeRef === "string" && beforeRef.length > 0;
+      const hasDestRef = typeof destRef === "string" && destRef.length > 0;
+      if (hasBefore && hasBeforeRef) {
+        throw new Error('move: provide "before" path OR "before_ref", not both');
+      }
+      if (hasDestination && hasDestRef) {
+        throw new Error('move: provide "destination" path OR "destination_ref", not both');
+      }
+      if (hasBefore) {
         isIntegerArray(before, "before");
         requestBody.before = before;
-      } else if (destination !== void 0 && destination !== null) {
+      } else if (hasDestination) {
         isIntegerArray(destination, "destination");
         requestBody.destination = destination;
-      } else if (typeof beforeRef === "string" && beforeRef.length > 0) {
+      } else if (hasBeforeRef) {
         requestBody.before_ref = beforeRef;
-      } else if (typeof destRef === "string" && destRef.length > 0) {
+      } else if (hasDestRef) {
         requestBody.destination_ref = destRef;
       } else {
         throw new Error('move requires "before"/"destination" path or "before_ref"/"destination_ref"');
@@ -58596,26 +58612,36 @@ function narrowYoastFields(input) {
 }
 
 // src/index.ts
-var GK_SITE_URL = process.env.GK_SITE_URL;
-var GK_BLOCK_API_USER = process.env.GK_BLOCK_API_USER;
-var GK_BLOCK_API_APP_PASSWORD = process.env.GK_BLOCK_API_APP_PASSWORD;
-if (!GK_SITE_URL || !GK_BLOCK_API_USER || !GK_BLOCK_API_APP_PASSWORD) {
+function readEnv(primary, legacy) {
+  const fromPrimary = process.env[primary];
+  if (fromPrimary) return fromPrimary;
+  const fromLegacy = process.env[legacy];
+  if (fromLegacy) {
+    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
+    return fromLegacy;
+  }
+  return void 0;
+}
+var WORDPRESS_URL = readEnv("WORDPRESS_URL", "GK_SITE_URL");
+var WORDPRESS_USER = readEnv("WORDPRESS_USER", "GK_BLOCK_API_USER");
+var WORDPRESS_APP_PASSWORD = readEnv("WORDPRESS_APP_PASSWORD", "GK_BLOCK_API_APP_PASSWORD");
+if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
   console.error(
-    "Missing required environment variables: GK_SITE_URL, GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD"
+    "Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD"
   );
   process.exit(1);
 }
 var client = new WordPressBlockClient({
-  wordpress_url: GK_SITE_URL,
+  wordpress_url: WORDPRESS_URL,
   auth: {
-    username: GK_BLOCK_API_USER,
-    application_password: GK_BLOCK_API_APP_PASSWORD
+    username: WORDPRESS_USER,
+    application_password: WORDPRESS_APP_PASSWORD
   }
 });
 var server = new McpServer(
   {
     name: "block-mcp",
-    version: "1.4.0"
+    version: "1.5.0"
   },
   {
     capabilities: {

@@ -14,9 +14,9 @@
  *   node scripts/highlight-code-blocks.mjs --dry-run
  *
  * Required env vars (same as the MCP server):
- *   GK_SITE_URL              https://www.gravitykit.com
- *   GK_BLOCK_API_USER        WordPress username
- *   GK_BLOCK_API_APP_PASSWORD Application Password
+ *   WORDPRESS_URL            https://www.gravitykit.com
+ *   WORDPRESS_USER           WordPress username
+ *   WORDPRESS_APP_PASSWORD   Application Password
  *
  * Extension API — import this file and call before running:
  *   import { registerBlockHighlighter, addLanguageRule } from './highlight-code-blocks.mjs';
@@ -164,20 +164,18 @@ registerBlockHighlighter('kevinbatdorf/code-block-pro', async (attrs, highlightF
 
 // ── REST API client ───────────────────────────────────────────────────────────
 
-const {
-  GK_SITE_URL,
-  GK_BLOCK_API_USER,
-  GK_BLOCK_API_APP_PASSWORD,
-} = process.env;
+const WORDPRESS_URL = process.env.WORDPRESS_URL || process.env.GK_SITE_URL;
+const WORDPRESS_USER = process.env.WORDPRESS_USER || process.env.GK_BLOCK_API_USER;
+const WORDPRESS_APP_PASSWORD = process.env.WORDPRESS_APP_PASSWORD || process.env.GK_BLOCK_API_APP_PASSWORD;
 
-if (!GK_SITE_URL || !GK_BLOCK_API_USER || !GK_BLOCK_API_APP_PASSWORD) {
-  console.error('Missing required env vars: GK_SITE_URL, GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD');
+if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
+  console.error('Missing required env vars: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD');
   process.exit(1);
 }
 
 const api = axios.create({
-  baseURL: `${GK_SITE_URL.replace(/\/$/, '')}/wp-json/gk-block-api/v1`,
-  auth: { username: GK_BLOCK_API_USER, password: GK_BLOCK_API_APP_PASSWORD },
+  baseURL: `${WORDPRESS_URL.replace(/\/$/, '')}/wp-json/gk-block-api/v1`,
+  auth: { username: WORDPRESS_USER, password: WORDPRESS_APP_PASSWORD },
   timeout: 30_000,
 });
 

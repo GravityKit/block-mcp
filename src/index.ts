@@ -46,22 +46,37 @@ import { YOAST_TOOLS, handleYoastTool } from './tools/yoast.js';
 // Initialize WordPress client
 // ============================================
 
-const GK_SITE_URL = process.env.GK_SITE_URL;
-const GK_BLOCK_API_USER = process.env.GK_BLOCK_API_USER;
-const GK_BLOCK_API_APP_PASSWORD = process.env.GK_BLOCK_API_APP_PASSWORD;
+// Primary names (recommended): WORDPRESS_URL / WORDPRESS_USER / WORDPRESS_APP_PASSWORD.
+// Fall back to the legacy GK_-prefixed names so existing configs keep working;
+// emit a deprecation notice to stderr when they're used. The legacy names will
+// be removed in a future minor release.
+function readEnv(primary: string, legacy: string): string | undefined {
+  const fromPrimary = process.env[primary];
+  if (fromPrimary) return fromPrimary;
+  const fromLegacy = process.env[legacy];
+  if (fromLegacy) {
+    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
+    return fromLegacy;
+  }
+  return undefined;
+}
 
-if (!GK_SITE_URL || !GK_BLOCK_API_USER || !GK_BLOCK_API_APP_PASSWORD) {
+const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
+const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
+const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
+
+if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
   console.error(
-    'Missing required environment variables: GK_SITE_URL, GK_BLOCK_API_USER, GK_BLOCK_API_APP_PASSWORD'
+    'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
   );
   process.exit(1);
 }
 
 const client = new WordPressBlockClient({
-  wordpress_url: GK_SITE_URL,
+  wordpress_url: WORDPRESS_URL,
   auth: {
-    username: GK_BLOCK_API_USER,
-    application_password: GK_BLOCK_API_APP_PASSWORD,
+    username: WORDPRESS_USER,
+    application_password: WORDPRESS_APP_PASSWORD,
   },
 });
 
@@ -72,7 +87,7 @@ const client = new WordPressBlockClient({
 const server = new McpServer(
   {
     name: 'block-mcp',
-    version: '1.4.0',
+    version: '1.5.0',
   },
   {
     capabilities: {
