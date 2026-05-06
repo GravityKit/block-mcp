@@ -1,11 +1,13 @@
 /**
  * Yoast SEO tools — read/write SEO metadata for posts and pages.
  *
- * Backed by the Block-Theme mu-plugin's `gravitykit/v1/yoast-seo` REST
- * namespace, not gk-block-api. Lives alongside post/term/media tools so an
- * agent sees one MCP for the full docs lifecycle.
+ * Backed by `Yoast_Bridge` inside gk-block-api itself (routes:
+ * `gk-block-api/v1/yoast/{id}` and `gk-block-api/v1/yoast/bulk`). Routes
+ * register only when Yoast SEO is active on the target site; if Yoast SEO
+ * isn't installed, calls return a 404 `rest_no_route` from WordPress.
  *
- * Replaces the standalone `yoast-seo-mcp` MCP server (deprecated as of v1.2).
+ * Replaces the standalone `yoast-seo-mcp` MCP server (deprecated as of v1.2)
+ * and the older Block-Theme mu-plugin namespace (`gravitykit/v1/yoast-seo`).
  */
 
 import type { WordPressBlockClient } from '../client.js';

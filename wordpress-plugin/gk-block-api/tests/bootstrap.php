@@ -596,6 +596,25 @@ if ( ! function_exists( 'update_post_meta' ) ) {
 		return true;
 	}
 }
+if ( ! function_exists( 'delete_post_meta' ) ) {
+	function delete_post_meta( $post_id, $key, $value = '' ) {
+		unset( $value );
+		if ( isset( $GLOBALS['_gk_test_post_meta'][ $post_id ][ $key ] ) ) {
+			unset( $GLOBALS['_gk_test_post_meta'][ $post_id ][ $key ] );
+			return true;
+		}
+		return false;
+	}
+}
+if ( ! function_exists( 'get_post_type' ) ) {
+	function get_post_type( $post = null ) {
+		$id = is_object( $post ) ? (int) $post->ID : (int) $post;
+		if ( isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+			return $GLOBALS['_gk_test_posts'][ $id ]->post_type;
+		}
+		return 'post';
+	}
+}
 
 // Taxonomies and terms.
 $GLOBALS['_gk_test_taxonomies'] = array(

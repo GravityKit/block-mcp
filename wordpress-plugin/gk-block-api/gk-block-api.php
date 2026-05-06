@@ -128,6 +128,11 @@ function init_rest_api() {
 		);
 
 		$controller->register_routes();
+
+		// Yoast SEO bridge: optional add-on. Routes only register when Yoast SEO
+		// is active; absent Yoast, this is a no-op. Lives in its own class so
+		// gk-block-api stays self-contained — no mu-plugin or theme dependency.
+		( new Yoast_Bridge() )->register_routes();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'GK Block API init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log

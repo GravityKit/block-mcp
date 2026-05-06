@@ -58,12 +58,6 @@ interface PageBlocksResponse {
  */
 export class WordPressBlockClient {
   private client: AxiosInstance;
-  /**
-   * Sibling axios instance pointed at `gravitykit/v1` for Yoast SEO meta.
-   * Same auth as the main client; different REST namespace because Yoast
-   * endpoints live in the Block-Theme mu-plugin, not the gk-block-api plugin.
-   */
-  private yoastClient: AxiosInstance;
 
   /**
    * Create a new WordPress Block API client.
@@ -93,35 +87,24 @@ export class WordPressBlockClient {
 
     const trimmed = wordpress_url.replace(/\/+$/, '');
     const baseURL = `${trimmed}/wp-json/gk-block-api/v1`;
-    const yoastBaseURL = `${trimmed}/wp-json/gravitykit/v1`;
-
-    const sharedHeaders = {
-      Authorization: `Basic ${credentials}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'GravityKit Block MCP Server (https://github.com/GravityKit/block-mcp)',
-    };
 
     this.client = axios.create({
       baseURL,
-      headers: sharedHeaders,
-      timeout: 30000,
-    });
-
-    this.yoastClient = axios.create({
-      baseURL: yoastBaseURL,
-      headers: sharedHeaders,
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'GravityKit Block MCP Server (https://github.com/GravityKit/block-mcp)',
+      },
       timeout: 30000,
     });
 
     // Response interceptor for consistent error formatting. formatError now
     // returns an Error already enriched with `wpCode`/`wpData`/`wpStatus`,
     // so we throw it directly instead of wrapping (which would strip them).
-    const errorInterceptor = (error: AxiosError) => {
+    this.client.interceptors.response.use((r) => r, (error: AxiosError) => {
       throw this.formatError(error);
-    };
-    this.yoastClient.interceptors.response.use((r) => r, errorInterceptor);
-    this.client.interceptors.response.use((r) => r, errorInterceptor);
+    });
   }
 
   /**
@@ -787,10 +770,10 @@ export class WordPressBlockClient {
   }
 
   // ──────────────────────────────────────────────────────────
-  // v1.2 — Yoast SEO metadata (separate REST namespace)
+  // v1.3 — Yoast SEO metadata (gk-block-api/v1/yoast/...)
   //
-  // Endpoints: gravitykit/v1/yoast-seo/{post_id}, gravitykit/v1/yoast-seo/bulk
-  // Backed by the Block-Theme mu-plugin, not gk-block-api.
+  // Backed by Yoast_Bridge inside gk-block-api itself. Routes register only
+  // when Yoast SEO is active; absent Yoast you'll get 404 rest_no_route.
   // ──────────────────────────────────────────────────────────
 
   /** Read all Yoast SEO metadata for a post. */
@@ -798,7 +781,7 @@ export class WordPressBlockClient {
     if (postId === undefined || postId === null) {
       throw new Error('yoast_get_seo: post_id is required');
     }
-    const response = await this.yoastClient.get<YoastSEOMeta>(`/yoast-seo/${postId}`);
+    const response = await this.client.get<YoastSEOMeta>(`/yoast/${postId}`);
     return response.data;
   }
 
@@ -807,7 +790,7 @@ export class WordPressBlockClient {
     if (postId === undefined || postId === null) {
       throw new Error('yoast_update_seo: post_id is required');
     }
-    const response = await this.yoastClient.patch<YoastSEOMeta>(`/yoast-seo/${postId}`, fields);
+    const response = await this.client.patch<YoastSEOMeta>(`/yoast/${postId}`, fields);
     return response.data;
   }
 
@@ -816,7 +799,7 @@ export class WordPressBlockClient {
     if (!Array.isArray(posts) || posts.length === 0) {
       throw new Error('yoast_bulk_update_seo: non-empty `posts` array is required');
     }
-    const response = await this.yoastClient.patch<YoastBulkUpdateResponse>('/yoast-seo/bulk', { posts });
+    const response = await this.client.patch<YoastBulkUpdateResponse>('/yoast/bulk', { posts });
     return response.data;
   }
 }

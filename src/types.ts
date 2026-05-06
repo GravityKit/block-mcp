@@ -674,11 +674,10 @@ export interface UploadMediaResponse {
 }
 
 // ============================================
-// v1.2 — Yoast SEO Metadata
+// v1.3 — Yoast SEO Metadata
 //
-// Endpoints live in the Block-Theme mu-plugin (`gravitykit/v1/yoast-seo/*`),
-// not in the gk-block-api WordPress plugin. The MCP client targets that
-// namespace by absolute URL.
+// Backed by Yoast_Bridge inside gk-block-api (`gk-block-api/v1/yoast/*`).
+// Routes only register when Yoast SEO is active on the target site.
 // ============================================
 
 export type YoastSchemaPageType =
