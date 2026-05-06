@@ -1164,8 +1164,10 @@ class Block_CRUD {
 			$blocks = array();
 		}
 
-		$flat = $this->flatten_blocks( $blocks );
-		foreach ( $flat as $i => $entry ) {
+		$flat  = $this->flatten_blocks( $blocks );
+		$count = count( $flat );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$entry = $flat[ $i ];
 			if ( isset( $entry['block']['attrs']['metadata']['gk_ref'] ) && $entry['block']['attrs']['metadata']['gk_ref'] === $ref ) {
 				return $i;
 			}
@@ -1211,8 +1213,10 @@ class Block_CRUD {
 			return new \WP_Error( 'post_not_found', __( 'Post not found.', 'gk-block-api' ), array( 'status' => 404 ) );
 		}
 		$blocks  = parse_blocks( $post->post_content );
+		$count   = count( $blocks );
 		$counter = 0;
-		foreach ( $blocks as $i => $block ) {
+		for ( $i = 0; $i < $count; $i++ ) {
+			$block = $blocks[ $i ];
 			if ( empty( $block['blockName'] ) ) {
 				continue;
 			}
@@ -1235,7 +1239,9 @@ class Block_CRUD {
 	 * @return int[]|null Path or null if not found.
 	 */
 	private function find_ref_in_blocks( $blocks, $ref, $current_path ) {
-		foreach ( $blocks as $i => $block ) {
+		$count = count( $blocks );
+		for ( $i = 0; $i < $count; $i++ ) {
+			$block = $blocks[ $i ];
 			if ( ! is_array( $block ) ) {
 				continue;
 			}
@@ -1263,27 +1269,27 @@ class Block_CRUD {
 	 */
 	public function assign_missing_refs_recursive( &$blocks ) {
 		$dirty = false;
-		foreach ( $blocks as &$block ) {
-			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+		$count = count( $blocks );
+		for ( $i = 0; $i < $count; $i++ ) {
+			if ( ! is_array( $blocks[ $i ] ) || empty( $blocks[ $i ]['blockName'] ) ) {
 				continue;
 			}
-			if ( ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
-				$block['attrs'] = array();
+			if ( ! isset( $blocks[ $i ]['attrs'] ) || ! is_array( $blocks[ $i ]['attrs'] ) ) {
+				$blocks[ $i ]['attrs'] = array();
 			}
-			if ( ! isset( $block['attrs']['metadata'] ) || ! is_array( $block['attrs']['metadata'] ) ) {
-				$block['attrs']['metadata'] = array();
+			if ( ! isset( $blocks[ $i ]['attrs']['metadata'] ) || ! is_array( $blocks[ $i ]['attrs']['metadata'] ) ) {
+				$blocks[ $i ]['attrs']['metadata'] = array();
 			}
-			if ( empty( $block['attrs']['metadata']['gk_ref'] ) ) {
-				$block['attrs']['metadata']['gk_ref'] = self::generate_ref();
+			if ( empty( $blocks[ $i ]['attrs']['metadata']['gk_ref'] ) ) {
+				$blocks[ $i ]['attrs']['metadata']['gk_ref'] = self::generate_ref();
 				$dirty = true;
 			}
-			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				if ( $this->assign_missing_refs_recursive( $block['innerBlocks'] ) ) {
+			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
+				if ( $this->assign_missing_refs_recursive( $blocks[ $i ]['innerBlocks'] ) ) {
 					$dirty = true;
 				}
 			}
 		}
-		unset( $block );
 		return $dirty;
 	}
 
@@ -1296,22 +1302,22 @@ class Block_CRUD {
 	 * @return void
 	 */
 	public function assign_fresh_refs_recursive( &$blocks ) {
-		foreach ( $blocks as &$block ) {
-			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+		$count = count( $blocks );
+		for ( $i = 0; $i < $count; $i++ ) {
+			if ( ! is_array( $blocks[ $i ] ) || empty( $blocks[ $i ]['blockName'] ) ) {
 				continue;
 			}
-			if ( ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
-				$block['attrs'] = array();
+			if ( ! isset( $blocks[ $i ]['attrs'] ) || ! is_array( $blocks[ $i ]['attrs'] ) ) {
+				$blocks[ $i ]['attrs'] = array();
 			}
-			if ( ! isset( $block['attrs']['metadata'] ) || ! is_array( $block['attrs']['metadata'] ) ) {
-				$block['attrs']['metadata'] = array();
+			if ( ! isset( $blocks[ $i ]['attrs']['metadata'] ) || ! is_array( $blocks[ $i ]['attrs']['metadata'] ) ) {
+				$blocks[ $i ]['attrs']['metadata'] = array();
 			}
-			$block['attrs']['metadata']['gk_ref'] = self::generate_ref();
-			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				$this->assign_fresh_refs_recursive( $block['innerBlocks'] );
+			$blocks[ $i ]['attrs']['metadata']['gk_ref'] = self::generate_ref();
+			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
+				$this->assign_fresh_refs_recursive( $blocks[ $i ]['innerBlocks'] );
 			}
 		}
-		unset( $block );
 	}
 
 	/**

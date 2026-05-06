@@ -317,14 +317,16 @@ class Settings_Page {
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
 		// Build a sorted list of every registered block name for the searchable
-		// dropdown in the replacement-map "to" column. Falls back to a small
-		// curated list if nothing is registered yet (very early in the request
-		// lifecycle this can happen).
+		// dropdown in the replacement-map columns. Uses SORT_NATURAL +
+		// SORT_FLAG_CASE so the dropdown reads the way a human would expect:
+		// case-insensitive (so `core/` and `Core/` mix correctly), and
+		// "image2" sorts after "image1" rather than between "image1" and
+		// "image10" the way a plain ASCII sort would.
 		$block_names = array();
 		if ( class_exists( '\WP_Block_Type_Registry' ) ) {
 			$registered_blocks = \WP_Block_Type_Registry::get_instance()->get_all_registered();
 			$block_names       = array_keys( $registered_blocks );
-			sort( $block_names );
+			sort( $block_names, SORT_NATURAL | SORT_FLAG_CASE );
 		}
 
 		// Notices from action handlers. All inputs unslashed and clamped via
@@ -370,10 +372,15 @@ class Settings_Page {
 				}
 			</style>
 
+			<?php /* Live region for screen-reader announcements when the auto-grow
+			       JS appends a new blank row. Visually hidden via WP's standard
+			       .screen-reader-text class. */ ?>
+			<div id="gk-block-api-live" class="screen-reader-text" role="status" aria-live="polite" aria-atomic="true"></div>
+
 			<datalist id="gk-block-names">
-				<?php foreach ( $block_names as $name ) : ?>
-					<option value="<?php echo esc_attr( $name ); ?>"></option>
-				<?php endforeach; ?>
+				<?php for ( $i = 0, $bn_count = count( $block_names ); $i < $bn_count; $i++ ) : ?>
+					<option value="<?php echo esc_attr( $block_names[ $i ] ); ?>"></option>
+				<?php endfor; ?>
 			</datalist>
 
 			<form method="post" action="options.php">
@@ -390,7 +397,13 @@ class Settings_Page {
 						</tr>
 					</thead>
 					<tbody>
-						<?php $ns_index = 0; foreach ( $namespace_scores as $ns => $score ) : ?>
+						<?php
+						$ns_keys  = array_keys( $namespace_scores );
+						$ns_count = count( $ns_keys );
+						for ( $ns_index = 0; $ns_index < $ns_count; $ns_index++ ) :
+							$ns    = $ns_keys[ $ns_index ];
+							$score = $namespace_scores[ $ns ];
+							?>
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></label>
@@ -404,7 +417,8 @@ class Settings_Page {
 									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
 								</td>
 							</tr>
-						<?php $ns_index++; endforeach; ?>
+						<?php endfor; ?>
+						<?php $ns_index = $ns_count; ?>
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New namespace', 'gk-block-api' ); ?></label>
@@ -430,7 +444,13 @@ class Settings_Page {
 						</tr>
 					</thead>
 					<tbody>
-						<?php $rm_index = 0; foreach ( $replacement_map as $from => $to ) : ?>
+						<?php
+						$rm_keys  = array_keys( $replacement_map );
+						$rm_count = count( $rm_keys );
+						for ( $rm_index = 0; $rm_index < $rm_count; $rm_index++ ) :
+							$from = $rm_keys[ $rm_index ];
+							$to   = $replacement_map[ $from ];
+							?>
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></label>
@@ -444,7 +464,8 @@ class Settings_Page {
 									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
 								</td>
 							</tr>
-						<?php $rm_index++; endforeach; ?>
+						<?php endfor; ?>
+						<?php $rm_index = $rm_count; ?>
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-api' ); ?></label>
@@ -480,12 +501,18 @@ class Settings_Page {
 				<h2><?php esc_html_e( 'Post types AI agents can create', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Restrict which post types the create_post MCP tool is allowed to use. Check the boxes for the types you want agents to be able to create. Leave everything unchecked to allow any public post type with REST support (the default).', 'gk-block-api' ); ?></p>
 				<fieldset class="gk-block-api-allowlist">
-					<?php foreach ( $registered_post_types as $slug => $type_obj ) : ?>
+					<?php
+					$pt_slugs = array_keys( $registered_post_types );
+					$pt_count = count( $pt_slugs );
+					for ( $pt_idx = 0; $pt_idx < $pt_count; $pt_idx++ ) :
+						$slug     = $pt_slugs[ $pt_idx ];
+						$type_obj = $registered_post_types[ $slug ];
+						?>
 						<label>
 							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> />
 							<?php echo esc_html( $type_obj->labels->singular_name ); ?> <code><?php echo esc_html( $slug ); ?></code>
 						</label>
-					<?php endforeach; ?>
+					<?php endfor; ?>
 				</fieldset>
 				<style>.gk-block-api-allowlist label { margin-right: 16px; }</style>
 
@@ -527,55 +554,63 @@ class Settings_Page {
 			/* Auto-grow tables marked .gk-block-api-growable. When the user types
 			 * into the last row's "trigger" input (data-row-trigger="1"), clone
 			 * that row, blank out its values, and increment the [N] index in
-			 * every input's name attribute so the form posts as a fresh entry. */
+			 * every input's name attribute so the form posts as a fresh entry.
+			 * Announces the new row via the polite live region for screen readers. */
 			(function () {
+				var live = document.getElementById('gk-block-api-live');
+				var announcement = <?php echo wp_json_encode( __( 'New row added. You can keep adding entries.', 'gk-block-api' ) ); ?>;
+
+				function announce(msg) {
+					if (!live) return;
+					// Toggle text so the live region fires even if the message is identical.
+					live.textContent = '';
+					setTimeout(function () { live.textContent = msg; }, 50);
+				}
+
 				var tables = document.querySelectorAll('.gk-block-api-growable');
-				tables.forEach(function (table) {
-					var tbody = table.querySelector('tbody');
-					if (!tbody) return;
+				for (var t = 0, tlen = tables.length; t < tlen; t++) {
+					(function (table) {
+						var tbody = table.querySelector('tbody');
+						if (!tbody) return;
 
-					// Track the next index to use across this table. Starts above
-					// the highest existing index so we never collide.
-					var nextIdx = tbody.querySelectorAll('tr').length;
+						var nextIdx = tbody.querySelectorAll('tr').length;
 
-					tbody.addEventListener('input', function (e) {
-						var trigger = e.target.closest('[data-row-trigger]');
-						if (!trigger) return;
-						var lastRow = tbody.lastElementChild;
-						if (!lastRow || !lastRow.contains(trigger)) return;
-						if (trigger.value === '') return;
+						tbody.addEventListener('input', function (e) {
+							var trigger = e.target.closest('[data-row-trigger]');
+							if (!trigger) return;
+							var lastRow = tbody.lastElementChild;
+							if (!lastRow || !lastRow.contains(trigger)) return;
+							if (trigger.value === '') return;
 
-						// Mark this row "claimed" so we don't clone again from it.
-						trigger.removeAttribute('data-row-trigger');
+							trigger.removeAttribute('data-row-trigger');
 
-						var clone = lastRow.cloneNode(true);
-						var idx = nextIdx++;
-						clone.querySelectorAll('input').forEach(function (input) {
-							input.value = '';
-							if (input.checked) input.checked = false;
-							input.removeAttribute('id');
-							if (input.name) {
-								input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
+							var clone = lastRow.cloneNode(true);
+							var idx = nextIdx++;
+							var inputs = clone.querySelectorAll('input');
+							for (var i = 0, ilen = inputs.length; i < ilen; i++) {
+								var input = inputs[i];
+								input.value = '';
+								if (input.checked) input.checked = false;
+								input.removeAttribute('id');
+								if (input.name) {
+									input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
+								}
 							}
-							// Re-arm the trigger on the new last row.
-							if (input.dataset.rowTriggerOriginal === '1' || input.classList.contains('regular-text')) {
-								// no-op: handled below by checking original markup
+
+							var triggerCell = trigger.closest('td');
+							if (triggerCell) {
+								var cellIndex = Array.prototype.indexOf.call(triggerCell.parentNode.children, triggerCell);
+								var newCell = clone.children[cellIndex];
+								if (newCell) {
+									var newTrigger = newCell.querySelector('input');
+									if (newTrigger) newTrigger.setAttribute('data-row-trigger', '1');
+								}
 							}
+							tbody.appendChild(clone);
+							announce(announcement);
 						});
-						// Restore the trigger marker on the appropriate input in the new row.
-						// Easiest: find the input in the same column position the trigger was in.
-						var triggerCell = trigger.closest('td');
-						if (triggerCell) {
-							var cellIndex = Array.prototype.indexOf.call(triggerCell.parentNode.children, triggerCell);
-							var newCell = clone.children[cellIndex];
-							if (newCell) {
-								var newTrigger = newCell.querySelector('input');
-								if (newTrigger) newTrigger.setAttribute('data-row-trigger', '1');
-							}
-						}
-						tbody.appendChild(clone);
-					});
-				});
+					})(tables[t]);
+				}
 			})();
 			</script>
 		</div>
