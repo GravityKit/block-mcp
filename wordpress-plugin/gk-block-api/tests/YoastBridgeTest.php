@@ -404,6 +404,66 @@ class YoastBridgeTest extends \PHPUnit\Framework\TestCase {
 		$this->assertTrue( $data['nofollow'] );
 	}
 
+	// ── emoji round-trip ───────────────────────────────────────────
+
+	/**
+	 * Emoji survive a write → read cycle on every text field unmolested.
+	 *
+	 * Sanitizers like sanitize_text_field() are sometimes mistakenly applied
+	 * to multi-byte UTF-8 input in ways that strip 4-byte characters (the
+	 * emoji range). This test pins the contract: agents can put emoji in
+	 * SEO copy and they survive the trip through the bridge.
+	 */
+	public function test_write_then_read_preserves_emoji_in_text_fields() {
+		$with_emoji = array(
+			'title'               => 'Award winner 🏆 Block MCP',
+			'description'         => 'Edits like 🪄 magic — no editor corruption.',
+			'focus_keyword'       => '🚀 ship it',
+			'og_title'            => 'Block MCP 💎',
+			'og_description'      => 'WordPress MCP done right ✨',
+			'twitter_title'       => 'Tweet me 🐦',
+			'twitter_description' => 'Threads-friendly 🧵',
+			'breadcrumb_title'    => 'Home 🏠',
+		);
+
+		$this->bridge->write_fields_public( $this->post_id, $with_emoji );
+
+		$data = $this->bridge->read_fields_public( $this->post_id );
+
+		foreach ( $with_emoji as $field => $expected ) {
+			$this->assertSame( $expected, $data[ $field ], "Field {$field} must round-trip emoji unchanged." );
+		}
+	}
+
+	/**
+	 * Multi-codepoint emoji clusters (skin tones, ZWJ sequences) survive too.
+	 *
+	 * Family / waving-hand-with-skin-tone / flag-of emoji are made of
+	 * multiple codepoints joined by zero-width-joiner or skin-tone modifiers.
+	 * They're a frequent casualty of overzealous sanitizers; this test
+	 * pins them down explicitly so we'd catch a regression that mangled
+	 * the joiner sequence.
+	 */
+	public function test_write_then_read_preserves_complex_emoji_sequences() {
+		$family   = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";              // 👨‍👩‍👧
+		$wave     = "\u{1F44B}\u{1F3FE}";                                        // 👋🏾 (skin tone)
+		$flag     = "\u{1F1FA}\u{1F1F8}";                                        // 🇺🇸
+
+		$this->bridge->write_fields_public(
+			$this->post_id,
+			array(
+				'title'         => 'Hi ' . $wave,
+				'description'   => 'A ' . $family . ' page',
+				'focus_keyword' => $flag . ' MCP',
+			)
+		);
+
+		$data = $this->bridge->read_fields_public( $this->post_id );
+		$this->assertSame( 'Hi ' . $wave, $data['title'] );
+		$this->assertSame( 'A ' . $family . ' page', $data['description'] );
+		$this->assertSame( $flag . ' MCP', $data['focus_keyword'] );
+	}
+
 	// ── is_yoast_active ────────────────────────────────────────────
 
 	/**

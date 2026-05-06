@@ -794,6 +794,117 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertInstanceOf( \WP_Error::class, $result );
 	}
 
+	// ── emoji round-trip ───────────────────────────────────────────
+
+	/**
+	 * Emoji in innerHTML survive an `update-html` mutation untouched.
+	 *
+	 * 4-byte UTF-8 (emoji) frequently get mangled by sanitizers that aren't
+	 * mb-aware. parse_blocks() / serialize_blocks() are mb-safe; this test
+	 * pins the contract that nothing in our code path corrupts them.
+	 */
+	public function test_update_html_preserves_emoji() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>plain</p>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-html',
+			array( 0 ),
+			array( 'innerHTML' => '<p>Edits like 🪄 magic 🏆</p>' )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertSame( '<p>Edits like 🪄 magic 🏆</p>', $saved[0]['innerHTML'] );
+	}
+
+	/**
+	 * Emoji in block attributes survive an `update-attrs` mutation untouched.
+	 *
+	 * Attributes are stored as JSON inside the block-comment delimiter, so
+	 * the emoji has to round-trip through json_encode + serialize_blocks +
+	 * parse_blocks + json_decode. PHP json_encode escapes non-ASCII by
+	 * default; WordPress' serialize_blocks uses JSON_UNESCAPED_UNICODE so
+	 * the on-disk markup retains the literal emoji bytes.
+	 */
+	public function test_update_attrs_preserves_emoji() {
+		$this->make_post( array( $this->block( 'core/heading', array( 'level' => 2 ), '<h2>old</h2>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-attrs',
+			array( 0 ),
+			array( 'attributes' => array( 'placeholder' => 'Type here 🪄' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertSame( 'Type here 🪄', $saved[0]['attrs']['placeholder'] );
+	}
+
+	/**
+	 * Emoji survive `replace-block`, including in nested innerBlocks.
+	 *
+	 * Exercises the recursive build_block_from_def() path — an emoji in a
+	 * grandchild's innerHTML must come out intact at the bottom of the tree.
+	 */
+	public function test_replace_block_preserves_emoji_in_nested_inner_blocks() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>old</p>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'replace-block',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'        => 'core/group',
+					'innerHTML'   => '<div></div>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Top 🚀</p>' ),
+						array(
+							'name'        => 'core/columns',
+							'innerHTML'   => '<div></div>',
+							'innerBlocks' => array(
+								array(
+									'name'        => 'core/column',
+									'innerHTML'   => '<div></div>',
+									'innerBlocks' => array(
+										array( 'name' => 'core/heading', 'attributes' => array( 'level' => 3 ), 'innerHTML' => '<h3>Deep ✨ heading</h3>' ),
+									),
+								),
+							),
+						),
+					),
+				),
+			)
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertSame( '<p>Top 🚀</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
+
+		$deep_heading = $saved[0]['innerBlocks'][1]['innerBlocks'][0]['innerBlocks'][0];
+		$this->assertSame( 'core/heading', $deep_heading['blockName'] );
+		$this->assertSame( '<h3>Deep ✨ heading</h3>', $deep_heading['innerHTML'] );
+	}
+
+	/**
+	 * Emoji clusters with ZWJ / skin-tone modifiers survive innerHTML edits.
+	 *
+	 * Composite emoji are the most common casualty of mb-unsafe processing —
+	 * a single grapheme is multiple codepoints joined by U+200D or modified
+	 * by skin-tone selectors. This test pins them down explicitly.
+	 */
+	public function test_complex_emoji_sequences_survive_in_html() {
+		$family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";  // 👨‍👩‍👧
+		$wave   = "\u{1F44B}\u{1F3FE}";                            // 👋🏾
+
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>plain</p>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-html',
+			array( 0 ),
+			array( 'innerHTML' => '<p>Hi ' . $wave . ' from the ' . $family . '</p>' )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertSame( '<p>Hi ' . $wave . ' from the ' . $family . '</p>', $saved[0]['innerHTML'] );
+	}
+
 	// ── duplicate ──────────────────────────────────────────────────
 
 	public function test_duplicate_deep_clones_after_original() {
