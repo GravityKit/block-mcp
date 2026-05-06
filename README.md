@@ -125,6 +125,14 @@ Register the server in your MCP client. Example for Claude Code's `~/.claude.jso
 
 Restart your MCP client. Run `npm run inspect` to test the tools interactively.
 
+### 4. (Optional) Tune the settings
+
+When the plugin is active, an admin page appears at **Settings → Block MCP**. The defaults work out of the box, but it's worth a look — this is where you decide which blocks AI agents are allowed to write, what to suggest as replacements, and which post types `create_post` can target.
+
+![Namespace tier scores](docs/screenshots/settings-namespace-scores.png)
+
+See the [Configuration](#configuration) section below for the full breakdown.
+
 ## MCP Tools
 
 **Content I/O**
@@ -189,18 +197,46 @@ Refs are stored in `attrs.metadata.gk_ref` inside `post_content`, so they surviv
 
 The first read of a post lazily assigns + persists refs via a direct DB write that skips revision creation (refs are editor-only metadata, not content). Pass `persist_refs: false` to read without that side effect.
 
-## Preference System
+## Configuration
 
-Block preferences are stored as a WordPress option and configurable per-site. Default tiers:
+Everything in this section is editable at **Settings → Block MCP** in WordPress admin. Defaults are sensible — none of this is required to get started.
+
+### Namespace tier scores
+
+Block preferences are stored as a WordPress option (`gk_block_api_preferences`) and configurable per-site. Each block namespace gets a score 0–100, which maps to a tier:
 
 | Tier | Score | Policy |
 |---|---|---|
 | **preferred** | ≥ 80 | Use freely |
 | **acceptable** | 50–79 | Use if preferred unavailable |
-| **avoid** | 10–49 | Warn, suggest replacement |
+| **avoid** | 10–49 | Warn, return suggested replacement |
 | **legacy** | < 10 | Reject on insert |
 
-Defaults ship with `core/*` preferred and a starter set of known-deprecated namespaces marked legacy. A replacement map suggests modern alternatives when an agent attempts a legacy block (e.g., a deprecated heading variant → `core/heading`). Customize the `gk_block_api_preferences` option, or use the **Settings → Block MCP** admin screen, to manage scores, tiers, and replacements per site.
+Defaults ship with `core/*` preferred and a starter set of known-deprecated namespaces marked legacy. Add new namespaces by typing into the bottom row — a fresh blank row appears as soon as you start typing.
+
+### Replacement map
+
+When an agent attempts to insert a legacy block, the rejection error includes a suggested replacement from this map. Both columns are searchable dropdowns of every block currently registered on your site (you can also type a block name that isn't currently registered).
+
+![Replacement map](docs/screenshots/settings-replacement-map.png)
+
+### Blocks that store data in two places
+
+A few blocks (notably `yoast/faq-block`) keep the same data in *both* their attributes and their innerHTML. Updating one without the other corrupts the block silently. Block MCP detects most automatically by scanning your site; list any extras here so the API forces agents to send both fields together.
+
+![Dual-storage blocks](docs/screenshots/settings-dual-storage.png)
+
+### Post types AI agents can create
+
+Restrict `create_post` to specific post types. Leave everything unchecked to allow any public post type with REST support (the default).
+
+![Post types allow-list](docs/screenshots/settings-post-types.png)
+
+### Storage-mode scan + reset
+
+The scan walks every published post and classifies each distinct block as static / dynamic / dual, replacing the filter defaults with live data from your site. Slow on large sites; the result is cached. The Reset button below it clears every option this plugin owns and restores hard-coded defaults.
+
+![Storage scan and reset](docs/screenshots/settings-scan-reset.png)
 
 ## Examples
 
