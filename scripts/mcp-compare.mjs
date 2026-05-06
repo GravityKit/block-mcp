@@ -17,17 +17,27 @@
  *                have edit_others_* caps; uses ?context=edit so the WP REST
  *                workflow gets raw block markup, not lossy rendered HTML)
  *
+ * Optional env:
+ *   TRIALS                 Number of full bench passes to average (default 1)
+ *   RATE_LIMIT_RESET_CMD   Shell command to clear the per-post write rate limit
+ *                          transient between trials. Without this, TRIALS > 1
+ *                          will hit the plugin's 10 writes/min/post throttle
+ *                          (each trial spends ~12 writes).
+ *
  * Usage:
  *   WP_BASE=https://example.com WP_USER=admin WP_PASS=xxx POST_ID=123 \
- *     node scripts/mcp-compare.mjs
+ *     TRIALS=5 node scripts/mcp-compare.mjs
  */
 import axios from 'axios';
 import https from 'node:https';
+import { execSync } from 'node:child_process';
 
 const BASE = process.env.WP_BASE;
 const POST_ID = parseInt(process.env.POST_ID || '0', 10);
 const USER = process.env.WP_USER;
 const PASS = process.env.WP_PASS;
+const TRIALS = Math.max(1, parseInt(process.env.TRIALS || '1', 10));
+const RATE_RESET = process.env.RATE_LIMIT_RESET_CMD;
 
 if (!BASE || !USER || !PASS || !POST_ID) {
   console.error('Required env: WP_BASE, WP_USER, WP_PASS, POST_ID');
@@ -75,22 +85,13 @@ function collectHeadingRefs(blocksResp, n) {
   return out;
 }
 
-async function main() {
-  console.log(`\n=== Block MCP vs wp/v2 REST API live comparison ===`);
-  console.log(`target: ${BASE}, page ${POST_ID}\n`);
+function resetRateLimit() {
+  if (!RATE_RESET) return;
+  try { execSync(RATE_RESET, { stdio: 'ignore' }); } catch {}
+}
 
-  // Warm-up so the first measured trial doesn't pay TCP/PHP cold-start cost.
-  for (let i = 0; i < 3; i++) {
-    await wp.get(`/pages/${POST_ID}?context=edit`).catch(() => {});
-    await gk.get(`/posts/${POST_ID}/blocks`).catch(() => {});
-  }
-
-  // ── Phase 1: read latency × 5 each ─────────────────────────────────────────
-  // context=edit returns raw block-comment markup. Without it, wp/v2 returns
-  // rendered HTML (block boundaries dissolved) — fine for read-only display,
-  // but writing rendered HTML back via update_page silently strips block
-  // markers. Using ?context=edit gives the WP REST workflow a fair shot at
-  // round-tripping content losslessly.
+async function runTrial() {
+  // Phase 1: 5 reads each
   const wpReads = [], gkReads = [];
   let wpReadBytes = 0, gkReadBytes = 0, totalBlocks = 0;
   for (let i = 0; i < 5; i++) {
@@ -103,15 +104,14 @@ async function main() {
     totalBlocks = b.out.data.summary.total_blocks;
   }
 
-  // Capture refs for 5 heading blocks for Phase 3.
   const blocksResp = (await gk.get(`/posts/${POST_ID}/blocks`)).data;
   const refs = collectHeadingRefs(blocksResp, 5);
-  if (refs.length < 5) { console.error('Need at least 5 top-level headings on the page; got', refs.length); process.exit(1); }
+  if (refs.length < 5) throw new Error(`Need 5+ top-level headings; got ${refs.length}`);
 
-  // ── Phase 2: single heading-level change ───────────────────────────────────
+  // Phase 2: single edit
   const wpFull = (await wp.get(`/pages/${POST_ID}?context=edit`)).data;
   const wpContent = wpFull.content.raw;
-  if (!wpContent) { console.error('No raw content returned (auth user lacks edit cap?)'); process.exit(1); }
+  if (!wpContent) throw new Error('No raw content (auth lacks edit cap?)');
   const newContent = wpContent.replace(
     /<h2 class="wp-block-heading">Code samples<\/h2>/,
     '<h3 class="wp-block-heading">Code samples</h3>'
@@ -125,15 +125,13 @@ async function main() {
     gk.patch(`/posts/${POST_ID}/blocks/by-ref/${encodeURIComponent(refs[3])}`, gkEditBody)
   );
 
-  // ── Phase 3: 5 chained edits ───────────────────────────────────────────────
-  // wp/v2 workflow: 1 GET + 5 PUTs of whole content (cache between edits).
-  // The agent CAN keep the whole post in memory and avoid re-reading, but each
-  // write still ships the entire post body.
+  resetRateLimit();
+
+  // Phase 3: chain of 5 edits
   const t0wp = ns();
   let mut = (await wp.get(`/pages/${POST_ID}?context=edit`)).data.content.raw;
   let wpChainBytesUploaded = 0;
   for (let i = 0; i < 5; i++) {
-    // Toggle the same heading so iterations are deterministic.
     mut = mut.replace(/<h2 class="wp-block-heading">Conclusion<\/h2>/, '<h3 class="wp-block-heading">Conclusion</h3>');
     const body = JSON.stringify({ content: mut });
     wpChainBytesUploaded += body.length;
@@ -141,7 +139,8 @@ async function main() {
   }
   const wpChainMs = ms(t0wp);
 
-  // Block MCP workflow: 1 GET + 5 ref-based PATCHes.
+  resetRateLimit();
+
   const t0gk = ns();
   await gk.get(`/posts/${POST_ID}/blocks`);
   let gkChainBytesUploaded = 0;
@@ -152,25 +151,59 @@ async function main() {
   }
   const gkChainMs = ms(t0gk);
 
-  // ── Report ──────────────────────────────────────────────────────────────
-  const wpR = summarize(wpReads);
-  const gkR = summarize(gkReads);
+  return {
+    totalBlocks,
+    wpReadMean: summarize(wpReads).mean, gkReadMean: summarize(gkReads).mean,
+    wpReadBytes, gkReadBytes,
+    wpSingle: wpSingleEdit.ms, gkSingle: gkSingleEdit.ms,
+    wpEditBytes, gkEditBytes,
+    wpChainMs, gkChainMs,
+    wpChainBytesUploaded, gkChainBytesUploaded,
+  };
+}
 
-  console.log(`PHASE 1: Read one page (5 trials)\n`);
-  console.log(`  ${'mean'.padStart(8)} ${'p50'.padStart(8)}  response`);
-  console.log(`  wp/v2 (?context=edit):  ${fmt(wpR.mean)} ${fmt(wpR.p50)}  ${kb(wpReadBytes).padStart(8)}   raw HTML + Yoast schema + ACF + links`);
-  console.log(`  Block MCP:              ${fmt(gkR.mean)} ${fmt(gkR.p50)}  ${kb(gkReadBytes).padStart(8)}   ${totalBlocks} structured blocks with refs`);
+async function main() {
+  console.log(`\n=== Block MCP vs wp/v2 REST API live comparison ===`);
+  console.log(`target: ${BASE}, page ${POST_ID}, trials: ${TRIALS}\n`);
 
-  console.log(`\nPHASE 2: One heading-level change\n`);
-  console.log(`                            time      uploaded`);
-  console.log(`  wp/v2 workflow:         ${fmt(wpSingleEdit.ms)}  ${kb(wpEditBytes).padStart(8)}   (whole post body re-sent)`);
-  console.log(`  Block MCP workflow:     ${fmt(gkSingleEdit.ms)}  ${kb(gkEditBytes).padStart(8)}   (single-block PATCH)`);
+  // Warm-up
+  for (let i = 0; i < 3; i++) {
+    await wp.get(`/pages/${POST_ID}?context=edit`).catch(() => {});
+    await gk.get(`/posts/${POST_ID}/blocks`).catch(() => {});
+  }
 
-  console.log(`\nPHASE 3: Chain of 5 edits (1 read + 5 writes)\n`);
-  console.log(`                            total time    total uploaded`);
-  console.log(`  wp/v2 workflow:         ${fmt(wpChainMs)}    ${kb(wpChainBytesUploaded).padStart(8)}`);
-  console.log(`  Block MCP workflow:     ${fmt(gkChainMs)}    ${kb(gkChainBytesUploaded).padStart(8)}`);
-  console.log(`  bytes uploaded: ${(wpChainBytesUploaded / gkChainBytesUploaded).toFixed(0)}× less with Block MCP`);
+  const trials = [];
+  for (let t = 0; t < TRIALS; t++) {
+    if (t > 0) resetRateLimit();
+    process.stderr.write(`Trial ${t + 1}/${TRIALS}...\n`);
+    trials.push(await runTrial());
+  }
+
+  // Average across trials.
+  const avg = (key) => trials.reduce((s, t) => s + t[key], 0) / trials.length;
+  const stdev = (key) => {
+    const m = avg(key);
+    const v = trials.reduce((s, t) => s + (t[key] - m) ** 2, 0) / trials.length;
+    return Math.sqrt(v);
+  };
+  const totalBlocks = trials[0].totalBlocks;
+  const fmtMS = (k) => TRIALS > 1 ? `${avg(k).toFixed(0).padStart(4)} ± ${stdev(k).toFixed(0)} ms` : fmt(avg(k));
+
+  console.log(`\nPHASE 1: Read one page (5 reads × ${TRIALS} trials = ${5 * TRIALS} samples)\n`);
+  console.log(`                              time              response`);
+  console.log(`  wp/v2 (?context=edit):     ${fmtMS('wpReadMean').padEnd(18)}  ${kb(avg('wpReadBytes')).padStart(8)}   raw HTML + Yoast schema + ACF + links`);
+  console.log(`  Block MCP:                 ${fmtMS('gkReadMean').padEnd(18)}  ${kb(avg('gkReadBytes')).padStart(8)}   ${totalBlocks} structured blocks with refs`);
+
+  console.log(`\nPHASE 2: One heading-level change (${TRIALS} trial${TRIALS > 1 ? 's' : ''})\n`);
+  console.log(`                              time              uploaded`);
+  console.log(`  wp/v2 workflow:            ${fmtMS('wpSingle').padEnd(18)}  ${kb(avg('wpEditBytes')).padStart(8)}   (whole post body re-sent)`);
+  console.log(`  Block MCP workflow:        ${fmtMS('gkSingle').padEnd(18)}  ${kb(avg('gkEditBytes')).padStart(8)}   (single-block PATCH)`);
+
+  console.log(`\nPHASE 3: Chain of 5 edits, 1 read + 5 writes (${TRIALS} trial${TRIALS > 1 ? 's' : ''})\n`);
+  console.log(`                              total time        total uploaded`);
+  console.log(`  wp/v2 workflow:            ${fmtMS('wpChainMs').padEnd(18)}  ${kb(avg('wpChainBytesUploaded')).padStart(8)}`);
+  console.log(`  Block MCP workflow:        ${fmtMS('gkChainMs').padEnd(18)}  ${kb(avg('gkChainBytesUploaded')).padStart(8)}`);
+  console.log(`  bytes uploaded: ${(avg('wpChainBytesUploaded') / avg('gkChainBytesUploaded')).toFixed(0)}× less with Block MCP`);
   console.log();
 }
 

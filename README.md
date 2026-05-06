@@ -6,23 +6,23 @@ An MCP server + WordPress plugin that lets AI agents read, edit, and restructure
 
 ## At a glance
 
-Live comparison against the standard `wp/v2` REST API (the surface that REST-API-wrapping MCPs like [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) expose), run on `https://www.gravitykit.com` against a draft 43-block fixture page. Same WordPress site, same auth, same network — see [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness.
+Live comparison against the standard `wp/v2` REST API (the surface that REST-API-wrapping MCPs like [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) expose), run on `https://www.gravitykit.com` against a draft 38-block fixture page. Same WordPress site, same auth, same network. **5 trials, mean ± stdev.** See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness.
 
 | Operation | `wp/v2` REST API | Block MCP |
 |---|---|---|
-| **Read one page** | 690 ms · 24.5 KB | 656 ms · 16.3 KB |
-| &nbsp;&nbsp;&nbsp;&nbsp;Response shape | full HTML body + Yoast schema + ACF + links | 43 structured blocks with paths, refs, attributes |
+| **Read one page** *(25 samples)* | 751 ± 46 ms · 21.8 KB | 687 ± 60 ms · 13.6 KB |
+| &nbsp;&nbsp;&nbsp;&nbsp;Response shape | full HTML body + Yoast schema + ACF + links | 38 structured blocks with paths, refs, attributes |
 | &nbsp;&nbsp;&nbsp;&nbsp;Default read | rendered HTML — block boundaries dissolved (`?context=edit` needed for raw markup, requires edit cap) | structured tree of every block, with refs |
-| **Update one heading** | 1.76 s | 1.67 s |
-| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 8.2 KB (entire post body re-sent) | 40 B (single-block PATCH) |
-| **5 chained edits** | 9.23 s | 9.19 s |
-| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 41.0 KB | 0.1 KB · **323× less** |
+| **Update one heading** | 1647 ± 254 ms | 1456 ± 299 ms |
+| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 6.7 KB (entire post body re-sent) | 40 B (single-block PATCH) |
+| **5 chained edits** | 8.65 ± 1.35 s | 9.81 ± 2.01 s |
+| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 33.4 KB | 0.1 KB · **263× less** |
 | **Block addressability** | none — agent regex/parses HTML | path or stable ref (`blk_a3f2c1q9`) |
 | **Update precision** | rewrites whole post on every edit | targets one block; siblings untouched |
 | **Block-aware safety** | none — write whatever HTML you want | tier-based legacy rejection, dual-storage guards, auto-transforms |
 | **Round-trip risk** | reading rendered HTML and writing it back silently strips block markers — content corruption visible in the editor on next open | block markup round-trips losslessly |
 
-Wall-clock per operation is similar — both APIs go through the same WordPress bootstrap, network, and `wp_update_post` save path, so a single round-trip costs the same. The compounding wins are *what each round-trip carries*: structured data the agent can actually reason about, and ~300× less upload traffic when chaining edits.
+Wall-clock per operation is similar — both APIs go through the same WordPress bootstrap, network, and `wp_update_post` save path, so a single round-trip costs the same. Within stdev, neither workflow is meaningfully faster. The compounding wins are *what each round-trip carries*: structured data the agent can actually reason about, and **~260× less upload traffic** when chaining edits.
 
 ## Why this MCP
 
