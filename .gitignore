@@ -2,3 +2,7 @@ node_modules/
 .env
 .env.gkclone
 .phpunit.result.cache
+
+# Internal planning + spec docs — kept locally, not shipped to the public repo.
+docs/plans/
+docs/specs/
