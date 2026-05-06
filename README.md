@@ -19,7 +19,7 @@ How Block MCP compares to the standard WordPress REST API — the same surface t
 
 ### The numbers
 
-Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture page, averaged over 5 runs with 300 ms spacing between calls and 8 s spacing between trials. See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness, and [`scripts/seed-bench-page.php`](scripts/seed-bench-page.php) to re-create the fixture on any WordPress install.
+Averaged over 5 trials against a 38-block fixture page. Reproduce via [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs).
 
 | | Standard WP REST API | Block MCP |
 |---|---|---|
@@ -31,6 +31,29 @@ Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture
 Both tools take about the same amount of time per edit. The chained-edit row is roughly tied — the standard REST API ships the whole page each time but skips per-block parsing on the server, while Block MCP ships only the change but does extra work to parse and re-serialize. Speed isn't the win.
 
 The differences that matter are **what gets sent** and **whether the result is correct**. The standard REST API re-sends the entire page on every edit, which is roughly 260× more data over 5 edits and — more importantly — gives the AI the chance to accidentally touch parts of the page it didn't intend to. Block MCP only sends what changed, and because it works in WordPress's native block format the result opens cleanly in the block editor afterward (no "this block contains unexpected or invalid content" warnings).
+
+### When you actually ask an AI to edit a page
+
+The numbers above measure the API itself. The next test sits in front of Claude and types a real instruction — *"change the H2 heading 'Code samples' to H3"* — then checks whether the page is actually correct afterward.
+
+27 runs total: three MCP servers × Haiku, Sonnet, Opus × 3 trials each. After every run the page is re-read and inspected. **The AI's claim of success doesn't count — only the actual page state does.**
+
+| Model | Block MCP | [AI Engine Pro](https://meowapps.com/ai-engine/) | [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) |
+|---|:---:|:---:|:---:|
+| Haiku  | ✅ 3 / 3 · 10 s avg | ⚠️ 2 / 3 · 44 s avg | ❌ 0 / 3 · 20 s avg |
+| Sonnet | ✅ 3 / 3 · 9 s avg  | ✅ 3 / 3 · 14 s avg | ❌ 0 / 3 · 36 s avg |
+| Opus   | ✅ 3 / 3 · 9 s avg  | ✅ 3 / 3 · 13 s avg | ⚠️ 2 / 3 · 38 s avg |
+| **Total** | **✅ 9 / 9** | **8 / 9** | **2 / 9** |
+
+Three takeaways:
+
+**Block MCP works on the cheapest model.** Haiku passes every trial in 10 seconds at $0.014 per edit. The agent doesn't need to think hard about the page because the API is shaped exactly like the task.
+
+**InstaWP's wp/v2 wrapper fails 7 out of 9 times — even Opus only gets it right 2/3.** When the agent reports success, it's technically right that the heading text changed. But the whole-page round-trip through `update_page` strips every `<!-- wp:* -->` block marker. Reopen the page in the block editor and you'll see "This block contains unexpected or invalid content" warnings on most blocks. The standard REST API isn't broken — it does exactly what it's documented to do — but its data shape lets the AI corrupt content without realizing it.
+
+**AI Engine Pro is competitive with Sonnet and Opus but stumbles on Haiku.** Its `wp_alter_post` tool is block-aware (the post markup stays valid), but on the failed Haiku trials the rendered HTML and the block's declared attributes drift out of sync — e.g., the comment marker still says `level: 2` while the inner tag is `<h3>`. The block editor flags that as broken too. Sonnet and Opus retry until consistent (2–3 tool calls); Haiku sometimes gives up after declaring success. Cost-wise, AI Engine on Sonnet runs ~$0.07 per edit vs Block MCP on Haiku at $0.014.
+
+Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs). Cost across all 27 invocations: $2.22.
 
 ## Why this MCP
 

@@ -56,7 +56,11 @@ import https from 'node:https';
 import axios from 'axios';
 
 // ── Required env ───────────────────────────────────────────────────────────
-const REQUIRED = ['WP_BASE', 'WP_USER', 'WP_PASS', 'BLOCK_MCP_DIST', 'WP_PATH', 'WP_LIVE_HOST', 'WP_LIVE_USER', 'WP_LIVE_PORT', 'WP_LIVE_SSH_PASSWORD'];
+// LOCAL_WP_PATH set → run wp-cli directly (no SSH). Otherwise SSH-based remote.
+const LOCAL_WP_PATH = process.env.LOCAL_WP_PATH;
+const REQUIRED = LOCAL_WP_PATH
+  ? ['WP_BASE', 'WP_USER', 'WP_PASS', 'BLOCK_MCP_DIST', 'LOCAL_WP_PATH']
+  : ['WP_BASE', 'WP_USER', 'WP_PASS', 'BLOCK_MCP_DIST', 'WP_PATH', 'WP_LIVE_HOST', 'WP_LIVE_USER', 'WP_LIVE_PORT', 'WP_LIVE_SSH_PASSWORD'];
 for (const k of REQUIRED) {
   if (!process.env[k]) { console.error(`Missing env: ${k}`); process.exit(1); }
 }
@@ -73,6 +77,9 @@ const MAX_BUDGET_USD   = process.env.MAX_BUDGET_USD || '0.50';
 const PER_CALL_TIMEOUT_MS = parseInt(process.env.PER_CALL_TIMEOUT_MS || '90000', 10);
 
 // ── MCP configs (per-call isolation: only the named MCP is exposed) ────────
+const AI_ENGINE_MCP_URL = process.env.AI_ENGINE_MCP_URL;
+const AI_ENGINE_BEARER  = process.env.AI_ENGINE_BEARER;
+
 const MCP_CONFIGS = {
   'block-mcp': {
     label: 'Block MCP',
@@ -102,6 +109,19 @@ const MCP_CONFIGS = {
             WORDPRESS_USERNAME: WP_USER,
             WORDPRESS_PASSWORD: WP_PASS,
           },
+        },
+      },
+    },
+  },
+  'ai-engine': {
+    label: 'AI Engine Pro',
+    skip: !AI_ENGINE_MCP_URL || !AI_ENGINE_BEARER,
+    config: {
+      mcpServers: {
+        'ai-engine': {
+          type: 'http',
+          url: AI_ENGINE_MCP_URL,
+          headers: { Authorization: `Bearer ${AI_ENGINE_BEARER}` },
         },
       },
     },
@@ -162,32 +182,34 @@ const SCENARIOS = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-function runSSH(cmd) {
+function runWP(cmd) {
+  if (LOCAL_WP_PATH) {
+    return execSync(`wp --path="${LOCAL_WP_PATH}" ${cmd}`, { encoding: 'utf8' });
+  }
   const ssh = `sshpass -p "${WP_LIVE_SSH_PASSWORD}" ssh -o StrictHostKeyChecking=no -p ${WP_LIVE_PORT} ${WP_LIVE_USER}@${WP_LIVE_HOST}`;
-  return execSync(`${ssh} "${cmd.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });
+  return execSync(`${ssh} "cd ${WP_PATH} && wp ${cmd.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });
 }
 
 function reseedPage() {
-  // Calls scripts/seed-bench-page.php on the remote host and returns a fresh post ID.
-  // The seed file must already be present on the server (we scp it once at startup).
-  const out = runSSH(`cd ${WP_PATH} && wp eval-file /tmp/seed-bench-page.php 2>&1 | grep -v Deprecated | tail -1`).trim();
+  const seedPath = LOCAL_WP_PATH ? join(import.meta.dirname, 'seed-bench-page.php') : '/tmp/seed-bench-page.php';
+  const out = runWP(`eval-file ${seedPath} 2>&1 | grep -v Deprecated | tail -1`).trim();
   const id = parseInt(out, 10);
   if (!id) throw new Error(`reseed failed; got: ${out}`);
   return id;
 }
 
 function uploadSeedScript() {
+  if (LOCAL_WP_PATH) return; // local — file is in scripts/ already, no upload needed
   const scp = `sshpass -p "${WP_LIVE_SSH_PASSWORD}" scp -o StrictHostKeyChecking=no -P ${WP_LIVE_PORT}`;
   execSync(`${scp} ${join(import.meta.dirname, 'seed-bench-page.php')} ${WP_LIVE_USER}@${WP_LIVE_HOST}:/tmp/seed-bench-page.php`, { stdio: 'ignore' });
 }
 
 function resetRateLimit(postId) {
-  // wp transient delete avoids the multi-layer shell + PHP quoting issues that
-  // plagued the earlier `wp eval "..."` form.
-  try { runSSH(`cd ${WP_PATH} && wp transient delete gk_block_api_rate_${postId}`); } catch {}
+  try { runWP(`transient delete gk_block_api_rate_${postId}`); } catch {}
 }
 
 // gk-block-api client for validation reads (independent of which MCP the agent used).
+// rejectUnauthorized:false so local self-signed certs work too.
 const gk = axios.create({
   baseURL: `${WP_BASE}/wp-json/gk-block-api/v1`,
   timeout: 30000,
@@ -275,7 +297,9 @@ async function main() {
   process.stderr.write(`Seeded scripts/seed-bench-page.php to remote\n`);
 
   const scenarios = Object.entries(SCENARIOS).filter(([k]) => SCENARIOS_FILTER.length === 0 || SCENARIOS_FILTER.includes(k));
-  const mcps      = Object.entries(MCP_CONFIGS).filter(([k]) => MCPS_FILTER.length      === 0 || MCPS_FILTER.includes(k));
+  const mcps      = Object.entries(MCP_CONFIGS)
+    .filter(([, def]) => !def.skip)
+    .filter(([k]) => MCPS_FILTER.length === 0 || MCPS_FILTER.includes(k));
   const models    = MODELS_FILTER.length ? MODELS_FILTER : ['sonnet', 'haiku'];
 
   const total = scenarios.length * mcps.length * models.length * TRIALS;
