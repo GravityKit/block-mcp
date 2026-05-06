@@ -1,0 +1,74 @@
+name: Build plugin ZIP
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & publish gk-block-api.zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ZIP
+        run: |
+          set -euo pipefail
+          cd wordpress-plugin
+          # Exclude dev / test files via .distignore — same pattern WP-CLI's
+          # `dist-archive` follows. zip's -x patterns are glob, not regex.
+          zip -rq ../gk-block-api.zip gk-block-api \
+            -x 'gk-block-api/.git*' \
+            -x 'gk-block-api/.distignore' \
+            -x 'gk-block-api/.editorconfig' \
+            -x 'gk-block-api/.phpcs.xml' \
+            -x 'gk-block-api/.phpunit.cache/*' \
+            -x 'gk-block-api/.phpunit.result.cache' \
+            -x 'gk-block-api/node_modules/*' \
+            -x 'gk-block-api/tests/*' \
+            -x 'gk-block-api/phpunit.xml' \
+            -x 'gk-block-api/phpunit.xml.dist' \
+            -x 'gk-block-api/composer.json' \
+            -x 'gk-block-api/composer.lock' \
+            -x 'gk-block-api/package.json' \
+            -x 'gk-block-api/package-lock.json' \
+            -x 'gk-block-api/README.md' \
+            -x 'gk-block-api/CHANGELOG.md' \
+            -x 'gk-block-api/**/.DS_Store' \
+            -x 'gk-block-api/.DS_Store' \
+            -x 'gk-block-api/Thumbs.db'
+          unzip -l ../gk-block-api.zip | tail -5
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gk-block-api
+          path: gk-block-api.zip
+          retention-days: 90
+
+      - name: Update rolling 'latest' release (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (main)
+          body: |
+            Rolling build of `main`. Auto-updated on every push.
+
+            Commit: ${{ github.sha }}
+
+            Install the ZIP via WordPress admin → Plugins → Add New → Upload.
+          prerelease: true
+          files: gk-block-api.zip
+
+      - name: Tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: gk-block-api.zip

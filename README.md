@@ -134,10 +134,14 @@ AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin 
 
 ### 1. Install the WordPress plugin
 
-Copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` and activate it. Or install via WP-CLI:
+**Easiest — download the latest ZIP:** [gk-block-api.zip](https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip) (auto-built from `main` on every push).
+
+Then in WordPress: **Plugins → Add New → Upload Plugin** and pick the ZIP.
+
+Or copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` and activate manually. Or via WP-CLI:
 
 ```bash
-wp plugin install /path/to/block-mcp/wordpress-plugin/gk-block-api --activate
+wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip --activate
 ```
 
 ### 2. Create an Application Password

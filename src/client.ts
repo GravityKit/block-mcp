@@ -99,7 +99,7 @@ export class WordPressBlockClient {
       Authorization: `Basic ${credentials}`,
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'User-Agent': 'MonoKit Block MCP Server (https://github.com/GravityKit)',
+      'User-Agent': 'GravityKit Block MCP Server (https://github.com/GravityKit/block-mcp)',
     };
 
     this.client = axios.create({
