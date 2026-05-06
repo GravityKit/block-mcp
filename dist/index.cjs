@@ -43616,6 +43616,83 @@ var {
   mergeConfig: mergeConfig2
 } = axios_default;
 
+// src/error-translator.ts
+function extractHints(data) {
+  if (!data || typeof data !== "object") return {};
+  const d2 = data;
+  const hints = { ...d2 };
+  if (typeof d2.post_id === "number") hints.post_id = d2.post_id;
+  if (typeof d2.ref === "string") hints.ref = d2.ref;
+  if (Array.isArray(d2.path)) hints.path = d2.path;
+  if (typeof d2.block === "string") hints.block = d2.block;
+  if (typeof d2.block_name === "string") hints.block_name = d2.block_name;
+  if (typeof d2.suggested_replacement === "string") hints.suggested_replacement = d2.suggested_replacement;
+  if (typeof d2.status === "number") hints.status = d2.status;
+  return hints;
+}
+function translateWpError(code, data) {
+  if (!code) return null;
+  const hints = extractHints(data);
+  const blockName = hints.block ?? hints.block_name;
+  switch (code) {
+    // ── Routing / auth ─────────────────────────────────────────────
+    case "rest_no_route":
+      return "REST route not found at this site. Confirm the gk-block-api plugin is active and the WORDPRESS_URL is correct.";
+    case "rest_forbidden":
+    case "rest_cannot_edit":
+    case "rest_cannot_create":
+      return "Permission denied. The Application Password's user lacks the required capability (typically `edit_posts`, or `edit_post` on this specific post).";
+    case "rest_cookie_invalid_nonce":
+    case "rest_authentication_required":
+      return "Authentication failed. Confirm WORDPRESS_USER and WORDPRESS_APP_PASSWORD are set to a valid Application Password (not a regular login password).";
+    // ── Post lookup ────────────────────────────────────────────────
+    case "rest_post_invalid_id":
+    case "invalid_post_id": {
+      const target = hints.post_id !== void 0 ? `Post ${hints.post_id}` : "Post";
+      return `${target} not found. List pages with \`list_posts\` to find the right ID.`;
+    }
+    case "not_found":
+      return hints.post_id ? `Post ${hints.post_id} not found. It may have been deleted, or the ID is wrong.` : "Resource not found. It may have been deleted, or the ID is wrong.";
+    // ── Block ref / path resolution ────────────────────────────────
+    case "gk_block_api_invalid_ref":
+    case "invalid_ref":
+      return `Block ref \`${hints.ref ?? "?"}\` not found in post ${hints.post_id ?? "?"}. The post may have been edited since you last fetched it \u2014 call \`get_page_blocks\` again to get the current refs.`;
+    case "path_not_found":
+    case "invalid_path":
+      return `Block path ${formatPath(hints.path)} doesn't address an existing block. Re-fetch the post with \`get_page_blocks\` to get current paths \u2014 paths shift when blocks are added or removed.`;
+    case "path_out_of_bounds":
+      return `Block path ${formatPath(hints.path)} is out of bounds. The post has fewer blocks than expected \u2014 re-fetch with \`get_page_blocks\` for current state.`;
+    // ── Block tier / preference enforcement ────────────────────────
+    case "legacy_block":
+      return blockName ? `${blockName} is a legacy block (typically Stackable / UGB / Jetpack). Use ${hints.suggested_replacement ?? "a core block instead"}.` : "Legacy block rejected. Use a core block (or a higher-tier alternative) instead.";
+    case "static_markup_stale_risk":
+      return "Updating attributes on a static block without new innerHTML may leave its rendered markup stale. Pass `innerHTML` alongside `attributes`, or use a dynamic block.";
+    // ── Rate limiting ──────────────────────────────────────────────
+    case "rate_limit_exceeded": {
+      const where = hints.post_id !== void 0 ? `on post ${hints.post_id} ` : "";
+      return `Too many writes ${where}in the last minute. Wait ~60s before retrying, or batch your edits into a single \`edit_block_tree\` call.`;
+    }
+    // ── v1.2 post lifecycle ────────────────────────────────────────
+    case "mixed_trash_payload":
+      return '`status: "trash"` cannot be combined with other fields. Trash the post in one call, then update other fields after.';
+    case "invalid_post_type":
+      return "Post type not allowed by this site's gk_block_api_post_types_allowlist option. Ask the site admin to add it, or pick a supported type.";
+    case "invalid_status":
+      return "Post status not allowed. Valid values: draft, pending, publish, future, private (trash via DELETE only).";
+    // ── Media uploads ──────────────────────────────────────────────
+    case "invalid_url":
+      return "URL rejected by SSRF guard. Hostnames pointing at private/loopback/cloud-metadata IPs are blocked. Use a publicly reachable URL.";
+    case "disallowed_mime":
+      return "File MIME type isn't in WordPress's allowed-uploads list. Convert to PNG/JPG/WEBP for images, MP4 for video, etc.";
+    default:
+      return null;
+  }
+}
+function formatPath(path) {
+  if (!path || path.length === 0) return "?";
+  return `[${path.join(", ")}]`;
+}
+
 // src/client.ts
 var WordPressBlockClient = class {
   client;
@@ -43687,7 +43764,9 @@ var WordPressBlockClient = class {
       } else if (typeof body3 === "string") {
         detail = body3;
       }
-      const err = new Error(`Block API Error (${status}): ${detail}`);
+      const hint = translateWpError(code, wpData);
+      const message = hint ? `Block API Error (${status}): ${hint}${code ? ` (${code})` : ""}` : `Block API Error (${status}): ${detail}`;
+      const err = new Error(message);
       err.wpCode = code;
       err.wpData = wpData;
       err.wpStatus = status;

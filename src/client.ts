@@ -7,6 +7,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { translateWpError } from './error-translator.js';
 import type {
   BlockMCPConfig,
   BlockType,
@@ -140,7 +141,15 @@ export class WordPressBlockClient {
         detail = body;
       }
 
-      const err = new Error(`Block API Error (${status}): ${detail}`) as Error & {
+      // Replace HTTP-shaped detail with an agent-actionable hint when we
+      // recognize the code. Original code/data still flow through wpCode /
+      // wpData so callers can pattern-match the raw form if they want to.
+      const hint = translateWpError(code, wpData);
+      const message = hint
+        ? `Block API Error (${status}): ${hint}${code ? ` (${code})` : ''}`
+        : `Block API Error (${status}): ${detail}`;
+
+      const err = new Error(message) as Error & {
         wpCode?: string;
         wpData?: unknown;
         wpStatus?: number;
