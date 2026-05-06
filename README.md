@@ -14,7 +14,7 @@ How Block MCP compares to the standard WordPress REST API — the same surface t
 | **Make 5 edits in a row without re-sending the whole page each time** | ❌ Sends the full page body 5× | ✅ Sends only what changed |
 | **Find which block contains "Pricing" without scanning rendered HTML** | ❌ No structured search — agent has to regex through HTML | ✅ Built-in search by text or block type |
 | **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Agent can write any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
-| **Read a page, save it back unchanged, and have the post stay intact** | ❌ Rendered HTML strips block boundaries — the editor sees corruption next time it opens | ✅ Block structure round-trips losslessly |
+| **Edit a page and have it still open cleanly in the block editor afterward** | ❌ Edits go in as raw HTML — when you reopen the page, the block editor flags many blocks with **"This block contains unexpected or invalid content"** because the original block markers got stripped during the round-trip | ✅ Block markup is preserved exactly. The editor reopens the page with every block intact and editable. |
 | **Refer to a specific block across multiple edits, even after others move** | ❌ No block identity at all | ✅ Every block carries a stable ID that survives sibling shifts |
 
 ### The numbers
