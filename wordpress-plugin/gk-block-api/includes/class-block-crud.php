@@ -1609,7 +1609,7 @@ class Block_CRUD {
 	 * @param array &$warnings  Accumulated warnings (modified in place).
 	 * @return array|\WP_Error  Built block array ready for serialize_blocks(), or WP_Error.
 	 */
-	private function build_block_from_def( array $block_def, array &$warnings ) {
+	public function build_block_from_def( array $block_def, array &$warnings ) {
 		$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
 
 		$validation = $this->validate_block_def( $name );

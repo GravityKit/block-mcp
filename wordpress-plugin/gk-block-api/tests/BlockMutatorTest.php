@@ -369,6 +369,51 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( 'core/paragraph', $saved[0]['innerBlocks'][0]['blockName'] );
 	}
 
+	// Issue #1 — replace-block must recurse to ANY depth, not just 1.
+	public function test_replace_block_preserves_grandchild_inner_blocks() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'replace-block',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'        => 'core/columns',
+					'innerHTML'   => '<div class="wp-block-columns"></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div class="wp-block-column"></div>',
+							'innerBlocks' => array(
+								array( 'name' => 'core/heading', 'attributes' => array( 'level' => 3 ), 'innerHTML' => '<h3>Deep</h3>' ),
+								array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Body</p>' ),
+							),
+						),
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div class="wp-block-column"></div>',
+							'innerBlocks' => array(
+								array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Right</p>' ),
+							),
+						),
+					),
+				),
+			)
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( 'core/columns', $saved[0]['blockName'] );
+		$this->assertCount( 2, $saved[0]['innerBlocks'] );
+		$col1 = $saved[0]['innerBlocks'][0];
+		$col2 = $saved[0]['innerBlocks'][1];
+		$this->assertEquals( 'core/column', $col1['blockName'] );
+		$this->assertCount( 2, $col1['innerBlocks'], 'grandchildren of column 1 must survive' );
+		$this->assertEquals( 'core/heading', $col1['innerBlocks'][0]['blockName'] );
+		$this->assertEquals( 'core/paragraph', $col1['innerBlocks'][1]['blockName'] );
+		$this->assertCount( 1, $col2['innerBlocks'], 'grandchildren of column 2 must survive' );
+		$this->assertEquals( 'core/paragraph', $col2['innerBlocks'][0]['blockName'] );
+	}
+
 	// ── remove-block ───────────────────────────────────────────────
 
 	public function test_remove_block_removes_and_reindexes() {
@@ -677,6 +722,76 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		);
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertEquals( 'legacy_block', $result->get_error_code() );
+	}
+
+	// Issue #1 — insert-child must build innerBlocks recursively, not drop them.
+	public function test_insert_child_preserves_nested_inner_blocks() {
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>existing</p>' ),
+			) ),
+		) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'        => 'core/columns',
+					'innerHTML'   => '<div class="wp-block-columns"></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div class="wp-block-column"></div>',
+							'innerBlocks' => array(
+								array( 'name' => 'core/heading', 'attributes' => array( 'level' => 3 ), 'innerHTML' => '<h3>Deep</h3>' ),
+							),
+						),
+					),
+				),
+			)
+		);
+		$this->assertTrue( $result['success'] );
+		$saved    = $this->current_blocks();
+		$children = $saved[0]['innerBlocks'];
+		$this->assertCount( 2, $children, 'group should now have its existing child + the inserted columns' );
+		$inserted = $children[1];
+		$this->assertEquals( 'core/columns', $inserted['blockName'] );
+		$this->assertCount( 1, $inserted['innerBlocks'], 'columns must keep its column' );
+		$column = $inserted['innerBlocks'][0];
+		$this->assertEquals( 'core/column', $column['blockName'] );
+		$this->assertCount( 1, $column['innerBlocks'], 'column must keep its grandchild heading' );
+		$this->assertEquals( 'core/heading', $column['innerBlocks'][0]['blockName'] );
+	}
+
+	// Issue #1 — legacy blocks nested inside an otherwise-valid insert-child must hard-reject.
+	public function test_insert_child_rejects_nested_legacy_block() {
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+			) ),
+		) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'        => 'core/columns',
+					'innerHTML'   => '<div></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div></div>',
+							'innerBlocks' => array(
+								array( 'name' => 'ugb/text' ),
+							),
+						),
+					),
+				),
+			)
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
 	}
 
 	// ── duplicate ──────────────────────────────────────────────────

@@ -279,50 +279,25 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_block', __( 'replace-block requires a "block" object with a "name" field.', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
-				// Validate block name and preference tier.
-				$name = $new_block_def['name'];
-				$validation = $this->crud->validate_block_def( $name );
-				if ( $validation['error'] ) {
-					return $validation['error'];
-				}
-				$warnings = array_merge( $warnings, $validation['warnings'] );
-
-				// Build replacement block.
-				$attrs      = isset( $new_block_def['attributes'] ) ? $new_block_def['attributes'] : array();
-				$inner_html = isset( $new_block_def['innerHTML'] ) ? wp_kses_post( $new_block_def['innerHTML'] ) : '';
-				$inner_blocks = array();
-
-				// Build innerBlocks recursively if provided.
-				if ( ! empty( $new_block_def['innerBlocks'] ) ) {
-					foreach ( $new_block_def['innerBlocks'] as $child_def ) {
-						$child_name  = isset( $child_def['name'] ) ? $child_def['name'] : '';
-						$child_attrs = isset( $child_def['attributes'] ) ? $child_def['attributes'] : array();
-						$child_html  = isset( $child_def['innerHTML'] ) ? wp_kses_post( $child_def['innerHTML'] ) : '';
-						$inner_blocks[] = array(
-							'blockName'    => $child_name,
-							'attrs'        => $child_attrs,
-							'innerHTML'    => $child_html,
-							'innerContent' => ! empty( $child_html ) ? array( $child_html ) : array(),
-							'innerBlocks'  => array(),
-						);
-					}
+				// Build the replacement (validating + building innerBlocks
+				// recursively to any depth) via Block_CRUD's shared builder —
+				// the same one insert_blocks uses, so deeply-nested structures
+				// like core/columns → core/column → core/heading round-trip
+				// correctly through this op too.
+				$built = $this->crud->build_block_from_def( $new_block_def, $warnings );
+				if ( is_wp_error( $built ) ) {
+					return $built;
 				}
 
-				$parent[ $target_index ] = array(
-					'blockName'    => $name,
-					'attrs'        => $attrs,
-					'innerHTML'    => $inner_html,
-					'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
-					'innerBlocks'  => $inner_blocks,
-				);
+				$parent[ $target_index ] = $built;
 
 				// Stable ref for the replacement (and any nested children).
 				$single = array( &$parent[ $target_index ] );
 				$this->crud->assign_missing_refs_recursive( $single );
 
 				$result_block = array(
-					'name'       => $name,
-					'attributes' => isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : $attrs,
+					'name'       => $built['blockName'],
+					'attributes' => isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : array(),
 				);
 				if ( isset( $parent[ $target_index ]['attrs']['metadata']['gk_ref'] ) ) {
 					$result_block['ref'] = (string) $parent[ $target_index ]['attrs']['metadata']['gk_ref'];
@@ -502,25 +477,15 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_block', __( 'insert-child requires a "block" object with a "name".', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
-				$name = $new_block_def['name'];
-
-				// Validate block name and preference tier.
-				$validation = $this->crud->validate_block_def( $name );
-				if ( $validation['error'] ) {
-					return $validation['error'];
+				// Build the child (validating + building innerBlocks recursively
+				// to any depth) via Block_CRUD's shared builder. This op
+				// previously dropped nested innerBlocks silently — see #1.
+				$child_block = $this->crud->build_block_from_def( $new_block_def, $warnings );
+				if ( is_wp_error( $child_block ) ) {
+					return $child_block;
 				}
-				$warnings = array_merge( $warnings, $validation['warnings'] );
-
-				$attrs      = isset( $new_block_def['attributes'] ) ? $new_block_def['attributes'] : array();
-				$inner_html = isset( $new_block_def['innerHTML'] ) ? wp_kses_post( $new_block_def['innerHTML'] ) : '';
-
-				$child_block = array(
-					'blockName'    => $name,
-					'attrs'        => $attrs,
-					'innerHTML'    => $inner_html,
-					'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
-					'innerBlocks'  => array(),
-				);
+				$name  = $child_block['blockName'];
+				$attrs = $child_block['attrs'];
 
 				// Stable ref for the new child.
 				$single = array( &$child_block );
