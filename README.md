@@ -6,23 +6,29 @@ An MCP server + WordPress plugin that lets AI agents read, edit, and restructure
 
 ## At a glance
 
-Live comparison against the standard `wp/v2` REST API (the surface that REST-API-wrapping MCPs like [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) expose), run on `https://www.gravitykit.com` against a draft 38-block fixture page. Same WordPress site, same auth, same network. **5 trials, mean ± stdev.** See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness.
+How Block MCP compares to the standard WordPress REST API — the same surface that most other WordPress MCPs (like [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)) wrap.
 
-| Operation | `wp/v2` REST API | Block MCP |
+| What the agent can do | Standard WP REST API | Block MCP |
+|---|:---:|:---:|
+| **Edit one heading without touching the rest of the page** | ❌ Has to rewrite the entire page on every edit | ✅ Updates just the one heading |
+| **Make 5 edits in a row without re-sending the whole page each time** | ❌ Sends the full page body 5× | ✅ Sends only what changed |
+| **Find which block contains "Pricing" without scanning rendered HTML** | ❌ No structured search — agent has to regex through HTML | ✅ Built-in search by text or block type |
+| **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Agent can write any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
+| **Read a page, save it back unchanged, and have the post stay intact** | ❌ Rendered HTML strips block boundaries — the editor sees corruption next time it opens | ✅ Block structure round-trips losslessly |
+| **Refer to a specific block across multiple edits, even after others move** | ❌ No block identity at all | ✅ Every block carries a stable ID that survives sibling shifts |
+
+### The numbers
+
+Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture page, averaged over 5 runs. See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness.
+
+| | Standard WP REST API | Block MCP |
 |---|---|---|
-| **Read one page** *(25 samples)* | 751 ± 46 ms · 21.8 KB | 687 ± 60 ms · 13.6 KB |
-| &nbsp;&nbsp;&nbsp;&nbsp;Response shape | full HTML body + Yoast schema + ACF + links | 38 structured blocks with paths, refs, attributes |
-| &nbsp;&nbsp;&nbsp;&nbsp;Default read | rendered HTML — block boundaries dissolved (`?context=edit` needed for raw markup, requires edit cap) | structured tree of every block, with refs |
-| **Update one heading** | 1647 ± 254 ms | 1456 ± 299 ms |
-| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 6.7 KB (entire post body re-sent) | 40 B (single-block PATCH) |
-| **5 chained edits** | 8.65 ± 1.35 s | 9.81 ± 2.01 s |
-| &nbsp;&nbsp;&nbsp;&nbsp;Bytes uploaded | 33.4 KB | 0.1 KB · **263× less** |
-| **Block addressability** | none — agent regex/parses HTML | path or stable ref (`blk_a3f2c1q9`) |
-| **Update precision** | rewrites whole post on every edit | targets one block; siblings untouched |
-| **Block-aware safety** | none — write whatever HTML you want | tier-based legacy rejection, dual-storage guards, auto-transforms |
-| **Round-trip risk** | reading rendered HTML and writing it back silently strips block markers — content corruption visible in the editor on next open | block markup round-trips losslessly |
+| Time to read one page | 750 ms | 690 ms |
+| Time to make one edit | 1.6 s | 1.5 s |
+| Time for 5 edits in a row | 8.6 s | 9.8 s |
+| **Data sent for 5 edits** | **33 KB** *(the whole page, 5×)* | **0.1 KB** *(just the changes)* |
 
-Wall-clock per operation is similar — both APIs go through the same WordPress bootstrap, network, and `wp_update_post` save path, so a single round-trip costs the same. Within stdev, neither workflow is meaningfully faster. The compounding wins are *what each round-trip carries*: structured data the agent can actually reason about, and **~260× less upload traffic** when chaining edits.
+**The last row is the headline.** Time-per-edit is essentially the same on both — every WordPress write goes through the same database save, regardless of which API kicked it off. What changes is *what each request has to carry*. The standard REST API re-uploads the whole page every time the agent makes any edit; Block MCP uploads only the changed block. Across five edits, that's **~260× less data sent over the wire** — and, more importantly, an agent that doesn't have to keep parsing and re-emitting HTML it didn't intend to touch.
 
 ## Why this MCP
 
