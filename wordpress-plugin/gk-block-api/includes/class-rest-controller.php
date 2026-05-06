@@ -650,20 +650,22 @@ class REST_Controller {
 					'wrapper'     => array( 'type' => 'object' ),
 					'position'    => array( 'type' => array( 'integer', 'string' ) ),
 					'destination' => array(
-						'type'  => 'array',
-						'items' => array( 'type' => 'integer' ),
+						'type'        => 'array',
+						'items'       => array( 'type' => 'integer' ),
+						'description' => 'Path the block(s) should land at after the move (move op). Canonical name — preferred over "before".',
 					),
 					'destination_ref' => array(
 						'type'        => 'string',
 						'description' => 'Resolve destination from this ref instead of a path (move op).',
 					),
 					'before' => array(
-						'type'  => 'array',
-						'items' => array( 'type' => 'integer' ),
+						'type'        => 'array',
+						'items'       => array( 'type' => 'integer' ),
+						'description' => 'DEPRECATED legacy alias for "destination" (move op). Removed in v2 — use "destination".',
 					),
 					'before_ref' => array(
 						'type'        => 'string',
-						'description' => 'Resolve "before" anchor from this ref instead of a path (move op).',
+						'description' => 'DEPRECATED legacy alias for "destination_ref" (move op). Removed in v2 — use "destination_ref".',
 					),
 					'count' => array(
 						'type'    => 'integer',

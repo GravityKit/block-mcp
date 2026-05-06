@@ -631,8 +631,21 @@ class Block_Mutator {
 				$before_path = isset( $params['before'] ) ? $params['before'] : null;
 				$destination  = isset( $params['destination'] ) ? $params['destination'] : $before_path;
 
+				// `before` is a legacy alias for `destination` (issue #8) — the
+				// names imply different semantics (insert-before vs move-to)
+				// which confused agents. `destination` is the canonical name;
+				// `before` will be dropped in v2. Surface a warning whenever
+				// only `before` is supplied so callers can migrate.
+				if ( null !== $before_path && ! isset( $params['destination'] ) ) {
+					$warnings[] = array(
+						'type'    => 'deprecated_param',
+						'param'   => 'before',
+						'message' => __( '"before" is deprecated on the move op; use "destination" instead. "before" will be removed in v2.', 'gk-block-api' ),
+					);
+				}
+
 				if ( empty( $destination ) || ! is_array( $destination ) ) {
-					return new \WP_Error( 'missing_destination', __( 'move requires a "before" or "destination" path.', 'gk-block-api' ), array( 'status' => 400 ) );
+					return new \WP_Error( 'missing_destination', __( 'move requires a "destination" (or legacy "before") path.', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
 				foreach ( $destination as $seg ) {
