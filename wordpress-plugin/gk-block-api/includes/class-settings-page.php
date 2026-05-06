@@ -316,6 +316,17 @@ class Settings_Page {
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
+		// Build a sorted list of every registered block name for the searchable
+		// dropdown in the replacement-map "to" column. Falls back to a small
+		// curated list if nothing is registered yet (very early in the request
+		// lifecycle this can happen).
+		$block_names = array();
+		if ( class_exists( '\WP_Block_Type_Registry' ) ) {
+			$registered_blocks = \WP_Block_Type_Registry::get_instance()->get_all_registered();
+			$block_names       = array_keys( $registered_blocks );
+			sort( $block_names );
+		}
+
 		// Notices from action handlers. All inputs unslashed and clamped via
 		// absint before composition; the message itself never contains user data.
 		$scanned       = isset( $_GET['scanned'] ) ? absint( wp_unslash( $_GET['scanned'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag from our own redirect.
@@ -345,17 +356,37 @@ class Settings_Page {
 
 			<p><?php esc_html_e( 'These settings drive how the Block MCP server classifies blocks (preferred / acceptable / avoid / legacy), suggests replacements, and detects dual-storage blocks that need both attributes and innerHTML on every update.', 'gk-block-api' ); ?></p>
 
+			<style>
+				/* Keep the Remove checkbox + label on a single line — the 80px
+				   column width was wrapping the label below the checkbox. */
+				.gk-block-api-remove-label {
+					white-space: nowrap;
+					display: inline-flex;
+					align-items: center;
+					gap: 4px;
+				}
+				.gk-block-api-remove-label input[type="checkbox"] {
+					margin: 0;
+				}
+			</style>
+
+			<datalist id="gk-block-names">
+				<?php foreach ( $block_names as $name ) : ?>
+					<option value="<?php echo esc_attr( $name ); ?>"></option>
+				<?php endforeach; ?>
+			</datalist>
+
 			<form method="post" action="options.php">
 				<?php settings_fields( self::OPTION_GROUP ); ?>
 
 				<h2><?php esc_html_e( 'Namespace tier scores', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = avoid (warning), < 10 = legacy (hard reject on insert).', 'gk-block-api' ); ?></p>
-				<table class="widefat striped" style="max-width: 700px;">
+				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[namespace_rows]" style="max-width: 700px;">
 					<thead>
 						<tr>
 							<th scope="col"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></th>
 							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></th>
-							<th scope="col" style="width: 80px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -363,21 +394,21 @@ class Settings_Page {
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="regular-text" />
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="regular-text" data-row-trigger="1" />
 								</td>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></label>
 									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
 								</td>
 								<td>
-									<label><input type="checkbox" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
+									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
 								</td>
 							</tr>
 						<?php $ns_index++; endforeach; ?>
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New namespace', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" class="regular-text" />
+								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" class="regular-text" data-row-trigger="1" />
 							</td>
 							<td>
 								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-api' ); ?></label>
@@ -389,13 +420,13 @@ class Settings_Page {
 				</table>
 
 				<h2><?php esc_html_e( 'Replacement map', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'When a legacy block is rejected on insert, the error suggests its mapped replacement. Format: legacy/block-name → preferred/block-name.', 'gk-block-api' ); ?></p>
-				<table class="widefat striped" style="max-width: 800px;">
+				<p class="description"><?php esc_html_e( 'When a legacy block is rejected on insert, the error suggests its mapped replacement. The Replacement column shows a searchable list of all currently registered blocks on this site — type to filter, or enter any block name manually.', 'gk-block-api' ); ?></p>
+				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[replacement_rows]" style="max-width: 800px;">
 					<thead>
 						<tr>
 							<th scope="col"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Replacement', 'gk-block-api' ); ?></th>
-							<th scope="col" style="width: 80px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -403,38 +434,51 @@ class Settings_Page {
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="regular-text" />
+									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="regular-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
 								</td>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" value="<?php echo esc_attr( (string) $to ); ?>" class="regular-text" />
+									<input type="text" id="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" value="<?php echo esc_attr( (string) $to ); ?>" class="regular-text" list="gk-block-names" autocomplete="off" />
 								</td>
 								<td>
-									<label><input type="checkbox" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
+									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
 								</td>
 							</tr>
 						<?php $rm_index++; endforeach; ?>
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-api' ); ?>" class="regular-text" />
+								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-api' ); ?>" class="regular-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
 							</td>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-api' ); ?>" class="regular-text" />
+								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-api' ); ?>" class="regular-text" list="gk-block-names" autocomplete="off" />
 							</td>
 							<td></td>
 						</tr>
 					</tbody>
 				</table>
 
-				<h2><?php esc_html_e( 'Manual dual-storage blocks', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Block names (one per line) that should be treated as dual-storage in addition to whatever the site-scan and the gk_block_api_dual_storage_blocks filter contribute. Use this to force-classify a block before running a full scan.', 'gk-block-api' ); ?></p>
-				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block"; ?>
+				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Most blocks store their content in one place — either as block attributes (the JSON between the wp:block comments) or as innerHTML. A few blocks store the same data in BOTH at the same time. For these, updating one without the other corrupts the block silently.', 'gk-block-api' ); ?>
+				</p>
+				<p class="description">
+					<?php
+					echo wp_kses(
+						__( 'A common example is <code>yoast/faq-block</code>: it keeps the questions in <code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> markup. If an agent updates only innerHTML, the structured questions array goes stale.', 'gk-block-api' ),
+						array( 'code' => array() )
+					);
+					?>
+				</p>
+				<p class="description">
+					<?php esc_html_e( 'Block MCP detects most dual-storage blocks automatically by scanning your site. List any extras here (one per line) — when an agent tries to update one of these blocks, it will be required to send both attributes and innerHTML together, preventing the corruption.', 'gk-block-api' ); ?>
+				</p>
+				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block-name"; ?>
 				<textarea name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
 
-				<h2><?php esc_html_e( 'create_post post-type allow-list', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Limit which post types the create_post tool can create. Leave all unchecked to allow any public post type with REST support.', 'gk-block-api' ); ?></p>
+				<h2><?php esc_html_e( 'Post types AI agents can create', 'gk-block-api' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Restrict which post types the create_post MCP tool is allowed to use. Check the boxes for the types you want agents to be able to create. Leave everything unchecked to allow any public post type with REST support (the default).', 'gk-block-api' ); ?></p>
 				<fieldset class="gk-block-api-allowlist">
 					<?php foreach ( $registered_post_types as $slug => $type_obj ) : ?>
 						<label>
@@ -478,6 +522,62 @@ class Settings_Page {
 				<?php wp_nonce_field( 'gk_block_api_reset_defaults' ); ?>
 				<?php submit_button( __( 'Reset to defaults', 'gk-block-api' ), 'delete', 'submit', false ); ?>
 			</form>
+
+			<script>
+			/* Auto-grow tables marked .gk-block-api-growable. When the user types
+			 * into the last row's "trigger" input (data-row-trigger="1"), clone
+			 * that row, blank out its values, and increment the [N] index in
+			 * every input's name attribute so the form posts as a fresh entry. */
+			(function () {
+				var tables = document.querySelectorAll('.gk-block-api-growable');
+				tables.forEach(function (table) {
+					var tbody = table.querySelector('tbody');
+					if (!tbody) return;
+
+					// Track the next index to use across this table. Starts above
+					// the highest existing index so we never collide.
+					var nextIdx = tbody.querySelectorAll('tr').length;
+
+					tbody.addEventListener('input', function (e) {
+						var trigger = e.target.closest('[data-row-trigger]');
+						if (!trigger) return;
+						var lastRow = tbody.lastElementChild;
+						if (!lastRow || !lastRow.contains(trigger)) return;
+						if (trigger.value === '') return;
+
+						// Mark this row "claimed" so we don't clone again from it.
+						trigger.removeAttribute('data-row-trigger');
+
+						var clone = lastRow.cloneNode(true);
+						var idx = nextIdx++;
+						clone.querySelectorAll('input').forEach(function (input) {
+							input.value = '';
+							if (input.checked) input.checked = false;
+							input.removeAttribute('id');
+							if (input.name) {
+								input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
+							}
+							// Re-arm the trigger on the new last row.
+							if (input.dataset.rowTriggerOriginal === '1' || input.classList.contains('regular-text')) {
+								// no-op: handled below by checking original markup
+							}
+						});
+						// Restore the trigger marker on the appropriate input in the new row.
+						// Easiest: find the input in the same column position the trigger was in.
+						var triggerCell = trigger.closest('td');
+						if (triggerCell) {
+							var cellIndex = Array.prototype.indexOf.call(triggerCell.parentNode.children, triggerCell);
+							var newCell = clone.children[cellIndex];
+							if (newCell) {
+								var newTrigger = newCell.querySelector('input');
+								if (newTrigger) newTrigger.setAttribute('data-row-trigger', '1');
+							}
+						}
+						tbody.appendChild(clone);
+					});
+				});
+			})();
+			</script>
 		</div>
 		<?php
 	}
