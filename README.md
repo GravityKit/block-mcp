@@ -28,7 +28,7 @@ Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture
 | Time for 5 edits in a row | 8.6 s | 9.8 s |
 | **Data sent for 5 edits** | **33 KB** *(the whole page, 5×)* | **0.1 KB** *(just the changes)* |
 
-**The last row is the headline.** Time-per-edit is essentially the same on both — every WordPress write goes through the same database save, regardless of which API kicked it off. What changes is *what each request has to carry*. The standard REST API re-uploads the whole page every time the agent makes any edit; Block MCP uploads only the changed block. Across five edits, that's **~260× less data sent over the wire** — and, more importantly, an agent that doesn't have to keep parsing and re-emitting HTML it didn't intend to touch.
+Both tools take about the same amount of time per edit. The difference is how much *data* gets sent. The standard REST API re-sends the entire page every time the AI makes any change; Block MCP sends only what changed. Across five edits that's about **260× less** — and, more importantly, fewer chances for the AI to accidentally alter parts of the page you didn't ask it to touch.
 
 ## Why this MCP
 
