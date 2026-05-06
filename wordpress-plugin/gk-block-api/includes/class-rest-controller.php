@@ -282,6 +282,11 @@ class REST_Controller {
 							'default'     => false,
 							'description' => 'Add summary.legacy_blocks.paths. Aggregate counts always included.',
 						),
+						'persist_refs' => array(
+							'type'        => 'boolean',
+							'default'     => true,
+							'description' => 'Assign and persist stable gk_ref UUIDs on blocks missing them. Default true. Set false for read-only callers that do not want write side effects (refs in response will not resolve later).',
+						),
 					),
 				),
 				// POST — insert blocks.
@@ -300,6 +305,14 @@ class REST_Controller {
 						),
 						'before' => array(
 							'type' => 'integer',
+						),
+						'after_ref' => array(
+							'type'        => 'string',
+							'description' => 'Insert after the top-level block with this gk_ref (alternative to "after").',
+						),
+						'before_ref' => array(
+							'type'        => 'string',
+							'description' => 'Insert before the top-level block with this gk_ref (alternative to "before").',
 						),
 						'blocks' => array(
 							'type'     => 'array',
@@ -413,6 +426,57 @@ class REST_Controller {
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
+						),
+						'count' => array(
+							'type'              => 'integer',
+							'default'           => 1,
+							'sanitize_callback' => 'absint',
+						),
+					),
+				),
+			)
+		);
+
+		// Ref-addressed PATCH/DELETE — same semantics as index-addressed routes,
+		// but the target is resolved via attrs.metadata.gk_ref instead of a flat
+		// index. Refs survive sibling shifts so chained mutations don't go stale.
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)/blocks/by-ref/(?P<ref>blk_[a-f0-9]+)',
+			array(
+				array(
+					'methods'             => 'PATCH',
+					'callback'            => array( $this, 'update_block_by_ref' ),
+					'permission_callback' => array( $this, 'check_edit_permissions' ),
+					'args'                => array(
+						'id' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'ref' => array(
+							'type'              => 'string',
+							'required'          => true,
+							'sanitize_callback' => 'sanitize_text_field',
+						),
+						'attributes' => array( 'type' => 'object' ),
+						'innerHTML'  => array( 'type' => 'string' ),
+					),
+				),
+				array(
+					'methods'             => \WP_REST_Server::DELETABLE,
+					'callback'            => array( $this, 'delete_block_by_ref' ),
+					'permission_callback' => array( $this, 'check_edit_permissions' ),
+					'args'                => array(
+						'id' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'ref' => array(
+							'type'              => 'string',
+							'required'          => true,
+							'sanitize_callback' => 'sanitize_text_field',
 						),
 						'count' => array(
 							'type'              => 'integer',
@@ -572,9 +636,13 @@ class REST_Controller {
 						),
 					),
 					'path' => array(
-						'type'     => 'array',
-						'required' => true,
-						'items'    => array( 'type' => 'integer' ),
+						'type'        => 'array',
+						'items'       => array( 'type' => 'integer' ),
+						'description' => 'Integer path to the target block. Provide this OR "ref".',
+					),
+					'ref' => array(
+						'type'        => 'string',
+						'description' => 'Stable gk_ref of the target block (alternative to "path"). Survives sibling shifts.',
 					),
 					'attributes'  => array( 'type' => 'object' ),
 					'innerHTML'   => array( 'type' => 'string' ),
@@ -585,9 +653,17 @@ class REST_Controller {
 						'type'  => 'array',
 						'items' => array( 'type' => 'integer' ),
 					),
+					'destination_ref' => array(
+						'type'        => 'string',
+						'description' => 'Resolve destination from this ref instead of a path (move op).',
+					),
 					'before' => array(
 						'type'  => 'array',
 						'items' => array( 'type' => 'integer' ),
+					),
+					'before_ref' => array(
+						'type'        => 'string',
+						'description' => 'Resolve "before" anchor from this ref instead of a path (move op).',
 					),
 					'count' => array(
 						'type'    => 'integer',
@@ -1255,8 +1331,9 @@ class REST_Controller {
 				return $perm_check;
 			}
 
-			$render = (bool) $request->get_param( 'render' );
-			$blocks = $this->block_crud->get_blocks( $post_id, $render );
+			$render       = (bool) $request->get_param( 'render' );
+			$persist_refs = null === $request->get_param( 'persist_refs' ) ? true : (bool) $request->get_param( 'persist_refs' );
+			$blocks       = $this->block_crud->get_blocks( $post_id, $render, $persist_refs );
 
 			if ( is_wp_error( $blocks ) ) {
 				return $blocks;
@@ -1487,6 +1564,95 @@ class REST_Controller {
 	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
+	/**
+	 * PATCH /posts/{id}/blocks/by-ref/{ref}
+	 *
+	 * Ref-based update. Resolves the ref to a flat index, then calls the
+	 * existing update_block path. Returns ref_stale (404) if not found.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function update_block_by_ref( $request ) {
+		try {
+			$post_id = (int) $request->get_param( 'id' );
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$ref   = (string) $request->get_param( 'ref' );
+			$index = $this->block_crud->resolve_ref_to_index( $post_id, $ref );
+			if ( is_wp_error( $index ) ) {
+				return $index;
+			}
+
+			$attributes = $request->get_param( 'attributes' );
+			$inner_html = $request->get_param( 'innerHTML' );
+
+			if ( null === $attributes && null === $inner_html ) {
+				return new \WP_Error(
+					'missing_data',
+					__( 'At least one of "attributes" or "innerHTML" must be provided.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+
+			$result = $this->block_crud->update_block(
+				$post_id,
+				$index,
+				is_array( $attributes ) ? $attributes : array(),
+				$inner_html
+			);
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * DELETE /posts/{id}/blocks/by-ref/{ref}
+	 *
+	 * Ref-based delete. Resolves the ref to a flat index, then calls the
+	 * existing delete_blocks path.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function delete_block_by_ref( $request ) {
+		try {
+			$post_id = (int) $request->get_param( 'id' );
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$ref   = (string) $request->get_param( 'ref' );
+			$index = $this->block_crud->resolve_ref_to_index( $post_id, $ref );
+			if ( is_wp_error( $index ) ) {
+				return $index;
+			}
+
+			$count  = (int) $request->get_param( 'count' );
+			$result = $this->block_crud->delete_blocks( $post_id, $index, $count );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
 	public function update_block( $request ) {
 		try {
 			$post_id = (int) $request->get_param( 'id' );
@@ -1541,9 +1707,24 @@ class REST_Controller {
 
 			$blocks = $request->get_param( 'blocks' );
 
-			// Determine position.
-			$position = null;
-			if ( null !== $request->get_param( 'after' ) ) {
+			// Determine position. after_ref/before_ref take precedence over after/before
+			// when both are supplied (the ref is the more stable identifier).
+			$after_ref  = $request->get_param( 'after_ref' );
+			$before_ref = $request->get_param( 'before_ref' );
+			$position   = null;
+			if ( is_string( $after_ref ) && '' !== $after_ref ) {
+				$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $after_ref );
+				if ( is_wp_error( $resolved ) ) {
+					return $resolved;
+				}
+				$position = $resolved;
+			} elseif ( is_string( $before_ref ) && '' !== $before_ref ) {
+				$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $before_ref );
+				if ( is_wp_error( $resolved ) ) {
+					return $resolved;
+				}
+				$position = $resolved > 0 ? $resolved - 1 : 'start';
+			} elseif ( null !== $request->get_param( 'after' ) ) {
 				$position = $request->get_param( 'after' );
 			} elseif ( null !== $request->get_param( 'before' ) ) {
 				// "before" index N = "after" index N-1.
@@ -1752,6 +1933,24 @@ class REST_Controller {
 
 			$op   = $request->get_param( 'op' );
 			$path = $request->get_param( 'path' );
+			$ref  = $request->get_param( 'ref' );
+
+			// Resolve ref → path if no explicit path supplied.
+			if ( ( null === $path || ( is_array( $path ) && empty( $path ) ) ) && is_string( $ref ) && '' !== $ref ) {
+				$resolved = $this->block_crud->resolve_ref( $post_id, $ref );
+				if ( is_wp_error( $resolved ) ) {
+					return $resolved;
+				}
+				$path = $resolved;
+			}
+
+			if ( ! is_array( $path ) || empty( $path ) ) {
+				return new \WP_Error(
+					'missing_target',
+					__( 'Either "path" or "ref" is required.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
 
 			// Cast path elements to integers.
 			$path = array_map( 'intval', $path );
@@ -1766,6 +1965,24 @@ class REST_Controller {
 				'before'      => $request->get_param( 'before' ),
 				'count'       => $request->get_param( 'count' ),
 			);
+
+			// Resolve destination_ref / before_ref to paths for the move op.
+			$dest_ref   = $request->get_param( 'destination_ref' );
+			$before_ref = $request->get_param( 'before_ref' );
+			if ( null === $params['destination'] && is_string( $dest_ref ) && '' !== $dest_ref ) {
+				$resolved = $this->block_crud->resolve_ref( $post_id, $dest_ref );
+				if ( is_wp_error( $resolved ) ) {
+					return $resolved;
+				}
+				$params['destination'] = $resolved;
+			}
+			if ( null === $params['before'] && is_string( $before_ref ) && '' !== $before_ref ) {
+				$resolved = $this->block_crud->resolve_ref( $post_id, $before_ref );
+				if ( is_wp_error( $resolved ) ) {
+					return $resolved;
+				}
+				$params['before'] = $resolved;
+			}
 
 			// Cast destination to integers if present.
 			if ( is_array( $params['destination'] ) ) {

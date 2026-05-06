@@ -339,6 +339,8 @@ export class WordPressBlockClient {
       outline?: boolean;
       summary_only?: boolean;
       include_legacy_paths?: boolean;
+      /** When true (default), missing gk_refs are assigned and persisted. Pass false to skip the silent write side effect. */
+      persist_refs?: boolean;
     }
   ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
@@ -353,6 +355,11 @@ export class WordPressBlockClient {
     if (params?.outline) queryParams.outline = 'true';
     if (params?.summary_only) queryParams.summary_only = 'true';
     if (params?.include_legacy_paths) queryParams.include_legacy_paths = 'true';
+    // Forward both true and false explicitly when set, so tool-layer intent
+    // matches what reaches the server. The server default (true) only kicks in
+    // when the param is omitted entirely.
+    if (params?.persist_refs === false) queryParams.persist_refs = 'false';
+    else if (params?.persist_refs === true) queryParams.persist_refs = 'true';
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,
@@ -440,6 +447,33 @@ export class WordPressBlockClient {
   }
 
   /**
+   * Update a single block by its stable gk_ref instead of a flat index.
+   * Refs survive sibling shifts so chained mutations don't go stale.
+   *
+   * @param postId - WordPress post/page ID
+   * @param ref    - Stable ref (e.g. "blk_a3f2c1q9") from get_page_blocks
+   * @param data   - Partial attributes and/or innerHTML
+   * @returns 404 ref_stale if the ref no longer matches any block.
+   */
+  async updateBlockByRef(
+    postId: number,
+    ref: string,
+    data: { attributes?: Record<string, unknown>; innerHTML?: string }
+  ): Promise<BlockUpdateResponse> {
+    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
+    if (!data.attributes && !data.innerHTML) {
+      throw new Error('At least one of attributes or innerHTML must be provided');
+    }
+
+    const response = await this.client.patch<BlockUpdateResponse>(
+      `/posts/${postId}/blocks/by-ref/${encodeURIComponent(ref)}`,
+      data
+    );
+    return response.data;
+  }
+
+  /**
    * Insert one or more blocks at a specific position.
    *
    * @param postId - WordPress post/page ID
@@ -451,6 +485,8 @@ export class WordPressBlockClient {
     data: {
       after?: number | 'start';
       before?: number;
+      after_ref?: string;
+      before_ref?: string;
       blocks: Array<{
         name: string;
         attributes?: Record<string, unknown>;
@@ -491,6 +527,31 @@ export class WordPressBlockClient {
 
     const response = await this.client.delete<BlockDeleteResponse>(
       `/posts/${postId}/blocks/${index}`,
+      { params }
+    );
+    return response.data;
+  }
+
+  /**
+   * Delete one or more blocks identified by the leading block's stable gk_ref.
+   *
+   * @param postId - WordPress post/page ID
+   * @param ref    - Stable ref of the first block to remove
+   * @param count  - Consecutive blocks to remove (default 1)
+   */
+  async deleteBlockByRef(
+    postId: number,
+    ref: string,
+    count?: number
+  ): Promise<BlockDeleteResponse> {
+    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
+
+    const params: Record<string, string> = {};
+    if (count && count > 1) params.count = String(count);
+
+    const response = await this.client.delete<BlockDeleteResponse>(
+      `/posts/${postId}/blocks/by-ref/${encodeURIComponent(ref)}`,
       { params }
     );
     return response.data;

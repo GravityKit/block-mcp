@@ -131,6 +131,12 @@ export interface Block {
   top_level_counter?: number;
   /** Path array (raw `parse_blocks()` indices). e.g. `[0, 2, 1]` = block 0 → innerBlock 2 → innerBlock 1. Used by `edit_block_tree`. */
   path?: number[];
+  /**
+   * Stable identity ref (e.g. "blk_a3f2c1q9"). Persisted in attrs.metadata.gk_ref.
+   * Survives sibling shifts — pass `ref` to update_block/delete_block/edit_block_tree
+   * instead of `index`/`path` to chain mutations without re-fetching the page.
+   */
+  ref?: string;
   /** Fully-qualified block name (e.g. "core/paragraph") */
   name: string;
   /** Block attributes (key-value pairs) */
@@ -199,6 +205,8 @@ export interface InsertedBlockRef {
    * `edit_block_tree op: insert-child` without an extra get_page_blocks lookup.
    */
   path?: number[];
+  /** Stable gk_ref. Returned so callers can chain mutations against it. */
+  ref?: string;
   /** Fully-qualified block name. */
   name: string;
 }
@@ -398,6 +406,10 @@ export interface InsertBlocksParams {
   post_id: number;
   after?: number | 'start';
   before?: number;
+  /** Insert after the top-level block with this gk_ref. Takes precedence over `after`. */
+  after_ref?: string;
+  /** Insert before the top-level block with this gk_ref. Takes precedence over `before`. */
+  before_ref?: string;
   blocks: Array<{
     name: string;
     attributes?: Record<string, unknown>;
@@ -430,10 +442,13 @@ export type MutationOp =
   | 'duplicate'
   | 'move';
 
-/** Request body for the mutate endpoint. */
+/** Request body for the mutate endpoint. Provide either `path` or `ref`. */
 export interface MutationRequest {
   op: MutationOp;
-  path: number[];
+  /** Integer path to the target. Provide either this or `ref`. */
+  path?: number[];
+  /** Stable gk_ref of the target block. Survives sibling shifts. */
+  ref?: string;
   attributes?: Record<string, unknown>;
   innerHTML?: string;
   block?: {
@@ -452,8 +467,12 @@ export interface MutationRequest {
   };
   position?: number | 'start' | 'end';
   destination?: number[];
+  /** Alternative to `destination` — resolve from a ref instead of a path. */
+  destination_ref?: string;
   /** Alias for destination — path of block to insert BEFORE (pre-move indexing). */
   before?: number[];
+  /** Alternative to `before` — resolve from a ref instead of a path. */
+  before_ref?: string;
   /** Number of consecutive blocks to move/operate on. Default: 1. */
   count?: number;
 }
@@ -474,6 +493,10 @@ export interface MutationResponse {
   block?: {
     name: string;
     attributes: Record<string, unknown>;
+    /** Set when the op produced a new block (replace, wrap, insert-child, duplicate). */
+    ref?: string;
+    /** Set on `duplicate` — path of the new clone. */
+    new_path?: number[];
   };
   warnings: Array<PreferenceWarning | StaticBlockWarning>;
   before_revision_id: number;

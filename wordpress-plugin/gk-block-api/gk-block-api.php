@@ -3,7 +3,7 @@
  * Plugin Name: GK Block API
  * Plugin URI: https://www.gravitykit.com
  * Description: REST API for block-level CRUD operations with smart preferences for AI agents.
- * Version: 1.4.2
+ * Version: 1.5.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GK_BLOCK_API_VERSION', '1.4.2' );
+define( 'GK_BLOCK_API_VERSION', '1.5.0' );
 define( 'GK_BLOCK_API_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -137,9 +137,17 @@ function init_rest_api() {
 add_action( 'rest_api_init', __NAMESPACE__ . '\\init_rest_api' );
 
 /**
- * Settings page bootstrap. Lazy: only fires on admin requests.
+ * Settings page bootstrap. Admin-only via is_admin() guard.
+ *
+ * Hooks `plugins_loaded` (not `admin_init`) because Settings_Page::register()
+ * needs to add an `admin_menu` callback, and `admin_menu` fires BEFORE
+ * `admin_init` in WP's admin request lifecycle. Hooking on `admin_init`
+ * registers the menu callback too late and the submenu silently never appears.
  */
 function init_settings_page() {
+	if ( ! is_admin() ) {
+		return;
+	}
 	try {
 		$settings = new Settings_Page( new Block_Inventory() );
 		$settings->register();
@@ -149,7 +157,7 @@ function init_settings_page() {
 		}
 	}
 }
-add_action( 'admin_init', __NAMESPACE__ . '\\init_settings_page', 0 );
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
 
 /**
  * WP-CLI bootstrap. Required for any CLI command — `rest_api_init` does

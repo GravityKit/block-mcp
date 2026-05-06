@@ -28,15 +28,23 @@ const OPS: readonly MutationOp[] = [
 export const MUTATE_TOOLS = [{
   name: 'edit_block_tree',
   description:
-    'Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. `path` is an integer array from get_page_blocks ([0,2,1] = block 0 → innerBlock 2 → innerBlock 1). Creates a revision.',
-  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Edit block tree by path' },
+    'Run one structural op on a nested block tree. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Target the block via `ref` (stable gk_ref — recommended, survives sibling shifts) OR `path` (integer array, e.g. [0,2,1]). For move, the destination can be a `destination_ref` / `before_ref` instead of a path. Creates a revision.',
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Edit block tree' },
   outputSchema: {
     type: 'object',
     properties: {
       success:            { type: 'boolean' },
       op:                 { type: 'string' },
       path:               { type: 'array', items: { type: 'integer' } },
-      block:              { type: 'object', properties: { name: { type: 'string' }, attributes: { type: 'object' } } },
+      block:              {
+        type: 'object',
+        properties: {
+          name:       { type: 'string' },
+          attributes: { type: 'object' },
+          ref:        { type: 'string', description: 'New ref when the op produced a new block.' },
+          new_path:   { type: 'array', items: { type: 'integer' }, description: 'duplicate: path of the clone.' },
+        },
+      },
       warnings:           { type: 'array' },
       formatted_warnings: { type: 'array', items: { type: 'string' } },
       before_revision_id: { type: 'number' },
@@ -48,7 +56,8 @@ export const MUTATE_TOOLS = [{
     properties: {
       post_id:     { type: 'number',  description: 'Post ID.' },
       op:          { type: 'string',  enum: [...OPS], description: 'Operation to perform.' },
-      path:        { type: 'array',   items: { type: 'integer' }, description: 'Target block path (e.g. [0,2,1]).' },
+      path:        { type: 'array',   items: { type: 'integer' }, description: 'Target block path (e.g. [0,2,1]). Provide this OR `ref`.' },
+      ref:         { type: 'string',  description: 'Stable gk_ref of the target block. Survives sibling shifts. Provide this OR `path`.' },
       attributes:  { type: 'object',  description: 'update-attrs: attributes to merge.' },
       innerHTML:   { type: 'string',  description: 'update-html: replacement innerHTML.' },
       block: {
@@ -69,12 +78,14 @@ export const MUTATE_TOOLS = [{
           attributes: { type: 'object' },
         },
       },
-      position:    { type: ['integer', 'string'], description: 'insert-child: index, "start", or "end" (default).' },
-      destination: { type: 'array', items: { type: 'integer' }, description: 'move: destination path.' },
-      before:      { type: 'array', items: { type: 'integer' }, description: 'move: insert BEFORE this path (pre-move indexing). Alias for destination.' },
-      count:       { type: 'integer', description: 'move: consecutive blocks to move. Default 1.' },
+      position:        { type: ['integer', 'string'], description: 'insert-child: index, "start", or "end" (default).' },
+      destination:     { type: 'array', items: { type: 'integer' }, description: 'move: destination path.' },
+      destination_ref: { type: 'string', description: 'move: destination ref (alternative to destination).' },
+      before:          { type: 'array', items: { type: 'integer' }, description: 'move: insert BEFORE this path (pre-move indexing). Alias for destination.' },
+      before_ref:      { type: 'string', description: 'move: insert BEFORE the block with this ref.' },
+      count:           { type: 'integer', description: 'move: consecutive blocks to move. Default 1.' },
     },
-    required: ['post_id', 'op', 'path'],
+    required: ['post_id', 'op'],
   },
 }];
 
@@ -114,6 +125,7 @@ export async function handleMutateTool(
   const postId = args.post_id as number;
   const op = args.op as string;
   const path = args.path;
+  const ref = args.ref as string | undefined;
 
   if (postId === undefined || postId === null) throw new Error('post_id is required');
   // Op validation comes from the schema enum at request time; this guard
@@ -121,12 +133,32 @@ export async function handleMutateTool(
   if (!op || !(OPS as readonly string[]).includes(op)) {
     throw new Error(`op must be one of: ${OPS.join(', ')}. Got: ${JSON.stringify(op)}`);
   }
-  isIntegerArray(path, 'path');
+
+  const pathProvided = path !== undefined && path !== null;
+  const hasRef = typeof ref === 'string' && ref.length > 0;
+
+  if (pathProvided && hasRef) {
+    throw new Error('Provide "path" OR "ref", not both');
+  }
+  if (!pathProvided && !hasRef) {
+    throw new Error('Provide either "path" or "ref" to identify the target block');
+  }
+  if (pathProvided) {
+    // Validate shape — must be an integer array.
+    isIntegerArray(path, 'path');
+    if ((path as number[]).length === 0) {
+      throw new Error('path must not be empty');
+    }
+  }
 
   const requestBody: MutationRequest = {
     op: op as MutationOp,
-    path: path as number[],
   };
+  if (pathProvided) {
+    requestBody.path = path as number[];
+  } else {
+    requestBody.ref = ref as string;
+  }
 
   switch (op) {
     case 'update-attrs': {
@@ -171,14 +203,35 @@ export async function handleMutateTool(
     case 'move': {
       const before = args.before;
       const destination = args.destination;
-      if (before !== undefined && before !== null) {
+      const beforeRef = args.before_ref as string | undefined;
+      const destRef = args.destination_ref as string | undefined;
+
+      const hasBefore     = before !== undefined && before !== null;
+      const hasDestination = destination !== undefined && destination !== null;
+      const hasBeforeRef  = typeof beforeRef === 'string' && beforeRef.length > 0;
+      const hasDestRef    = typeof destRef === 'string' && destRef.length > 0;
+
+      // XOR: a path and a ref for the same anchor is ambiguous — silently
+      // preferring one would make a stale path silently invalidate a fresh ref.
+      if (hasBefore && hasBeforeRef) {
+        throw new Error('move: provide "before" path OR "before_ref", not both');
+      }
+      if (hasDestination && hasDestRef) {
+        throw new Error('move: provide "destination" path OR "destination_ref", not both');
+      }
+
+      if (hasBefore) {
         isIntegerArray(before, 'before');
         requestBody.before = before as number[];
-      } else if (destination !== undefined && destination !== null) {
+      } else if (hasDestination) {
         isIntegerArray(destination, 'destination');
         requestBody.destination = destination as number[];
+      } else if (hasBeforeRef) {
+        requestBody.before_ref = beforeRef as string;
+      } else if (hasDestRef) {
+        requestBody.destination_ref = destRef as string;
       } else {
-        throw new Error('move requires either a "before" or "destination" array of integers');
+        throw new Error('move requires "before"/"destination" path or "before_ref"/"destination_ref"');
       }
       if (args.count !== undefined && args.count !== null) {
         const count = args.count as number;

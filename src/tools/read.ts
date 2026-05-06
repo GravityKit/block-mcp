@@ -16,7 +16,7 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Use outline:true or summary_only:true for cheap inspection.",
+      "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get post blocks' },
     outputSchema: {
       type: 'object',
@@ -67,6 +67,10 @@ export const READ_TOOLS = [
           type: 'boolean',
           description: 'Add summary.legacy_blocks.paths (per-block path list). Off by default; turn on for migration audits.',
         },
+        persist_refs: {
+          type: 'boolean',
+          description: 'Default true. When true, missing block refs (attrs.metadata.gk_ref) are assigned and persisted silently (no revision created). Set false for read-only callers that don\'t want write side effects — refs in the response will not resolve in subsequent mutation calls.',
+        },
       },
     },
   },
@@ -96,6 +100,7 @@ export async function handleReadTool(
       const outline = args.outline as boolean | undefined;
       const summaryOnly = args.summary_only as boolean | undefined;
       const includeLegacyPaths = args.include_legacy_paths as boolean | undefined;
+      const persistRefs = args.persist_refs as boolean | undefined;
 
       if ((postId === undefined || postId === null) && !url) {
         throw new Error('Either post_id or url is required');
@@ -110,6 +115,7 @@ export async function handleReadTool(
         fields, render, search, block_name: blockName, outline,
         summary_only: summaryOnly,
         include_legacy_paths: includeLegacyPaths,
+        ...(persistRefs !== undefined ? { persist_refs: persistRefs } : {}),
       });
 
       // summary_only mode: return server summary as-is.

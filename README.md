@@ -2,123 +2,192 @@
 
 > Surgical block-level content editing for WordPress via the Model Context Protocol.
 
-An MCP server + WordPress plugin that lets AI agents read, edit, and restructure Gutenberg block content as nested JSON instead of raw HTML. Every edit creates a WordPress revision for rollback. Preference scoring guides agents toward the right blocks for your site.
+An MCP server + WordPress plugin that lets AI agents read, edit, and restructure Gutenberg block content as nested JSON instead of raw HTML. Every edit creates a WordPress revision for rollback. Stable block refs let agents chain mutations without re-fetching the page.
 
-## Why
+## Why this MCP
 
-AI agents working with WordPress typically have three options for editing content:
+Most WordPress MCPs wrap the default REST API. That gives an agent post-level CRUD, but it stops there — to change one heading on a page, the agent has to read the entire `post_content` HTML, parse it, find the right tag, mutate it, and write the whole thing back. Block boundaries dissolve, structure breaks subtly, and there's no undo path.
 
-1. **Rewrite `post_content` as HTML** — destroys block structure, lossy, dangerous.
-2. **Use the default WP REST API** — whole-post reads/writes; no path-based access to nested blocks.
-3. **Use this MCP** — read/write blocks by path (`[0, 2, 1]`), surgical edits, auto-transforms, revision tracking.
+Block MCP is built around the block tree itself. The agent sees a structured, addressable, well-typed view of the page — and writes through purpose-built endpoints that know what blocks are.
+
+What that gets you in practice:
+
+- **Block-aware editing.** Change a heading's level, swap a button's URL, reorder columns — without touching surrounding HTML. The agent works in JSON; the plugin handles parse/serialize.
+- **Stable block refs.** Every block carries a persistent ID. An agent can fetch a page once, capture the refs of every block it intends to edit, then chain inserts/deletes/updates against those refs without re-reading. Sibling shifts don't invalidate the addresses.
+- **Path-based structural ops.** Nine operations (`update-attrs`, `replace-block`, `wrap-in-group`, `unwrap-group`, `move`, `duplicate`, `insert-child`, `remove-block`, `update-html`) work on any nesting depth via integer paths or refs.
+- **Auto-transforms.** Change a heading's `level` attribute and the `<h2>`/`<h3>` tag updates with it. Toggle a list to ordered and `<ul>` becomes `<ol>`. The plugin keeps attributes and innerHTML in sync for the common patterns so agents don't have to.
+- **Site policy enforcement.** Per-site preference tiers reject inserts of blocks you've marked as legacy and surface suggested replacements. An agent can't write blocks your site doesn't want.
+- **Revision-backed undo.** Every write returns `before_revision_id` and `revision_id`. `revert_to_revision` rolls back to either side of any edit.
+- **Discovery tools.** Browse registered block types with preference scoring, search patterns, query site-wide block/pattern usage, resolve URLs to post IDs. The agent can plan with knowledge of what your site actually contains.
+- **Static-block safety guards.** Warns when an attribute change would leave rendered markup stale, so the agent knows when to also pass innerHTML.
+
+The combination — block-aware, ref-stable, revision-tracked, policy-enforcing — is what existing REST-API-wrapping MCPs don't give you.
+
+## Compared to other WordPress MCPs
+
+The WordPress MCP space is small and the projects work at different layers — they're more complementary than competing.
+
+**[InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)** — A REST-API-wrapping MCP that operates on whole posts, plus broad coverage of users, comments, media, plugins, and plugin-repo search. Standout feature: multi-site management from one MCP instance. Reach for it when you need post-level CRUD across many sites or general-purpose WordPress administration. It's not block-aware: editing a single heading inside a long page means reading and rewriting the entire post.
+
+**[WordPress/mcp-adapter](https://github.com/WordPress/mcp-adapter)** — The official WordPress-org adapter that bridges WordPress's core Abilities API (`wp_register_ability()`, shipped in WP 6.9) to the MCP specification. It's a framework, not an end-user tool — by itself it exposes only built-in abilities. To make it useful for content editing, you (or some other plugin) still need to register abilities that do the actual work. Reach for it when you're building first-party WordPress AI integrations and want the blessed transport, permissions, and observability story.
+
+**Block MCP** (this project) — Operates one layer below: inside a single post's block tree. Path- and ref-based addressing, auto-transforms, preference-tier enforcement, per-block revisions. None of those exist in the other two. Reach for it when an agent needs to edit *blocks* — change a heading level, swap a column layout, insert a CTA after the third paragraph — without rewriting the surrounding content.
+
+These can all coexist. Block MCP could (and likely will) be exposed through the official adapter as registered abilities once that path matures — same logic, blessed plumbing. See [issues](https://github.com/GravityKit/block-mcp/issues) for the roadmap.
 
 ## Features
 
 **Read**
-- Full block tree as structured JSON with paths, names, attributes, and a `text_preview` of each block's content
-- Page summary in one call: block type counts, headings with paths, section markers, legacy block detection, max nesting depth
+- Full block tree as structured JSON: paths, names, attributes, refs, `text_preview` of each block's content
+- Page summary in one call: block type counts, headings with paths, section markers, max nesting depth
 - Outline mode for fast page structure inspection
-- Search blocks by text content or block name
-- Render mode expands shortcodes, resolves synced patterns, and marks dynamic blocks
+- Search blocks by text or block name
+- Render mode expands shortcodes, resolves synced patterns, marks dynamic blocks
 
-**Write**
-- Update a single block's attributes or HTML (auto-transforms keep them in sync)
-- Insert blocks at any position (flat index or nested path)
-- Delete blocks with optional count
-- Full page rewrite with validation
-- Insert patterns — synced (`core/block` reference) or inline (independent copy)
-
-**Mutate** (9 path-based operations)
-- `update-attrs`, `update-html`, `replace-block`, `remove-block`
-- `wrap-in-group`, `unwrap-group`, `insert-child`, `duplicate`, `move`
-- `dry_run` parameter to validate without writing
-- `before` (pre-move indexing) and `count` (move N consecutive blocks)
+**Write — by index, by ref, or by path**
+- `update_block` — flat-index OR ref
+- `delete_block` — top-level counter OR ref
+- `insert_blocks` — anchor on `after_top_level`/`before_top_level` OR `after_ref`/`before_ref`
+- `edit_block_tree` — 9 path-based or ref-based structural ops:
+  - `update-attrs`, `update-html`, `replace-block`, `remove-block`
+  - `wrap-in-group`, `unwrap-group`, `insert-child`, `duplicate`, `move`
+- `rewrite_post_blocks` — full page rewrite
+- `dry_run` parameter to validate any mutation without writing
 
 **Safety**
-- Auto-transform keeps innerHTML in sync when attributes change (heading level, list ordered, group tagName, button URL, spacer height, etc.)
-- Static block guards warn when attr changes may leave rendered markup stale
-- Legacy blocks are hard-rejected on insert; avoid-tier blocks generate warnings with suggested replacements
-- Rate limiting (10 writes/min per post, 2 full rewrites/min per post)
-- Every write creates a before/after WordPress revision — use `revert_to_revision` to undo
+- Auto-transform keeps innerHTML in sync when attributes change (heading level, list ordered, group tagName, button URL, image src, spacer height, etc.)
+- Static block guards warn when an attribute change may leave rendered markup stale
+- Configurable preference tiers: legacy blocks rejected on insert, avoid-tier blocks return warnings with suggested replacements
+- Per-post rate limiting (10 writes/min, 2 full rewrites/min)
+- Every write creates a WordPress revision; `revert_to_revision` undoes any edit
 
 **Discover**
 - List block types filtered by namespace, category, or preference tier
-- Browse patterns (synced + registered) with scoring by recency, reference count, and legacy content
-- Site-wide usage analytics (cached)
-- Resolve any URL to its post ID, type, and edit link
+- Browse patterns (synced + registered) scored by recency, reference count, and legacy content
+- Site-wide block/pattern usage analytics (cached)
+- Resolve any URL or slug to its post ID, type, and edit link
 
 ## How It Works
-
-The project has two components:
-
-**WordPress plugin** (`wordpress-plugin/gk-block-api/`) — PHP REST API under the `gk-block-api/v1` namespace. Handles block parsing, serialization, safety, preference scoring, rate limiting, revisions. Works with any post type that stores block content in `post_content`.
-
-**MCP server** (`src/`) — TypeScript server that exposes the REST API as MCP tools. Runs locally on your machine via stdio transport. No part of the MCP server touches the WordPress site directly — it authenticates as a normal user.
 
 ```
 AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin (your site)
 ```
 
-## Installation
+**WordPress plugin** (`wordpress-plugin/gk-block-api/`) — REST API at `gk-block-api/v1`. Handles block parsing, serialization, safety checks, preference scoring, rate limiting, revisions. Works with any post type that stores Gutenberg blocks in `post_content`.
 
-### WordPress plugin
+**MCP server** (`src/`) — TypeScript stdio server that exposes the REST API as MCP tools. Authenticates as a normal WordPress user via Application Password. No special privileges, no direct DB access from the MCP side.
 
-1. Copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` directory.
-2. Activate the plugin.
-3. Create a WordPress Application Password (Users → Your Profile → Application Passwords) for the user the MCP will authenticate as. The user needs `edit_posts` capability at minimum.
+## Quick Start
 
-### MCP server
+### 1. Install the WordPress plugin
+
+Copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` and activate it. Or install via WP-CLI:
 
 ```bash
-npm install   # auto-builds dist/index.cjs via prepare script
+wp plugin install /path/to/block-mcp/wordpress-plugin/gk-block-api --activate
 ```
 
-Set three environment variables in your MCP client config:
+### 2. Create an Application Password
 
-```
-GK_SITE_URL=https://example.com
-GK_BLOCK_API_USER=<wordpress-username>
-GK_BLOCK_API_APP_PASSWORD=<application-password>
+In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
+
+```bash
+wp user application-password create <username> "Block MCP" --porcelain
 ```
 
-Then register the server with your MCP client (Claude Code, etc.) pointing at `dist/index.cjs`:
+The user needs at minimum the `edit_posts` capability for any post you want to read or write.
+
+### 3. Install and configure the MCP server
+
+```bash
+git clone https://github.com/GravityKit/block-mcp
+cd block-mcp
+npm install   # auto-builds dist/index.cjs via the prepare script
+```
+
+Register the server in your MCP client. Example for Claude Code's `~/.claude.json`:
 
 ```json
 {
-  "command": "node",
-  "args": ["/path/to/block-mcp/dist/index.cjs"],
-  "env": {
-    "GK_SITE_URL": "https://example.com",
-    "GK_BLOCK_API_USER": "...",
-    "GK_BLOCK_API_APP_PASSWORD": "..."
+  "mcpServers": {
+    "block-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/block-mcp/dist/index.cjs"],
+      "env": {
+        "GK_SITE_URL": "https://example.com",
+        "GK_BLOCK_API_USER": "your-wp-username",
+        "GK_BLOCK_API_APP_PASSWORD": "xxxx xxxx xxxx xxxx xxxx xxxx"
+      }
+    }
   }
 }
 ```
 
+Restart your MCP client. Run `npm run inspect` to test the tools interactively.
+
 ## MCP Tools
+
+**Content I/O**
 
 | Tool | Purpose |
 |---|---|
-| `get_page_blocks` | Read a post's blocks — supports `outline`, `summary_only`, `search`, `block_name`, `render`, `fields` params |
-| `edit_block_tree` | Path-based structural edits (9 operations) |
-| `update_block` | Flat-index single block update |
-| `insert_blocks` | Insert blocks at a position |
-| `delete_block` | Remove block(s) by index |
+| `get_page_blocks` | Read a post's blocks. Supports `outline`, `summary_only`, `search`, `block_name`, `render`, `fields`, `persist_refs` |
+| `update_block` | Update one block's attributes/innerHTML (by `flat_index` or `ref`) |
+| `insert_blocks` | Insert blocks at a position (by counter or ref) |
+| `delete_block` | Remove block(s) (by counter or ref) |
+| `replace_block_range` | Atomic single-revision swap of N blocks for M blocks |
 | `rewrite_post_blocks` | Full page rewrite |
+| `edit_block_tree` | 9 path-or-ref-based structural ops |
 | `insert_pattern` | Insert a pattern, synced or inline |
 | `revert_to_revision` | Roll back to a prior revision ID |
-| `list_block_types` | Browse registered blocks with tiers |
-| `list_patterns` | Search patterns with preference scoring |
-| `get_pattern` | Inspect a pattern's block content |
+
+**Posts & taxonomies**
+
+| Tool | Purpose |
+|---|---|
+| `create_post` | Create a post or page (draft, publish, future) — accepts blocks or HTML |
+| `update_post` | Update post metadata, status, terms — covers publish/trash/untrash transitions |
+| `list_terms` | List taxonomy terms (categories, tags, custom) for ID lookup |
+| `find_posts` / `post_info` / `resolve_url` | Locate posts by search, ID, slug, or URL |
+
+**Media**
+
+| Tool | Purpose |
+|---|---|
+| `upload_media` | Upload via local path, URL sideload (with SSRF guard), or base64. Returns attachment ID + URL |
+
+**Discovery**
+
+| Tool | Purpose |
+|---|---|
+| `list_block_types` | Browse registered block types with preference tiers |
+| `list_patterns` / `get_pattern` | Search and inspect patterns with scoring |
 | `get_site_usage` | Block/pattern usage analytics |
-| `resolve_url` | Map a URL to post ID and type |
-| `create_post` | Create a new post or page (draft, publish, etc.) — accepts blocks or HTML |
-| `update_post` | Update post metadata, status, or terms — covers publish/trash/untrash transitions |
-| `list_terms` | List taxonomy terms (categories, tags, custom taxonomies) for ID lookup |
-| `upload_media` | Upload to the media library via local path, URL sideload, or base64 |
-| `yoast_get_seo` | Read Yoast SEO metadata for a post (title, description, robots, OG, Twitter, schema, scores) |
-| `yoast_update_seo` | Update one or more Yoast SEO fields on a single post |
-| `yoast_bulk_update_seo` | Batch-update Yoast SEO fields on multiple posts |
+
+**SEO** (when [Yoast SEO](https://wordpress.org/plugins/wordpress-seo/) is active)
+
+| Tool | Purpose |
+|---|---|
+| `yoast_get_seo` | Read SEO metadata: title, description, robots, OG, Twitter, schema, scores |
+| `yoast_update_seo` / `yoast_bulk_update_seo` | Update SEO fields on one or many posts |
+
+## Stable Refs
+
+Every block in a `get_page_blocks` response includes a `ref` field:
+
+```json
+{
+  "index": 5,
+  "path": [0, 2, 1],
+  "ref": "blk_a3f2c1q9",
+  "name": "core/heading",
+  "attributes": { "level": 2, "content": "Hello" }
+}
+```
+
+Refs are stored in `attrs.metadata.gk_ref` inside `post_content`, so they survive across sessions and across mutations that shift sibling positions. Pass `ref` to `update_block`, `delete_block`, or `edit_block_tree` to address the same block reliably even after inserts or deletes elsewhere on the page.
+
+The first read of a post lazily assigns + persists refs via a direct DB write that skips revision creation (refs are editor-only metadata, not content). Pass `persist_refs: false` to read without that side effect.
 
 ## Preference System
 
@@ -129,59 +198,57 @@ Block preferences are stored as a WordPress option and configurable per-site. De
 | **preferred** | ≥ 80 | Use freely |
 | **acceptable** | 50–79 | Use if preferred unavailable |
 | **avoid** | 10–49 | Warn, suggest replacement |
-| **legacy** | < 10 | Reject on insert, return error |
+| **legacy** | < 10 | Reject on insert |
 
-Defaults: `core/*` and theme (`filter/*`) blocks are preferred. Known-legacy namespaces (`ugb`, `jetpack`) are rejected. A replacement map suggests modern alternatives when an agent tries to insert a legacy block (e.g., `stackable/heading` → `core/heading`).
+Defaults ship with `core/*` preferred and a starter set of known-deprecated namespaces marked legacy. A replacement map suggests modern alternatives when an agent attempts a legacy block (e.g., a deprecated heading variant → `core/heading`). Customize the `gk_block_api_preferences` option, or use the **Settings → Block MCP** admin screen, to manage scores, tiers, and replacements per site.
 
-Customize via the `gk_block_api_preferences` WordPress option or extend the defaults in `class-preferences.php`.
+## Examples
 
-## Example Usage
+**Update a heading by URL**
 
-Once configured with your MCP client:
+> "Change the H2 'Welcome' on `/about/` to 'About Us'."
 
-> **Agent**: "Change the H2 'Welcome' on `/about/` to 'About Us'"
+1. `resolve_url({ url: "/about/" })` → post ID
+2. `get_page_blocks({ post_id, outline: true })` → finds heading at `path: [4]`, ref `blk_a3f2c1q9`
+3. `edit_block_tree({ post_id, op: "update-attrs", ref: "blk_a3f2c1q9", attributes: { content: "About Us" } })`
 
-1. Agent calls `resolve_url({ url: "/about/" })` → gets post ID
-2. Agent calls `get_page_blocks({ post_id: 42, outline: true })` → finds heading at `path: [4]`
-3. Agent calls `edit_block_tree({ post_id: 42, op: "update-attrs", path: [4], attributes: { content: "About Us" } })` → done, revision created
+Auto-transform updates both the `content` attribute and the inner `<h2>` text. Revision created.
 
-The auto-transform updates both the `content` attribute and the inner `<h2>...</h2>` text so the block editor stays consistent.
+**Chained edit workflow (where refs shine)**
 
-### Docs Lifecycle (v1.2)
+> "On the homepage: delete the third paragraph, change the next H2 to H3, and add a CTA button after it."
 
-Authoring a fresh doc end-to-end with a single MCP:
+1. `get_page_blocks({ post_id })` once — capture refs for all three target blocks
+2. `delete_block({ post_id, ref: <para-ref> })`
+3. `edit_block_tree({ post_id, op: "update-attrs", ref: <heading-ref>, attributes: { level: 3 } })`
+4. `insert_blocks({ post_id, after_ref: <heading-ref>, blocks: [{ name: "core/buttons", … }] })`
 
-> **Agent**: "Write a getting-started doc with a screenshot, publish under Documentation."
+With path-based addressing, the agent would need to re-fetch between every step. With refs, one read covers the whole chain.
 
-1. `list_terms({ taxonomy: "category", search: "Documentation" })` → grab the category ID.
-2. `create_post({ title: "Getting Started with GravityView", status: "draft", categories: [<id>], blocks: [{ name: "core/heading", attributes: { level: 2 }, innerHTML: "<h2 class=\"wp-block-heading\">Quick Start</h2>" }] })` → captures the post ID.
-3. `upload_media({ path: "/tmp/screenshot.png", alt_text: "Filtering view results", post_id: <id> })` → captures the attachment ID + URL.
-4. `insert_blocks({ post_id, after: 0, blocks: [{ name: "core/image", attributes: { id: <atch>, url, alt: "Filtering view results" } }] })`.
-5. `yoast_update_seo({ post_id, title: "Getting Started with GravityView | GravityKit Docs", description: "Step-by-step setup of GravityView with screenshots.", focus_keyword: "GravityView setup", schema_article_type: "TechArticle" })` → SEO meta in place.
-6. `update_post({ post_id, status: "publish" })` → live.
-7. (Later) `update_post({ post_id, status: "trash" })` to retire, or `revert_to_revision` to undo a bad edit.
+**Author and publish a doc**
+
+1. `list_terms({ taxonomy: "category", search: "Documentation" })` → category ID
+2. `create_post({ title: "Getting Started", status: "draft", categories: [<id>], blocks: [...] })` → post ID
+3. `upload_media({ path: "/tmp/screenshot.png", alt_text: "...", post_id })` → attachment ID + URL
+4. `insert_blocks({ post_id, after_top_level: 0, blocks: [{ name: "core/image", attributes: { id: <atch>, url, alt: "..." } }] })`
+5. `yoast_update_seo({ post_id, title: "...", description: "...", focus_keyword: "..." })`
+6. `update_post({ post_id, status: "publish" })`
 
 ## Testing
 
-Three layers, run from cheap to expensive:
-
-- **PHP** (PHPUnit, stub bootstrap): 230 tests covering preferences, safety, CRUD, mutation engine, HTML transforms, post lifecycle, term listing, media validation, REST summary/outline. The stub layer mocks just enough WordPress to exercise validation/error paths without booting WP. (Issue [#2](https://github.com/GravityKit/block-mcp/issues/2) tracks moving to wp-env-based PHPUnit for full integration coverage.)
-- **TypeScript** (Vitest): 146 tests covering tool input validation, client calls, enrichment, and field-narrowing across `discovery`, `read`, `write`, `mutate`, `patterns`, `posts`, `terms`, `media`, `yoast`, and `preferences`.
-- **End-to-end** (`scripts/e2e-gkclone.mjs`, manual): 11-step lifecycle smoke against gkclone — `list_terms` → `create_post` → `upload_media` → `insert_blocks` → `get_page_blocks` → `yoast_update_seo` → `yoast_get_seo` → `update_post (publish/trash/untrash/re-trash)`. Proves the real WP backends.
-
-Run locally:
+Run all suites locally:
 
 ```bash
-# PHP unit (stub layer)
-cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
-
-# TypeScript
+# TypeScript (Vitest) — 230 tests
 npm test
 
-# End-to-end against gkclone (requires gkclone running + .env.gkclone)
-set -a; source .env.gkclone; set +a
-node scripts/e2e-gkclone.mjs
+# PHP (PHPUnit, stub WP bootstrap) — 286 tests
+cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
 ```
+
+The PHP suite uses a minimal WordPress stub layer (no full WP install required) to exercise validation, error paths, mutation engine, ref resolution, HTML auto-transforms, post lifecycle, term listing, media validation, and REST summary/outline.
+
+An end-to-end smoke script is included under `scripts/` for live-WordPress validation; point it at any WordPress site by setting `GK_SITE_URL`, `GK_BLOCK_API_USER`, and `GK_BLOCK_API_APP_PASSWORD`.
 
 ## Requirements
 
@@ -192,25 +259,15 @@ node scripts/e2e-gkclone.mjs
 
 ## Limitations
 
-- Edits work on posts stored as blocks. Block-theme templates (`wp_template`, `wp_template_part`) and widget areas are not currently supported.
+- Edits work on posts stored as blocks. Block-theme templates (`wp_template`, `wp_template_part`) and widget areas are not yet supported.
 - Rate limits are per-post, not per-user — multiple agents editing the same post share the budget.
-- Static block innerHTML can't be regenerated server-side (WordPress has no PHP equivalent of the React `save` function). Auto-transforms cover the common cases; for anything else, supply innerHTML explicitly.
-
-## Migrating from `yoast-seo-mcp`
-
-As of v1.3, the standalone `@gravitykit/yoast-seo-mcp` server has been **removed** from the GravityKit marketplace. block-mcp owns Yoast SEO metadata tools now.
-
-If you have the old plugin still registered, uninstall it:
-
-```
-/plugin uninstall yoast-seo
-```
-
-The three tools (`yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo`) are part of block-mcp v1.2+ and use the same Application Password auth. The Yoast REST endpoints themselves (`gravitykit/v1/yoast-seo/*`) didn't move — they still live in the Block-Theme mu-plugin. Only the MCP tool surface consolidated.
-
-**For skills authors:** tool name changed from `mcp__yoast-seo__yoast_*` to `mcp__plugin_block-mcp_block-mcp__yoast_*`.
+- Static block innerHTML cannot be regenerated server-side (WordPress has no PHP equivalent of the React `save` function). Auto-transforms cover the common cases; for anything else, supply innerHTML explicitly.
 
 ## License
 
 - WordPress plugin: GPL-2.0-or-later
 - MCP server: MIT
+
+## Contributing
+
+Issues and PRs welcome at [github.com/GravityKit/block-mcp](https://github.com/GravityKit/block-mcp). Run the test suites before submitting; new mutations should ship with PHPUnit + Vitest coverage.

@@ -88,7 +88,7 @@ class Block_CRUD {
 	 *
 	 * @return array|\WP_Error Array of block data or WP_Error.
 	 */
-	public function get_blocks( $post_id, $render = false ) {
+	public function get_blocks( $post_id, $render = false, $persist_refs = true ) {
 		$post = get_post( $post_id );
 
 		if ( ! $post ) {
@@ -109,6 +109,15 @@ class Block_CRUD {
 
 		if ( ! is_array( $blocks ) ) {
 			$blocks = array();
+		}
+
+		// Lazy-assign block refs. When $persist_refs is true (default), any blocks
+		// missing attrs.metadata.gk_ref get a fresh one and the post is updated
+		// silently (no revision) so the refs survive across reads/writes.
+		// When false, refs are still surfaced in the response but won't resolve later.
+		$dirty = $this->assign_missing_refs_recursive( $blocks );
+		if ( $dirty && $persist_refs ) {
+			$this->persist_ref_assignments( $post_id, $blocks );
 		}
 
 		// Set up post context so shortcodes and render_block() can
@@ -331,6 +340,11 @@ class Block_CRUD {
 			$new_blocks[] = $built;
 		}
 
+		// Assign fresh refs to newly inserted blocks (and any innerBlocks).
+		// Agents need these refs to address the blocks they just created
+		// without re-fetching the page.
+		$this->assign_missing_refs_recursive( $new_blocks );
+
 		// Determine insertion index (visible index), then map to raw position.
 		$visible_insert = $visible_count; // Default: append.
 
@@ -391,12 +405,16 @@ class Block_CRUD {
 				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
 					? $post_visible_to_raw[ $visible_index ]
 					: null;
-				$inserted[] = array(
+				$entry = array(
 					'index'             => $visible_index,
 					'top_level_counter' => $visible_index,
 					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
 					'name'              => $block['blockName'],
 				);
+				if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+					$entry['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+				}
+				$inserted[] = $entry;
 			}
 		} else {
 			foreach ( $new_blocks as $i => $block ) {
@@ -611,6 +629,9 @@ class Block_CRUD {
 			$new_blocks[] = $built;
 		}
 
+		// Stable refs for the new blocks (and any nested innerBlocks).
+		$this->assign_missing_refs_recursive( $new_blocks );
+
 		// Resolve the raw splice range. We splice at the raw index of the
 		// first removed block (or end-of-array if start === visible_count),
 		// removing `count` raw entries by walking visible_to_raw.
@@ -677,12 +698,16 @@ class Block_CRUD {
 				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
 					? $post_visible_to_raw[ $visible_index ]
 					: null;
-				$inserted[] = array(
+				$entry = array(
 					'index'             => $visible_index,
 					'top_level_counter' => $visible_index,
 					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
 					'name'              => $block['blockName'],
 				);
+				if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+					$entry['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+				}
+				$inserted[] = $entry;
 			}
 		}
 
@@ -744,6 +769,9 @@ class Block_CRUD {
 			);
 		}
 
+		// Stable refs for the new block tree.
+		$this->assign_missing_refs_recursive( $new_blocks );
+
 		// Serialize and save.
 		$new_content = serialize_blocks( $new_blocks );
 		$result      = $this->save_post_content( $post_id, $new_content );
@@ -757,11 +785,15 @@ class Block_CRUD {
 		// Build response block list.
 		$block_list = array();
 		foreach ( $new_blocks as $i => $block ) {
-			$block_list[] = array(
+			$entry = array(
 				'index'      => $i,
 				'name'       => $block['blockName'],
 				'attributes' => $block['attrs'],
 			);
+			if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+				$entry['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+			}
+			$block_list[] = $entry;
 		}
 
 		return array(
@@ -1040,6 +1072,287 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Stable identity prefix for block refs stored in attrs.metadata.gk_ref.
+	 *
+	 * Refs let agents address a block without keeping path/index fresh between
+	 * mutations — sibling shifts don't invalidate them.
+	 *
+	 * @var string
+	 */
+	const REF_PREFIX = 'blk_';
+
+	/**
+	 * Generate a fresh block ref.
+	 *
+	 * Uses wp_hash (HMAC keyed on the site secret) over a unique seed instead
+	 * of the WP password helper, because that helper runs through the
+	 * `random_password` filter which third-party plugins can override and
+	 * could yield non-unique or filtered output. wp_hash is unfiltered and
+	 * deterministic given an input, so feeding it a guaranteed-unique input
+	 * (uniqid + wp_rand + microtime) produces a stable, collision-resistant ref.
+	 *
+	 * @return string A new ref like "blk_a3f2c1q9".
+	 */
+	public static function generate_ref() {
+		$seed = uniqid( 'gk_block_ref_', true ) . '|' . wp_rand() . '|' . microtime( true );
+		// Use the 'auth' scheme (stable, long-lived). The 'nonce' scheme is
+		// intended for time-bounded values that rotate; refs persist with the post.
+		return self::REF_PREFIX . substr( wp_hash( $seed, 'auth' ), 0, 8 );
+	}
+
+	/**
+	 * Resolve a block ref to its current path within a post.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $ref     Ref string (e.g., "blk_a3f2c1q9").
+	 *
+	 * @return int[]|\WP_Error Path array or WP_Error('ref_stale').
+	 */
+	public function resolve_ref( $post_id, $ref ) {
+		if ( ! is_string( $ref ) || '' === $ref ) {
+			return new \WP_Error( 'invalid_ref', __( 'Ref must be a non-empty string.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error( 'post_not_found', __( 'Post not found.', 'gk-block-api' ), array( 'status' => 404 ) );
+		}
+
+		$blocks = parse_blocks( $post->post_content );
+		if ( ! is_array( $blocks ) ) {
+			$blocks = array();
+		}
+
+		$path = $this->find_ref_in_blocks( $blocks, $ref, array() );
+		if ( null === $path ) {
+			return new \WP_Error(
+				'ref_stale',
+				sprintf(
+					/* translators: %s: ref string */
+					__( 'Ref "%s" not found. The block may have been deleted, or the ref is from an older snapshot. Re-fetch the page to get current refs.', 'gk-block-api' ),
+					$ref
+				),
+				array( 'status' => 404, 'ref' => $ref )
+			);
+		}
+
+		return $path;
+	}
+
+	/**
+	 * Resolve a block ref to its flat index (the addressing scheme used by
+	 * update_block / delete_blocks). Skips empty/whitespace-only blocks the
+	 * same way flatten_blocks does.
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $ref     Ref string.
+	 *
+	 * @return int|\WP_Error Flat index or WP_Error('ref_stale').
+	 */
+	public function resolve_ref_to_index( $post_id, $ref ) {
+		if ( ! is_string( $ref ) || '' === $ref ) {
+			return new \WP_Error( 'invalid_ref', __( 'Ref must be a non-empty string.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error( 'post_not_found', __( 'Post not found.', 'gk-block-api' ), array( 'status' => 404 ) );
+		}
+
+		$blocks = parse_blocks( $post->post_content );
+		if ( ! is_array( $blocks ) ) {
+			$blocks = array();
+		}
+
+		$flat = $this->flatten_blocks( $blocks );
+		foreach ( $flat as $i => $entry ) {
+			if ( isset( $entry['block']['attrs']['metadata']['gk_ref'] ) && $entry['block']['attrs']['metadata']['gk_ref'] === $ref ) {
+				return $i;
+			}
+		}
+
+		return new \WP_Error(
+			'ref_stale',
+			sprintf(
+				/* translators: %s: ref string */
+				__( 'Ref "%s" not found.', 'gk-block-api' ),
+				$ref
+			),
+			array( 'status' => 404, 'ref' => $ref )
+		);
+	}
+
+	/**
+	 * Resolve a top-level ref to its top-level counter (for insert_blocks
+	 * before/after positioning, which uses the top-level counter scheme).
+	 *
+	 * @param int    $post_id Post ID.
+	 * @param string $ref     Ref string.
+	 *
+	 * @return int|\WP_Error Top-level position or WP_Error.
+	 */
+	public function resolve_ref_to_top_level( $post_id, $ref ) {
+		$path = $this->resolve_ref( $post_id, $ref );
+		if ( is_wp_error( $path ) ) {
+			return $path;
+		}
+		if ( count( $path ) !== 1 ) {
+			return new \WP_Error(
+				'ref_not_top_level',
+				__( 'Ref refers to a nested block; insert_blocks before/after_ref requires a top-level block.', 'gk-block-api' ),
+				array( 'status' => 400, 'ref' => $ref, 'path' => $path )
+			);
+		}
+		// Top-level counter equals raw index for non-empty top-level blocks; need to map.
+		// resolve_ref already verified the post exists, but a concurrent delete
+		// between the two fetches would otherwise fatal here. Guard explicitly.
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error( 'post_not_found', __( 'Post not found.', 'gk-block-api' ), array( 'status' => 404 ) );
+		}
+		$blocks  = parse_blocks( $post->post_content );
+		$counter = 0;
+		foreach ( $blocks as $i => $block ) {
+			if ( empty( $block['blockName'] ) ) {
+				continue;
+			}
+			if ( $i === $path[0] ) {
+				return $counter;
+			}
+			$counter++;
+		}
+		return new \WP_Error( 'ref_stale', __( 'Ref position could not be resolved.', 'gk-block-api' ), array( 'status' => 404 ) );
+	}
+
+	/**
+	 * Recursive walker — returns the path of the first block whose
+	 * attrs.metadata.gk_ref matches $ref, or null if not found.
+	 *
+	 * @param array  $blocks       Parsed blocks (may be nested).
+	 * @param string $ref          Ref to find.
+	 * @param int[]  $current_path Path accumulated so far.
+	 *
+	 * @return int[]|null Path or null if not found.
+	 */
+	private function find_ref_in_blocks( $blocks, $ref, $current_path ) {
+		foreach ( $blocks as $i => $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+			$path = array_merge( $current_path, array( (int) $i ) );
+			if ( isset( $block['attrs']['metadata']['gk_ref'] ) && $block['attrs']['metadata']['gk_ref'] === $ref ) {
+				return $path;
+			}
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$found = $this->find_ref_in_blocks( $block['innerBlocks'], $ref, $path );
+				if ( null !== $found ) {
+					return $found;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Walk a block tree and assign a fresh gk_ref to any block that doesn't
+	 * have one. Returns true if any assignments were made.
+	 *
+	 * @param array $blocks Blocks (passed by reference).
+	 *
+	 * @return bool True if any block got a new ref.
+	 */
+	public function assign_missing_refs_recursive( &$blocks ) {
+		$dirty = false;
+		foreach ( $blocks as &$block ) {
+			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+				continue;
+			}
+			if ( ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
+				$block['attrs'] = array();
+			}
+			if ( ! isset( $block['attrs']['metadata'] ) || ! is_array( $block['attrs']['metadata'] ) ) {
+				$block['attrs']['metadata'] = array();
+			}
+			if ( empty( $block['attrs']['metadata']['gk_ref'] ) ) {
+				$block['attrs']['metadata']['gk_ref'] = self::generate_ref();
+				$dirty = true;
+			}
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				if ( $this->assign_missing_refs_recursive( $block['innerBlocks'] ) ) {
+					$dirty = true;
+				}
+			}
+		}
+		unset( $block );
+		return $dirty;
+	}
+
+	/**
+	 * Walk a block tree and overwrite gk_ref on every block. Used by `duplicate`
+	 * so the clone doesn't share an identity with the source.
+	 *
+	 * @param array $blocks Blocks (passed by reference).
+	 *
+	 * @return void
+	 */
+	public function assign_fresh_refs_recursive( &$blocks ) {
+		foreach ( $blocks as &$block ) {
+			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+				continue;
+			}
+			if ( ! isset( $block['attrs'] ) || ! is_array( $block['attrs'] ) ) {
+				$block['attrs'] = array();
+			}
+			if ( ! isset( $block['attrs']['metadata'] ) || ! is_array( $block['attrs']['metadata'] ) ) {
+				$block['attrs']['metadata'] = array();
+			}
+			$block['attrs']['metadata']['gk_ref'] = self::generate_ref();
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$this->assign_fresh_refs_recursive( $block['innerBlocks'] );
+			}
+		}
+		unset( $block );
+	}
+
+	/**
+	 * Persist ref assignments to post_content directly via $wpdb. Bypasses
+	 * wp_update_post to avoid creating revisions for what is effectively
+	 * metadata bookkeeping (gk_ref is editor-only — see Block_Safety).
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param array $blocks  Block tree with refs assigned.
+	 *
+	 * @return bool True on success.
+	 */
+	public function persist_ref_assignments( $post_id, $blocks ) {
+		global $wpdb;
+		$content = serialize_blocks( $blocks );
+		$result  = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->posts,
+			array( 'post_content' => $content ),
+			array( 'ID' => (int) $post_id ),
+			array( '%s' ),
+			array( '%d' )
+		);
+		clean_post_cache( (int) $post_id );
+
+		/**
+		 * Fires after gk_ref UUIDs have been persisted to a post via direct DB
+		 * write (no revision created, no save_post hook). Use this to invalidate
+		 * any secondary caches keyed on post_content (search indexes, CDN edge
+		 * caches, page-builder CSS). Skipped when the underlying $wpdb->update
+		 * fails.
+		 *
+		 * @param int $post_id Post that received fresh refs.
+		 */
+		if ( false !== $result ) {
+			do_action( 'gk_block_api_refs_persisted', (int) $post_id );
+		}
+
+		return false !== $result;
+	}
+
+	/**
 	 * Format parsed blocks into a structured response array.
 	 *
 	 * Includes both `index` (flat sequential counter for backwards compatibility)
@@ -1118,6 +1431,12 @@ class Block_CRUD {
 				'name'       => $block['blockName'],
 				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
 			);
+
+			// Surface the stable ref (from attrs.metadata.gk_ref). Refs let agents
+			// re-address the same block after sibling shifts without re-fetching.
+			if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+				$data['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+			}
 
 			// Top-level counter: sequential position among non-empty top-level blocks only.
 			// This is the value consumed by `delete_block.block_index`,

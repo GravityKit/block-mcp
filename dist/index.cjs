@@ -43851,6 +43851,7 @@ var WordPressBlockClient = class {
     if (params?.outline) queryParams.outline = "true";
     if (params?.summary_only) queryParams.summary_only = "true";
     if (params?.include_legacy_paths) queryParams.include_legacy_paths = "true";
+    if (params?.persist_refs === false) queryParams.persist_refs = "false";
     const response = await this.client.get(
       `/posts/${postId}/blocks`,
       { params: queryParams }
@@ -43917,6 +43918,27 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Update a single block by its stable gk_ref instead of a flat index.
+   * Refs survive sibling shifts so chained mutations don't go stale.
+   *
+   * @param postId - WordPress post/page ID
+   * @param ref    - Stable ref (e.g. "blk_a3f2c1q9") from get_page_blocks
+   * @param data   - Partial attributes and/or innerHTML
+   * @returns 404 ref_stale if the ref no longer matches any block.
+   */
+  async updateBlockByRef(postId, ref, data) {
+    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    if (!ref || typeof ref !== "string") throw new Error("Ref is required");
+    if (!data.attributes && !data.innerHTML) {
+      throw new Error("At least one of attributes or innerHTML must be provided");
+    }
+    const response = await this.client.patch(
+      `/posts/${postId}/blocks/by-ref/${encodeURIComponent(ref)}`,
+      data
+    );
+    return response.data;
+  }
+  /**
    * Insert one or more blocks at a specific position.
    *
    * @param postId - WordPress post/page ID
@@ -43949,6 +43971,24 @@ var WordPressBlockClient = class {
     if (count && count > 1) params.count = String(count);
     const response = await this.client.delete(
       `/posts/${postId}/blocks/${index}`,
+      { params }
+    );
+    return response.data;
+  }
+  /**
+   * Delete one or more blocks identified by the leading block's stable gk_ref.
+   *
+   * @param postId - WordPress post/page ID
+   * @param ref    - Stable ref of the first block to remove
+   * @param count  - Consecutive blocks to remove (default 1)
+   */
+  async deleteBlockByRef(postId, ref, count) {
+    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    if (!ref || typeof ref !== "string") throw new Error("Ref is required");
+    const params = {};
+    if (count && count > 1) params.count = String(count);
+    const response = await this.client.delete(
+      `/posts/${postId}/blocks/by-ref/${encodeURIComponent(ref)}`,
       { params }
     );
     return response.data;
@@ -44511,7 +44551,7 @@ async function handleDiscoveryTool(toolName, args, client2) {
 var READ_TOOLS = [
   {
     name: "get_page_blocks",
-    description: 'Get a post\'s blocks. Pass post_id OR url (server resolves URL \u2014 don\'t shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, name, attributes, innerHTML?, dynamic, storage_mode ("static"|"dynamic"|"dual"), preference? (when non-preferred)}`. Use outline:true or summary_only:true for cheap inspection.',
+    description: 'Get a post\'s blocks. Pass post_id OR url (server resolves URL \u2014 don\'t shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode ("static"|"dynamic"|"dual"), preference? (when non-preferred)}`. Refs survive sibling shifts \u2014 pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Get post blocks" },
     outputSchema: {
       type: "object",
@@ -44561,6 +44601,10 @@ var READ_TOOLS = [
         include_legacy_paths: {
           type: "boolean",
           description: "Add summary.legacy_blocks.paths (per-block path list). Off by default; turn on for migration audits."
+        },
+        persist_refs: {
+          type: "boolean",
+          description: "Default true. When true, missing block refs (attrs.metadata.gk_ref) are assigned and persisted silently (no revision created). Set false for read-only callers that don't want write side effects \u2014 refs in the response will not resolve in subsequent mutation calls."
         }
       }
     }
@@ -44578,6 +44622,7 @@ async function handleReadTool(toolName, args, client2) {
       const outline = args.outline;
       const summaryOnly = args.summary_only;
       const includeLegacyPaths = args.include_legacy_paths;
+      const persistRefs = args.persist_refs;
       if ((postId === void 0 || postId === null) && !url3) {
         throw new Error("Either post_id or url is required");
       }
@@ -44592,7 +44637,8 @@ async function handleReadTool(toolName, args, client2) {
         block_name: blockName,
         outline,
         summary_only: summaryOnly,
-        include_legacy_paths: includeLegacyPaths
+        include_legacy_paths: includeLegacyPaths,
+        ...persistRefs !== void 0 ? { persist_refs: persistRefs } : {}
       });
       if (summaryOnly) {
         return {
@@ -57545,7 +57591,7 @@ var REVISION_ONLY_SCHEMA = {
 var WRITE_TOOLS = [
   {
     name: "update_block",
-    description: "Update one block by flat_index. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
+    description: "Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
@@ -57554,7 +57600,7 @@ var WRITE_TOOLS = [
       type: "object",
       properties: {
         success: { type: "boolean" },
-        block: { type: "object", properties: { index: { type: "number" }, name: { type: "string" }, attributes: { type: "object" } } },
+        block: { type: "object", properties: { index: { type: "number" }, name: { type: "string" }, attributes: { type: "object" }, ref: { type: "string" } } },
         before_revision_id: { type: "number" },
         revision_id: { type: "number" }
       }
@@ -57565,7 +57611,11 @@ var WRITE_TOOLS = [
         post_id: { type: "number", description: "Post ID." },
         flat_index: {
           type: "number",
-          description: "Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). For top-level-only addressing, use delete_block / insert_blocks / replace_block_range."
+          description: "Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). Provide this OR `ref`."
+        },
+        ref: {
+          type: "string",
+          description: 'Stable gk_ref (e.g. "blk_a3f2c1q9") from get_page_blocks. Survives sibling shifts so chained mutations don\'t go stale. Provide this OR `flat_index`.'
         },
         block_name: {
           type: "string",
@@ -57574,14 +57624,31 @@ var WRITE_TOOLS = [
         attributes: { type: "object", description: "Partial attrs (top-level shallow merge). Enrichers derive computed fields (e.g. codeHTML) automatically when block_name is provided." },
         innerHTML: { type: "string", description: "Replacement innerHTML." }
       },
-      required: ["post_id", "flat_index"]
+      required: ["post_id"]
     }
   },
   {
     name: "insert_blocks",
-    description: 'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://agent-guide). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+    description: 'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref \u2014 recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
-    outputSchema: INSERTED_REFS_SCHEMA,
+    outputSchema: {
+      type: "object",
+      properties: {
+        ...INSERTED_REFS_SCHEMA.properties,
+        inserted: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              top_level_counter: { type: "number" },
+              path: { type: "array", items: { type: "integer" } },
+              ref: { type: "string" },
+              name: { type: "string" }
+            }
+          }
+        }
+      }
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -57594,6 +57661,14 @@ var WRITE_TOOLS = [
           type: "number",
           description: "top_level_counter to insert BEFORE."
         },
+        after_ref: {
+          type: "string",
+          description: "gk_ref of the top-level block to insert AFTER. Recommended \u2014 survives sibling shifts. Takes precedence over after_top_level."
+        },
+        before_ref: {
+          type: "string",
+          description: "gk_ref of the top-level block to insert BEFORE. Takes precedence over before_top_level."
+        },
         blocks: {
           type: "array",
           description: "Blocks to insert.",
@@ -57605,7 +57680,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "delete_block",
-    description: "Remove block(s) at a top_level_counter. For core/block, removes the reference only \u2014 not the source pattern.",
+    description: "Remove block(s) by top_level_counter OR by ref. Provide exactly one. For core/block, removes the reference only \u2014 not the source pattern.",
     // idempotentHint is false: deleting at counter N twice removes a
     // *different* block the second time (indices shift after the first).
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Delete blocks" },
@@ -57616,11 +57691,15 @@ var WRITE_TOOLS = [
         post_id: { type: "number", description: "Post ID." },
         top_level_counter: {
           type: "number",
-          description: "Zero-based top_level_counter (sequential position among top-level blocks). NOT the flat index \u2014 that one is for update_block."
+          description: "Zero-based top_level_counter (sequential position among top-level blocks). Provide this OR `ref`."
+        },
+        ref: {
+          type: "string",
+          description: "gk_ref of the block to remove (or the leading block if count > 1). Survives sibling shifts. Provide this OR `top_level_counter`."
         },
         count: { type: "number", description: "Consecutive top-level blocks to remove. Default 1." }
       },
-      required: ["post_id", "top_level_counter"]
+      required: ["post_id"]
     }
   },
   {
@@ -57674,11 +57753,19 @@ async function handleWriteTool(toolName, args, client2) {
     case "update_block": {
       const postId = args.post_id;
       const flatIndex = args.flat_index;
+      const ref = args.ref;
       const blockName = args.block_name;
       let attributes = args.attributes;
       let innerHTML = args.innerHTML;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (flatIndex === void 0 || flatIndex === null) throw new Error("flat_index is required");
+      const hasIndex = flatIndex !== void 0 && flatIndex !== null;
+      const hasRef = typeof ref === "string" && ref.length > 0;
+      if (!hasIndex && !hasRef) {
+        throw new Error("Provide either flat_index or ref");
+      }
+      if (hasIndex && hasRef) {
+        throw new Error("Provide flat_index OR ref, not both");
+      }
       if (!attributes && !innerHTML) {
         throw new Error("At least one of attributes or innerHTML must be provided");
       }
@@ -57688,16 +57775,27 @@ async function handleWriteTool(toolName, args, client2) {
         attributes = enriched.attributes;
         if (enriched.innerHTML !== void 0) innerHTML = enriched.innerHTML;
       }
+      if (hasRef) {
+        return await client2.updateBlockByRef(postId, ref, { attributes, innerHTML });
+      }
       return await client2.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
     case "insert_blocks": {
       const postId = args.post_id;
       const after = args.after_top_level;
       const before = args.before_top_level;
+      const afterRef = args.after_ref;
+      const beforeRef = args.before_ref;
       const blocks = args.blocks;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
       if (!blocks || blocks.length === 0) throw new Error("At least one block is required in the blocks array");
-      const result = await client2.insertBlocks(postId, { after, before, blocks: await enrichBlocks(blocks) });
+      const result = await client2.insertBlocks(postId, {
+        after,
+        before,
+        ...afterRef ? { after_ref: afterRef } : {},
+        ...beforeRef ? { before_ref: beforeRef } : {},
+        blocks: await enrichBlocks(blocks)
+      });
       if (result.warnings && result.warnings.length > 0) {
         return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
@@ -57706,9 +57804,20 @@ async function handleWriteTool(toolName, args, client2) {
     case "delete_block": {
       const postId = args.post_id;
       const topLevelCounter = args.top_level_counter;
+      const ref = args.ref;
       const count = args.count;
       if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (topLevelCounter === void 0 || topLevelCounter === null) throw new Error("top_level_counter is required");
+      const hasCounter = topLevelCounter !== void 0 && topLevelCounter !== null;
+      const hasRef = typeof ref === "string" && ref.length > 0;
+      if (!hasCounter && !hasRef) {
+        throw new Error("Provide either top_level_counter or ref");
+      }
+      if (hasCounter && hasRef) {
+        throw new Error("Provide top_level_counter OR ref, not both");
+      }
+      if (hasRef) {
+        return await client2.deleteBlockByRef(postId, ref, count);
+      }
       return await client2.deleteBlock(postId, topLevelCounter, count);
     }
     case "replace_block_range": {
@@ -57824,15 +57933,23 @@ var OPS = [
 ];
 var MUTATE_TOOLS = [{
   name: "edit_block_tree",
-  description: "Run one structural op on a nested block tree by path. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. `path` is an integer array from get_page_blocks ([0,2,1] = block 0 \u2192 innerBlock 2 \u2192 innerBlock 1). Creates a revision.",
-  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Edit block tree by path" },
+  description: "Run one structural op on a nested block tree. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Target the block via `ref` (stable gk_ref \u2014 recommended, survives sibling shifts) OR `path` (integer array, e.g. [0,2,1]). For move, the destination can be a `destination_ref` / `before_ref` instead of a path. Creates a revision.",
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Edit block tree" },
   outputSchema: {
     type: "object",
     properties: {
       success: { type: "boolean" },
       op: { type: "string" },
       path: { type: "array", items: { type: "integer" } },
-      block: { type: "object", properties: { name: { type: "string" }, attributes: { type: "object" } } },
+      block: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          attributes: { type: "object" },
+          ref: { type: "string", description: "New ref when the op produced a new block." },
+          new_path: { type: "array", items: { type: "integer" }, description: "duplicate: path of the clone." }
+        }
+      },
       warnings: { type: "array" },
       formatted_warnings: { type: "array", items: { type: "string" } },
       before_revision_id: { type: "number" },
@@ -57844,7 +57961,8 @@ var MUTATE_TOOLS = [{
     properties: {
       post_id: { type: "number", description: "Post ID." },
       op: { type: "string", enum: [...OPS], description: "Operation to perform." },
-      path: { type: "array", items: { type: "integer" }, description: "Target block path (e.g. [0,2,1])." },
+      path: { type: "array", items: { type: "integer" }, description: "Target block path (e.g. [0,2,1]). Provide this OR `ref`." },
+      ref: { type: "string", description: "Stable gk_ref of the target block. Survives sibling shifts. Provide this OR `path`." },
       attributes: { type: "object", description: "update-attrs: attributes to merge." },
       innerHTML: { type: "string", description: "update-html: replacement innerHTML." },
       block: {
@@ -57867,10 +57985,12 @@ var MUTATE_TOOLS = [{
       },
       position: { type: ["integer", "string"], description: 'insert-child: index, "start", or "end" (default).' },
       destination: { type: "array", items: { type: "integer" }, description: "move: destination path." },
+      destination_ref: { type: "string", description: "move: destination ref (alternative to destination)." },
       before: { type: "array", items: { type: "integer" }, description: "move: insert BEFORE this path (pre-move indexing). Alias for destination." },
+      before_ref: { type: "string", description: "move: insert BEFORE the block with this ref." },
       count: { type: "integer", description: "move: consecutive blocks to move. Default 1." }
     },
-    required: ["post_id", "op", "path"]
+    required: ["post_id", "op"]
   }
 }];
 function isIntegerArray(value, fieldName) {
@@ -57897,15 +58017,33 @@ async function handleMutateTool(toolName, args, client2) {
   const postId = args.post_id;
   const op = args.op;
   const path = args.path;
+  const ref = args.ref;
   if (postId === void 0 || postId === null) throw new Error("post_id is required");
   if (!op || !OPS.includes(op)) {
     throw new Error(`op must be one of: ${OPS.join(", ")}. Got: ${JSON.stringify(op)}`);
   }
-  isIntegerArray(path, "path");
+  const pathProvided = path !== void 0 && path !== null;
+  const hasRef = typeof ref === "string" && ref.length > 0;
+  if (pathProvided && hasRef) {
+    throw new Error('Provide "path" OR "ref", not both');
+  }
+  if (!pathProvided && !hasRef) {
+    throw new Error('Provide either "path" or "ref" to identify the target block');
+  }
+  if (pathProvided) {
+    isIntegerArray(path, "path");
+    if (path.length === 0) {
+      throw new Error("path must not be empty");
+    }
+  }
   const requestBody = {
-    op,
-    path
+    op
   };
+  if (pathProvided) {
+    requestBody.path = path;
+  } else {
+    requestBody.ref = ref;
+  }
   switch (op) {
     case "update-attrs": {
       const attributes = args.attributes;
@@ -57949,14 +58087,20 @@ async function handleMutateTool(toolName, args, client2) {
     case "move": {
       const before = args.before;
       const destination = args.destination;
+      const beforeRef = args.before_ref;
+      const destRef = args.destination_ref;
       if (before !== void 0 && before !== null) {
         isIntegerArray(before, "before");
         requestBody.before = before;
       } else if (destination !== void 0 && destination !== null) {
         isIntegerArray(destination, "destination");
         requestBody.destination = destination;
+      } else if (typeof beforeRef === "string" && beforeRef.length > 0) {
+        requestBody.before_ref = beforeRef;
+      } else if (typeof destRef === "string" && destRef.length > 0) {
+        requestBody.destination_ref = destRef;
       } else {
-        throw new Error('move requires either a "before" or "destination" array of integers');
+        throw new Error('move requires "before"/"destination" path or "before_ref"/"destination_ref"');
       }
       if (args.count !== void 0 && args.count !== null) {
         const count = args.count;

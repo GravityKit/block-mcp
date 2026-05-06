@@ -316,10 +316,17 @@ class Block_Mutator {
 					'innerBlocks'  => $inner_blocks,
 				);
 
+				// Stable ref for the replacement (and any nested children).
+				$single = array( &$parent[ $target_index ] );
+				$this->crud->assign_missing_refs_recursive( $single );
+
 				$result_block = array(
 					'name'       => $name,
-					'attributes' => $attrs,
+					'attributes' => isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : $attrs,
 				);
+				if ( isset( $parent[ $target_index ]['attrs']['metadata']['gk_ref'] ) ) {
+					$result_block['ref'] = (string) $parent[ $target_index ]['attrs']['metadata']['gk_ref'];
+				}
 				break;
 
 			case 'remove-block':
@@ -420,10 +427,19 @@ class Block_Mutator {
 
 				$parent[ $target_index ] = $wrapper_block;
 
+				// Stable ref for the new wrapper. The wrapped target keeps its
+				// existing ref because assign_missing_refs_recursive only fills
+				// in missing slots — wrapper gets a fresh one, target untouched.
+				$single = array( &$parent[ $target_index ] );
+				$this->crud->assign_missing_refs_recursive( $single );
+
 				$result_block = array(
 					'name'       => $wrapper_name,
-					'attributes' => $wrapper_attrs,
+					'attributes' => isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : $wrapper_attrs,
 				);
+				if ( isset( $parent[ $target_index ]['attrs']['metadata']['gk_ref'] ) ) {
+					$result_block['ref'] = (string) $parent[ $target_index ]['attrs']['metadata']['gk_ref'];
+				}
 				break;
 
 			case 'unwrap-group':
@@ -506,6 +522,10 @@ class Block_Mutator {
 					'innerBlocks'  => array(),
 				);
 
+				// Stable ref for the new child.
+				$single = array( &$child_block );
+				$this->crud->assign_missing_refs_recursive( $single );
+
 				// Get the container block and its innerBlocks.
 				if ( ! isset( $parent[ $target_index ]['innerBlocks'] ) ) {
 					$parent[ $target_index ]['innerBlocks'] = array();
@@ -576,8 +596,11 @@ class Block_Mutator {
 
 				$result_block = array(
 					'name'       => $name,
-					'attributes' => $attrs,
+					'attributes' => isset( $child_block['attrs'] ) ? $child_block['attrs'] : $attrs,
 				);
+				if ( isset( $child_block['attrs']['metadata']['gk_ref'] ) ) {
+					$result_block['ref'] = (string) $child_block['attrs']['metadata']['gk_ref'];
+				}
 				break;
 
 			case 'duplicate':
@@ -585,6 +608,12 @@ class Block_Mutator {
 
 				// Deep clone via serialize/unserialize.
 				$clone = unserialize( serialize( $original ) );
+
+				// Strip & replace refs on the clone — every block in the clone tree
+				// must have a fresh ref so the duplicate doesn't share identity with
+				// the source. assign_fresh_refs_recursive overwrites unconditionally.
+				$clone_arr = array( &$clone );
+				$this->crud->assign_fresh_refs_recursive( $clone_arr );
 
 				// Insert clone immediately after original in the sibling array.
 				array_splice( $parent, $target_index + 1, 0, array( $clone ) );
@@ -628,6 +657,9 @@ class Block_Mutator {
 					'attributes' => isset( $clone['attrs'] ) ? $clone['attrs'] : array(),
 					'new_path'   => $clone_path,
 				);
+				if ( isset( $clone['attrs']['metadata']['gk_ref'] ) ) {
+					$result_block['ref'] = (string) $clone['attrs']['metadata']['gk_ref'];
+				}
 				break;
 
 			case 'move':

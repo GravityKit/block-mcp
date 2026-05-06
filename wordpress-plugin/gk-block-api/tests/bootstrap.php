@@ -28,6 +28,87 @@ if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 if ( ! function_exists( 'wp_kses_post' ) ) {
 	function wp_kses_post( $data ) { return $data; }
 }
+if ( ! function_exists( 'wp_hash' ) ) {
+	function wp_hash( $data, $scheme = 'auth' ) {
+		// Mirror WP's HMAC behavior with a deterministic salt for tests.
+		// Production uses wp_salt(), but tests just need a stable, unique-input → unique-output hash.
+		unset( $scheme );
+		return hash_hmac( 'md5', (string) $data, 'gk-test-salt' );
+	}
+}
+if ( ! function_exists( 'wp_rand' ) ) {
+	function wp_rand( $min = 0, $max = 0 ) {
+		if ( 0 === $min && 0 === $max ) {
+			return mt_rand();
+		}
+		return mt_rand( $min, $max );
+	}
+}
+if ( ! function_exists( 'clean_post_cache' ) ) {
+	function clean_post_cache( $post_id ) {
+		unset( $post_id );
+	}
+}
+// Mirror WordPress's wp_slash/wp_unslash so the test environment behaves like
+// real WP — strings are addslashes'd, arrays/objects walked recursively. Using
+// identity stubs would let slashing bugs slip through (e.g., save_post_content
+// passes wp_slash'd content to wp_update_post; reading it back without an
+// unslash would otherwise look fine in tests but break in production).
+if ( ! function_exists( 'wp_slash' ) ) {
+	function wp_slash( $value ) {
+		if ( is_array( $value ) ) {
+			return array_map( 'wp_slash', $value );
+		}
+		if ( is_object( $value ) ) {
+			foreach ( get_object_vars( $value ) as $k => $v ) {
+				$value->$k = wp_slash( $v );
+			}
+			return $value;
+		}
+		if ( is_string( $value ) ) {
+			return addslashes( $value );
+		}
+		return $value;
+	}
+}
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( $value ) {
+		if ( is_array( $value ) ) {
+			return array_map( 'wp_unslash', $value );
+		}
+		if ( is_object( $value ) ) {
+			foreach ( get_object_vars( $value ) as $k => $v ) {
+				$value->$k = wp_unslash( $v );
+			}
+			return $value;
+		}
+		if ( is_string( $value ) ) {
+			return stripslashes( $value );
+		}
+		return $value;
+	}
+}
+// Stub $wpdb. persist_ref_assignments uses $wpdb->update() to write content
+// without triggering revisions. The stub mutates _gk_test_posts directly.
+if ( ! isset( $GLOBALS['wpdb'] ) ) {
+	$GLOBALS['wpdb'] = new class {
+		public $posts = 'wp_posts';
+		public function update( $table, $data, $where, $format = null, $where_format = null ) {
+			unset( $table, $format, $where_format );
+			if ( ! isset( $where['ID'] ) ) {
+				return false;
+			}
+			$id = (int) $where['ID'];
+			if ( ! isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
+				return false;
+			}
+			foreach ( $data as $field => $value ) {
+				$GLOBALS['_gk_test_posts'][ $id ]->{$field} = $value;
+			}
+			return 1;
+		}
+	};
+}
 if ( ! function_exists( '__' ) ) {
 	function __( $text, $domain = 'default' ) { unset( $domain ); return $text; }
 }
@@ -57,6 +138,9 @@ if ( ! function_exists( 'do_shortcode' ) ) {
 }
 if ( ! function_exists( 'apply_filters' ) ) {
 	function apply_filters( $tag, $value ) { return $value; }
+}
+if ( ! function_exists( 'do_action' ) ) {
+	function do_action( $tag, ...$args ) { unset( $tag, $args ); }
 }
 
 // Options storage for Preferences class.
@@ -170,6 +254,8 @@ if ( ! function_exists( 'wp_update_post' ) ) {
 			return 0;
 		}
 		$post = $GLOBALS['_gk_test_posts'][ $id ];
+		// Real WP unslashes string fields once before storage. Mirror that so
+		// the wp_slash → wp_update_post → get_post round trip is faithful.
 		foreach ( array(
 			'post_title',
 			'post_content',
@@ -185,7 +271,11 @@ if ( ! function_exists( 'wp_update_post' ) ) {
 			'post_mime_type',
 		) as $field ) {
 			if ( array_key_exists( $field, $args ) ) {
-				$post->{$field} = $args[ $field ];
+				$value = $args[ $field ];
+				if ( is_string( $value ) ) {
+					$value = stripslashes( $value );
+				}
+				$post->{$field} = $value;
 			}
 		}
 		$GLOBALS['_gk_test_posts'][ $id ] = $post;

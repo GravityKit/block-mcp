@@ -67,7 +67,7 @@ export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
-      'Update one block by flat_index. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
+      'Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
@@ -76,7 +76,7 @@ export const WRITE_TOOLS = [
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        block: { type: 'object', properties: { index: { type: 'number' }, name: { type: 'string' }, attributes: { type: 'object' } } },
+        block: { type: 'object', properties: { index: { type: 'number' }, name: { type: 'string' }, attributes: { type: 'object' }, ref: { type: 'string' } } },
         before_revision_id: { type: 'number' },
         revision_id: { type: 'number' },
       },
@@ -87,7 +87,11 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         flat_index: {
           type: 'number',
-          description: 'Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). For top-level-only addressing, use delete_block / insert_blocks / replace_block_range.',
+          description: 'Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). Provide this OR `ref`.',
+        },
+        ref: {
+          type: 'string',
+          description: 'Stable gk_ref (e.g. "blk_a3f2c1q9") from get_page_blocks. Survives sibling shifts so chained mutations don\'t go stale. Provide this OR `flat_index`.',
         },
         block_name: {
           type: 'string',
@@ -96,15 +100,32 @@ export const WRITE_TOOLS = [
         attributes: { type: 'object', description: 'Partial attrs (top-level shallow merge). Enrichers derive computed fields (e.g. codeHTML) automatically when block_name is provided.' },
         innerHTML: { type: 'string', description: 'Replacement innerHTML.' },
       },
-      required: ['post_id', 'flat_index'],
+      required: ['post_id'],
     },
   },
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a top-level position. `after_top_level` / `before_top_level` use the top_level_counter. Omit or after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy (see block-mcp://agent-guide). Response.inserted[] carries `path` + `top_level_counter` so you can chain edit_block_tree without re-reading.',
+      'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
-    outputSchema: INSERTED_REFS_SCHEMA,
+    outputSchema: {
+      type: 'object',
+      properties: {
+        ...INSERTED_REFS_SCHEMA.properties,
+        inserted: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              top_level_counter: { type: 'number' },
+              path:              { type: 'array', items: { type: 'integer' } },
+              ref:               { type: 'string' },
+              name:              { type: 'string' },
+            },
+          },
+        },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -117,6 +138,14 @@ export const WRITE_TOOLS = [
           type: 'number',
           description: 'top_level_counter to insert BEFORE.',
         },
+        after_ref: {
+          type: 'string',
+          description: 'gk_ref of the top-level block to insert AFTER. Recommended — survives sibling shifts. Takes precedence over after_top_level.',
+        },
+        before_ref: {
+          type: 'string',
+          description: 'gk_ref of the top-level block to insert BEFORE. Takes precedence over before_top_level.',
+        },
         blocks: {
           type: 'array',
           description: 'Blocks to insert.',
@@ -128,7 +157,7 @@ export const WRITE_TOOLS = [
   },
   {
     name: 'delete_block',
-    description: 'Remove block(s) at a top_level_counter. For core/block, removes the reference only — not the source pattern.',
+    description: 'Remove block(s) by top_level_counter OR by ref. Provide exactly one. For core/block, removes the reference only — not the source pattern.',
     // idempotentHint is false: deleting at counter N twice removes a
     // *different* block the second time (indices shift after the first).
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Delete blocks' },
@@ -139,11 +168,15 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         top_level_counter: {
           type: 'number',
-          description: 'Zero-based top_level_counter (sequential position among top-level blocks). NOT the flat index — that one is for update_block.',
+          description: 'Zero-based top_level_counter (sequential position among top-level blocks). Provide this OR `ref`.',
+        },
+        ref: {
+          type: 'string',
+          description: 'gk_ref of the block to remove (or the leading block if count > 1). Survives sibling shifts. Provide this OR `top_level_counter`.',
         },
         count: { type: 'number', description: 'Consecutive top-level blocks to remove. Default 1.' },
       },
-      required: ['post_id', 'top_level_counter'],
+      required: ['post_id'],
     },
   },
   {
@@ -205,21 +238,27 @@ export async function handleWriteTool(
   switch (toolName) {
     case 'update_block': {
       const postId = args.post_id as number;
-      const flatIndex = args.flat_index as number;
+      const flatIndex = args.flat_index as number | undefined;
+      const ref = args.ref as string | undefined;
       const blockName = args.block_name as string | undefined;
       let attributes = args.attributes as Record<string, unknown> | undefined;
       let innerHTML = args.innerHTML as string | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (flatIndex === undefined || flatIndex === null) throw new Error('flat_index is required');
+      const hasIndex = typeof flatIndex === 'number' && Number.isFinite(flatIndex) && flatIndex >= 0;
+      const hasRef = typeof ref === 'string' && ref.length > 0;
+      if (!hasIndex && !hasRef) {
+        throw new Error('Provide either flat_index (non-negative integer) or ref');
+      }
+      if (hasIndex && hasRef) {
+        throw new Error('Provide flat_index OR ref, not both');
+      }
       if (!attributes && !innerHTML) {
         throw new Error('At least one of attributes or innerHTML must be provided');
       }
 
       // When block_name is provided, run enrichers so computed fields (e.g.
       // codeHTML for CBP) are derived automatically from the supplied attrs.
-      // Pass innerHTML so enrichers can splice updated codeHTML into the
-      // wrapper HTML (copy-button textarea + <pre>) for dual-storage blocks.
       if (blockName && attributes) {
         const blockDef: BlockDef = { name: blockName, attributes, ...(innerHTML ? { innerHTML } : {}) };
         const enriched = await enrichBlock(blockDef);
@@ -227,13 +266,18 @@ export async function handleWriteTool(
         if (enriched.innerHTML !== undefined) innerHTML = enriched.innerHTML;
       }
 
-      return await client.updateBlock(postId, flatIndex, { attributes, innerHTML });
+      if (hasRef) {
+        return await client.updateBlockByRef(postId, ref as string, { attributes, innerHTML });
+      }
+      return await client.updateBlock(postId, flatIndex as number, { attributes, innerHTML });
     }
 
     case 'insert_blocks': {
       const postId = args.post_id as number;
       const after = args.after_top_level as number | 'start' | undefined;
       const before = args.before_top_level as number | undefined;
+      const afterRef = args.after_ref as string | undefined;
+      const beforeRef = args.before_ref as string | undefined;
       const blocks = args.blocks as Array<{
         name: string;
         attributes?: Record<string, unknown>;
@@ -243,7 +287,13 @@ export async function handleWriteTool(
       if (postId === undefined || postId === null) throw new Error('post_id is required');
       if (!blocks || blocks.length === 0) throw new Error('At least one block is required in the blocks array');
 
-      const result = await client.insertBlocks(postId, { after, before, blocks: await enrichBlocks(blocks as BlockDef[]) });
+      const result = await client.insertBlocks(postId, {
+        after,
+        before,
+        ...(afterRef ? { after_ref: afterRef } : {}),
+        ...(beforeRef ? { before_ref: beforeRef } : {}),
+        blocks: await enrichBlocks(blocks as BlockDef[]),
+      });
       if (result.warnings && result.warnings.length > 0) {
         return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
       }
@@ -252,13 +302,29 @@ export async function handleWriteTool(
 
     case 'delete_block': {
       const postId = args.post_id as number;
-      const topLevelCounter = args.top_level_counter as number;
+      const topLevelCounter = args.top_level_counter as number | undefined;
+      const ref = args.ref as string | undefined;
       const count = args.count as number | undefined;
 
       if (postId === undefined || postId === null) throw new Error('post_id is required');
-      if (topLevelCounter === undefined || topLevelCounter === null) throw new Error('top_level_counter is required');
+      const hasCounter = typeof topLevelCounter === 'number' && Number.isFinite(topLevelCounter) && topLevelCounter >= 0;
+      const hasRef = typeof ref === 'string' && ref.length > 0;
+      if (!hasCounter && !hasRef) {
+        throw new Error('Provide either top_level_counter (non-negative integer) or ref');
+      }
+      if (hasCounter && hasRef) {
+        throw new Error('Provide top_level_counter OR ref, not both');
+      }
+      if (count !== undefined && count !== null) {
+        if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) {
+          throw new Error('count must be a positive integer');
+        }
+      }
 
-      return await client.deleteBlock(postId, topLevelCounter, count);
+      if (hasRef) {
+        return await client.deleteBlockByRef(postId, ref as string, count);
+      }
+      return await client.deleteBlock(postId, topLevelCounter as number, count);
     }
 
     case 'replace_block_range': {
