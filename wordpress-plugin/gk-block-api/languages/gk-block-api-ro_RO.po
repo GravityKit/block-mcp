@@ -1,0 +1,837 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 20:16+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : (n==0 || (n%100 > 0 && n%100 < "
+"20)) ? 1 : 2);\n"
+"Language: ro-RO\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "GK Block API"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"API REST pentru operațiuni CRUD la nivel de bloc cu preferințe inteligente "
+"pentru agenții AI."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "Postarea nu a fost găsită."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "Indexul blocului este în afara intervalului."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr ""
+"Se elimină referința la modelul sincronizat „%s” de pe această pagină. "
+"Modelul în sine nu este șters."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "range.start trebuie să fie >= 0."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) depășește sfârșitul paginii (maxim %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "Model sincronizat negăsit."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "Registrul modelelor nu este disponibil."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "Modelul „%s” nu a fost găsit în registru."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "Modelul nu conține conținut de bloc."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "Modelul nu conține blocuri valide."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "Ref trebuie să fie un șir nevid."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"Ref „%s” nu a fost găsită. Blocul poate fi șters sau referința este dintr-o "
+"captură veche. Reîncarcă pagina pentru a obține referințele curente."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "Ref „%s” nu a fost găsită."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"Ref face referire la un bloc imbricat; insert_blocks înainte/după ref "
+"necesită un bloc de nivel superior."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "Poziția referinței nu a putut fi rezolvată."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"Blocul „%s” are stocare duală: atât `attributes`, cât și `innerHTML` conțin "
+"aceleași date și trebuie să rămână sincronizate. Trimiterea doar a "
+"`innerHTML` va desincroniza silențios atributele structurate (cazul canonic "
+"este yoast/faq-block care pierde array-ul questions[]). Trimite ambele "
+"câmpuri împreună. Vezi block-mcp://agent-guide pentru lista stocărilor "
+"duale."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "Tipul de bloc „%s” nu este înregistrat."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "Blocul „%1$s” este învechit. Folosiți în schimb „%2$s”."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "un bloc preferat"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "Spațiul de nume %s/ este blocat de politica site-ului."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr ""
+"Consultați resursa block-mcp://agent-guide pentru lista completă de "
+"permisiuni/ interdicții."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "Blocurile %s sunt învechite pe acest site."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Limita de rescrieri complete de pagină a fost depășită. Maximul este %d pe "
+"minut per articol."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr "Limita de scrieri a fost depășită. Maximul este %d pe minut per articol."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "Revizia nu a fost găsită."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "Revizia nu aparține acestui articol."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr ""
+"Scanarea în modul de stocare a fost făcută recent. Încercați din nou peste "
+"%d secunde."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(șablon șters)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "Calea trebuie să fie un array de întregi nenegativi."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "Calea nu poate fi goală."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Segmentul de cale %1$d (index %2$d) este în afara limitelor. Indicii valizi "
+"la acest nivel: %3$s. Calea parțială până la eroare: [%4$s]. Rulați GET "
+"/posts/{id}/blocks?outline=true pentru a vedea structura paginii."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"Blocul „%1$s” de la [%2$s] nu are blocuri interioare. Nu se poate traversa "
+"în el. Folosiți update-attrs/update-html direct pe acest bloc sau "
+"wrap-in-group pentru a adăuga copii."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "Traversarea căii a întâlnit o structură de bloc invalidă."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Blocul țintă la index %1$d nu a fost găsit. Indicii valizi la acest nivel: "
+"%2$s. Rulați GET /posts/{id}/blocks?outline=true pentru a vedea structura "
+"paginii."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs necesită un obiect „attributes”."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html necesită un șir „innerHTML”."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block necesită un obiect „block” cu un câmp „name”."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr ""
+"Se elimină referința la tiparul sincronizat „%s”. Tiparul în sine nu este "
+"șters."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "Blocul wrapper „%s” nu este înregistrat."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "Wrapper-ul „%s” este învechit."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "Blocurile %s sunt învechite."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "Blocul nu are blocuri interioare de dezvelit."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child necesită un obiect „block” cu un „name”."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move necesită o cale „before” sau „destination”."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "Destinația trebuie să fie un tablou de numere întregi nenegative."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr "Nu se poate muta un bloc în el însuși sau în descendenții săi."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "Numărătoarea depășește blocurile disponibile la cale."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "Calea destinației este invalidă."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "Operațiune necunoscută „%s”."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"Modificarea atributelor care afectează redarea (%1$s) pe blocul static "
+"„%2$s” fără a actualiza innerHTML poate lăsa marcajul inconsistent. Luați "
+"în considerare și furnizarea innerHTML sau utilizarea replace-block."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr "Furnizați una dintre: câmp multipart „file”, „url” sau „data_base64”."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr "Poate fi furnizat doar unul dintre „file”, „url” sau „data_base64”."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "Fișierul încărcat depășește limita de încărcare a site-ului."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "Tip de fișier nepermis pentru „%s”."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "URL-ul nu este valid sau nu este permis."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "Fișierul descărcat depășește limita de dimensiune."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "„filename” este obligatoriu pentru încărcările base64."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64 depășește limita de dimensiune înainte de decodare."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 nu este un base64 valid."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "Datele decodate depășesc limita de dimensiune."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "Nu s-a putut crea fișierul temporar."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "Nu s-a putut scrie fișierul temporar."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "Atașamentul nu a fost găsit după încărcare."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "URL-ul nu are gazdă."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "Nu s-a putut rezolva gazda „%s”."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "Nu s-a putut valida IP-ul „%1$s” pentru „%2$s”."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr "Gazda URL „%1$s” se rezolvă la un IPv4 rezervat sau privat (%2$s)."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "Nu s-a putut valida IPv6 „%1$s” pentru „%2$s”."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr "Gazda URL „%1$s” se rezolvă la un IPv6 rezervat sau privat (%2$s, în %3$s)."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "Este necesar un „title” care să nu fie gol."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "Tipul de postare „%s” nu este permis."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "Ne pare rău, nu aveți permisiunea de a crea postări de acest tip."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"Statusul „%s” nu este permis la creare. Folosiți update_post pentru "
+"tranzițiile către coșul de gunoi."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "Nu puteți publica postări de acest tip."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "„content” și „blocks” sunt mutual exclusive."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "Nu puteți atribui autoratul altor utilizatori."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media nu este un atașament de imagine valid."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post a returnat un ID nenul sau negativ."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "Postarea %d nu există."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "Nu poți edita această postare."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "Statusul „%s” nu este permis."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "Fiecare bloc necesită un „nume”."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "Statusul „future” necesită o „dată” setată în viitor."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "O postare nu poate fi propriul său părinte."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "Postarea părinte %1$d nu există sau nu este de tipul „%2$s”."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "Taxonomia „%s” nu există."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "Taxonomia „%1$s” nu este înregistrată pentru tipul de post „%2$s”."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "Termenul %1$d nu există în taxonomia „%2$s”."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "Nu ai permisiunea de a accesa acest endpoint."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "Nu ai permisiunea de a edita postările."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "Nu ai permisiunea de a încărca fișiere."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "A apărut o eroare neașteptată."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "Modelul nu a fost găsit."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "Nu a fost găsită nicio postare pentru acest URL."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "Furnizează unul dintre: post_id, url sau slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "Nicio postare nu a corespuns căutării."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr "Cel puțin unul dintre „attributes” sau „innerHTML” trebuie furnizat."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "Parametrul „blocks” este obligatoriu și trebuie să fie un tablou nenul."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"Parametrul „blocks” este obligatoriu și trebuie să fie un tablou (poate fi "
+"gol pentru o ștergere pură)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "Este necesar fie „path”, fie „ref”."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr "Nu aveți permisiunea să editați acest %1$s. Capacitatea necesară: %2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "Bloc MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "Nu aveți permisiunea să faceți acest lucru."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "Nu aveți permisiunea să vizualizați această pagină."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "Setări Bloc MCP"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr ""
+"Scanarea modului de stocare s-a încheiat. %1$d blocuri unice clasificate "
+"(%2$d stocare duală)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "Setările au fost resetate la valorile implicite."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"Aceste setări determină modul în care serverul Block MCP clasifică "
+"blocurile (preferat / acceptabil / evitat / moștenit), sugerează înlocuiri "
+"și detectează blocurile cu stocare duală care necesită atât atribute, cât "
+"și innerHTML la fiecare actualizare."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "Scoruri nivel spațiu de nume"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"Scor 0–100 pe spațiu de nume. >= 80 = preferat, >= 50 = acceptabil, >= 10 = "
+"evitat (avertisment), < 10 = moștenit (respingere fermă la inserare)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "Spațiu de nume"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "Scor"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "Elimină"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "Spațiu de nume nou"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "spațiu-de-nume-nou"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "Scor nou"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "Harta de înlocuire"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"Când un bloc vechi este respins la inserare, eroarea sugerează înlocuirea "
+"sa mapată. Coloana Înlocuire afișează o listă căutabilă cu toate blocurile "
+"înregistrate în prezent pe acest site — tastează pentru a filtra sau "
+"introdu manual orice nume de bloc."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "Bloc vechi"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "Înlocuire"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "Bloc de înlocuire"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "Bloc vechi nou"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "legacy/block-name"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "Înlocuire nouă"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "core/block-name"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "Blocuri care stochează date în două locuri"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"Majoritatea blocurilor stochează conținutul într-un singur loc — fie ca "
+"atribute ale blocului (JSON-ul dintre comentariile wp:block), fie ca "
+"innerHTML. Câteva blocuri stochează aceleași date ÎN AMBELE locuri în "
+"același timp. Pentru acestea, actualizarea unuia fără celălalt corupe "
+"blocul în tăcere."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"Un exemplu comun este <code>yoast/faq-block</code>: păstrează întrebările "
+"în <code>attributes.questions</code> ȘI în interiorul marcajului "
+"<code>&lt;dl&gt;</code>. Dacă un agent actualizează doar innerHTML, "
+"matricea structurată a întrebărilor devine neactualizată."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"Block MCP detectează automat majoritatea blocurilor cu stocare dublă prin "
+"scanarea site-ului tău. Listează aici orice blocuri suplimentare (unul pe "
+"linie) — când un agent încearcă să actualizeze unul dintre aceste blocuri, "
+"va fi necesar să trimită împreună atributele și innerHTML, prevenind "
+"coruperea."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "Tipuri de postări pe care agenții AI le pot crea"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"Restricționează ce tipuri de postări poate folosi instrumentul create_post "
+"MCP. Bifează casetele pentru tipurile pe care vrei ca agenții să le poată "
+"crea. Lasă totul nebifat pentru a permite orice tip public de postare cu "
+"suport REST (implicit)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "Scanare mod stocare"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"Parcurge fiecare postare publicată și clasifică fiecare nume distinct de "
+"bloc ca static / dinamic / dublu. După rulare, adnotările get_page_blocks "
+"și aplicarea stocării duble folosesc clasificarea live în locul valorilor "
+"implicite ale filtrului. Lent pe site-urile mari."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "Ultima scanare a clasificat %d nume distincte de bloc."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "Rulați scanarea acum"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "Resetați la valorile implicite"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"Șterge toate setările stocate de mai sus (preferințe, lista permisă pentru "
+"tipuri de postări, lista manuală de stocare duală, rezultatele scanării, "
+"memoria cache a inventarului și transienții de limitare a ratei pentru "
+"fiecare postare). Următoarea citire va reveni la setările implicite "
+"codificate în preferințe."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "Resetați toate setările Block MCP? Aceasta nu poate fi anulată."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "Rând nou adăugat. Puteți continua să adăugați intrări."

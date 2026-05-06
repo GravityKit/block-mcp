@@ -1,0 +1,837 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 20:08+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"Language: tr-TR\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "GK Blok API"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"Yapay zeka ajanları için akıllı tercihlerle blok düzeyinde CRUD işlemleri "
+"için REST API."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "Yazı bulunamadı."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "Blok dizini sınırların dışında."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr ""
+"Bu sayfadan eşzamanlı desen referansı \"%s\" kaldırılıyor. Desen kendisi "
+"silinmez."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "range.start >= 0 olmalıdır."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) sayfanın sonundan sonra (maks %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "Eşzamanlı desen bulunamadı."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "Desen kayıt defteri kullanılamıyor."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "Kayıt defterinde \"%s\" deseni bulunamadı."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "Desenin blok içeriği yok."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "Desen geçerli blok içermiyor."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "Ref boş olmayan bir dize olmalıdır."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"Ref \"%s\" bulunamadı. Blok silinmiş olabilir veya ref eski bir anlık "
+"görüntüden olabilir. Mevcut referansları almak için sayfayı yeniden "
+"yükleyin."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "Ref \"%s\" bulunamadı."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"Ref iç içe bloklara işaret ediyor; insert_blocks before/after_ref üst düzey "
+"blok gerektirir."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "Ref konumu çözülemedi."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"\"%s\" bloğu çift depolamalıdır: `attributes` ve `innerHTML` aynı veriyi "
+"taşır ve senkronize tutulmalıdır. Sadece `innerHTML` göndermek "
+"yapılandırılmış özniteliklerin sessizce senkronizasyonunu bozar (kanonik "
+"örnek yoast/faq-block’un questions[] dizisini kaybetmesi). Her iki alan "
+"birlikte iletilmelidir. Çift depolama listesi için block-mcp://agent-guide "
+"adresine bakınız."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "Blok türü \"%s\" kayıtlı değil."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "Blok \"%1$s\" eski. Onun yerine \"%2$s\" kullanın."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "tercih edilen bir blok"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "%s/ ad alanı site politikası tarafından engellenmiştir."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr "Tam izin/verme listesi için block-mcp://agent-guide kaynağına bakın."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "%s blokları bu sitede kullanımdan kaldırılmıştır."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Tam sayfa yeniden yazma oran sınırı aşıldı. Gönderi başına dakikada en "
+"fazla %d."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr "Yazma oran sınırı aşıldı. Gönderi başına dakikada en fazla %d."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "Revizyon bulunamadı."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "Revizyon bu gönderiye ait değil."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr ""
+"Depolama modu taraması yakın zamanda yapıldı. %d saniye sonra tekrar "
+"deneyin."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(silinmiş desen)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "Yol negatif olmayan tamsayılar dizisi olmalıdır."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "Yol boş olamaz."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Yol segmenti %1$d (indeks %2$d) sınırların dışında. Bu seviyedeki geçerli "
+"indeksler: %3$s. Hata oluşana kadar kısmi yol: [%4$s]. Sayfa yapısını "
+"görmek için GET /posts/{id}/blocks?outline=true çalıştırın."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"[%2$s] konumundaki \"%1$s\" bloğun iç bloğu yok. İçine geçiş yapılamaz. Bu "
+"bloğun özelliklerini doğrudan update-attrs/update-html ile güncelleyin veya "
+"çocuk eklemek için wrap-in-group kullanın."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "Yol geçişinde geçersiz blok yapısı ile karşılaşıldı."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"%1$d indeksindeki hedef blok bulunamadı. Bu seviyedeki geçerli indeksler: "
+"%2$s. Sayfa yapısını görmek için GET /posts/{id}/blocks?outline=true "
+"çalıştırın."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs için bir \"attributes\" nesnesi gerekir."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html için bir \"innerHTML\" dizesi gerekir."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block, \"name\" alanına sahip bir \"block\" nesnesi gerektirir."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr ""
+"Eşzamanlı desen referansı \"%s\" kaldırılıyor. Desenin kendisi "
+"silinmemektedir."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "Sarmalayıcı blok \"%s\" kayıtlı değil."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "Sarmalayıcı \"%s\" eski sürümdür."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "%s blokları kullanımdan kaldırılmıştır."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "Blokun açılacak iç bloğu yok."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child, \"name\" alanına sahip bir \"block\" nesnesi gerektirir."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move işlemi için \"before\" veya \"destination\" yolu gereklidir."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "Hedef, negatif olmayan tam sayılardan oluşan bir dizi olmalıdır."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr "Bir bloğu kendisinin veya alt öğelerinin içine taşımak mümkün değildir."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "Sayım, yoldaki mevcut blok sayısını aşıyor."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "Hedef yol geçersizdir."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "Bilinmeyen işlem \"%s\"."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"Statik blok \"%2$s\" üzerindeki render'ı etkileyen özellikler (%1$s) "
+"innerHTML güncellenmeden değiştirilirse işaretleme tutarsız kalabilir. "
+"innerHTML sağlamayı veya replace-block kullanmayı düşünün."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr ""
+"Şu alanlardan birini sağlayın: çok parçalı \"file\" alanı, \"url\" veya "
+"\"data_base64\"."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr "Sadece bir tane \"file\", \"url\" veya \"data_base64\" sağlanabilir."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "Yüklenen dosya site yükleme sınırını aşıyor."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "\"%s\" için izin verilmeyen dosya türü."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "URL geçerli değil veya izin verilmiyor."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "İndirilen dosya boyut sınırını aşıyor."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "base64 yüklemeleri için \"filename\" gereklidir."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64, kod çözmeden önce boyut sınırını aşıyor."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 geçerli bir base64 değil."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "Çözümlenen veri boyut sınırını aşıyor."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "Geçici dosya oluşturulamadı."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "Geçici dosyaya yazılamadı."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "Yüklemeden sonra ek bulunamadı."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "URL'nin hostu yok."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "Host \"%s\" çözümlenemedi."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "\"%2$s\" için IP \"%1$s\" doğrulanamadı."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr "URL hostu \"%1$s\" ayrılmış veya özel IPv4 (%2$s) adresine çözümleniyor."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "\"%2$s\" için IPv6 \"%1$s\" doğrulanamadı."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr ""
+"URL hostu \"%1$s\" ayrılmış veya özel IPv6 (%2$s, %3$s içinde) adresine "
+"çözümleniyor."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "Boş olmayan bir \"title\" gereklidir."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "Gönderi tipi \"%s\" izin verilmiyor."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "Üzgünüz, bu tipte gönderi oluşturmanıza izin verilmiyor."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"Oluşturma sırasında \"%s\" durumu izin verilmiyor. Çöp geçişleri için "
+"update_post kullanın."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "Bu tipte gönderi yayınlayamazsınız."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "\"content\" ve \"blocks\" birbirini dışlar."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "Yazarlığı diğer kullanıcılara atayamazsınız."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media geçerli bir resim eki değildir."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post sıfırdan küçük veya eşit bir ID döndürdü."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "Gönderi %d mevcut değil."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "Bu gönderiyi düzenleyemezsiniz."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "\"%s\" durumu izin verilmiyor."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "Her bloğun bir \"adı\" olmalıdır."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "\"future\" durumu gelecekte ayarlanmış bir \"tarih\" gerektirir."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "Bir gönderi kendi ebeveyni olamaz."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "Ebeveyn gönderi %1$d mevcut değil veya \"%2$s\" türünde değil."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "\"%s\" taksonomisi mevcut değil."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "\"%1$s\" taksonomisi \"%2$s\" gönderi türü için kayıtlı değil."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "%1$d terimi \"%2$s\" taksonomisinde mevcut değil."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "Bu uç noktaya erişim izniniz yok."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "Gönderileri düzenleme izniniz yok."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "Dosya yükleme izniniz yok."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "Beklenmeyen bir hata oluştu."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "Desen bulunamadı."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "Bu URL için gönderi bulunamadı."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "Birini sağlayın: post_id, url veya slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "Arama ile eşleşen gönderi yok."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr "En az bir \"attributes\" veya \"innerHTML\" sağlanmalıdır."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "\"blocks\" parametresi gereklidir ve boş olmayan bir dizi olmalıdır."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"\"blocks\" parametresi gereklidir ve bir dizi olmalıdır (saf silme için boş "
+"olabilir)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "\"path\" veya \"ref\" gereklidir."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr "Bu %1$s öğesini düzenleme izniniz yok. Gerekli yetki: %2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "Blok MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "Bunu yapma izniniz yok."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "Bu sayfayı görüntüleme izniniz yok."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "Blok MCP Ayarları"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr ""
+"Depolama modu taraması tamamlandı. %1$d benzersiz blok sınıflandırıldı "
+"(%2$d çift-depolama)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "Ayarlar varsayılana sıfırlandı."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"Bu ayarlar, Blok MCP sunucu sınıfının blokları nasıl sınıflandırdığını "
+"(tercih edilen / kabul edilebilir / kaçınılması gereken / eski), yedek "
+"önerdiğini ve her güncellemede hem attributes hem innerHTML gerektiren "
+"çift-depolama bloklarını nasıl algıladığını belirler."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "Ad alanı seviye puanları"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"Ad alanı başına 0–100 puan. >= 80 = tercih edilen, >= 50 = kabul "
+"edilebilir, >= 10 = kaçınılması gereken (uyarı), < 10 = eski (eklemelerde "
+"sert reddetme)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "Ad alanı"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "Puan"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "Kaldır"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "Yeni ad alanı"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "yeni-ad-alanı"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "Yeni puan"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "Yerine koyma haritası"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"Eski bir blok eklenirken reddedildiğinde, hata onun eşlenen yerine "
+"koymasını önerir. Yerine Koyma sütunu, bu sitede şu anda kayıtlı tüm "
+"blokların aranabilir bir listesini gösterir — filtrelemek için yazın veya "
+"herhangi bir blok adını manuel olarak girin."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "Eski blok"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "Yerine Koyma"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "Yerine Koyma bloğu"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "Yeni eski blok"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "legacy/block-name"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "Yeni yerine koyma"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "core/block-name"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "Veriyi iki yerde depolayan bloklar"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"Çoğu blok içeriğini tek bir yerde depolar — ya blok öznitelikleri olarak "
+"(wp:block yorumları arasındaki JSON) ya da innerHTML olarak. Bazı bloklar "
+"aynı veriyi İKİSİNDE de aynı anda depolar. Bunlar için birini diğerinden "
+"güncellemek bloğun sessizce bozulmasına yol açar."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"Yaygın bir örnek <code>yoast/faq-block</code>: soruları "
+"<code>attributes.questions</code> içinde VE içteki <code>&lt;dl&gt;</code> "
+"işaretlemesinde tutar. Eğer bir araç sadece innerHTML’i güncellerse, "
+"yapılandırılmış sorular dizisi güncelliğini yitirir."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"Block MCP, siteyi tarayarak çoğu çift depolamalı bloğu otomatik algılar. "
+"Buraya ekstra olanları listeleyin (her satıra bir tane) — bir araç bu "
+"bloklardan birini güncellemeye çalıştığında, hem özniteliklerin hem "
+"innerHTML’in birlikte gönderilmesi gerekecek, böylece bozulma önlenecektir."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "AI ajanlarının oluşturabileceği gönderi türleri"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"create_post MCP aracının kullanmasına izin verilen gönderi türlerini "
+"kısıtlayın. Ajanların oluşturabilmesini istediğiniz türler için kutuları "
+"işaretleyin. Tümünü işaretlemeden bırakmak, REST desteği olan herhangi bir "
+"genel gönderi türüne izin verir (varsayılan)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "Depolama modu taraması"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"Her yayımlanmış gönderiyi tarar ve her benzersiz blok adını statik / "
+"dinamik / çift olarak sınıflandırır. Çalıştırdıktan sonra get_page_blocks "
+"açıklamaları ve çift depolama zorlaması, filtre varsayılanları yerine canlı "
+"sınıflandırmayı kullanır. Büyük sitelerde yavaştır."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "Son tarama %d benzersiz blok adını sınıflandırdı."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "Şimdi taramayı çalıştır"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "Varsayılanlara sıfırla"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"Yukarıda depolanan tüm ayarları siler (tercihler, yazı türü izin listesi, "
+"manuel çift depolama listesi, tarama sonuçları, envanter önbelleği ve yazı "
+"başına hız sınırı geçici verileri). Sonraki okuma, kodlanmış Tercihler "
+"varsayılanlarına döner."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "Tüm Block MCP ayarları sıfırlansın mı? Bu işlem geri alınamaz."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "Yeni satır eklendi. Giriş eklemeye devam edebilirsiniz."

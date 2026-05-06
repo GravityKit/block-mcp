@@ -1,0 +1,819 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 20:07+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
+"&& n%100<=10 ? 3 : n%100>=11 ? 4 : 5);\n"
+"Language: ar\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "واجهة برمجة تطبيقات GK Block"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"واجهة REST API لعمليات CRUD على مستوى الكتل مع تفضيلات ذكية لوكلاء الذكاء "
+"الاصطناعي."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "المشاركة غير موجودة."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "مؤشر الكتلة خارج النطاق."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr "إزالة مرجع النمط المتزامن \"%s\" من هذه الصفحة. النمط نفسه لم يُحذف."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "يجب أن يكون range.start >= 0."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) بعد نهاية الصفحة (الحد الأقصى %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "النمط المتزامن غير موجود."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "سجل الأنماط غير متاح."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "النمط \"%s\" غير موجود في السجل."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "النمط لا يحتوي على محتوى كتلة."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "النمط لا يحتوي على كتل صالحة."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "يجب أن يكون المرجع سلسلة غير فارغة."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"المرجع \"%s\" غير موجود. قد تكون الكتلة قد حُذفت، أو المرجع يعود إلى لقطة "
+"أقدم. أعد جلب الصفحة للحصول على المراجع الحالية."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "المرجع \"%s\" غير موجود."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"المرجع يشير إلى كتلة متداخلة؛ insert_blocks قبل/بعد المرجع يتطلب كتلة على "
+"المستوى الأعلى."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "لم يمكن تحديد موقع المرجع."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"الكتلة \"%s\" تخزن البيانات مزدوجة: كل من `attributes` و `innerHTML` تحمل "
+"نفس البيانات ويجب مزامنتهما. إرسال `innerHTML` فقط سيؤدي إلى عدم تزامن ضمني "
+"للسمات المهيكلة (الحالة النموذجية هي فقدان yoast/faq-block لمصفوفة "
+"questions[]). أرسل كلا الحقلين معاً. راجع block-mcp://agent-guide لقائمة "
+"التخزين المزدوج."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "نوع الكتلة \"%s\" غير مسجل."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "الكتلة \"%1$s\" قديمة. استخدم \"%2$s\" بدلاً منها."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "كتلة مفضلة"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "المجال %s/ محظور بسياسة الموقع."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr "راجع مورد block-mcp://agent-guide لقائمة السماح/الرفض الكاملة."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "كتل %s مهجورة في هذا الموقع."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"تم تجاوز حد معدل إعادة كتابة الصفحة الكاملة. الحد الأقصى %d في الدقيقة لكل "
+"منشور."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr "تم تجاوز حد معدل الكتابة. الحد الأقصى %d في الدقيقة لكل منشور."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "الإصدار غير موجود."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "الإصدار لا ينتمي لهذا المنشور."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr "تم إجراء فحص وضع التخزين مؤخراً. حاول مرة أخرى بعد %d ثانية."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(نمط محذوف)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "يجب أن يكون المسار مصفوفة من أعداد صحيحة غير سالبة."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "لا يمكن أن يكون المسار فارغاً."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"جزء المسار %1$d (الفهرس %2$d) خارج الحدود. الفهارس الصالحة في هذا المستوى: "
+"%3$s. المسار الجزئي حتى الفشل: [%4$s]. نفذ GET "
+"/posts/{id}/blocks?outline=true لرؤية هيكل الصفحة."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"الكتلة \"%1$s\" في [%2$s] لا تحتوي على كتل داخلية. لا يمكن التجوال داخلها. "
+"استخدم update-attrs/update-html على هذه الكتلة مباشرةً، أو wrap-in-group "
+"لإضافة أطفال."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "التجوال في المسار واجه هيكل كتلة غير صالح."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"الكتلة الهدف عند الفهرس %1$d غير موجودة. الفهارس الصالحة في هذا المستوى: "
+"%2$s. نفذ GET /posts/{id}/blocks?outline=true لرؤية هيكل الصفحة."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs يتطلب كائن \"attributes\"."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html يتطلب سلسلة \"innerHTML\"."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block يتطلب كائن \"block\" يحتوي على حقل \"name\"."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr "جارٍ إزالة مرجع النمط المتزامن \"%s\". النمط نفسه لم يُحذف."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "كتلة الغلاف \"%s\" غير مسجلة."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "الغلاف \"%s\" قديم."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "الكتل %s قديمة."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "الكتلة لا تحتوي على كتل داخلية لفك التغليف."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child يتطلب كائن \"block\" يحتوي على \"name\"."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move يتطلب مسار \"before\" أو \"destination\"."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "يجب أن يكون الوجهة مصفوفة من أعداد صحيحة غير سالبة."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr "لا يمكن نقل كتلة إلى داخل نفسها أو أحفادها."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "العدد يتجاوز الكتل المتاحة في المسار."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "مسار الوجهة غير صالح."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "عملية غير معروفة \"%s\"."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"تغيير السمات التي تؤثر على العرض (%1$s) في كتلة ثابتة \"%2$s\" دون تحديث "
+"innerHTML قد يؤدي إلى عدم تناسق العلامات. يُفضّل أيضاً توفير innerHTML أو "
+"استخدام replace-block."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr ""
+"يرجى توفير واحد مما يلي: حقل \"file\" متعدد الأجزاء، \"url\"، أو "
+"\"data_base64\"."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr "يمكن توفير واحد فقط من \"file\" أو \"url\" أو \"data_base64\"."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "الملف المرفوع يتجاوز حد التحميل الخاص بالموقع."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "نوع الملف غير مسموح به لـ \"%s\"."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "الرابط غير صالح أو غير مسموح به."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "الملف الذي تم تنزيله يتجاوز الحد الأقصى للحجم."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "\"filename\" مطلوب للتحميلات المشفرة بـ base64."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64 يتجاوز الحد الأقصى للحجم قبل فك التشفير."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 ليست قاعدة64 صحيحة."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "البيانات المفككة تتجاوز الحد الأقصى للحجم."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "تعذر إنشاء ملف مؤقت."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "تعذر كتابة الملف المؤقت."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "المرفق غير موجود بعد التحميل."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "الرابط لا يحتوي على مضيف."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "تعذر حل المضيف \"%s\"."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "تعذر التحقق من عنوان IP \"%1$s\" لـ \"%2$s\"."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr "مضيف الرابط \"%1$s\" يحل إلى عنوان IPv4 محجوز أو خاص (%2$s)."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "تعذر التحقق من IPv6 \"%1$s\" لـ \"%2$s\"."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr "مضيف الرابط \"%1$s\" يحل إلى عنوان IPv6 محجوز أو خاص (%2$s، في %3$s)."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "مطلوب \"title\" غير فارغ."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "نوع المنشور \"%s\" غير مسموح به."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "عذرًا، لا يسمح لك بإنشاء منشورات من هذا النوع."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"الحالة \"%s\" غير مسموح بها عند الإنشاء. استخدم update_post لعمليات النقل "
+"إلى سلة المهملات."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "لا يمكنك نشر منشورات من هذا النوع."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "\"content\" و \"blocks\" متبادلان ولا يمكن استخدامهما معًا."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "لا يمكنك تعيين الحقوق التأليفية لمستخدمين آخرين."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media ليس مرفق صورة صالحًا."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post أعاد معرفًا غير موجب."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "المشاركة %d غير موجودة."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "لا يمكنك تعديل هذه المشاركة."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "الحالة \"%s\" غير مسموح بها."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "كل كتلة تتطلب \"اسمًا\"."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "الحالة \"future\" تتطلب تعيين \"تاريخ\" في المستقبل."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "لا يمكن للمشاركة أن تكون هي نفسها الأصل."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "المشاركة الأصل %1$d غير موجودة أو ليست من نوع \"%2$s\"."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "التصنيف \"%s\" غير موجود."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "التصنيف \"%1$s\" غير مسجل لنوع المشاركة \"%2$s\"."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "المصطلح %1$d غير موجود في التصنيف \"%2$s\"."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "ليس لديك إذن للوصول إلى نقطة النهاية هذه."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "ليس لديك إذن لتحرير المشاركات."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "ليس لديك إذن لتحميل الملفات."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "حدث خطأ غير متوقع."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "النمط غير موجود."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "لم يتم العثور على مشاركة لهذا الرابط."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "يرجى تقديم أحد: post_id، url، أو slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "لم تطابق أي مشاركة البحث."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr "يجب توفير واحد على الأقل من \"attributes\" أو \"innerHTML\"."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "المُعامل \"blocks\" مطلوب ويجب أن يكون مصفوفة غير فارغة."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"المُعامل \"blocks\" مطلوب ويجب أن يكون مصفوفة (قد تكون فارغة في حالة الحذف "
+"البحت)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "إما \"path\" أو \"ref\" مطلوب."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr "ليس لديك إذن لتحرير هذا %1$s. القدرة المطلوبة: %2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "حظر MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "ليس لديك إذن للقيام بذلك."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "ليس لديك إذن لعرض هذه الصفحة."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "إعدادات حظر MCP"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr "اكتمل فحص وضع التخزين. تم تصنيف %1$d كتلة فريدة (%2$d تخزين مزدوج)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "تم إعادة تعيين الإعدادات إلى الافتراضيات."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"تتحكم هذه الإعدادات في كيفية تصنيف خادم Block MCP للكتل (مفضلة / مقبولة / "
+"تجنب / قديمة)، واقتراح البدائل، واكتشاف الكتل ذات التخزين المزدوج التي "
+"تحتاج إلى كل من السمات و innerHTML في كل تحديث."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "درجات مستوى مساحة الأسماء"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"درجة من 0 إلى 100 لكل مساحة أسماء. >= 80 = مفضلة، >= 50 = مقبولة، >= 10 = "
+"تجنب (تحذير)، < 10 = قديمة (رفض صارم عند الإدراج)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "مساحة الأسماء"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "الدرجة"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "إزالة"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "مساحة أسماء جديدة"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "new-namespace"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "درجة جديدة"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "خريطة الاستبدال"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"عندما يتم رفض كتلة قديمة عند الإدراج، يقترح الخطأ استبدالها المحدد. يعرض "
+"عمود الاستبدال قائمة قابلة للبحث لجميع الكتل المسجلة حالياً في هذا الموقع — "
+"اكتب للتصفية، أو أدخل اسم أي كتلة يدوياً."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "كتلة قديمة"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "الاستبدال"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "كتلة الاستبدال"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "كتلة قديمة جديدة"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "legacy/block-name"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "استبدال جديد"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "core/block-name"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "الكتل التي تخزن البيانات في مكانين"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"معظم الكتل تخزن محتواها في مكان واحد — إما كسمات للكتلة (الـ JSON بين "
+"تعليقات wp:block) أو كـ innerHTML. بعض الكتل تخزن نفس البيانات في كلا "
+"المكانين في نفس الوقت. بالنسبة لهذه، تحديث أحدهما دون الآخر يفسد الكتلة "
+"بصمت."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"مثال شائع هو <code>yoast/faq-block</code>: يحتفظ بالأسئلة في "
+"<code>attributes.questions</code> وَفي العلامة الداخلية "
+"<code>&lt;dl&gt;</code>. إذا قام الوكيل بتحديث innerHTML فقط، تصبح مصفوفة "
+"الأسئلة المنسقة قديمة."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"يكتشف Block MCP معظم الكتل ذات التخزين المزدوج تلقائياً عن طريق مسح موقعك. "
+"قم بإدراج أي إضافات هنا (واحدة لكل سطر) — عندما يحاول الوكيل تحديث إحدى هذه "
+"الكتل، سيُطلب منه إرسال كل من السمات و innerHTML معاً، منعاً للفساد."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "أنواع المنشورات التي يمكن لوكلاء الذكاء الاصطناعي إنشاؤها"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"قم بتقييد أنواع المنشورات التي يُسمح لأداة create_post MCP باستخدامها. علم "
+"المربعات لأنواع المنشورات التي تريد أن يتمكن الوكلاء من إنشائها. اترك كل "
+"شيء غير محدد للسماح بأي نوع منشور عام يدعم REST (الإعداد الافتراضي)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "مسح وضع التخزين"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"يمر على كل منشور منشور ويصنف كل اسم كتلة مميز كـ ثابت / ديناميكي / مزدوج. "
+"بعد التشغيل، تستخدم تعليقات get_page_blocks وتطبيق التخزين المزدوج التصنيف "
+"الحي بدلاً من الإعدادات الافتراضية للفلتر. بطيء على المواقع الكبيرة."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "آخر مسح صنف %d اسم كتلة مميز."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "تشغيل المسح الآن"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "إعادة الضبط إلى الإعدادات الافتراضية"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"يحذف جميع الإعدادات المخزنة أعلاه (التفضيلات، قائمة السماح لأنواع "
+"المنشورات، قائمة التخزين المزدوج اليدوية، نتائج الفحص، ذاكرة التخزين المؤقت "
+"للمخزون، والمتغيرات المؤقتة لمعدل الحد لكل منشور). القراءة التالية ستعود "
+"إلى إعدادات التفضيلات الافتراضية المدمجة."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "إعادة تعيين جميع إعدادات كتلة MCP؟ لا يمكن التراجع عن هذا الإجراء."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "تمت إضافة صف جديد. يمكنك الاستمرار في إضافة إدخالات."

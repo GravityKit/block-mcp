@@ -1,0 +1,848 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 19:55+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: es-ES\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "API de Bloques GK"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"API REST para operaciones CRUD a nivel de bloque con preferencias "
+"inteligentes para agentes de IA."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "Entrada no encontrada."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "Índice de bloque fuera de rango."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr ""
+"Eliminando referencia sincronizada del patrón \"%s\" de esta página. El "
+"patrón en sí no se elimina."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "range.start debe ser >= 0."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) está más allá del final de la página (máx. %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "Patrón sincronizado no encontrado."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "Registro de patrones no disponible."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "Patrón \"%s\" no encontrado en el registro."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "El patrón no tiene contenido de bloque."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "El patrón no contiene bloques válidos."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "Ref debe ser una cadena no vacía."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"Ref \"%s\" no encontrada. El bloque puede haber sido eliminado, o la "
+"referencia es de una instantánea antigua. Vuelve a cargar la página para "
+"obtener las referencias actuales."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "Ref \"%s\" no encontrada."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"La referencia apunta a un bloque anidado; insert_blocks antes/después de la "
+"referencia requiere un bloque de nivel superior."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "No se pudo resolver la posición de la referencia."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"El bloque \"%s\" utiliza almacenamiento dual: tanto `attributes` como "
+"`innerHTML` contienen los mismos datos y deben mantenerse sincronizados. "
+"Enviar solo `innerHTML` desincronizará silenciosamente los atributos "
+"estructurados (el caso típico es que yoast/faq-block pierde su array "
+"questions[]). Pasa ambos campos juntos. Consulta block-mcp://agent-guide "
+"para la lista de almacenamiento dual."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "El tipo de bloque \"%s\" no está registrado."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "El bloque \"%1$s\" es antiguo. Usa \"%2$s\" en su lugar."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "un bloque preferido"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "El espacio de nombres %s/ está bloqueado por la política del sitio."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr ""
+"Consulta el recurso block-mcp://agent-guide para la lista completa de "
+"permitidos/denegados."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "Los bloques %s están obsoletos en este sitio."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Se ha superado el límite de reescrituras completas de página. Máximo %d por "
+"minuto y por publicación."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Se ha superado el límite de escrituras. Máximo %d por minuto y por "
+"publicación."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "Revisión no encontrada."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "La revisión no pertenece a esta publicación."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr ""
+"El escaneo en modo almacenamiento se ejecutó recientemente. Inténtalo de "
+"nuevo en %d segundos."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(patrón eliminado)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "La ruta debe ser un array de enteros no negativos."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "La ruta no puede estar vacía."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"El segmento %1$d (índice %2$d) de la ruta está fuera de rango. Índices "
+"válidos en este nivel: %3$s. Ruta parcial hasta el fallo: [%4$s]. Ejecuta "
+"GET /posts/{id}/blocks?outline=true para ver la estructura de la página."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"El bloque \"%1$s\" en [%2$s] no tiene bloques internos. No se puede "
+"recorrer. Usa update-attrs/update-html en este bloque directamente, o "
+"wrap-in-group para añadir hijos."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "El recorrido por la ruta encontró una estructura de bloque inválida."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"No se encontró el bloque destino en el índice %1$d. Índices válidos en este "
+"nivel: %2$s. Ejecuta GET /posts/{id}/blocks?outline=true para ver la "
+"estructura de la página."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs requiere un objeto \"attributes\"."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html requiere una cadena \"innerHTML\"."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block requiere un objeto \"block\" con un campo \"name\"."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr ""
+"Eliminando la referencia al patrón sincronizado \"%s\". El patrón en sí no "
+"se elimina."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "El bloque envoltorio \"%s\" no está registrado."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "El envoltorio \"%s\" es heredado."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "Los bloques %s están obsoletos."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "El bloque no tiene bloques internos para desempaquetar."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child requiere un objeto \"block\" con un \"name\"."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move requiere una ruta \"before\" o \"destination\"."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "El destino debe ser un arreglo de enteros no negativos."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr ""
+"No se puede mover un bloque dentro de sí mismo o de sus propios "
+"descendientes."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "El conteo supera los bloques disponibles en la ruta."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "La ruta de destino no es válida."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "Operación desconocida \"%s\"."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"Cambiar atributos que afectan el renderizado (%1$s) en el bloque estático "
+"\"%2$s\" sin actualizar innerHTML puede dejar el marcado inconsistente. "
+"Considere también proporcionar innerHTML o usar replace-block."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr ""
+"Proporcione uno de los siguientes: campo multipart \"file\", \"url\" o "
+"\"data_base64\"."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr "Solo se puede suministrar uno de \"file\", \"url\" o \"data_base64\"."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "El archivo subido supera el límite de carga del sitio."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "Tipo de archivo no permitido para \"%s\"."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "La URL no es válida o no está permitida."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "El archivo descargado supera el límite de tamaño."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "\"filename\" es obligatorio para cargas base64."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64 supera el límite de tamaño antes de la decodificación."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 no es un base64 válido."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "Los datos decodificados superan el límite de tamaño."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "No se pudo crear el archivo temporal."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "No se pudo escribir el archivo temporal."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "No se encontró el archivo adjunto después de la carga."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "La URL no tiene host."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "No se pudo resolver el host \"%s\"."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "No se pudo validar la IP \"%1$s\" para \"%2$s\"."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr ""
+"El host de la URL \"%1$s\" se resuelve en una IPv4 reservada o privada "
+"(%2$s)."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "No se pudo validar la IPv6 \"%1$s\" para \"%2$s\"."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr ""
+"El host de la URL \"%1$s\" se resuelve en una IPv6 reservada o privada "
+"(%2$s, en %3$s)."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "Se requiere un \"título\" no vacío."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "El tipo de publicación \"%s\" no está permitido."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "Lo sentimos, no tienes permiso para crear publicaciones de este tipo."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"El estado \"%s\" no está permitido al crear. Usa update_post para "
+"transiciones a la papelera."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "No puedes publicar publicaciones de este tipo."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "\"content\" y \"blocks\" son mutuamente excluyentes."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "No puedes asignar autoría a otros usuarios."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media no es un adjunto de imagen válido."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post devolvió un ID no positivo."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "La entrada %d no existe."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "No puedes editar esta entrada."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "El estado \"%s\" no está permitido."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "Cada bloque requiere un \"nombre\"."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "El estado \"future\" requiere una \"fecha\" establecida en el futuro."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "Una entrada no puede ser su propio padre."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "La entrada padre %1$d no existe o no es del tipo \"%2$s\"."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "La taxonomía \"%s\" no existe."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "La taxonomía \"%1$s\" no está registrada para el tipo de entrada \"%2$s\"."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "El término %1$d no existe en la taxonomía \"%2$s\"."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "No tienes permiso para acceder a este endpoint."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "No tienes permiso para editar entradas."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "No tienes permiso para subir archivos."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "Ocurrió un error inesperado."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "Patrón no encontrado."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "No se encontró ninguna entrada para esta URL."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "Proporciona uno de: post_id, url o slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "Ninguna entrada coincidió con la búsqueda."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr "Se debe proporcionar al menos uno de los \"atributos\" o \"innerHTML\"."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "El parámetro \"blocks\" es obligatorio y debe ser una matriz no vacía."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"El parámetro \"blocks\" es obligatorio y debe ser una matriz (puede estar "
+"vacía para una eliminación pura)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "Se requiere \"path\" o \"ref\"."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr "No tiene permiso para editar este %1$s. Capacidad requerida: %2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "Bloquear MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "No tiene permiso para hacer esto."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "No tiene permiso para ver esta página."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "Configuración de Bloquear MCP"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr ""
+"Escaneo del modo de almacenamiento completo. %1$d bloques únicos "
+"clasificados (%2$d almacenamiento dual)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "Configuraciones restablecidas a los valores predeterminados."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"Estas configuraciones determinan cómo la clase de servidor Block MCP "
+"clasifica los bloques (preferido / aceptable / evitar / legado), sugiere "
+"reemplazos y detecta bloques de almacenamiento dual que necesitan tanto "
+"atributos como innerHTML en cada actualización."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "Puntuaciones por nivel de espacio de nombres"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"Puntuación de 0 a 100 por espacio de nombres. >= 80 = preferido, >= 50 = "
+"aceptable, >= 10 = evitar (advertencia), < 10 = legado (rechazo estricto en "
+"inserción)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "Espacio de nombres"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "Puntuación"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "Eliminar"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "Nuevo espacio de nombres"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "nuevo-espacio-de-nombres"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "Nueva puntuación"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "Mapa de reemplazos"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"Cuando se rechaza un bloque heredado al insertarlo, el error sugiere su "
+"reemplazo mapeado. La columna Reemplazo muestra una lista buscable de todos "
+"los bloques registrados actualmente en este sitio — escribe para filtrar o "
+"introduce manualmente cualquier nombre de bloque."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "Bloque heredado"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "Reemplazo"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "Bloque de reemplazo"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "Nuevo bloque heredado"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "legacy/block-name"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "Nuevo reemplazo"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "core/block-name"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "Bloques que almacenan datos en dos lugares"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"La mayoría de los bloques almacenan su contenido en un solo lugar — ya sea "
+"como atributos del bloque (el JSON entre los comentarios wp:block) o como "
+"innerHTML. Algunos bloques almacenan los mismos datos en AMBOS lugares al "
+"mismo tiempo. Para estos, actualizar uno sin el otro corrompe el bloque "
+"silenciosamente."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"Un ejemplo común es <code>yoast/faq-block</code>: mantiene las preguntas en "
+"<code>attributes.questions</code> Y en el marcado inner "
+"<code>&lt;dl&gt;</code>. Si un agente actualiza solo innerHTML, el array "
+"estructurado de preguntas queda obsoleto."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"Block MCP detecta automáticamente la mayoría de los bloques de "
+"almacenamiento dual al escanear tu sitio. Lista aquí cualquier extra (uno "
+"por línea) — cuando un agente intente actualizar uno de estos bloques, se "
+"requerirá enviar atributos e innerHTML juntos, evitando la corrupción."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "Tipos de entradas que los agentes AI pueden crear"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"Restringe los tipos de entradas que la herramienta create_post MCP puede "
+"usar. Marca las casillas para los tipos que quieres que los agentes puedan "
+"crear. Deja todo sin marcar para permitir cualquier tipo de entrada pública "
+"con soporte REST (el valor predeterminado)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "Escaneo del modo de almacenamiento"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"Recorre cada entrada publicada y clasifica cada nombre de bloque distinto "
+"como estático / dinámico / dual. Tras ejecutarlo, las anotaciones "
+"get_page_blocks y la aplicación del almacenamiento dual usan la "
+"clasificación en vivo en lugar de los valores predeterminados del filtro. "
+"Lentitud en sitios grandes."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "Último escaneo clasificó %d nombre(s) de bloque distinto(s)."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "Ejecutar escaneo ahora"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "Restablecer a valores predeterminados"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"Elimina todos los ajustes almacenados anteriormente (preferencias, lista "
+"permitida de tipos de publicación, lista manual de almacenamiento dual, "
+"resultados del escaneo, caché de inventario y transitorios de limitación de "
+"tasa por publicación). La siguiente lectura volverá a los valores "
+"predeterminados codificados en las Preferencias."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "¿Restablecer todos los ajustes de Bloque MCP? Esto no se puede deshacer."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "Fila nueva añadida. Puedes seguir añadiendo entradas."

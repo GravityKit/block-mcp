@@ -1,0 +1,829 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 20:14+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: da-DK\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "GK Block API"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"REST API til blok-niveau CRUD-operationer med smarte præferencer for "
+"AI-agenter."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "Indlæg ikke fundet."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "Blokindeks uden for rækkevidde."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr ""
+"Fjerner synkroniseret mønsterreference \"%s\" fra denne side. Mønstret selv "
+"slettes ikke."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "range.start skal være >= 0."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) er forbi slutningen af siden (maks %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "Synkroniseret mønster ikke fundet."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "Mønsterregister ikke tilgængeligt."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "Mønster \"%s\" ikke fundet i registeret."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "Mønster har intet blokindhold."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "Mønster indeholder ingen gyldige blokke."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "Ref skal være en ikke-tom streng."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"Ref \"%s\" ikke fundet. Blokken kan være slettet, eller ref er fra et ældre "
+"snapshot. Genindlæs siden for at få aktuelle refs."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "Ref \"%s\" ikke fundet."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"Ref henviser til en indlejret blok; insert_blocks før/efter_ref kræver en "
+"top-niveau blok."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "Ref-position kunne ikke opklares."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"Blok \"%s\" er dobbelt-lagring: både `attributes` og `innerHTML` indeholder "
+"de samme data og skal holdes synkroniseret. At sende kun `innerHTML` vil "
+"tavst afsynkronisere de strukturerede attributter (det kanoniske tilfælde "
+"er yoast/faq-block, der mister sit questions[] array). Send begge felter "
+"sammen. Se block-mcp://agent-guide for listen over dobbelt-lagring."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "Bloktype \"%s\" er ikke registreret."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "Blok \"%1$s\" er forældet. Brug i stedet \"%2$s\"."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "en foretrukken blok"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "Navnerummet %s/ er blokeret af sidens politik."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr "Se ressourcen block-mcp://agent-guide for den komplette tillad/bloker-liste."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "%s blokke er forældede på denne side."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Grænsen for fuld side-overskrivning per minut er overskredet. Maks %d per "
+"minut per indlæg."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr "Grænsen for skrivehastighed er overskredet. Maks %d per minut per indlæg."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "Revision ikke fundet."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "Revision tilhører ikke dette indlæg."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr "Lager-tilstand scanning er netop kørt. Prøv igen om %d sekunder."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(slettet mønster)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "Stien skal være et array af ikke-negative heltal."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "Stien kan ikke være tom."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Stisegment %1$d (indeks %2$d) er uden for grænserne. Gyldige indeks på "
+"dette niveau: %3$s. Delvis sti op til fejlen: [%4$s]. Kør GET "
+"/posts/{id}/blocks?outline=true for at se sidestrukturen."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"Blokken \"%1$s\" ved [%2$s] har ingen indre blokke. Kan ikke traversere ind "
+"i den. Brug update-attrs/update-html direkte på denne blok, eller "
+"wrap-in-group for at tilføje børn."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "Stitraversering stødte på ugyldig blokstruktur."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Målblokken ved indeks %1$d blev ikke fundet. Gyldige indeks på dette "
+"niveau: %2$s. Kør GET /posts/{id}/blocks?outline=true for at se "
+"sidestrukturen."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs kræver et \"attributes\" objekt."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html kræver en \"innerHTML\" streng."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block kræver et \"block\"-objekt med et \"name\"-felt."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr "Fjerner synkroniseret mønsterreference \"%s\". Mønstret selv slettes ikke."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "Wrapper-blokken \"%s\" er ikke registreret."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "Wrapper \"%s\" er forældet."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "%s blokke er forældede."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "Blokken har ingen indre blokke at pakke ud."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child kræver et \"block\"-objekt med et \"name\"."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move kræver en \"before\" eller \"destination\" sti."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "Destinationen skal være et array af ikke-negative heltal."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr "Kan ikke flytte en blok ind i sig selv eller dens egne efterkommere."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "Antallet overstiger tilgængelige blokke ved stien."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "Destinationsstien er ugyldig."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "Ukendt operation \"%s\"."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"Ændring af rendering-påvirkende attributter (%1$s) på statisk blok \"%2$s\" "
+"uden opdatering af innerHTML kan efterlade markup inkonsistent. Overvej "
+"også at angive innerHTML eller bruge replace-block."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr "Angiv en af: multipart \"file\"-felt, \"url\" eller \"data_base64\"."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr "Kun én af \"file\", \"url\" eller \"data_base64\" må angives."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "Uploadet fil overskrider webstedets uploadgrænse."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "Ikke tilladt filtype for \"%s\"."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "URL er ikke gyldig eller ikke tilladt."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "Downloadet fil overskrider størrelsesgrænsen."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "\"filename\" er påkrævet for base64-upload."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64 overskrider størrelsesgrænsen før dekodning."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 er ikke gyldig base64."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "Dekodede data overskrider størrelsesgrænsen."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "Kunne ikke oprette midlertidig fil."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "Kunne ikke skrive midlertidig fil."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "Vedhæftning blev ikke fundet efter upload."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "URL har ingen vært."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "Kunne ikke løse vært \"%s\"."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "Kunne ikke validere IP \"%1$s\" for \"%2$s\"."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr "URL-vært \"%1$s\" løser til en reserveret eller privat IPv4 (%2$s)."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "Kunne ikke validere IPv6 \"%1$s\" for \"%2$s\"."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr "URL-vært \"%1$s\" løser til en reserveret eller privat IPv6 (%2$s, i %3$s)."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "En ikke-tom \"title\" er påkrævet."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "Indlægstype \"%s\" er ikke tilladt."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "Beklager, du har ikke tilladelse til at oprette indlæg af denne type."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"Status \"%s\" er ikke tilladt ved oprettelse. Brug update_post til "
+"affaldsovergang."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "Du kan ikke offentliggøre indlæg af denne type."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "\"content\" og \"blocks\" udelukker hinanden."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "Du kan ikke tildele forfatterskab til andre brugere."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media er ikke en gyldig billedefil."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post returnerede et ikke-positivt ID."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "Indlæg %d findes ikke."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "Du kan ikke redigere dette indlæg."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "Status \"%s\" er ikke tilladt."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "Hver blok kræver et \"navn\"."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "Status \"future\" kræver en \"dato\" sat i fremtiden."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "Et indlæg kan ikke være sin egen overordnede."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "Overordnet indlæg %1$d findes ikke eller er ikke af typen \"%2$s\"."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "Taksonomi \"%s\" findes ikke."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "Taksonomi \"%1$s\" er ikke registreret for indlægstype \"%2$s\"."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "Term %1$d findes ikke i taksonomi \"%2$s\"."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "Du har ikke tilladelse til at få adgang til dette slutpunkt."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "Du har ikke tilladelse til at redigere indlæg."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "Du har ikke tilladelse til at uploade filer."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "Der opstod en uventet fejl."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "Mønster ikke fundet."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "Intet indlæg fundet for denne URL."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "Angiv en af følgende: post_id, url eller slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "Intet indlæg matchede opslaget."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr "Mindst én af \"attributter\" eller \"innerHTML\" skal angives."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "Parameteren \"blocks\" er påkrævet og skal være et ikke-tomt array."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"Parameteren \"blocks\" er påkrævet og skal være et array (kan være tomt ved "
+"ren sletning)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "Enten \"path\" eller \"ref\" er påkrævet."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr ""
+"Du har ikke tilladelse til at redigere denne %1$s. Påkrævet tilladelse: "
+"%2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "Blok MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "Du har ikke tilladelse til at gøre dette."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "Du har ikke tilladelse til at se denne side."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "Indstillinger for Blok MCP"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr ""
+"Scan af lagringstilstand fuldført. %1$d unikke blokke klassificeret (%2$d "
+"dual-lagring)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "Indstillinger nulstillet til standard."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"Disse indstillinger styrer, hvordan Block MCP-serveren klassificerer blokke "
+"(foretrukne / acceptable / undgå / ældre), foreslår erstatninger og opdager "
+"dual-lagringsblokke, der kræver både attributter og innerHTML ved hver "
+"opdatering."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "Namespace-lagscores"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"Score 0–100 per namespace. >= 80 = foretrukket, >= 50 = acceptabel, >= 10 = "
+"undgå (advarsel), < 10 = ældre (hård afvisning ved indsættelse)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "Namespace"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "Score"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "Fjern"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "Nyt namespace"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "nyt-namespace"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "Ny score"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "Erstatningskort"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"Når en ældre blok afvises ved indsættelse, foreslår fejlen dens kortlagte "
+"erstatning. Erstatningskolonnen viser en søgbar liste over alle aktuelt "
+"registrerede blokke på dette websted — skriv for at filtrere, eller indtast "
+"manuelt et hvilket som helst bloknavn."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "Ældre blok"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "Erstatning"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "Erstatningsblok"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "Ny ældre blok"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "legacy/block-navn"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "Ny erstatning"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "core/block-navn"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "Blokke der gemmer data to steder"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"De fleste blokke gemmer deres indhold ét sted — enten som blokattributter "
+"(JSON’en mellem wp:block-kommentarerne) eller som innerHTML. Nogle få "
+"blokke gemmer de samme data begge steder samtidig. For disse korruptes "
+"blokken stiltiende, hvis man opdaterer den ene uden den anden."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"Et almindeligt eksempel er <code>yoast/faq-block</code>: den gemmer "
+"spørgsmålene i <code>attributes.questions</code> OG i den indre "
+"<code>&lt;dl&gt;</code> markup. Hvis en agent kun opdaterer innerHTML, "
+"bliver det strukturerede spørgsmål-array forældet."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"Block MCP opdager automatisk de fleste dobbelt-lagringsblokke ved at scanne "
+"dit websted. Angiv eventuelle ekstra her (én per linje) — når en agent "
+"forsøger at opdatere en af disse blokke, skal den sende både attributter og "
+"innerHTML sammen for at forhindre korruption."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "Indlægstyper AI-agenter kan oprette"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"Begræns hvilke indlægstyper create_post MCP-værktøjet må bruge. Marker "
+"felterne for de typer, du ønsker, at agenter skal kunne oprette. Lad alle "
+"felter være umarkerede for at tillade enhver offentlig indlægstype med "
+"REST-understøttelse (standard)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "Lagringstilstandsscanning"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"Går igennem hvert offentliggjort indlæg og klassificerer hvert unikt "
+"bloknavn som statisk / dynamisk / dobbelt. Efter kørsel bruger "
+"get_page_blocks-annoteringer og håndhævelse af dobbeltlagring den "
+"live-klassifikation i stedet for filterstandarderne. Langsomt på store "
+"websteder."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "Sidste scanning klassificerede %d unikke bloknavn(e)."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "Kør scanning nu"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "Nulstil til standard"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"Sletter alle ovenstående gemte indstillinger (præferencer, tilladelsesliste "
+"for post-typer, manuel dobbelt-lagerliste, scanningsresultater, lager-cache "
+"og midlertidige begrænsninger per post). Det næste opslag falder tilbage "
+"til de forudindstillede standardindstillinger for Præferencer."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "Nulstil alle Block MCP-indstillinger? Dette kan ikke fortrydes."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "Ny række tilføjet. Du kan fortsætte med at tilføje poster."

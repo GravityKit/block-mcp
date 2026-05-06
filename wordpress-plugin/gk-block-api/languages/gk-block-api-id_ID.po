@@ -1,0 +1,841 @@
+# Copyright (C) 2026 GravityKit
+# This file is distributed under the GPL-2.0-or-later.
+msgid ""
+msgstr ""
+"Project-Id-Version: GK Block API 1.5.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/gk-block-api\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-05-06T19:52:49+00:00\n"
+"PO-Revision-Date: 2026-05-06 20:14+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"X-Domain: gk-block-api\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"Language: id-ID\n"
+
+#: gk-block-api.php
+#. Plugin Name of the plugin
+msgid "GK Block API"
+msgstr "GK Block API"
+
+#: gk-block-api.php
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+msgid "https://www.gravitykit.com"
+msgstr "https://www.gravitykit.com"
+
+#: gk-block-api.php
+#. Description of the plugin
+msgid ""
+"REST API for block-level CRUD operations with smart preferences for AI "
+"agents."
+msgstr ""
+"REST API untuk operasi CRUD tingkat blok dengan preferensi cerdas untuk "
+"agen AI."
+
+#: gk-block-api.php
+#. Author of the plugin
+msgid "GravityKit"
+msgstr "GravityKit"
+
+#: includes/class-block-crud.php:97
+#: includes/class-block-crud.php:170
+#: includes/class-block-crud.php:311
+#: includes/class-block-crud.php:458
+#: includes/class-block-crud.php:570
+#: includes/class-block-crud.php:742
+#: includes/class-block-crud.php:828
+#: includes/class-block-crud.php:1118
+#: includes/class-block-crud.php:1159
+#: includes/class-block-crud.php:1213
+#: includes/class-block-crud.php:1893
+#: includes/class-block-mutator.php:91
+msgid "Post not found."
+msgstr "Posting tidak ditemukan."
+
+#: includes/class-block-crud.php:184
+#: includes/class-block-crud.php:479
+msgid "Block index out of range."
+msgstr "Indeks blok di luar jangkauan."
+
+#: includes/class-block-crud.php:501
+#: includes/class-block-crud.php:662
+#. translators: %s: pattern name
+#, php-format
+msgid ""
+"Removing synced pattern reference \"%s\" from this page. The pattern itself "
+"is not deleted."
+msgstr ""
+"Menghapus referensi pola sinkron \"%s\" dari halaman ini. Pola itu sendiri "
+"tidak dihapus."
+
+#: includes/class-block-crud.php:581
+msgid "range.start must be >= 0."
+msgstr "range.start harus >= 0."
+
+#: includes/class-block-crud.php:606
+#. translators: 1: start value, 2: maximum visible index
+#, php-format
+msgid "range.start (%1$d) is past the end of the page (max %2$d)."
+msgstr "range.start (%1$d) melewati akhir halaman (maks %2$d)."
+
+#: includes/class-block-crud.php:847
+msgid "Synced pattern not found."
+msgstr "Pola sinkron tidak ditemukan."
+
+#: includes/class-block-crud.php:859
+msgid "Pattern registry not available."
+msgstr "Registri pola tidak tersedia."
+
+#: includes/class-block-crud.php:869
+#, php-format
+msgid "Pattern \"%s\" not found in registry."
+msgstr "Pola \"%s\" tidak ditemukan dalam registri."
+
+#: includes/class-block-crud.php:955
+msgid "Pattern has no block content."
+msgstr "Pola tidak memiliki konten blok."
+
+#: includes/class-block-crud.php:973
+msgid "Pattern contains no valid blocks."
+msgstr "Pola tidak mengandung blok yang valid."
+
+#: includes/class-block-crud.php:1113
+#: includes/class-block-crud.php:1154
+msgid "Ref must be a non-empty string."
+msgstr "Ref harus berupa string yang tidak kosong."
+
+#: includes/class-block-crud.php:1132
+#. translators: %s: ref string
+#, php-format
+msgid ""
+"Ref \"%s\" not found. The block may have been deleted, or the ref is from "
+"an older snapshot. Re-fetch the page to get current refs."
+msgstr ""
+"Ref \"%s\" tidak ditemukan. Blok mungkin telah dihapus, atau ref berasal "
+"dari snapshot lama. Muat ulang halaman untuk mendapatkan ref yang terbaru."
+
+#: includes/class-block-crud.php:1180
+#. translators: %s: ref string
+#, php-format
+msgid "Ref \"%s\" not found."
+msgstr "Ref \"%s\" tidak ditemukan."
+
+#: includes/class-block-crud.php:1204
+msgid ""
+"Ref refers to a nested block; insert_blocks before/after_ref requires a "
+"top-level block."
+msgstr ""
+"Ref merujuk ke blok bersarang; insert_blocks sebelum/sesudah_ref memerlukan "
+"blok tingkat atas."
+
+#: includes/class-block-crud.php:1228
+msgid "Ref position could not be resolved."
+msgstr "Posisi ref tidak dapat ditentukan."
+
+#: includes/class-block-crud.php:1399
+#. translators: %s: block name (e.g., yoast/faq-block)
+#, php-format
+msgid ""
+"Block \"%s\" is dual-storage: both `attributes` and `innerHTML` carry the "
+"same data and must be kept in sync. Sending only `innerHTML` will silently "
+"desync the structured attributes (the canonical case is yoast/faq-block "
+"losing its questions[] array). Pass both fields together. See "
+"block-mcp://agent-guide for the dual-storage list."
+msgstr ""
+"Blok \"%s\" adalah penyimpanan ganda: baik `attributes` maupun `innerHTML` "
+"membawa data yang sama dan harus disinkronkan. Mengirim hanya `innerHTML` "
+"akan menyebabkan atribut terstruktur tidak sinkron secara diam-diam (kasus "
+"kanonis adalah yoast/faq-block kehilangan array questions[]-nya). Kirim "
+"kedua bidang bersama-sama. Lihat block-mcp://agent-guide untuk daftar "
+"penyimpanan ganda."
+
+#: includes/class-block-crud.php:1681
+#, php-format
+msgid "Block type \"%s\" is not registered."
+msgstr "Tipe blok \"%s\" tidak terdaftar."
+
+#: includes/class-block-crud.php:1695
+#. translators: 1: legacy block name, 2: suggested replacement block name
+#, php-format
+msgid "Block \"%1$s\" is legacy. Use \"%2$s\" instead."
+msgstr "Blok \"%1$s\" adalah warisan. Gunakan \"%2$s\" sebagai gantinya."
+
+#: includes/class-block-crud.php:1697
+msgid "a preferred block"
+msgstr "sebuah blok yang disukai"
+
+#: includes/class-block-crud.php:1701
+#. translators: %s: rejected namespace
+#, php-format
+msgid "The %s/ namespace is blocked by site policy."
+msgstr "Namespace %s/ diblokir oleh kebijakan situs."
+
+#: includes/class-block-crud.php:1704
+msgid "See the block-mcp://agent-guide resource for the full allow/deny list."
+msgstr "Lihat sumber block-mcp://agent-guide untuk daftar izinkan/tolak lengkap."
+
+#: includes/class-block-crud.php:1725
+#, php-format
+msgid "%s blocks are deprecated on this site."
+msgstr "%s blok sudah tidak digunakan di situs ini."
+
+#: includes/class-block-crud.php:1829
+#. translators: %d: maximum number of full page rewrites per minute
+#, php-format
+msgid "Full page rewrite rate limit exceeded. Max %d per minute per post."
+msgstr ""
+"Batas kecepatan penulisan ulang halaman penuh terlampaui. Maksimal %d per "
+"menit per posting."
+
+#: includes/class-block-crud.php:1843
+#. translators: %d: maximum number of writes per minute
+#, php-format
+msgid "Write rate limit exceeded. Max %d per minute per post."
+msgstr "Batas kecepatan penulisan terlampaui. Maksimal %d per menit per posting."
+
+#: includes/class-block-crud.php:1898
+msgid "Revision not found."
+msgstr "Revisi tidak ditemukan."
+
+#: includes/class-block-crud.php:1903
+msgid "Revision does not belong to this post."
+msgstr "Revisi tidak milik posting ini."
+
+#: includes/class-block-inventory.php:182
+#. translators: %d: seconds until the next scan is allowed
+#, php-format
+msgid "Storage-mode scan ran recently. Try again in %d seconds."
+msgstr "Pemindaian mode penyimpanan baru saja dijalankan. Coba lagi dalam %d detik."
+
+#: includes/class-block-inventory.php:607
+msgid "(deleted pattern)"
+msgstr "(pola dihapus)"
+
+#: includes/class-block-mutator.php:102
+msgid "Path must be an array of non-negative integers."
+msgstr "Jalur harus berupa array bilangan bulat tidak negatif."
+
+#: includes/class-block-mutator.php:107
+msgid "Path cannot be empty."
+msgstr "Jalur tidak boleh kosong."
+
+#: includes/class-block-mutator.php:122
+#. translators: 1: segment index in path, 2: requested index, 3: valid range, 4: partial path
+#, php-format
+msgid ""
+"Path segment %1$d (index %2$d) is out of bounds. Valid indices at this "
+"level: %3$s. Partial path up to failure: [%4$s]. Run GET "
+"/posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Segmen jalur %1$d (indeks %2$d) berada di luar batas. Indeks valid di "
+"tingkat ini: %3$s. Jalur parsial hingga kegagalan: [%4$s]. Jalankan GET "
+"/posts/{id}/blocks?outline=true untuk melihat struktur halaman."
+
+#: includes/class-block-mutator.php:143
+#. translators: 1: block name, 2: partial path
+#, php-format
+msgid ""
+"Block \"%1$s\" at [%2$s] has no inner blocks. Cannot traverse into it. Use "
+"update-attrs/update-html on this block directly, or wrap-in-group to add "
+"children."
+msgstr ""
+"Blok \"%1$s\" di [%2$s] tidak memiliki blok dalam. Tidak dapat menelusuri "
+"ke dalamnya. Gunakan update-attrs/update-html langsung pada blok ini, atau "
+"wrap-in-group untuk menambahkan anak."
+
+#: includes/class-block-mutator.php:158
+msgid "Path traversal encountered invalid block structure."
+msgstr "Penelusuran jalur menemukan struktur blok tidak valid."
+
+#: includes/class-block-mutator.php:170
+#. translators: 1: requested target index, 2: valid range
+#, php-format
+msgid ""
+"Target block at index %1$d not found. Valid indices at this level: %2$s. "
+"Run GET /posts/{id}/blocks?outline=true to see the page structure."
+msgstr ""
+"Blok target pada indeks %1$d tidak ditemukan. Indeks valid di tingkat ini: "
+"%2$s. Jalankan GET /posts/{id}/blocks?outline=true untuk melihat struktur "
+"halaman."
+
+#: includes/class-block-mutator.php:189
+msgid "update-attrs requires an \"attributes\" object."
+msgstr "update-attrs memerlukan objek \"attributes\"."
+
+#: includes/class-block-mutator.php:245
+msgid "update-html requires an \"innerHTML\" string."
+msgstr "update-html memerlukan string \"innerHTML\"."
+
+#: includes/class-block-mutator.php:279
+msgid "replace-block requires a \"block\" object with a \"name\" field."
+msgstr "replace-block memerlukan objek \"block\" dengan field \"name\"."
+
+#: includes/class-block-mutator.php:341
+#, php-format
+msgid "Removing synced pattern reference \"%s\". The pattern itself is not deleted."
+msgstr ""
+"Menghapus referensi pola yang disinkronkan \"%s\". Pola itu sendiri tidak "
+"dihapus."
+
+#: includes/class-block-mutator.php:390
+#, php-format
+msgid "Wrapper block \"%s\" is not registered."
+msgstr "Blok pembungkus \"%s\" tidak terdaftar."
+
+#: includes/class-block-mutator.php:396
+#, php-format
+msgid "Wrapper \"%s\" is legacy."
+msgstr "Pembungkus \"%s\" adalah versi lama."
+
+#: includes/class-block-mutator.php:401
+#, php-format
+msgid "%s blocks are deprecated."
+msgstr "Blok %s sudah tidak digunakan lagi."
+
+#: includes/class-block-mutator.php:449
+msgid "Block has no inner blocks to unwrap."
+msgstr "Blok tidak memiliki blok dalam untuk dibuka bungkusnya."
+
+#: includes/class-block-mutator.php:502
+msgid "insert-child requires a \"block\" object with a \"name\"."
+msgstr "insert-child memerlukan objek \"block\" dengan \"name\"."
+
+#: includes/class-block-mutator.php:670
+msgid "move requires a \"before\" or \"destination\" path."
+msgstr "move memerlukan jalur \"before\" atau \"destination\"."
+
+#: includes/class-block-mutator.php:675
+msgid "Destination must be array of non-negative integers."
+msgstr "Tujuan harus berupa array bilangan bulat tidak negatif."
+
+#: includes/class-block-mutator.php:691
+msgid "Cannot move a block into itself or its own descendants."
+msgstr "Tidak dapat memindahkan blok ke dalam dirinya sendiri atau keturunannya."
+
+#: includes/class-block-mutator.php:701
+msgid "count exceeds available blocks at path."
+msgstr "Jumlah melebihi blok yang tersedia di jalur."
+
+#: includes/class-block-mutator.php:785
+msgid "Destination path is invalid."
+msgstr "Jalur tujuan tidak valid."
+
+#: includes/class-block-mutator.php:830
+#, php-format
+msgid "Unknown operation \"%s\"."
+msgstr "Operasi tidak dikenal \"%s\"."
+
+#: includes/class-block-safety.php:90
+#. translators: 1: changed attribute names, 2: block name
+#, php-format
+msgid ""
+"Changing render-affecting attributes (%1$s) on static block \"%2$s\" "
+"without updating innerHTML may leave markup inconsistent. Consider also "
+"providing innerHTML or using replace-block."
+msgstr ""
+"Mengubah atribut yang memengaruhi render (%1$s) pada blok statis \"%2$s\" "
+"tanpa memperbarui innerHTML dapat meninggalkan markup tidak konsisten. "
+"Pertimbangkan juga untuk menyediakan innerHTML atau menggunakan "
+"replace-block."
+
+#: includes/class-media-manager.php:63
+msgid "Provide one of: multipart \"file\" field, \"url\", or \"data_base64\"."
+msgstr ""
+"Sediakan salah satu: field multipart \"file\", \"url\", atau "
+"\"data_base64\"."
+
+#: includes/class-media-manager.php:70
+msgid "Only one of \"file\", \"url\", or \"data_base64\" may be supplied."
+msgstr ""
+"Hanya boleh menyediakan salah satu dari \"file\", \"url\", atau "
+"\"data_base64\"."
+
+#: includes/class-media-manager.php:109
+msgid "Uploaded file exceeds the site upload limit."
+msgstr "File yang diunggah melebihi batas unggah situs."
+
+#: includes/class-media-manager.php:121
+#: includes/class-media-manager.php:168
+#: includes/class-media-manager.php:229
+#. translators: %s: filename
+#, php-format
+msgid "Disallowed file type for \"%s\"."
+msgstr "Jenis file tidak diperbolehkan untuk \"%s\"."
+
+#: includes/class-media-manager.php:136
+msgid "URL is not valid or not allowed."
+msgstr "URL tidak valid atau tidak diizinkan."
+
+#: includes/class-media-manager.php:156
+msgid "Downloaded file exceeds size cap."
+msgstr "File yang diunduh melebihi batas ukuran."
+
+#: includes/class-media-manager.php:187
+msgid "\"filename\" is required for base64 uploads."
+msgstr "\"filename\" diperlukan untuk unggahan base64."
+
+#: includes/class-media-manager.php:197
+msgid "data_base64 exceeds size cap before decoding."
+msgstr "data_base64 melebihi batas ukuran sebelum decoding."
+
+#: includes/class-media-manager.php:204
+msgid "data_base64 is not valid base64."
+msgstr "data_base64 bukan base64 yang valid."
+
+#: includes/class-media-manager.php:212
+msgid "Decoded data exceeds size cap."
+msgstr "Data yang didekode melebihi batas ukuran."
+
+#: includes/class-media-manager.php:218
+msgid "Could not create temp file."
+msgstr "Tidak dapat membuat file sementara."
+
+#: includes/class-media-manager.php:223
+msgid "Could not write temp file."
+msgstr "Tidak dapat menulis file sementara."
+
+#: includes/class-media-manager.php:272
+msgid "Attachment not found after upload."
+msgstr "Lampiran tidak ditemukan setelah unggahan."
+
+#: includes/class-media-manager.php:342
+msgid "URL has no host."
+msgstr "URL tidak memiliki host."
+
+#: includes/class-media-manager.php:380
+#. translators: %s: hostname
+#, php-format
+msgid "Could not resolve host \"%s\"."
+msgstr "Tidak dapat menyelesaikan host \"%s\"."
+
+#: includes/class-media-manager.php:403
+#. translators: 1: IP address, 2: hostname
+#, php-format
+msgid "Could not validate IP \"%1$s\" for \"%2$s\"."
+msgstr "Tidak dapat memvalidasi IP \"%1$s\" untuk \"%2$s\"."
+
+#: includes/class-media-manager.php:418
+#. translators: 1: hostname, 2: IPv4 address
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv4 (%2$s)."
+msgstr "Host URL \"%1$s\" mengarah ke IPv4 yang dipesan atau pribadi (%2$s)."
+
+#: includes/class-media-manager.php:462
+#. translators: 1: IPv6 address, 2: hostname
+#, php-format
+msgid "Could not validate IPv6 \"%1$s\" for \"%2$s\"."
+msgstr "Tidak dapat memvalidasi IPv6 \"%1$s\" untuk \"%2$s\"."
+
+#: includes/class-media-manager.php:475
+#. translators: 1: hostname, 2: IPv6 address, 3: CIDR
+#, php-format
+msgid "URL host \"%1$s\" resolves to a reserved or private IPv6 (%2$s, in %3$s)."
+msgstr ""
+"Host URL \"%1$s\" mengarah ke IPv6 yang dipesan atau pribadi (%2$s, dalam "
+"%3$s)."
+
+#: includes/class-post-manager.php:48
+msgid "A non-empty \"title\" is required."
+msgstr "\"title\" yang tidak kosong diperlukan."
+
+#: includes/class-post-manager.php:57
+#. translators: %s: post type slug
+#, php-format
+msgid "Post type \"%s\" is not allowed."
+msgstr "Tipe pos \"%s\" tidak diperbolehkan."
+
+#: includes/class-post-manager.php:69
+msgid "Sorry, you are not allowed to create posts of this type."
+msgstr "Maaf, Anda tidak diperbolehkan membuat pos tipe ini."
+
+#: includes/class-post-manager.php:78
+#. translators: %s: status slug
+#, php-format
+msgid ""
+"Status \"%s\" is not allowed on create. Use update_post for trash "
+"transitions."
+msgstr ""
+"Status \"%s\" tidak diperbolehkan saat membuat. Gunakan update_post untuk "
+"transisi tempat sampah."
+
+#: includes/class-post-manager.php:90
+#: includes/class-post-manager.php:309
+msgid "You cannot publish posts of this type."
+msgstr "Anda tidak dapat menerbitkan pos tipe ini."
+
+#: includes/class-post-manager.php:106
+msgid "\"content\" and \"blocks\" are mutually exclusive."
+msgstr "\"content\" dan \"blocks\" saling eksklusif."
+
+#: includes/class-post-manager.php:169
+#: includes/class-post-manager.php:412
+msgid "You cannot assign authorship to other users."
+msgstr "Anda tidak dapat menetapkan penulis kepada pengguna lain."
+
+#: includes/class-post-manager.php:181
+#: includes/class-post-manager.php:281
+msgid "featured_media is not a valid image attachment."
+msgstr "featured_media bukan lampiran gambar yang valid."
+
+#: includes/class-post-manager.php:198
+msgid "wp_insert_post returned a non-positive ID."
+msgstr "wp_insert_post mengembalikan ID yang tidak positif."
+
+#: includes/class-post-manager.php:254
+#. translators: %d: post ID
+#, php-format
+msgid "Post %d does not exist."
+msgstr "Posting %d tidak ada."
+
+#: includes/class-post-manager.php:262
+msgid "You cannot edit this post."
+msgstr "Anda tidak dapat mengedit posting ini."
+
+#: includes/class-post-manager.php:298
+#. translators: %s: status slug
+#, php-format
+msgid "Status \"%s\" is not allowed."
+msgstr "Status \"%s\" tidak diizinkan."
+
+#: includes/class-post-manager.php:486
+msgid "Each block requires a \"name\"."
+msgstr "Setiap blok memerlukan \"nama\"."
+
+#: includes/class-post-manager.php:522
+#: includes/class-post-manager.php:530
+msgid "Status \"future\" requires a \"date\" set in the future."
+msgstr "Status \"future\" memerlukan \"tanggal\" yang diatur di masa depan."
+
+#: includes/class-post-manager.php:594
+msgid "A post cannot be its own parent."
+msgstr "Sebuah posting tidak dapat menjadi induknya sendiri."
+
+#: includes/class-post-manager.php:600
+#. translators: 1: parent ID, 2: post type slug
+#, php-format
+msgid "Parent post %1$d does not exist or is not of type \"%2$s\"."
+msgstr "Posting induk %1$d tidak ada atau bukan tipe \"%2$s\"."
+
+#: includes/class-post-manager.php:635
+#: includes/class-term-manager.php:34
+#. translators: %s: taxonomy slug
+#, php-format
+msgid "Taxonomy \"%s\" does not exist."
+msgstr "Taksonomi \"%s\" tidak ada."
+
+#: includes/class-post-manager.php:643
+#. translators: 1: taxonomy slug, 2: post type slug
+#, php-format
+msgid "Taxonomy \"%1$s\" is not registered for post type \"%2$s\"."
+msgstr "Taksonomi \"%1$s\" tidak terdaftar untuk tipe posting \"%2$s\"."
+
+#: includes/class-post-manager.php:656
+#. translators: 1: term ID, 2: taxonomy slug
+#, php-format
+msgid "Term %1$d does not exist in taxonomy \"%2$s\"."
+msgstr "Istilah %1$d tidak ada dalam taksonomi \"%2$s\"."
+
+#: includes/class-rest-controller.php:777
+msgid "You do not have permission to access this endpoint."
+msgstr "Anda tidak memiliki izin untuk mengakses endpoint ini."
+
+#: includes/class-rest-controller.php:794
+msgid "You do not have permission to edit posts."
+msgstr "Anda tidak memiliki izin untuk mengedit posting."
+
+#: includes/class-rest-controller.php:811
+msgid "You do not have permission to upload files."
+msgstr "Anda tidak memiliki izin untuk mengunggah file."
+
+#: includes/class-rest-controller.php:937
+msgid "An unexpected error occurred."
+msgstr "Terjadi kesalahan tak terduga."
+
+#: includes/class-rest-controller.php:1046
+msgid "Pattern not found."
+msgstr "Pola tidak ditemukan."
+
+#: includes/class-rest-controller.php:1132
+msgid "No post found for this URL."
+msgstr "Tidak ada posting yang ditemukan untuk URL ini."
+
+#: includes/class-rest-controller.php:1276
+msgid "Provide one of: post_id, url, or slug."
+msgstr "Berikan salah satu dari: post_id, url, atau slug."
+
+#: includes/class-rest-controller.php:1284
+msgid "No post matched the lookup."
+msgstr "Tidak ada posting yang cocok dengan pencarian."
+
+#: includes/class-rest-controller.php:1597
+#: includes/class-rest-controller.php:1671
+msgid "At least one of \"attributes\" or \"innerHTML\" must be provided."
+msgstr ""
+"Setidaknya salah satu dari \"attributes\" atau \"innerHTML\" harus "
+"disediakan."
+
+#: includes/class-rest-controller.php:1738
+#: includes/class-rest-controller.php:1852
+msgid "The \"blocks\" parameter is required and must be a non-empty array."
+msgstr "Parameter \"blocks\" diperlukan dan harus berupa array yang tidak kosong."
+
+#: includes/class-rest-controller.php:1790
+msgid ""
+"The \"blocks\" parameter is required and must be an array (may be empty for "
+"a pure delete)."
+msgstr ""
+"Parameter \"blocks\" diperlukan dan harus berupa array (bisa kosong untuk "
+"penghapusan murni)."
+
+#: includes/class-rest-controller.php:1950
+msgid "Either \"path\" or \"ref\" is required."
+msgstr "Salah satu dari \"path\" atau \"ref\" diperlukan."
+
+#: includes/class-rest-controller.php:2066
+#. translators: 1: post type label, 2: required capability
+#, php-format
+msgid "You do not have permission to edit this %1$s. Required capability: %2$s."
+msgstr ""
+"Anda tidak memiliki izin untuk mengedit %1$s ini. Kemampuan yang "
+"diperlukan: %2$s."
+
+#: includes/class-settings-page.php:67
+#: includes/class-settings-page.php:68
+msgid "Block MCP"
+msgstr "Blok MCP"
+
+#: includes/class-settings-page.php:241
+#: includes/class-settings-page.php:265
+msgid "You do not have permission to do this."
+msgstr "Anda tidak memiliki izin untuk melakukan ini."
+
+#: includes/class-settings-page.php:302
+msgid "You do not have permission to view this page."
+msgstr "Anda tidak memiliki izin untuk melihat halaman ini."
+
+#: includes/class-settings-page.php:341
+msgid "Block MCP Settings"
+msgstr "Pengaturan Blok MCP"
+
+#: includes/class-settings-page.php:348
+#. translators: 1: total unique blocks, 2: dual-storage count
+#, php-format
+msgid ""
+"Storage-mode scan complete. %1$d unique blocks classified (%2$d "
+"dual-storage)."
+msgstr ""
+"Pemeriksaan mode penyimpanan selesai. %1$d blok unik diklasifikasikan (%2$d "
+"penyimpanan ganda)."
+
+#: includes/class-settings-page.php:356
+msgid "Settings reset to defaults."
+msgstr "Pengaturan direset ke pengaturan default."
+
+#: includes/class-settings-page.php:359
+msgid ""
+"These settings drive how the Block MCP server classifies blocks (preferred "
+"/ acceptable / avoid / legacy), suggests replacements, and detects "
+"dual-storage blocks that need both attributes and innerHTML on every update."
+msgstr ""
+"Pengaturan ini mengatur bagaimana server Block MCP mengklasifikasikan blok "
+"(preferensi / dapat diterima / hindari / warisan), menyarankan pengganti, "
+"dan mendeteksi blok penyimpanan ganda yang membutuhkan atribut dan "
+"innerHTML pada setiap pembaruan."
+
+#: includes/class-settings-page.php:389
+msgid "Namespace tier scores"
+msgstr "Skor tingkat namespace"
+
+#: includes/class-settings-page.php:390
+msgid ""
+"Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = "
+"avoid (warning), < 10 = legacy (hard reject on insert)."
+msgstr ""
+"Skor 0–100 per namespace. >= 80 = preferensi, >= 50 = dapat diterima, >= 10 "
+"= hindari (peringatan), < 10 = warisan (penolakan keras saat penyisipan)."
+
+#: includes/class-settings-page.php:394
+#: includes/class-settings-page.php:409
+msgid "Namespace"
+msgstr "Namespace"
+
+#: includes/class-settings-page.php:395
+#: includes/class-settings-page.php:413
+msgid "Score"
+msgstr "Skor"
+
+#: includes/class-settings-page.php:396
+#: includes/class-settings-page.php:417
+#: includes/class-settings-page.php:443
+#: includes/class-settings-page.php:464
+msgid "Remove"
+msgstr "Hapus"
+
+#: includes/class-settings-page.php:424
+msgid "New namespace"
+msgstr "Namespace baru"
+
+#: includes/class-settings-page.php:425
+msgid "new-namespace"
+msgstr "namespace-baru"
+
+#: includes/class-settings-page.php:428
+msgid "New score"
+msgstr "Skor baru"
+
+#: includes/class-settings-page.php:436
+msgid "Replacement map"
+msgstr "Peta pengganti"
+
+#: includes/class-settings-page.php:437
+msgid ""
+"When a legacy block is rejected on insert, the error suggests its mapped "
+"replacement. The Replacement column shows a searchable list of all "
+"currently registered blocks on this site — type to filter, or enter any "
+"block name manually."
+msgstr ""
+"Ketika blok warisan ditolak saat penyisipan, kesalahan akan menyarankan "
+"pengganti yang dipetakan. Kolom Pengganti menampilkan daftar yang dapat "
+"dicari dari semua blok yang terdaftar saat ini di situs ini — ketik untuk "
+"memfilter, atau masukkan nama blok secara manual."
+
+#: includes/class-settings-page.php:441
+#: includes/class-settings-page.php:456
+msgid "Legacy block"
+msgstr "Blok warisan"
+
+#: includes/class-settings-page.php:442
+msgid "Replacement"
+msgstr "Pengganti"
+
+#: includes/class-settings-page.php:460
+msgid "Replacement block"
+msgstr "Blok pengganti"
+
+#: includes/class-settings-page.php:471
+msgid "New legacy block"
+msgstr "Blok warisan baru"
+
+#: includes/class-settings-page.php:472
+msgid "legacy/block-name"
+msgstr "warisan/nama-blok"
+
+#: includes/class-settings-page.php:475
+msgid "New replacement"
+msgstr "Pengganti baru"
+
+#: includes/class-settings-page.php:476
+msgid "core/block-name"
+msgstr "inti/nama-blok"
+
+#: includes/class-settings-page.php:483
+msgid "Blocks that store data in two places"
+msgstr "Blok yang menyimpan data di dua tempat"
+
+#: includes/class-settings-page.php:485
+msgid ""
+"Most blocks store their content in one place — either as block attributes "
+"(the JSON between the wp:block comments) or as innerHTML. A few blocks "
+"store the same data in BOTH at the same time. For these, updating one "
+"without the other corrupts the block silently."
+msgstr ""
+"Sebagian besar blok menyimpan kontennya di satu tempat — baik sebagai "
+"atribut blok (JSON di antara komentar wp:block) atau sebagai innerHTML. "
+"Beberapa blok menyimpan data yang sama di KEDUA tempat sekaligus. Untuk "
+"ini, memperbarui salah satunya tanpa yang lain akan merusak blok secara "
+"diam-diam."
+
+#: includes/class-settings-page.php:490
+msgid ""
+"A common example is <code>yoast/faq-block</code>: it keeps the questions in "
+"<code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> "
+"markup. If an agent updates only innerHTML, the structured questions array "
+"goes stale."
+msgstr ""
+"Contoh umum adalah <code>yoast/faq-block</code>: blok ini menyimpan "
+"pertanyaan di <code>attributes.questions</code> DAN di markup inner "
+"<code>&lt;dl&gt;</code>. Jika agen hanya memperbarui innerHTML, array "
+"pertanyaan terstruktur menjadi usang."
+
+#: includes/class-settings-page.php:496
+msgid ""
+"Block MCP detects most dual-storage blocks automatically by scanning your "
+"site. List any extras here (one per line) — when an agent tries to update "
+"one of these blocks, it will be required to send both attributes and "
+"innerHTML together, preventing the corruption."
+msgstr ""
+"Block MCP mendeteksi sebagian besar blok penyimpanan ganda secara otomatis "
+"dengan memindai situs Anda. Daftarkan tambahan apa pun di sini (satu per "
+"baris) — saat agen mencoba memperbarui salah satu blok ini, mereka "
+"diwajibkan mengirim atribut dan innerHTML bersama-sama, mencegah kerusakan."
+
+#: includes/class-settings-page.php:501
+msgid "Post types AI agents can create"
+msgstr "Jenis posting yang dapat dibuat agen AI"
+
+#: includes/class-settings-page.php:502
+msgid ""
+"Restrict which post types the create_post MCP tool is allowed to use. Check "
+"the boxes for the types you want agents to be able to create. Leave "
+"everything unchecked to allow any public post type with REST support (the "
+"default)."
+msgstr ""
+"Batasi jenis posting yang dapat digunakan alat create_post MCP. Centang "
+"kotak untuk jenis yang Anda izinkan agen buat. Biarkan semuanya tidak "
+"dicentang untuk mengizinkan jenis posting publik apa pun dengan dukungan "
+"REST (default)."
+
+#: includes/class-settings-page.php:524
+msgid "Storage-mode scan"
+msgstr "Pemindaian mode penyimpanan"
+
+#: includes/class-settings-page.php:525
+msgid ""
+"Walks every published post and classifies each distinct block name as "
+"static / dynamic / dual. After running, get_page_blocks annotations and "
+"dual-storage enforcement use the live classification instead of the filter "
+"defaults. Slow on large sites."
+msgstr ""
+"Memeriksa setiap posting yang diterbitkan dan mengklasifikasikan setiap "
+"nama blok berbeda sebagai statis / dinamis / ganda. Setelah dijalankan, "
+"anotasi get_page_blocks dan penegakan penyimpanan ganda menggunakan "
+"klasifikasi langsung alih-alih filter default. Lambat pada situs besar."
+
+#: includes/class-settings-page.php:531
+#. translators: %d: number of distinct block names persisted
+#, php-format
+msgid "Last scan classified %d distinct block name(s)."
+msgstr "Pemindaian terakhir mengklasifikasikan %d nama blok berbeda."
+
+#: includes/class-settings-page.php:540
+msgid "Run scan now"
+msgstr "Jalankan pemindaian sekarang"
+
+#: includes/class-settings-page.php:545
+#: includes/class-settings-page.php:550
+msgid "Reset to defaults"
+msgstr "Reset ke default"
+
+#: includes/class-settings-page.php:546
+msgid ""
+"Deletes all settings stored above (preferences, post-type allow-list, "
+"manual dual-storage list, scan results, inventory cache, and per-post "
+"rate-limit transients). The next read falls back to the hard-coded "
+"Preferences defaults."
+msgstr ""
+"Menghapus semua pengaturan yang disimpan di atas (preferensi, daftar "
+"izinkan tipe pos, daftar penyimpanan ganda manual, hasil pemindaian, cache "
+"inventaris, dan transient batas laju per-pos). Pembacaan berikutnya akan "
+"kembali ke default Preferensi yang dikodekan secara keras."
+
+#: includes/class-settings-page.php:547
+msgid "Reset all Block MCP settings? This cannot be undone."
+msgstr "Atur ulang semua pengaturan Block MCP? Ini tidak dapat dibatalkan."
+
+#: includes/class-settings-page.php:561
+msgid "New row added. You can keep adding entries."
+msgstr "Baris baru ditambahkan. Anda dapat terus menambahkan entri."
