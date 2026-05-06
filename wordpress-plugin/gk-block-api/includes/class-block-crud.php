@@ -117,7 +117,43 @@ class Block_CRUD {
 		// When false, refs are still surfaced in the response but won't resolve later.
 		$dirty = $this->assign_missing_refs_recursive( $blocks );
 		if ( $dirty && $persist_refs ) {
-			$this->persist_ref_assignments( $post_id, $blocks );
+			// Concurrency guard. Two readers landing on a fresh post could both
+			// generate random refs and both call persist_ref_assignments(); the
+			// second writer would silently win, leaving the first reader's
+			// response with refs that no longer match disk. wp_cache_add() is
+			// atomic on persistent object caches (Memcached/Redis), so use it
+			// as a short-lived per-post lock around the assign-and-persist.
+			$lock_key  = 'gk_block_api_ref_lock_' . (int) $post_id;
+			$got_lock  = wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
+
+			if ( $got_lock ) {
+				try {
+					// Re-parse current content under the lock — another writer
+					// may have raced in between our parse_blocks() above and
+					// our lock acquisition. If they did, their refs are now on
+					// disk; assign_missing_refs_recursive() will be a no-op and
+					// we won't double-write.
+					$fresh = parse_blocks( (string) get_post_field( 'post_content', $post_id ) );
+					if ( is_array( $fresh ) && ! empty( $fresh ) ) {
+						$blocks = $fresh;
+					}
+					if ( $this->assign_missing_refs_recursive( $blocks ) ) {
+						$this->persist_ref_assignments( $post_id, $blocks );
+					}
+				} finally {
+					wp_cache_delete( $lock_key, 'gk_block_api' );
+				}
+			} else {
+				// Another worker is mid-assignment. Briefly wait for them to
+				// finish, then re-parse so we surface whatever they persist
+				// instead of our locally-generated random refs (which would
+				// be stale by the time the response leaves this server).
+				usleep( 50000 ); // 50 ms.
+				$fresh = parse_blocks( (string) get_post_field( 'post_content', $post_id ) );
+				if ( is_array( $fresh ) && ! empty( $fresh ) ) {
+					$blocks = $fresh;
+				}
+			}
 		}
 
 		// Set up post context so shortcodes and render_block() can

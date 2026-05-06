@@ -49,6 +49,39 @@ if ( ! function_exists( 'clean_post_cache' ) ) {
 		unset( $post_id );
 	}
 }
+// Minimal in-memory object cache used by the ref-assignment lock. The lock
+// only needs add/delete; we don't simulate the TTL because tests live within
+// a single process invocation.
+$GLOBALS['_gk_test_object_cache'] = array();
+if ( ! function_exists( 'wp_cache_add' ) ) {
+	function wp_cache_add( $key, $data, $group = '', $expire = 0 ) {
+		unset( $group, $expire );
+		if ( isset( $GLOBALS['_gk_test_object_cache'][ $key ] ) ) {
+			return false;
+		}
+		$GLOBALS['_gk_test_object_cache'][ $key ] = $data;
+		return true;
+	}
+}
+if ( ! function_exists( 'wp_cache_delete' ) ) {
+	function wp_cache_delete( $key, $group = '' ) {
+		unset( $group );
+		if ( ! isset( $GLOBALS['_gk_test_object_cache'][ $key ] ) ) {
+			return false;
+		}
+		unset( $GLOBALS['_gk_test_object_cache'][ $key ] );
+		return true;
+	}
+}
+if ( ! function_exists( 'get_post_field' ) ) {
+	function get_post_field( $field, $post_id ) {
+		if ( ! isset( $GLOBALS['_gk_test_posts'][ $post_id ] ) ) {
+			return '';
+		}
+		$post = $GLOBALS['_gk_test_posts'][ $post_id ];
+		return isset( $post->{$field} ) ? $post->{$field} : '';
+	}
+}
 // Mirror WordPress's wp_slash/wp_unslash so the test environment behaves like
 // real WP — strings are addslashes'd, arrays/objects walked recursively. Using
 // identity stubs would let slashing bugs slip through (e.g., save_post_content

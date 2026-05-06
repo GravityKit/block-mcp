@@ -534,6 +534,103 @@ class BlockRefsTest extends \PHPUnit\Framework\TestCase {
 		$this->assertNotEmpty( $this->current_blocks()[0]['attrs']['metadata']['gk_ref'] );
 	}
 
+	// ── Concurrent ref-assignment lock (issue #5) ──────────────────────
+
+	/**
+	 * The happy path: a single get_blocks() call acquires the lock,
+	 * persists refs, and releases the lock cleanly.
+	 *
+	 * Verifies the lock is released afterwards (so subsequent reads can
+	 * still write) and that the ref-assignment did happen.
+	 */
+	public function test_get_blocks_acquires_and_releases_ref_lock() {
+		$GLOBALS['_gk_test_object_cache'] = array();
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) ) );
+
+		$result = $this->crud->get_blocks( $this->post_id );
+
+		$this->assertNotEmpty( $result );
+		$this->assertNotEmpty( $result[0]['attributes']['metadata']['gk_ref'] );
+		$this->assertArrayNotHasKey(
+			'gk_block_api_ref_lock_' . $this->post_id,
+			$GLOBALS['_gk_test_object_cache'],
+			'lock must be released so the next reader can also write'
+		);
+	}
+
+	/**
+	 * When another worker is mid-assign-and-persist (the lock is held by
+	 * someone else), get_blocks must NOT also persist refs. It surfaces
+	 * whatever's currently on disk via a re-parse so it doesn't return
+	 * locally-generated random refs that nobody else will see.
+	 *
+	 * Pins the contract: in a contended scenario, only the lock-holder
+	 * writes; everyone else reads.
+	 */
+	public function test_get_blocks_skips_persistence_when_lock_held_by_another_worker() {
+		// Seed the lock as already held — simulating another worker mid-flight.
+		$GLOBALS['_gk_test_object_cache']                                  = array();
+		$GLOBALS['_gk_test_object_cache'][ 'gk_block_api_ref_lock_' . $this->post_id ] = 1;
+
+		// Start with a fresh post (no refs yet) so get_blocks would normally
+		// trigger the assign-and-persist path.
+		$blocks = array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) );
+		$this->make_post( $blocks );
+		$content_before = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
+
+		$result = $this->crud->get_blocks( $this->post_id );
+
+		// The post_content on disk must be unchanged: we deferred to the
+		// (simulated) other worker. The lock-holder will eventually persist
+		// and any subsequent read by us will see those refs.
+		$this->assertSame(
+			$content_before,
+			$GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content,
+			'no write should happen when another worker holds the lock'
+		);
+
+		// We still return blocks — the response is usable for read-only
+		// purposes — but the API consumer is expected to retry if it needs
+		// stable refs (which the lock-holder will provide on its write).
+		$this->assertNotEmpty( $result );
+
+		// The lock we seeded must still be there — we didn't release someone
+		// else's lock. (Cleared at end of test by setUp on the next run.)
+		$this->assertArrayHasKey(
+			'gk_block_api_ref_lock_' . $this->post_id,
+			$GLOBALS['_gk_test_object_cache']
+		);
+	}
+
+	/**
+	 * If a previous request crashed mid-assignment but the lock was somehow
+	 * left over, the next legitimate request must still succeed eventually.
+	 *
+	 * In production wp_cache_add() expires the lock after 5s. Tests don't
+	 * model TTL, but this test verifies the lock-released-on-success path
+	 * by making two sequential calls and confirming both produce refs.
+	 */
+	public function test_get_blocks_lock_released_after_success_allows_subsequent_reads() {
+		$GLOBALS['_gk_test_object_cache'] = array();
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) ) );
+
+		// First call: assigns + persists + releases lock.
+		$first = $this->crud->get_blocks( $this->post_id );
+		$ref1  = $first[0]['attributes']['metadata']['gk_ref'];
+
+		// Second call: should NOT block on the lock from call 1; should also
+		// be a no-op (refs already there) so the post_content hash stays the
+		// same.
+		$second = $this->crud->get_blocks( $this->post_id );
+		$ref2   = $second[0]['attributes']['metadata']['gk_ref'];
+
+		$this->assertSame( $ref1, $ref2, 'refs must be stable across reads once persisted' );
+		$this->assertArrayNotHasKey(
+			'gk_block_api_ref_lock_' . $this->post_id,
+			$GLOBALS['_gk_test_object_cache']
+		);
+	}
+
 	// ── Helpers ────────────────────────────────────────────────────────
 
 	private function _with_ref( array $block, string $ref ): array {
