@@ -63,19 +63,10 @@ describe('handleMutateTool', () => {
     ).rejects.toThrow('name');
   });
 
-  it('move requires before or destination', async () => {
+  it('move requires a destination', async () => {
     await expect(
       handleMutateTool('edit_block_tree', { post_id: 1, op: 'move', path: [0] }, mockClient)
-    ).rejects.toThrow('before');
-  });
-
-  it('move accepts before param', async () => {
-    await handleMutateTool('edit_block_tree', {
-      post_id: 1, op: 'move', path: [0], before: [5]
-    }, mockClient);
-    expect(mockClient.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
-      op: 'move', path: [0], before: [5]
-    }));
+    ).rejects.toThrow('destination');
   });
 
   it('move accepts destination param', async () => {
@@ -89,7 +80,7 @@ describe('handleMutateTool', () => {
 
   it('move accepts count param', async () => {
     await handleMutateTool('edit_block_tree', {
-      post_id: 1, op: 'move', path: [0], before: [5], count: 3
+      post_id: 1, op: 'move', path: [0], destination: [5], count: 3
     }, mockClient);
     expect(mockClient.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
       count: 3
@@ -99,7 +90,7 @@ describe('handleMutateTool', () => {
   it('move rejects non-integer count', async () => {
     await expect(
       handleMutateTool('edit_block_tree', {
-        post_id: 1, op: 'move', path: [0], before: [5], count: 0
+        post_id: 1, op: 'move', path: [0], destination: [5], count: 0
       }, mockClient)
     ).rejects.toThrow('count must be a positive integer');
   });

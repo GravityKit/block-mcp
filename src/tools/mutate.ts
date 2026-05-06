@@ -81,8 +81,6 @@ export const MUTATE_TOOLS = [{
       position:        { type: ['integer', 'string'], description: 'insert-child: index, "start", or "end" (default).' },
       destination:     { type: 'array', items: { type: 'integer' }, description: 'move: destination path (pre-move indexing).' },
       destination_ref: { type: 'string', description: 'move: destination block ref (alternative to destination).' },
-      before:          { type: 'array', items: { type: 'integer' }, description: 'DEPRECATED legacy alias for "destination" (move op). Removed in v2 — use "destination".' },
-      before_ref:      { type: 'string', description: 'DEPRECATED legacy alias for "destination_ref" (move op). Removed in v2 — use "destination_ref".' },
       count:           { type: 'integer', description: 'move: consecutive blocks to move. Default 1.' },
     },
     required: ['post_id', 'op'],
@@ -201,37 +199,25 @@ export async function handleMutateTool(
     case 'duplicate':
       break;
     case 'move': {
-      const before = args.before;
       const destination = args.destination;
-      const beforeRef = args.before_ref as string | undefined;
       const destRef = args.destination_ref as string | undefined;
 
-      const hasBefore     = before !== undefined && before !== null;
       const hasDestination = destination !== undefined && destination !== null;
-      const hasBeforeRef  = typeof beforeRef === 'string' && beforeRef.length > 0;
-      const hasDestRef    = typeof destRef === 'string' && destRef.length > 0;
+      const hasDestRef     = typeof destRef === 'string' && destRef.length > 0;
 
       // XOR: a path and a ref for the same anchor is ambiguous — silently
       // preferring one would make a stale path silently invalidate a fresh ref.
-      if (hasBefore && hasBeforeRef) {
-        throw new Error('move: provide "before" path OR "before_ref", not both');
-      }
       if (hasDestination && hasDestRef) {
         throw new Error('move: provide "destination" path OR "destination_ref", not both');
       }
 
-      if (hasBefore) {
-        isIntegerArray(before, 'before');
-        requestBody.before = before as number[];
-      } else if (hasDestination) {
+      if (hasDestination) {
         isIntegerArray(destination, 'destination');
         requestBody.destination = destination as number[];
-      } else if (hasBeforeRef) {
-        requestBody.before_ref = beforeRef as string;
       } else if (hasDestRef) {
         requestBody.destination_ref = destRef as string;
       } else {
-        throw new Error('move requires "before"/"destination" path or "before_ref"/"destination_ref"');
+        throw new Error('move requires "destination" path or "destination_ref"');
       }
       if (args.count !== undefined && args.count !== null) {
         const count = args.count as number;

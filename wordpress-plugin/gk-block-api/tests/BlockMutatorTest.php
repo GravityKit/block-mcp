@@ -971,7 +971,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 			$this->post_id,
 			'move',
 			array( 0 ),
-			array( 'before' => array( 2 ) )
+			array( 'destination' => array( 2 ) )
 		);
 		$this->assertTrue( $result['success'] );
 		$saved = $this->current_blocks();
@@ -989,7 +989,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 			$this->post_id,
 			'move',
 			array( 0 ),
-			array( 'before' => array( 2 ), 'count' => 5 )
+			array( 'destination' => array( 2 ), 'count' => 5 )
 		);
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertEquals( 'invalid_count', $result->get_error_code() );
@@ -1040,7 +1040,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 			$this->post_id,
 			'move',
 			array( 0 ),
-			array( 'before' => array( 4 ), 'count' => 2 )
+			array( 'destination' => array( 4 ), 'count' => 2 )
 		);
 		$this->assertTrue( $result['success'] );
 		$saved = $this->current_blocks();
@@ -1049,89 +1049,6 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( '<p>A</p>', $saved[2]['innerHTML'] );
 		$this->assertEquals( '<p>B</p>', $saved[3]['innerHTML'] );
 		$this->assertEquals( 2, $result['block']['moved_count'] );
-	}
-
-	/**
-	 * Issue #8 — `before` is a deprecated alias for `destination` and must
-	 * surface a deprecation warning when it's the only param supplied.
-	 */
-	public function test_move_with_before_emits_deprecation_warning() {
-		$this->make_post( array(
-			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
-			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
-		) );
-		$result = $this->mutator->mutate(
-			$this->post_id,
-			'move',
-			array( 0 ),
-			array( 'before' => array( 1 ) )
-		);
-		$this->assertTrue( $result['success'] );
-		$this->assertNotEmpty( $result['warnings'] );
-
-		$found = false;
-		foreach ( $result['warnings'] as $w ) {
-			if ( isset( $w['type'] ) && 'deprecated_param' === $w['type'] && 'before' === ( $w['param'] ?? '' ) ) {
-				$found = true;
-				break;
-			}
-		}
-		$this->assertTrue( $found, 'using "before" must produce a deprecated_param warning' );
-	}
-
-	/**
-	 * `destination` is the canonical name and must NOT emit a deprecation
-	 * warning. Pins the contract that callers who already migrated stay
-	 * warning-clean.
-	 */
-	public function test_move_with_destination_emits_no_deprecation_warning() {
-		$this->make_post( array(
-			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
-			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
-		) );
-		$result = $this->mutator->mutate(
-			$this->post_id,
-			'move',
-			array( 0 ),
-			array( 'destination' => array( 1 ) )
-		);
-		$this->assertTrue( $result['success'] );
-		foreach ( (array) ( $result['warnings'] ?? array() ) as $w ) {
-			$this->assertNotSame(
-				'deprecated_param',
-				$w['type'] ?? '',
-				'destination must not produce a deprecated_param warning'
-			);
-		}
-	}
-
-	/**
-	 * When both `before` and `destination` are supplied, `destination` wins
-	 * (it's canonical) and no deprecation fires — caller has already migrated.
-	 */
-	public function test_move_with_both_destination_and_before_uses_destination() {
-		$this->make_post( array(
-			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
-			$this->block( 'core/paragraph', array(), '<p>B</p>' ),
-			$this->block( 'core/paragraph', array(), '<p>C</p>' ),
-		) );
-		// destination=[2] is the canonical anchor; passing before=[0] is
-		// nonsense (would mean "no move"), but should be ignored entirely.
-		$result = $this->mutator->mutate(
-			$this->post_id,
-			'move',
-			array( 0 ),
-			array( 'destination' => array( 2 ), 'before' => array( 0 ) )
-		);
-		$this->assertTrue( $result['success'] );
-		$saved = $this->current_blocks();
-		$this->assertEquals( '<p>B</p>', $saved[0]['innerHTML'] );
-		$this->assertEquals( '<p>A</p>', $saved[1]['innerHTML'] );
-		$this->assertEquals( '<p>C</p>', $saved[2]['innerHTML'] );
-		// No deprecation: destination was supplied.
-		foreach ( (array) ( $result['warnings'] ?? array() ) as $w ) {
-			$this->assertNotSame( 'deprecated_param', $w['type'] ?? '' );
-		}
 	}
 
 	// ── dry_run ────────────────────────────────────────────────────

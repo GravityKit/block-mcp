@@ -58056,8 +58056,6 @@ var MUTATE_TOOLS = [{
       position: { type: ["integer", "string"], description: 'insert-child: index, "start", or "end" (default).' },
       destination: { type: "array", items: { type: "integer" }, description: "move: destination path (pre-move indexing)." },
       destination_ref: { type: "string", description: "move: destination block ref (alternative to destination)." },
-      before: { type: "array", items: { type: "integer" }, description: 'DEPRECATED legacy alias for "destination" (move op). Removed in v2 \u2014 use "destination".' },
-      before_ref: { type: "string", description: 'DEPRECATED legacy alias for "destination_ref" (move op). Removed in v2 \u2014 use "destination_ref".' },
       count: { type: "integer", description: "move: consecutive blocks to move. Default 1." }
     },
     required: ["post_id", "op"]
@@ -58155,32 +58153,20 @@ async function handleMutateTool(toolName, args, client2) {
     case "duplicate":
       break;
     case "move": {
-      const before = args.before;
       const destination = args.destination;
-      const beforeRef = args.before_ref;
       const destRef = args.destination_ref;
-      const hasBefore = before !== void 0 && before !== null;
       const hasDestination = destination !== void 0 && destination !== null;
-      const hasBeforeRef = typeof beforeRef === "string" && beforeRef.length > 0;
       const hasDestRef = typeof destRef === "string" && destRef.length > 0;
-      if (hasBefore && hasBeforeRef) {
-        throw new Error('move: provide "before" path OR "before_ref", not both');
-      }
       if (hasDestination && hasDestRef) {
         throw new Error('move: provide "destination" path OR "destination_ref", not both');
       }
-      if (hasBefore) {
-        isIntegerArray(before, "before");
-        requestBody.before = before;
-      } else if (hasDestination) {
+      if (hasDestination) {
         isIntegerArray(destination, "destination");
         requestBody.destination = destination;
-      } else if (hasBeforeRef) {
-        requestBody.before_ref = beforeRef;
       } else if (hasDestRef) {
         requestBody.destination_ref = destRef;
       } else {
-        throw new Error('move requires "before"/"destination" path or "before_ref"/"destination_ref"');
+        throw new Error('move requires "destination" path or "destination_ref"');
       }
       if (args.count !== void 0 && args.count !== null) {
         const count = args.count;

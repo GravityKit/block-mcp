@@ -6,7 +6,7 @@
  *   - delete_block: index-only, ref-only, both-rejected, neither-rejected
  *   - insert_blocks: after_ref / before_ref forwarded to client
  *   - edit_block_tree: ref-only, ref+path-rejected, neither-rejected
- *   - edit_block_tree move: destination_ref / before_ref forwarded
+ *   - edit_block_tree move: destination_ref forwarded
  *   - get_page_blocks: persist_refs forwarded (default vs explicit false)
  *   - client URL routing: /blocks/{index} vs /blocks/by-ref/{ref}
  */
@@ -245,14 +245,6 @@ describe('edit_block_tree — ref vs path', () => {
     ).rejects.toThrow(/must be an array of integers/);
   });
 
-  it('move accepts before_ref instead of before path', async () => {
-    await handleMutateTool('edit_block_tree', {
-      post_id: 1, op: 'move', ref: 'blk_source', before_ref: 'blk_anchor',
-    }, client);
-    const call = client.mutateBlockTree.mock.calls[0][1];
-    expect(call.before_ref).toBe('blk_anchor');
-  });
-
   it('move accepts destination_ref instead of destination path', async () => {
     await handleMutateTool('edit_block_tree', {
       post_id: 1, op: 'move', ref: 'blk_source', destination_ref: 'blk_dest',
@@ -261,18 +253,10 @@ describe('edit_block_tree — ref vs path', () => {
     expect(call.destination_ref).toBe('blk_dest');
   });
 
-  it('move with no destination, before, before_ref, or destination_ref errors', async () => {
+  it('move with no destination or destination_ref errors', async () => {
     await expect(
       handleMutateTool('edit_block_tree', { post_id: 1, op: 'move', ref: 'blk_x' }, client)
     ).rejects.toThrow(/move requires/);
-  });
-
-  it('move rejects both before path AND before_ref', async () => {
-    await expect(
-      handleMutateTool('edit_block_tree', {
-        post_id: 1, op: 'move', ref: 'blk_src', before: [3], before_ref: 'blk_anchor',
-      }, client)
-    ).rejects.toThrow(/before.*OR.*before_ref.*not both/i);
   });
 
   it('move rejects both destination path AND destination_ref', async () => {

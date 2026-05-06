@@ -287,6 +287,17 @@ class REST_Controller {
 							'default'     => true,
 							'description' => 'Assign and persist stable gk_ref UUIDs on blocks missing them. Default true. Set false for read-only callers that do not want write side effects (refs in response will not resolve later).',
 						),
+						'cursor' => array(
+							'type'              => 'string',
+							'sanitize_callback' => 'sanitize_text_field',
+							'description'       => 'Opaque cursor for paginating top-level blocks. Pass the previous response\'s pagination.next_cursor here. Omit on the first request.',
+						),
+						'limit' => array(
+							'type'        => 'integer',
+							'minimum'     => 1,
+							'maximum'     => 100,
+							'description' => 'Number of top-level blocks per page (each retains its full nested innerBlocks tree). Default 25, max 100. Triggers paginated response.',
+						),
 					),
 				),
 				// POST — insert blocks.
@@ -652,20 +663,11 @@ class REST_Controller {
 					'destination' => array(
 						'type'        => 'array',
 						'items'       => array( 'type' => 'integer' ),
-						'description' => 'Path the block(s) should land at after the move (move op). Canonical name — preferred over "before".',
+						'description' => 'Path the block(s) should land at after the move (move op).',
 					),
 					'destination_ref' => array(
 						'type'        => 'string',
 						'description' => 'Resolve destination from this ref instead of a path (move op).',
-					),
-					'before' => array(
-						'type'        => 'array',
-						'items'       => array( 'type' => 'integer' ),
-						'description' => 'DEPRECATED legacy alias for "destination" (move op). Removed in v2 — use "destination".',
-					),
-					'before_ref' => array(
-						'type'        => 'string',
-						'description' => 'DEPRECATED legacy alias for "destination_ref" (move op). Removed in v2 — use "destination_ref".',
 					),
 					'count' => array(
 						'type'    => 'integer',
@@ -1373,6 +1375,37 @@ class REST_Controller {
 				$blocks  = $this->filter_block_fields( $blocks, $allowed );
 			}
 
+			// Cursor-based pagination (issue #7). Opt-in: kicks in only when
+			// the caller passes `cursor` or `limit`. Walks top-level blocks
+			// and preserves each block's full nested innerBlocks tree, so
+			// edit-precision semantics aren't broken across pages.
+			$cursor_param = $request->get_param( 'cursor' );
+			$limit_param  = $request->get_param( 'limit' );
+			$paginated    = null !== $cursor_param || null !== $limit_param;
+
+			$pagination_meta = null;
+			if ( $paginated ) {
+				$total  = count( $blocks );
+				$offset = $this->decode_blocks_cursor( $cursor_param );
+				if ( is_wp_error( $offset ) ) {
+					return $offset;
+				}
+				$limit = $this->normalize_blocks_limit( $limit_param );
+				if ( is_wp_error( $limit ) ) {
+					return $limit;
+				}
+
+				$blocks = array_slice( $blocks, $offset, $limit );
+
+				$next_offset = $offset + $limit;
+				$pagination_meta = array(
+					'limit'       => $limit,
+					'offset'      => $offset,
+					'total'       => $total,
+					'next_cursor' => $next_offset < $total ? 'idx_' . $next_offset : null,
+				);
+			}
+
 			$response = array(
 				'summary' => $summary,
 				'blocks'  => $blocks,
@@ -1380,11 +1413,74 @@ class REST_Controller {
 			if ( $is_search ) {
 				$response['match_count'] = count( $blocks );
 			}
+			if ( null !== $pagination_meta ) {
+				$response['pagination'] = $pagination_meta;
+			}
 
 			return new \WP_REST_Response( $response, 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Decode the `cursor` query param for top-level-block pagination.
+	 *
+	 * Format: `idx_<int>`. Bare integer-as-string is also accepted for
+	 * convenience. Anything else returns a WP_Error so we never silently
+	 * paginate from offset 0 on a malformed cursor.
+	 *
+	 * @param string|null $cursor Raw cursor param (or null = start).
+	 *
+	 * @return int|\WP_Error Non-negative offset, or WP_Error 400.
+	 */
+	private function decode_blocks_cursor( $cursor ) {
+		if ( null === $cursor || '' === $cursor ) {
+			return 0;
+		}
+		if ( ! is_string( $cursor ) && ! is_int( $cursor ) ) {
+			return new \WP_Error( 'invalid_cursor', __( 'cursor must be a string or integer.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+		$cursor = (string) $cursor;
+
+		// Tolerate the prefix-stripped form for callers passing through their
+		// own bookkeeping. The canonical form is `idx_<n>`.
+		if ( 0 === strpos( $cursor, 'idx_' ) ) {
+			$cursor = substr( $cursor, 4 );
+		}
+
+		if ( ! preg_match( '/^[0-9]+$/', $cursor ) ) {
+			return new \WP_Error( 'invalid_cursor', __( 'cursor must be of the form "idx_<n>".', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+
+		return (int) $cursor;
+	}
+
+	/**
+	 * Normalize the `limit` query param for top-level-block pagination.
+	 *
+	 * Default 25, hard cap 100. Out-of-range values produce a WP_Error
+	 * rather than silently clamping, so callers learn they overshot.
+	 *
+	 * @param mixed $limit Raw limit param (or null = default).
+	 *
+	 * @return int|\WP_Error Effective limit, or WP_Error 400.
+	 */
+	private function normalize_blocks_limit( $limit ) {
+		if ( null === $limit || '' === $limit ) {
+			return 25;
+		}
+		if ( ! is_numeric( $limit ) ) {
+			return new \WP_Error( 'invalid_limit', __( 'limit must be a positive integer.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+		$n = (int) $limit;
+		if ( $n < 1 ) {
+			return new \WP_Error( 'invalid_limit', __( 'limit must be >= 1.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+		if ( $n > 100 ) {
+			return new \WP_Error( 'invalid_limit', __( 'limit must be <= 100.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+		return $n;
 	}
 
 	/**
@@ -1964,13 +2060,11 @@ class REST_Controller {
 				'wrapper'     => $request->get_param( 'wrapper' ),
 				'position'    => $request->get_param( 'position' ),
 				'destination' => $request->get_param( 'destination' ),
-				'before'      => $request->get_param( 'before' ),
 				'count'       => $request->get_param( 'count' ),
 			);
 
-			// Resolve destination_ref / before_ref to paths for the move op.
-			$dest_ref   = $request->get_param( 'destination_ref' );
-			$before_ref = $request->get_param( 'before_ref' );
+			// Resolve destination_ref to a path for the move op.
+			$dest_ref = $request->get_param( 'destination_ref' );
 			if ( null === $params['destination'] && is_string( $dest_ref ) && '' !== $dest_ref ) {
 				$resolved = $this->block_crud->resolve_ref( $post_id, $dest_ref );
 				if ( is_wp_error( $resolved ) ) {
@@ -1978,22 +2072,10 @@ class REST_Controller {
 				}
 				$params['destination'] = $resolved;
 			}
-			if ( null === $params['before'] && is_string( $before_ref ) && '' !== $before_ref ) {
-				$resolved = $this->block_crud->resolve_ref( $post_id, $before_ref );
-				if ( is_wp_error( $resolved ) ) {
-					return $resolved;
-				}
-				$params['before'] = $resolved;
-			}
 
 			// Cast destination to integers if present.
 			if ( is_array( $params['destination'] ) ) {
 				$params['destination'] = array_map( 'intval', $params['destination'] );
-			}
-
-			// Cast before to integers if present.
-			if ( is_array( $params['before'] ) ) {
-				$params['before'] = array_map( 'intval', $params['before'] );
 			}
 
 			$dry_run = (bool) $request->get_param( 'dry_run' );
