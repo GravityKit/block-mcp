@@ -15,20 +15,22 @@ How Block MCP compares to the standard WordPress REST API — the same surface t
 | **Find which block contains "Pricing" without scanning rendered HTML** | ❌ No structured search — agent has to regex through HTML | ✅ Built-in search by text or block type |
 | **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Agent can write any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
 | **Edit a page and have it still open cleanly in the block editor afterward** | ❌ Edits go in as raw HTML — when you reopen the page, the block editor flags many blocks with **"This block contains unexpected or invalid content"** because the original block markers got stripped during the round-trip | ✅ Block markup is preserved exactly. The editor reopens the page with every block intact and editable. |
-| **Refer to a specific block across multiple edits, even after others move** | ❌ No block identity at all | ✅ Every block carries a stable ID that survives sibling shifts |
+| **Keep editing the right block after adding or removing other blocks above it** | ❌ Loses track once anything moves — has to re-read the whole page to figure out positions again | ✅ Each block has a stable ID, so the AI can keep working without re-reading |
 
 ### The numbers
 
-Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture page, averaged over 5 runs. See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness.
+Live comparison on `https://www.gravitykit.com` against a 38-block draft fixture page, averaged over 5 runs with 300 ms spacing between calls and 8 s spacing between trials. See [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs) for the harness, and [`scripts/seed-bench-page.php`](scripts/seed-bench-page.php) to re-create the fixture on any WordPress install.
 
 | | Standard WP REST API | Block MCP |
 |---|---|---|
-| Time to read one page | 750 ms | 690 ms |
-| Time to make one edit | 1.6 s | 1.5 s |
-| Time for 5 edits in a row | 8.6 s | 9.8 s |
+| Time to read one page | 850 ms | 800 ms |
+| Time to make one edit | 1.9 s | 1.7 s |
+| Time for 5 edits in a row | 8.6 s | 9.2 s |
 | **Data sent for 5 edits** | **33 KB** *(the whole page, 5×)* | **0.1 KB** *(just the changes)* |
 
-Both tools take about the same amount of time per edit. The difference is how much *data* gets sent. The standard REST API re-sends the entire page every time the AI makes any change; Block MCP sends only what changed. Across five edits that's about **260× less** — and, more importantly, fewer chances for the AI to accidentally alter parts of the page you didn't ask it to touch.
+Both tools take about the same amount of time per edit. The chained-edit row is roughly tied — the standard REST API ships the whole page each time but skips per-block parsing on the server, while Block MCP ships only the change but does extra work to parse and re-serialize. Speed isn't the win.
+
+The differences that matter are **what gets sent** and **whether the result is correct**. The standard REST API re-sends the entire page on every edit, which is roughly 260× more data over 5 edits and — more importantly — gives the AI the chance to accidentally touch parts of the page it didn't intend to. Block MCP only sends what changed, and because it works in WordPress's native block format the result opens cleanly in the block editor afterward (no "this block contains unexpected or invalid content" warnings).
 
 ## Why this MCP
 

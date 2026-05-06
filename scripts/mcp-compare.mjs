@@ -15,10 +15,22 @@
  *   WP_PASS      Application Password for that user
  *   POST_ID      Post/page ID to benchmark against (must own the post or
  *                have edit_others_* caps; uses ?context=edit so the WP REST
- *                workflow gets raw block markup, not lossy rendered HTML)
+ *                workflow gets raw block markup, not lossy rendered HTML).
+ *                The page needs at least 5 top-level core/heading blocks —
+ *                use scripts/seed-bench-page.php to create a known-good
+ *                fixture: `wp eval-file scripts/seed-bench-page.php` returns
+ *                the new post ID.
  *
  * Optional env:
  *   TRIALS                 Number of full bench passes to average (default 1)
+ *   CALL_SPACING_MS        Delay between consecutive HTTP calls within a trial
+ *                          (default 250). Simulates an agent doing real work
+ *                          between requests instead of firing in a hot loop —
+ *                          and reduces same-process server contention noise.
+ *                          The delay is NOT counted in measured times; only
+ *                          actual HTTP round-trips are timed.
+ *   TRIAL_SPACING_MS       Delay between trials (default 5000). Lets the
+ *                          server cool off and any opcache state stabilize.
  *   RATE_LIMIT_RESET_CMD   Shell command to clear the per-post write rate limit
  *                          transient between trials. Without this, TRIALS > 1
  *                          will hit the plugin's 10 writes/min/post throttle
@@ -37,7 +49,11 @@ const POST_ID = parseInt(process.env.POST_ID || '0', 10);
 const USER = process.env.WP_USER;
 const PASS = process.env.WP_PASS;
 const TRIALS = Math.max(1, parseInt(process.env.TRIALS || '1', 10));
+const CALL_SPACING_MS = parseInt(process.env.CALL_SPACING_MS || '250', 10);
+const TRIAL_SPACING_MS = parseInt(process.env.TRIAL_SPACING_MS || '5000', 10);
 const RATE_RESET = process.env.RATE_LIMIT_RESET_CMD;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const space = () => CALL_SPACING_MS > 0 ? sleep(CALL_SPACING_MS) : Promise.resolve();
 
 if (!BASE || !USER || !PASS || !POST_ID) {
   console.error('Required env: WP_BASE, WP_USER, WP_PASS, POST_ID');
@@ -91,25 +107,30 @@ function resetRateLimit() {
 }
 
 async function runTrial() {
-  // Phase 1: 5 reads each
+  // Phase 1: 5 reads each. Spacing between calls reduces same-process server
+  // contention. The sleep is NOT timed — only the HTTP round-trip is.
   const wpReads = [], gkReads = [];
   let wpReadBytes = 0, gkReadBytes = 0, totalBlocks = 0;
   for (let i = 0; i < 5; i++) {
     const a = await timed(() => wp.get(`/pages/${POST_ID}?context=edit`));
     wpReads.push(a.ms);
     wpReadBytes = JSON.stringify(a.out.data).length;
+    await space();
     const b = await timed(() => gk.get(`/posts/${POST_ID}/blocks`));
     gkReads.push(b.ms);
     gkReadBytes = JSON.stringify(b.out.data).length;
     totalBlocks = b.out.data.summary.total_blocks;
+    await space();
   }
 
   const blocksResp = (await gk.get(`/posts/${POST_ID}/blocks`)).data;
   const refs = collectHeadingRefs(blocksResp, 5);
   if (refs.length < 5) throw new Error(`Need 5+ top-level headings; got ${refs.length}`);
+  await space();
 
   // Phase 2: single edit
   const wpFull = (await wp.get(`/pages/${POST_ID}?context=edit`)).data;
+  await space();
   const wpContent = wpFull.content.raw;
   if (!wpContent) throw new Error('No raw content (auth lacks edit cap?)');
   const newContent = wpContent.replace(
@@ -118,6 +139,7 @@ async function runTrial() {
   );
   const wpEditBytes = JSON.stringify({ content: newContent }).length;
   const wpSingleEdit = await timed(() => wp.post(`/pages/${POST_ID}`, { content: newContent }));
+  await space();
 
   const gkEditBody = { attributes: { level: 3 } };
   const gkEditBytes = JSON.stringify(gkEditBody).length;
@@ -126,30 +148,39 @@ async function runTrial() {
   );
 
   resetRateLimit();
+  await space();
 
-  // Phase 3: chain of 5 edits
-  const t0wp = ns();
+  // Phase 3: chain of 5 edits. Total time excludes the inter-call spacing —
+  // we sum the individual round-trip times instead of measuring wall-clock.
   let mut = (await wp.get(`/pages/${POST_ID}?context=edit`)).data.content.raw;
+  await space();
+  let wpChainMs = 0;
   let wpChainBytesUploaded = 0;
   for (let i = 0; i < 5; i++) {
     mut = mut.replace(/<h2 class="wp-block-heading">Conclusion<\/h2>/, '<h3 class="wp-block-heading">Conclusion</h3>');
     const body = JSON.stringify({ content: mut });
     wpChainBytesUploaded += body.length;
-    await wp.post(`/pages/${POST_ID}`, { content: mut });
+    const t = await timed(() => wp.post(`/pages/${POST_ID}`, { content: mut }));
+    wpChainMs += t.ms;
+    await space();
   }
-  const wpChainMs = ms(t0wp);
 
   resetRateLimit();
+  await space();
 
-  const t0gk = ns();
-  await gk.get(`/posts/${POST_ID}/blocks`);
+  // Same shape as wp/v2 above: 1 GET + 5 writes, summing the actual round-trip
+  // times only (not the inter-call spacing).
+  const r = await timed(() => gk.get(`/posts/${POST_ID}/blocks`));
+  let gkChainMs = r.ms;
+  await space();
   let gkChainBytesUploaded = 0;
   for (let i = 0; i < 5; i++) {
     const body = JSON.stringify({ attributes: { level: (i % 4) + 2 } });
     gkChainBytesUploaded += body.length;
-    await gk.patch(`/posts/${POST_ID}/blocks/by-ref/${encodeURIComponent(refs[i])}`, JSON.parse(body));
+    const t = await timed(() => gk.patch(`/posts/${POST_ID}/blocks/by-ref/${encodeURIComponent(refs[i])}`, JSON.parse(body)));
+    gkChainMs += t.ms;
+    await space();
   }
-  const gkChainMs = ms(t0gk);
 
   return {
     totalBlocks,
@@ -174,7 +205,10 @@ async function main() {
 
   const trials = [];
   for (let t = 0; t < TRIALS; t++) {
-    if (t > 0) resetRateLimit();
+    if (t > 0) {
+      resetRateLimit();
+      if (TRIAL_SPACING_MS > 0) await sleep(TRIAL_SPACING_MS);
+    }
     process.stderr.write(`Trial ${t + 1}/${TRIALS}...\n`);
     trials.push(await runTrial());
   }
