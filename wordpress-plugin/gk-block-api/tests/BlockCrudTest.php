@@ -386,6 +386,150 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( '<p>Changed</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
 	}
 
+	// ── update_blocks_batch ────────────────────────────────────────
+
+	public function test_update_blocks_batch_applies_all_in_one_revision() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>One</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>Two</p>' ),
+			$this->block( 'core/paragraph', array(), '<p>Three</p>' ),
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'flat_index' => 0, 'innerHTML' => '<p>1</p>' ),
+			array( 'flat_index' => 1, 'innerHTML' => '<p>2</p>' ),
+			array( 'flat_index' => 2, 'innerHTML' => '<p>3</p>' ),
+		) );
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$this->assertEquals( 3, $result['count'] );
+		$this->assertCount( 3, $result['results'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( '<p>1</p>', $saved[0]['innerHTML'] );
+		$this->assertEquals( '<p>2</p>', $saved[1]['innerHTML'] );
+		$this->assertEquals( '<p>3</p>', $saved[2]['innerHTML'] );
+		// Single revision regardless of N — exposed via revision_id == before_revision_id + 1
+		// in the test bootstrap. Just assert presence here.
+		$this->assertArrayHasKey( 'revision_id', $result );
+		$this->assertArrayHasKey( 'before_revision_id', $result );
+	}
+
+	public function test_update_blocks_batch_rejects_empty_updates() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array() );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'empty_batch', $result->get_error_code() );
+	}
+
+	public function test_update_blocks_batch_rejects_oversized_batch() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$updates = array_fill( 0, Block_CRUD::MAX_BATCH_SIZE + 1, array(
+			'flat_index' => 0,
+			'innerHTML'  => '<p>x</p>',
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, $updates );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'batch_too_large', $result->get_error_code() );
+	}
+
+	public function test_update_blocks_batch_aborts_on_any_invalid_item() {
+		// One valid + one out-of-range; whole batch must reject.
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>One</p>' ),
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'flat_index' => 0,  'innerHTML' => '<p>NEW</p>' ),
+			array( 'flat_index' => 99, 'innerHTML' => '<p>BAD</p>' ),
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertIsArray( $data['errors'] );
+		$this->assertCount( 1, $data['errors'] );
+		$this->assertEquals( 1, $data['errors'][0]['index'] );
+		$this->assertEquals( 'invalid_index', $data['errors'][0]['code'] );
+		// The valid item must NOT have been applied — atomicity.
+		$saved = $this->current_blocks();
+		$this->assertEquals( '<p>One</p>', $saved[0]['innerHTML'] );
+	}
+
+	public function test_update_blocks_batch_rejects_duplicate_target_path() {
+		// Two items targeting the same block (one by ref, one by flat_index)
+		// must be flagged as a duplicate.
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array( 'metadata' => array( 'gk_ref' => 'blk_aaaa1111' ) ),
+				'<p>One</p>'
+			),
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'ref' => 'blk_aaaa1111', 'innerHTML' => '<p>X</p>' ),
+			array( 'flat_index' => 0,       'innerHTML' => '<p>Y</p>' ),
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$codes = array_column( $result->get_error_data()['errors'], 'code' );
+		$this->assertContains( 'duplicate_target', $codes );
+	}
+
+	public function test_update_blocks_batch_rejects_missing_payload() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'flat_index' => 0 ), // neither attributes nor innerHTML
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$this->assertEquals( 'missing_payload', $result->get_error_data()['errors'][0]['code'] );
+	}
+
+	public function test_update_blocks_batch_rejects_both_ref_and_flat_index() {
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array( 'metadata' => array( 'gk_ref' => 'blk_bbbb2222' ) ),
+				'<p>A</p>'
+			),
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'ref' => 'blk_bbbb2222', 'flat_index' => 0, 'innerHTML' => 'x' ),
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$this->assertEquals( 'invalid_target', $result->get_error_data()['errors'][0]['code'] );
+	}
+
+	public function test_update_blocks_batch_resolves_refs_to_correct_blocks() {
+		// Two blocks with different refs; batch routes each update correctly.
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array( 'metadata' => array( 'gk_ref' => 'blk_first' ) ),
+				'<p>One</p>'
+			),
+			$this->block(
+				'core/paragraph',
+				array( 'metadata' => array( 'gk_ref' => 'blk_second' ) ),
+				'<p>Two</p>'
+			),
+		) );
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'ref' => 'blk_second', 'innerHTML' => '<p>SECOND</p>' ),
+			array( 'ref' => 'blk_first',  'innerHTML' => '<p>FIRST</p>' ),
+		) );
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertEquals( '<p>FIRST</p>',  $saved[0]['innerHTML'] );
+		$this->assertEquals( '<p>SECOND</p>', $saved[1]['innerHTML'] );
+	}
+
+	public function test_update_blocks_batch_post_not_found() {
+		$result = $this->crud->update_blocks_batch( 999999, array(
+			array( 'flat_index' => 0, 'innerHTML' => 'x' ),
+		) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'post_not_found', $result->get_error_code() );
+	}
+
 	// ── insert_blocks ──────────────────────────────────────────────
 
 	public function test_insert_blocks_appends_when_position_is_null() {

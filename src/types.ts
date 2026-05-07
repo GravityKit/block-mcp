@@ -255,6 +255,68 @@ export interface BlockReplaceRangeResponse {
   revision_id: number;
 }
 
+/**
+ * One item in a `update_blocks` batch. Targets exactly one block by stable
+ * `ref` (recommended) OR `flat_index` (legacy), with `attributes` and/or
+ * `innerHTML` to apply.
+ */
+export interface BlockBatchUpdateItem {
+  /** Stable gk_ref (e.g. `blk_a3f2c1q9`). Provide this OR `flat_index`. */
+  ref?: string;
+  /** Flat index from `get_page_blocks`. Provide this OR `ref`. */
+  flat_index?: number;
+  /** Block type — surfaces enrichers (e.g. CBP codeHTML) when `attributes` is provided. */
+  block_name?: string;
+  /** Partial attributes (top-level shallow merge). */
+  attributes?: Record<string, unknown>;
+  /** Replacement innerHTML. */
+  innerHTML?: string;
+}
+
+/** Per-item validation error returned with `batch_validation_failed` (400). */
+export interface BlockBatchValidationError {
+  /** Position of the failing item in the request `updates` array. */
+  index: number;
+  /** Machine-readable error code (e.g. `ref_stale`, `invalid_index`, `duplicate_target`). */
+  code: string;
+  /** Human-readable message. */
+  message: string;
+  /** Original `ref` (when applicable). */
+  ref?: string;
+  /** Original `flat_index` (when applicable). */
+  flat_index?: number;
+  /** Block name (when applicable). */
+  block?: string;
+  /** Earlier batch index that already targeted the same block (duplicate_target only). */
+  first_seen_at?: number;
+}
+
+/** Per-item success result inside a `BlockBatchUpdateResponse`. */
+export interface BlockBatchUpdateResult {
+  /** Batch position this result corresponds to. */
+  batch_index: number;
+  /** Updated block summary, mirroring `BlockUpdateResponse.block`. */
+  block: {
+    index: number;
+    name: string;
+    attributes: Record<string, unknown>;
+    ref?: string;
+  };
+}
+
+/** Response from `POST /posts/{id}/blocks/batch-update`. ONE revision for N updates. */
+export interface BlockBatchUpdateResponse {
+  success: boolean;
+  /** Number of items applied. Equals `updates.length` (validation is all-or-nothing). */
+  count: number;
+  /** Per-item updated block summaries, in the same order as the request. */
+  results: BlockBatchUpdateResult[];
+  /** WordPress revision ID of the pre-batch snapshot. */
+  before_revision_id: number;
+  /** WordPress revision ID of the post-batch state. ONE revision regardless of N. */
+  revision_id: number;
+}
+
 /** Response from URL resolution (GET /resolve). */
 export interface ResolveUrlResponse {
   post_id: number;

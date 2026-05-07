@@ -76,6 +76,8 @@ import type {
   BlockWriteResponse,
   BlockDeleteResponse,
   BlockReplaceRangeResponse,
+  BlockBatchUpdateItem,
+  BlockBatchUpdateResponse,
   StorageModeScanResult,
   PatternInsertResponse,
   MutationRequest,
@@ -531,6 +533,38 @@ export class WordPressBlockClient {
     const response = await this.client.patch<BlockUpdateResponse>(
       `/posts/${postId}/blocks/by-ref/${encodeURIComponent(ref)}`,
       data
+    );
+    return response.data;
+  }
+
+  /**
+   * Apply N independent block updates atomically in ONE WordPress revision.
+   *
+   * Each item targets one block by stable `ref` (recommended) or `flat_index`,
+   * with `attributes` and/or `innerHTML` to apply. Validation is all-or-nothing:
+   * if any item is invalid (stale ref, out-of-range index, dual-storage
+   * rejection, duplicate target), the whole batch fails with HTTP 400 and an
+   * itemized `errors` payload — no partial writes ever hit disk.
+   *
+   * Counts as ONE write against the per-post rate limit. Server caps batch
+   * size to prevent the rate-limit exemption from being abused.
+   *
+   * @param postId  WordPress post/page ID.
+   * @param updates Update items (1..MAX_BATCH_SIZE).
+   * @returns       Per-item results plus the single revision ID.
+   */
+  async updateBlocksBatch(
+    postId: number,
+    updates: BlockBatchUpdateItem[]
+  ): Promise<BlockBatchUpdateResponse> {
+    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new Error('updates must be a non-empty array');
+    }
+
+    const response = await this.client.post<BlockBatchUpdateResponse>(
+      `/posts/${postId}/blocks/batch-update`,
+      { updates }
     );
     return response.data;
   }

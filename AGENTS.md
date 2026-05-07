@@ -104,6 +104,7 @@ All routes are under `gk-block-api/v1`. Read endpoints require `edit_posts`; wri
 | GET | `/resolve?url={path}` | `resolve_url` | URL path → post ID resolver |
 | GET | `/posts/{id}/blocks` | `get_post_blocks` | Page blocks as structured JSON |
 | PATCH | `/posts/{id}/blocks/{index}` | `update_block` | Update single block attrs/HTML |
+| POST | `/posts/{id}/blocks/batch-update` | `update_blocks_batch` | Apply N independent updates atomically in ONE revision |
 | POST | `/posts/{id}/blocks` | `insert_blocks` | Insert blocks at position |
 | DELETE | `/posts/{id}/blocks/{index}` | `delete_block` | Remove block(s) |
 | PUT | `/posts/{id}/blocks` | `replace_all_blocks` | Full page rewrite |
@@ -125,6 +126,7 @@ GET `/posts/{id}/blocks` supports query params:
 **`Block_CRUD`** (`class-block-crud.php`, ~1184 lines) — the block-level engine.
 - `get_blocks($post_id, $render)` — parses `post_content`, formats with path tracking
 - `update_block()` — merges attributes and/or replaces innerHTML at flat index
+- `update_blocks_batch()` — applies N independent updates atomically (ONE revision); validates all-or-nothing, server-side cap of `Block_CRUD::MAX_BATCH_SIZE` (50)
 - `insert_blocks()` — validates block names against registry, checks preference tier, splices into content
 - `delete_blocks()` — removes consecutive blocks, warns on synced pattern removal
 - `replace_all_blocks()` — full page rewrite with block validation
@@ -184,7 +186,7 @@ The server (`src/index.ts`) aggregates tools from five modules, each exporting a
 |--------|-------|----------|
 | `discovery.ts` | `list_block_types`, `list_patterns`, `get_pattern`, `get_site_usage` | Read-only exploration |
 | `read.ts` | `get_page_blocks` | Page content reading |
-| `write.ts` | `update_block`, `insert_blocks`, `delete_block`, `rewrite_post_blocks` | Index-based CRUD |
+| `write.ts` | `update_block`, `update_blocks`, `insert_blocks`, `delete_block`, `replace_block_range`, `rewrite_post_blocks`, `revert_to_revision` | Index-based CRUD |
 | `mutate.ts` | `edit_block_tree` | Path-based structural operations |
 | `patterns.ts` | `insert_pattern` | Pattern insertion |
 | `posts.ts` (v1.2) | `create_post`, `update_post` | Post lifecycle |

@@ -87,6 +87,7 @@ All routes are registered in `REST_Controller::register_routes()` (class-rest-co
 | Method | Route | Handler | Description |
 |--------|-------|---------|-------------|
 | POST | `/posts/{id}/blocks` | `insert_blocks` | Insert blocks at a position. Params: `blocks[]`, `after`, `before`. |
+| POST | `/posts/{id}/blocks/batch-update` | `update_blocks_batch` | Apply N independent updates atomically in ONE revision. Params: `updates[]` (each: `ref` XOR `flat_index`, `attributes?`, `innerHTML?`). All-or-nothing validation. Capped at `Block_CRUD::MAX_BATCH_SIZE` (50). |
 | PATCH | `/posts/{id}/blocks/{index}` | `update_block` | Update a single block by flat index. Params: `attributes`, `innerHTML`. |
 | DELETE | `/posts/{id}/blocks/{index}` | `delete_block` | Remove block(s) at index. Param: `count`. |
 | PUT | `/posts/{id}/blocks` | `replace_all_blocks` | Full page rewrite. Param: `blocks[]`. Uses stricter `put` rate limit (2/min). |
@@ -138,7 +139,8 @@ All routes are registered in `REST_Controller::register_routes()` (class-rest-co
 The mutation engine. Owns all read/write logic for post block content.
 
 - **`get_blocks($post_id, $render)`** (line 73) — Parse post content, format blocks. When `render=true`, sets up post context, runs `render_block()` for dynamic blocks, expands shortcodes, and resolves synced pattern content.
-- **`update_block()`** (line 133) — Flat-index single block update. Uses `flatten_blocks()` to map index to nested path.
+- **`update_block()`** (line 133) — Flat-index single block update. Uses `flatten_blocks()` to map index to nested path. Internally delegates the merge → auto-transform → innerContent reconciliation to the private `apply_block_update_in_place()` helper, which is shared with `update_blocks_batch()`.
+- **`update_blocks_batch()`** — Atomic N-update batch in ONE revision. Phase 1 validates every item (target resolution, payload presence, dual-storage gate, duplicate-target detection by canonical path) and aborts the whole call with `WP_Error('batch_validation_failed')` + itemized `errors` if anything fails. Phase 2 applies all updates in memory via `apply_block_update_in_place()`. Phase 3 saves once. Counts as one write against `RATE_LIMIT_WRITES`; size capped at `MAX_BATCH_SIZE` (50).
 - **`insert_blocks()`** (line 216) — Validates block names against registry, enforces preference tiers (legacy = hard reject, avoid = warning), splices into block array.
 - **`delete_blocks()`** (line 357) — Warns on synced pattern reference removal.
 - **`replace_all_blocks()`** (line 444) — Full page rewrite. Uses `put` rate limit bucket.
@@ -148,7 +150,7 @@ The mutation engine. Owns all read/write logic for post block content.
 - **`save_post_content()`** (line 1702) — Wraps `wp_update_post()`, captures before/after revision IDs.
 - **`format_blocks()`** (line 1748) — Public method. Produces the response structure with `index`, `path`, `name`, `attributes`, `innerHTML`, `dynamic`, `section`, and optionally `rendered_html`, `rendered_text`, `innerHTML_rendered`, `pattern_ref`.
 
-**Rate limits** (lines 30-37): 10 writes/min/post, 2 PUT/min/post. Stored as transients with 2-minute TTL.
+**Rate limits** (lines 30-37): 10 writes/min/post, 2 PUT/min/post. Stored as transients with 2-minute TTL. A single `update_blocks_batch()` call counts as ONE write regardless of N — this is intentional (one revision, one save) and is bounded by `MAX_BATCH_SIZE` (50) to prevent the exemption from being abused.
 
 ### REST_Controller
 **File**: `includes/class-rest-controller.php` (~1167 lines)

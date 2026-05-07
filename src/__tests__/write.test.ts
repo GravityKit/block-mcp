@@ -14,6 +14,7 @@ vi.mock('../enrichers.js', () => ({
 
 const mockClient = {
   updateBlock: vi.fn().mockResolvedValue({ success: true, block: { index: 0, name: 'core/heading', attributes: {} }, before_revision_id: 1, revision_id: 2 }),
+  updateBlocksBatch: vi.fn().mockResolvedValue({ success: true, count: 0, results: [], before_revision_id: 1, revision_id: 2 }),
   insertBlocks: vi.fn().mockResolvedValue({ success: true, inserted: [{ index: 0, name: 'core/heading' }], warnings: [], before_revision_id: 1, revision_id: 2 }),
   deleteBlock: vi.fn().mockResolvedValue({ success: true, removed: 1, before_revision_id: 1, revision_id: 2 }),
   replaceAllBlocks: vi.fn().mockResolvedValue({ success: true, inserted: [], warnings: [], before_revision_id: 1, revision_id: 2 }),
@@ -56,6 +57,77 @@ describe('handleWriteTool', () => {
       expect(mockClient.updateBlock).toHaveBeenCalledWith(1, 0, {
         attributes: { level: 2 }, innerHTML: '<h2>Title</h2>'
       });
+    });
+  });
+
+  describe('update_blocks', () => {
+    it('requires post_id', async () => {
+      await expect(handleWriteTool('update_blocks', { updates: [{ ref: 'blk_a', innerHTML: 'x' }] }, mockClient))
+        .rejects.toThrow('post_id');
+    });
+
+    it('requires non-empty updates array', async () => {
+      await expect(handleWriteTool('update_blocks', { post_id: 1, updates: [] }, mockClient))
+        .rejects.toThrow('non-empty');
+      await expect(handleWriteTool('update_blocks', { post_id: 1 }, mockClient))
+        .rejects.toThrow('non-empty');
+    });
+
+    it('rejects items missing both ref and flat_index', async () => {
+      await expect(handleWriteTool('update_blocks', {
+        post_id: 1,
+        updates: [{ innerHTML: 'x' }],
+      }, mockClient)).rejects.toThrow('exactly one of ref or flat_index');
+    });
+
+    it('rejects items with both ref and flat_index', async () => {
+      await expect(handleWriteTool('update_blocks', {
+        post_id: 1,
+        updates: [{ ref: 'blk_a', flat_index: 0, innerHTML: 'x' }],
+      }, mockClient)).rejects.toThrow('exactly one of ref or flat_index');
+    });
+
+    it('rejects items missing payload', async () => {
+      await expect(handleWriteTool('update_blocks', {
+        post_id: 1,
+        updates: [{ ref: 'blk_a' }],
+      }, mockClient)).rejects.toThrow('attributes or innerHTML');
+    });
+
+    it('reports the failing item index in error messages', async () => {
+      await expect(handleWriteTool('update_blocks', {
+        post_id: 1,
+        updates: [
+          { ref: 'blk_a', innerHTML: 'x' },
+          { ref: 'blk_b' }, // missing payload
+        ],
+      }, mockClient)).rejects.toThrow('updates[1]');
+    });
+
+    it('forwards normalized items to the client', async () => {
+      await handleWriteTool('update_blocks', {
+        post_id: 42,
+        updates: [
+          { ref: 'blk_a', innerHTML: '<p>One</p>' },
+          { flat_index: 5, attributes: { level: 3 } },
+        ],
+      }, mockClient);
+      expect(mockClient.updateBlocksBatch).toHaveBeenCalledWith(42, [
+        { ref: 'blk_a', innerHTML: '<p>One</p>' },
+        { flat_index: 5, attributes: { level: 3 } },
+      ]);
+    });
+
+    it('runs enrichers when block_name + attributes are supplied', async () => {
+      await handleWriteTool('update_blocks', {
+        post_id: 7,
+        updates: [
+          { ref: 'blk_x', block_name: 'core/heading', attributes: { level: 2 } },
+        ],
+      }, mockClient);
+      // mock enrichBlock injects { enriched: true } on every attribute object
+      const [, normalized] = mockClient.updateBlocksBatch.mock.calls[0];
+      expect(normalized[0].attributes).toEqual({ level: 2, enriched: true });
     });
   });
 

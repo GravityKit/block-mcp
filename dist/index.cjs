@@ -44100,6 +44100,33 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Apply N independent block updates atomically in ONE WordPress revision.
+   *
+   * Each item targets one block by stable `ref` (recommended) or `flat_index`,
+   * with `attributes` and/or `innerHTML` to apply. Validation is all-or-nothing:
+   * if any item is invalid (stale ref, out-of-range index, dual-storage
+   * rejection, duplicate target), the whole batch fails with HTTP 400 and an
+   * itemized `errors` payload — no partial writes ever hit disk.
+   *
+   * Counts as ONE write against the per-post rate limit. Server caps batch
+   * size to prevent the rate-limit exemption from being abused.
+   *
+   * @param postId  WordPress post/page ID.
+   * @param updates Update items (1..MAX_BATCH_SIZE).
+   * @returns       Per-item results plus the single revision ID.
+   */
+  async updateBlocksBatch(postId, updates) {
+    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new Error("updates must be a non-empty array");
+    }
+    const response = await this.client.post(
+      `/posts/${postId}/blocks/batch-update`,
+      { updates }
+    );
+    return response.data;
+  }
+  /**
    * Insert one or more blocks at a specific position.
    *
    * @param postId - WordPress post/page ID
@@ -57836,6 +57863,59 @@ var WRITE_TOOLS = [
     }
   },
   {
+    name: "update_blocks",
+    description: "Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors \u2014 no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post \u2014 keeps revision history clean.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Batch-update blocks" },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        count: { type: "number" },
+        results: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              batch_index: { type: "number" },
+              block: {
+                type: "object",
+                properties: {
+                  index: { type: "number" },
+                  name: { type: "string" },
+                  attributes: { type: "object" },
+                  ref: { type: "string" }
+                }
+              }
+            }
+          }
+        },
+        before_revision_id: { type: "number" },
+        revision_id: { type: "number" }
+      }
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "number", description: "Post ID." },
+        updates: {
+          type: "array",
+          description: "List of update items (1..50). Each item targets one block; same item shape as update_block.",
+          items: {
+            type: "object",
+            properties: {
+              ref: { type: "string", description: "Stable gk_ref. Provide this OR flat_index." },
+              flat_index: { type: "number", description: "Flat index from get_page_blocks. Provide this OR ref." },
+              block_name: { type: "string", description: 'Block type (e.g. "core/paragraph"). Required for enrichers when attributes are provided.' },
+              attributes: { type: "object", description: "Partial attrs (top-level shallow merge)." },
+              innerHTML: { type: "string", description: "Replacement innerHTML." }
+            }
+          }
+        }
+      },
+      required: ["post_id", "updates"]
+    }
+  },
+  {
     name: "insert_blocks",
     description: 'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref \u2014 recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
@@ -57970,6 +58050,49 @@ async function handleWriteTool(toolName, args, client2) {
         return await client2.updateBlockByRef(postId, ref, { attributes, innerHTML });
       }
       return await client2.updateBlock(postId, flatIndex, { attributes, innerHTML });
+    }
+    case "update_blocks": {
+      const postId = args.post_id;
+      const updates = args.updates;
+      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (!Array.isArray(updates) || updates.length === 0) {
+        throw new Error("updates must be a non-empty array");
+      }
+      const normalized = [];
+      for (let i2 = 0; i2 < updates.length; i2++) {
+        const item = updates[i2];
+        if (!item || typeof item !== "object") {
+          throw new Error(`updates[${i2}]: each item must be an object`);
+        }
+        const hasItemRef = typeof item.ref === "string" && item.ref.length > 0;
+        const hasItemIndex = typeof item.flat_index === "number" && Number.isFinite(item.flat_index) && item.flat_index >= 0;
+        if (hasItemRef === hasItemIndex) {
+          throw new Error(`updates[${i2}]: provide exactly one of ref or flat_index`);
+        }
+        const hasAttrs = item.attributes && Object.keys(item.attributes).length > 0;
+        const hasHTML = typeof item.innerHTML === "string";
+        if (!hasAttrs && !hasHTML) {
+          throw new Error(`updates[${i2}]: at least one of attributes or innerHTML is required`);
+        }
+        let attributes = item.attributes;
+        let innerHTML = item.innerHTML;
+        if (item.block_name && attributes) {
+          const enriched = await enrichBlock({
+            name: item.block_name,
+            attributes,
+            ...innerHTML ? { innerHTML } : {}
+          });
+          attributes = enriched.attributes;
+          if (enriched.innerHTML !== void 0) innerHTML = enriched.innerHTML;
+        }
+        normalized.push({
+          ...hasItemRef ? { ref: item.ref } : {},
+          ...hasItemIndex ? { flat_index: item.flat_index } : {},
+          ...attributes ? { attributes } : {},
+          ...innerHTML !== void 0 ? { innerHTML } : {}
+        });
+      }
+      return await client2.updateBlocksBatch(postId, normalized);
     }
     case "insert_blocks": {
       const postId = args.post_id;

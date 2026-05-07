@@ -108,6 +108,60 @@ export const WRITE_TOOLS = [
     },
   },
   {
+    name: 'update_blocks',
+    description:
+      'Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors — no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post — keeps revision history clean.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Batch-update blocks' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        count:   { type: 'number' },
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              batch_index: { type: 'number' },
+              block: {
+                type: 'object',
+                properties: {
+                  index:      { type: 'number' },
+                  name:       { type: 'string' },
+                  attributes: { type: 'object' },
+                  ref:        { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        before_revision_id: { type: 'number' },
+        revision_id:        { type: 'number' },
+      },
+    },
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        post_id: { type: 'number', description: 'Post ID.' },
+        updates: {
+          type: 'array',
+          description: 'List of update items (1..50). Each item targets one block; same item shape as update_block.',
+          items: {
+            type: 'object',
+            properties: {
+              ref:        { type: 'string', description: 'Stable gk_ref. Provide this OR flat_index.' },
+              flat_index: { type: 'number', description: 'Flat index from get_page_blocks. Provide this OR ref.' },
+              block_name: { type: 'string', description: 'Block type (e.g. "core/paragraph"). Required for enrichers when attributes are provided.' },
+              attributes: { type: 'object', description: 'Partial attrs (top-level shallow merge).' },
+              innerHTML:  { type: 'string', description: 'Replacement innerHTML.' },
+            },
+          },
+        },
+      },
+      required: ['post_id', 'updates'],
+    },
+  },
+  {
     name: 'insert_blocks',
     description:
       'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
@@ -257,6 +311,74 @@ export async function handleWriteTool(
         return await client.updateBlockByRef(postId, ref as string, { attributes, innerHTML });
       }
       return await client.updateBlock(postId, flatIndex as number, { attributes, innerHTML });
+    }
+
+    case 'update_blocks': {
+      const postId = args.post_id as number;
+      const updates = args.updates as Array<{
+        ref?: string;
+        flat_index?: number;
+        block_name?: string;
+        attributes?: Record<string, unknown>;
+        innerHTML?: string;
+      }> | undefined;
+
+      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (!Array.isArray(updates) || updates.length === 0) {
+        throw new Error('updates must be a non-empty array');
+      }
+
+      // Pre-validate every item client-side so an obviously-broken batch
+      // surfaces a precise per-item error before paying the network round-trip.
+      // Server still re-validates (canonical authority).
+      const normalized: Array<{
+        ref?: string;
+        flat_index?: number;
+        attributes?: Record<string, unknown>;
+        innerHTML?: string;
+      }> = [];
+      for (let i = 0; i < updates.length; i++) {
+        const item = updates[i];
+        if (!item || typeof item !== 'object') {
+          throw new Error(`updates[${i}]: each item must be an object`);
+        }
+        const hasItemRef = typeof item.ref === 'string' && item.ref.length > 0;
+        const hasItemIndex = typeof item.flat_index === 'number'
+          && Number.isFinite(item.flat_index)
+          && item.flat_index >= 0;
+        if (hasItemRef === hasItemIndex) {
+          throw new Error(`updates[${i}]: provide exactly one of ref or flat_index`);
+        }
+        const hasAttrs = item.attributes && Object.keys(item.attributes).length > 0;
+        const hasHTML = typeof item.innerHTML === 'string';
+        if (!hasAttrs && !hasHTML) {
+          throw new Error(`updates[${i}]: at least one of attributes or innerHTML is required`);
+        }
+
+        // Run enrichers when block_name + attributes are both supplied so
+        // computed fields (e.g. CBP codeHTML) get derived automatically —
+        // mirrors update_block's behavior on a per-item basis.
+        let attributes = item.attributes;
+        let innerHTML = item.innerHTML;
+        if (item.block_name && attributes) {
+          const enriched = await enrichBlock({
+            name: item.block_name,
+            attributes,
+            ...(innerHTML ? { innerHTML } : {}),
+          });
+          attributes = enriched.attributes;
+          if (enriched.innerHTML !== undefined) innerHTML = enriched.innerHTML;
+        }
+
+        normalized.push({
+          ...(hasItemRef ? { ref: item.ref } : {}),
+          ...(hasItemIndex ? { flat_index: item.flat_index } : {}),
+          ...(attributes ? { attributes } : {}),
+          ...(innerHTML !== undefined ? { innerHTML } : {}),
+        });
+      }
+
+      return await client.updateBlocksBatch(postId, normalized);
     }
 
     case 'insert_blocks': {

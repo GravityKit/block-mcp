@@ -357,6 +357,42 @@ class REST_Controller {
 			)
 		);
 
+		// POST — atomic batch update of N independent blocks in ONE revision.
+		// Each item targets one block by ref XOR flat_index; all-or-nothing
+		// validation prevents partial writes when any item is invalid.
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)/blocks/batch-update',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'update_blocks_batch' ),
+					'permission_callback' => array( $this, 'check_edit_permissions' ),
+					'args'                => array(
+						'id' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'updates' => array(
+							'type'        => 'array',
+							'required'    => true,
+							'description' => 'List of update items. Each item targets one block by ref XOR flat_index, with attributes and/or innerHTML.',
+							'items'       => array(
+								'type'       => 'object',
+								'properties' => array(
+									'ref'        => array( 'type' => 'string' ),
+									'flat_index' => array( 'type' => 'integer' ),
+									'attributes' => array( 'type' => 'object' ),
+									'innerHTML'  => array( 'type' => 'string' ),
+								),
+							),
+						),
+					),
+				),
+			)
+		);
+
 		// POST — atomic replace of a top-level block range.
 		register_rest_route(
 			self::NAMESPACE,
@@ -1805,6 +1841,51 @@ class REST_Controller {
 				is_array( $attributes ) ? $attributes : array(),
 				$inner_html
 			);
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /posts/{id}/blocks/batch-update
+	 *
+	 * Apply N independent block updates in a single revision. Validation is
+	 * all-or-nothing: any item-level failure aborts the batch with an
+	 * itemized `errors` payload.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function update_blocks_batch( $request ) {
+		try {
+			$post_id    = (int) $request->get_param( 'id' );
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
+			$updates = $request->get_param( 'updates' );
+			if ( ! is_array( $updates ) ) {
+				return new \WP_Error(
+					'invalid_updates',
+					__( '"updates" must be an array.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+
+			$result = $this->block_crud->update_blocks_batch( $post_id, $updates );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;

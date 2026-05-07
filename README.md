@@ -7,6 +7,7 @@
 - **Edits one block, not the whole page.** Change a heading's level without touching the surrounding HTML. Standard MCPs force a full page rewrite on every edit; Block MCP touches just the one heading.
 - **Editor-safe round-trips.** `<!-- wp:* -->` block markers are preserved exactly. No "this block contains unexpected or invalid content" warnings on reopen.
 - **Stable block refs no other WordPress MCP has.** Quickly chain inserts, deletes, and updates across turns from a single read.
+- **Atomic batch edits.** Fix N independent blocks in **one** revision with `update_blocks` — all-or-nothing validation, so a stale ref or out-of-range index aborts the whole batch before anything hits disk. Keeps revision history clean instead of 6 entries for one logical change.
 - **Tier policy enforced server-side.** Decide what blocks you want to allow or reject before they are saved, with suggested replacements.
 - **Optimistic concurrency built in.** Two agents working on the same post can't silently overwrite each other.
 - **Yoast SEO support built in.** Read and write Yoast meta (titles, descriptions, focus keywords, canonical URLs, schema types, primary terms, Open Graph / Twitter cards) the moment Yoast SEO is active on the site.
@@ -53,6 +54,7 @@ Here's where Block MCP wins. Most other WordPress MCPs are wrappers around the s
 | **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Writes any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
 | **Edit a page and have it still open cleanly in the block editor afterward** | ❌ Edits as raw HTML — expect many blocks with **"This block contains unexpected or invalid content"** because the original block markers got stripped | ✅ Block markup is preserved exactly. |
 | **Keep editing the right block after adding or removing other blocks above it** | ❌ Re-reads the whole page after each edit | ✅ AI can keep working without re-reading |
+| **Fix N typos across one page in a single revision** | ❌ N round-trips, N revisions cluttering history | ✅ One `update_blocks` call, one revision, atomic — partial failure rolls back the whole batch |
 
 ### When you actually ask an AI to edit a page
 
@@ -144,6 +146,7 @@ These can coexist. Block MCP could (and likely will) be exposed through the offi
 
 **Write — by index, by ref, or by path**
 - `update_block` — flat-index OR ref
+- `update_blocks` — atomic N-update batch in ONE revision; all-or-nothing validation, max 50 items, counts as one write against the rate limit
 - `delete_block` — top-level counter OR ref
 - `insert_blocks` — anchor on `after_top_level`/`before_top_level` OR `after_ref`/`before_ref`
 - `edit_block_tree` — 9 path-based or ref-based structural ops:
@@ -243,6 +246,7 @@ See the [Configuration](#configuration) section below for the full breakdown.
 |---|---|
 | `get_page_blocks` | Read a post's blocks. Supports `outline`, `summary_only`, `search`, `block_name`, `render`, `fields`, `persist_refs` |
 | `update_block` | Update one block's attributes/innerHTML (by `flat_index` or `ref`) |
+| `update_blocks` | Apply N independent updates atomically in ONE revision (max 50). All-or-nothing validation — any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors before anything hits disk |
 | `insert_blocks` | Insert blocks at a position (by counter or ref) |
 | `delete_block` | Remove block(s) (by counter or ref) |
 | `replace_block_range` | Atomic single-revision swap of N blocks for M blocks |
@@ -377,10 +381,10 @@ With path-based addressing, the agent would need to re-fetch between every step.
 Run all suites locally:
 
 ```bash
-# TypeScript (Vitest) — 249 tests
+# TypeScript (Vitest) — 257 tests
 npm test
 
-# PHP (PHPUnit, stub WP bootstrap) — 326 tests
+# PHP (PHPUnit, stub WP bootstrap) — 335 tests
 cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
 ```
 

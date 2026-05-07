@@ -37,6 +37,16 @@ class Block_CRUD {
 	const RATE_LIMIT_PUT = 2;
 
 	/**
+	 * Maximum number of items in a single `update_blocks_batch()` call.
+	 *
+	 * One batch counts as one write against `RATE_LIMIT_WRITES`, so without
+	 * a cap a single call could update unbounded blocks per minute.
+	 *
+	 * @var int
+	 */
+	const MAX_BATCH_SIZE = 50;
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
@@ -238,64 +248,8 @@ class Block_CRUD {
 			return $this->dual_storage_error( $block['blockName'] );
 		}
 
-		// Merge attributes.
-		if ( ! empty( $attributes ) ) {
-			$block['attrs'] = array_merge(
-				isset( $block['attrs'] ) ? $block['attrs'] : array(),
-				$attributes
-			);
-
-			// Auto-transform innerHTML for known attribute-to-HTML mappings.
-			$auto_transformed = $this->transformer->auto_transform_html(
-				$block['blockName'],
-				$attributes,
-				isset( $block['innerHTML'] ) ? $block['innerHTML'] : ''
-			);
-
-			if ( null !== $auto_transformed ) {
-				$block['innerHTML'] = $auto_transformed;
-				// Update innerContent preserving null placeholders.
-				if ( ! empty( $block['innerContent'] ) ) {
-					$block_type_name = $block['blockName'];
-					$transformer = $this->transformer;
-					$block['innerContent'] = array_map(
-						function ( $piece ) use ( $transformer, $block_type_name, $attributes ) {
-							if ( null === $piece ) {
-								return null;
-							}
-							$result = $transformer->auto_transform_html( $block_type_name, $attributes, $piece );
-							return null !== $result ? $result : $piece;
-						},
-						$block['innerContent']
-					);
-				} else {
-					$block['innerContent'] = array( $auto_transformed );
-				}
-			} else {
-				// No auto-transform available — check static block safety.
-				$safety_warnings = $this->safety->check_mutation(
-					$block['blockName'],
-					array_keys( $attributes ),
-					false
-				);
-				if ( ! empty( $safety_warnings ) ) {
-					// update_block doesn't currently return warnings, so these are
-					// silently noted. Safety warnings can be added later if
-					// update_block gets a warnings field in the response.
-				}
-			}
-		}
-
-		// Replace innerHTML.
-		if ( null !== $inner_html ) {
-			$block['innerHTML'] = wp_kses_post( $inner_html );
-			// Preserve innerBlock placeholders (null) in innerContent for container blocks.
-			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
-				$block['innerContent'] = $this->transformer->rebuild_inner_content( $block['innerContent'], $block['innerHTML'] );
-			} else {
-				$block['innerContent'] = array( $block['innerHTML'] );
-			}
-		}
+		// Apply attribute merge + auto-transform + innerHTML replacement.
+		$this->apply_block_update_in_place( $block, (array) $attributes, $inner_html );
 
 		// Serialize and save.
 		$new_content = serialize_blocks( $blocks );
@@ -330,6 +284,319 @@ class Block_CRUD {
 			'block'              => $block_data,
 			'before_revision_id' => $result['before_revision_id'],
 			'revision_id'        => $result['revision_id'],
+		);
+	}
+
+	/**
+	 * Apply attribute merge and/or innerHTML replacement to a single block in
+	 * place. Pure mutation — no persistence, no rate limiting, no validation.
+	 *
+	 * Encapsulates the merge → auto-transform → innerContent reconciliation
+	 * pipeline shared by `update_block` and `update_blocks_batch`. Callers are
+	 * responsible for dual-storage rejection, rate limiting, and saving.
+	 *
+	 * @param array       &$block      Block array to mutate in place.
+	 * @param array       $attributes  Partial attributes to merge (may be empty).
+	 * @param string|null $inner_html  Replacement innerHTML, or null to skip.
+	 * @return void
+	 */
+	private function apply_block_update_in_place( &$block, $attributes, $inner_html ) {
+		$block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
+
+		if ( ! empty( $attributes ) ) {
+			$block['attrs'] = array_merge(
+				isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				$attributes
+			);
+
+			$auto_transformed = $this->transformer->auto_transform_html(
+				$block_name,
+				$attributes,
+				isset( $block['innerHTML'] ) ? $block['innerHTML'] : ''
+			);
+
+			if ( null !== $auto_transformed ) {
+				$block['innerHTML'] = $auto_transformed;
+				if ( ! empty( $block['innerContent'] ) ) {
+					$transformer = $this->transformer;
+					$block['innerContent'] = array_map(
+						function ( $piece ) use ( $transformer, $block_name, $attributes ) {
+							if ( null === $piece ) {
+								return null;
+							}
+							$result = $transformer->auto_transform_html( $block_name, $attributes, $piece );
+							return null !== $result ? $result : $piece;
+						},
+						$block['innerContent']
+					);
+				} else {
+					$block['innerContent'] = array( $auto_transformed );
+				}
+			} else {
+				// No auto-transform — surface the safety check for completeness.
+				// Result is currently silent (matches single-update behavior); a
+				// future revision can plumb safety_warnings into the response.
+				$this->safety->check_mutation( $block_name, array_keys( $attributes ), false );
+			}
+		}
+
+		if ( null !== $inner_html ) {
+			$block['innerHTML'] = wp_kses_post( $inner_html );
+			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
+				$block['innerContent'] = $this->transformer->rebuild_inner_content(
+					$block['innerContent'],
+					$block['innerHTML']
+				);
+			} else {
+				$block['innerContent'] = array( $block['innerHTML'] );
+			}
+		}
+	}
+
+	/**
+	 * Apply N independent block updates atomically in a single revision.
+	 *
+	 * Each item targets ONE block by `ref` (recommended) or `flat_index`, with
+	 * `attributes` and/or `innerHTML` to apply. The whole batch validates
+	 * up-front: any item-level failure (stale ref, out-of-range index,
+	 * dual-storage rejection, duplicate target) aborts the batch with an
+	 * itemized `errors` payload — no partial writes ever hit disk.
+	 *
+	 * On success a single `wp_update_post` call produces ONE WordPress
+	 * revision regardless of N, so revision history stays clean. Counts as
+	 * one write against `RATE_LIMIT_WRITES`; size is capped at MAX_BATCH_SIZE
+	 * to keep the rate-limit exemption from being abused.
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param array $updates List of update items. Each: { ref XOR flat_index,
+	 *                       attributes?, innerHTML? }.
+	 * @return array|\WP_Error On success: { success, count, results[],
+	 *                       before_revision_id, revision_id }. On validation
+	 *                       failure: WP_Error 'batch_validation_failed' (400)
+	 *                       with `errors` data array.
+	 */
+	public function update_blocks_batch( $post_id, $updates ) {
+		$rate_check = $this->check_rate_limit( $post_id, 'write' );
+		if ( is_wp_error( $rate_check ) ) {
+			return $rate_check;
+		}
+
+		if ( ! is_array( $updates ) || empty( $updates ) ) {
+			return new \WP_Error(
+				'empty_batch',
+				__( 'updates must be a non-empty array.', 'gk-block-api' ),
+				array( 'status' => 400 )
+			);
+		}
+		if ( count( $updates ) > self::MAX_BATCH_SIZE ) {
+			return new \WP_Error(
+				'batch_too_large',
+				sprintf(
+					/* translators: 1: actual batch size, 2: maximum batch size */
+					__( 'Batch contains %1$d items; maximum is %2$d.', 'gk-block-api' ),
+					count( $updates ),
+					self::MAX_BATCH_SIZE
+				),
+				array( 'status' => 400, 'max_batch_size' => self::MAX_BATCH_SIZE )
+			);
+		}
+
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error(
+				'post_not_found',
+				__( 'Post not found.', 'gk-block-api' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		$blocks = parse_blocks( $post->post_content );
+		if ( ! is_array( $blocks ) ) {
+			$blocks = array();
+		}
+		$flat       = $this->flatten_blocks( $blocks );
+		$flat_count = count( $flat );
+
+		// Phase 1: validate every item; collect resolved targets keyed by path
+		// so a `ref` item and a `flat_index` item that point to the SAME block
+		// are caught as duplicates (final state would be order-dependent).
+		$errors      = array();
+		$resolved    = array();
+		$seen_paths  = array();
+		foreach ( $updates as $i => $item ) {
+			if ( ! is_array( $item ) ) {
+				$errors[] = array(
+					'index'   => $i,
+					'code'    => 'invalid_item',
+					'message' => __( 'Each update must be an object.', 'gk-block-api' ),
+				);
+				continue;
+			}
+
+			$attributes = isset( $item['attributes'] ) && is_array( $item['attributes'] )
+				? $item['attributes']
+				: array();
+			$inner_html = array_key_exists( 'innerHTML', $item ) && null !== $item['innerHTML']
+				? (string) $item['innerHTML']
+				: null;
+
+			if ( empty( $attributes ) && null === $inner_html ) {
+				$errors[] = array(
+					'index'   => $i,
+					'code'    => 'missing_payload',
+					'message' => __( 'At least one of attributes or innerHTML is required.', 'gk-block-api' ),
+				);
+				continue;
+			}
+
+			$has_ref = isset( $item['ref'] ) && is_string( $item['ref'] ) && '' !== $item['ref'];
+			$has_idx = isset( $item['flat_index'] ) && is_numeric( $item['flat_index'] );
+			if ( $has_ref === $has_idx ) {
+				$errors[] = array(
+					'index'   => $i,
+					'code'    => 'invalid_target',
+					'message' => __( 'Provide exactly one of ref or flat_index.', 'gk-block-api' ),
+				);
+				continue;
+			}
+
+			if ( $has_ref ) {
+				$resolved_index = $this->resolve_ref_to_index( $post_id, $item['ref'] );
+				if ( is_wp_error( $resolved_index ) ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $resolved_index->get_error_code(),
+						'message' => $resolved_index->get_error_message(),
+						'ref'     => (string) $item['ref'],
+					);
+					continue;
+				}
+				$flat_idx = (int) $resolved_index;
+			} else {
+				$flat_idx = (int) $item['flat_index'];
+				if ( $flat_idx < 0 || $flat_idx >= $flat_count ) {
+					$errors[] = array(
+						'index'      => $i,
+						'code'       => 'invalid_index',
+						'message'    => __( 'flat_index out of range.', 'gk-block-api' ),
+						'flat_index' => $flat_idx,
+					);
+					continue;
+				}
+			}
+
+			$path     = $flat[ $flat_idx ]['path'];
+			$path_key = implode( '.', array_map( 'intval', $path ) );
+			if ( isset( $seen_paths[ $path_key ] ) ) {
+				$errors[] = array(
+					'index'        => $i,
+					'code'         => 'duplicate_target',
+					'message'      => sprintf(
+						/* translators: %d: index of the earlier item targeting the same block */
+						__( 'Duplicate target — same block already updated by item at index %d.', 'gk-block-api' ),
+						$seen_paths[ $path_key ]
+					),
+					'first_seen_at' => $seen_paths[ $path_key ],
+				);
+				continue;
+			}
+			$seen_paths[ $path_key ] = $i;
+
+			// Dual-storage check: innerHTML-only on dual-storage blocks is
+			// rejected, matching single update_block semantics.
+			$target_block = $this->get_block_by_path( $blocks, $path );
+			if (
+				null === $target_block
+				|| ! is_array( $target_block )
+			) {
+				$errors[] = array(
+					'index'   => $i,
+					'code'    => 'block_not_found',
+					'message' => __( 'Could not resolve block at the computed path.', 'gk-block-api' ),
+				);
+				continue;
+			}
+			if (
+				null !== $inner_html
+				&& empty( $attributes )
+				&& isset( $target_block['blockName'] )
+				&& $this->is_block_dual_storage( $target_block['blockName'] )
+			) {
+				$errors[] = array(
+					'index'   => $i,
+					'code'    => 'dual_storage_requires_both',
+					'message' => sprintf(
+						/* translators: %s: block name (e.g., yoast/faq-block) */
+						__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-api' ),
+						$target_block['blockName']
+					),
+					'block'   => (string) $target_block['blockName'],
+				);
+				continue;
+			}
+
+			$resolved[] = array(
+				'batch_index' => $i,
+				'flat_index'  => $flat_idx,
+				'path'        => $path,
+				'attributes'  => $attributes,
+				'innerHTML'   => $inner_html,
+			);
+		}
+
+		if ( ! empty( $errors ) ) {
+			return new \WP_Error(
+				'batch_validation_failed',
+				__( 'One or more items failed validation; no changes applied.', 'gk-block-api' ),
+				array( 'status' => 400, 'errors' => $errors )
+			);
+		}
+
+		// Phase 2: apply every update in memory. Paths stay valid because
+		// we don't re-flatten — attribute / innerHTML edits don't change the
+		// nested topology.
+		$results = array();
+		foreach ( $resolved as $r ) {
+			$block_ref = &$this->get_block_by_path( $blocks, $r['path'] );
+			$this->apply_block_update_in_place( $block_ref, $r['attributes'], $r['innerHTML'] );
+
+			$block_data = apply_filters(
+				'gk_block_api_format_block',
+				array(
+					'index'      => $r['flat_index'],
+					'name'       => isset( $block_ref['blockName'] ) ? $block_ref['blockName'] : '',
+					'attributes' => isset( $block_ref['attrs'] ) ? $block_ref['attrs'] : array(),
+				),
+				isset( $block_ref['blockName'] ) ? $block_ref['blockName'] : ''
+			);
+			if ( isset( $block_ref['attrs']['metadata']['gk_ref'] ) ) {
+				$block_data['ref'] = (string) $block_ref['attrs']['metadata']['gk_ref'];
+			}
+			$results[] = array(
+				'batch_index' => $r['batch_index'],
+				'block'       => $block_data,
+			);
+
+			// Break the reference so the next loop iteration doesn't alias
+			// the previous block when it rebinds.
+			unset( $block_ref );
+		}
+
+		// Phase 3: serialize and save. ONE wp_update_post call → ONE revision.
+		$new_content = serialize_blocks( $blocks );
+		$save_result = $this->save_post_content( $post_id, $new_content );
+		if ( is_wp_error( $save_result ) ) {
+			return $save_result;
+		}
+
+		$this->record_rate_limit( $post_id, 'write' );
+
+		return array(
+			'success'            => true,
+			'count'              => count( $results ),
+			'results'            => $results,
+			'before_revision_id' => $save_result['before_revision_id'],
+			'revision_id'        => $save_result['revision_id'],
 		);
 	}
 
