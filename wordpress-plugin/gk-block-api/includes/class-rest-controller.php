@@ -1335,6 +1335,11 @@ class REST_Controller {
 				return $perm_check;
 			}
 
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
 			$render       = (bool) $request->get_param( 'render' );
 			$persist_refs = null === $request->get_param( 'persist_refs' ) ? true : (bool) $request->get_param( 'persist_refs' );
 			$blocks       = $this->block_crud->get_blocks( $post_id, $render, $persist_refs );
@@ -1417,7 +1422,15 @@ class REST_Controller {
 				$response['pagination'] = $pagination_meta;
 			}
 
-			return new \WP_REST_Response( $response, 200 );
+			// Issue #6 — surface the current revision as a weak ETag so
+			// callers can do optimistic concurrency control on follow-up
+			// writes via the `If-Match` header (or `expected_revision` body
+			// field for transports that can't set headers).
+			$current_revision        = $this->block_crud->get_latest_revision_id( $post_id );
+			$response['revision_id'] = $current_revision;
+			$rest_response           = new \WP_REST_Response( $response, 200 );
+			$rest_response->header( 'ETag', sprintf( 'W/"%d"', $current_revision ) );
+			return $rest_response;
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
@@ -1656,13 +1669,6 @@ class REST_Controller {
 	}
 
 	/**
-	 * PATCH /posts/{id}/blocks/{index}
-	 *
-	 * @param \WP_REST_Request $request Request object.
-	 *
-	 * @return \WP_REST_Response|\WP_Error
-	 */
-	/**
 	 * PATCH /posts/{id}/blocks/by-ref/{ref}
 	 *
 	 * Ref-based update. Resolves the ref to a flat index, then calls the
@@ -1678,6 +1684,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$ref   = (string) $request->get_param( 'ref' );
@@ -1732,6 +1743,11 @@ class REST_Controller {
 				return $perm_check;
 			}
 
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
 			$ref   = (string) $request->get_param( 'ref' );
 			$index = $this->block_crud->resolve_ref_to_index( $post_id, $ref );
 			if ( is_wp_error( $index ) ) {
@@ -1751,12 +1767,24 @@ class REST_Controller {
 		}
 	}
 
+	/**
+	 * PATCH /posts/{id}/blocks/{index}
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
 	public function update_block( $request ) {
 		try {
 			$post_id = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$index      = (int) $request->get_param( 'index' );
@@ -1801,6 +1829,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$blocks = $request->get_param( 'blocks' );
@@ -1853,13 +1886,6 @@ class REST_Controller {
 	}
 
 	/**
-	 * DELETE /posts/{id}/blocks/{index}
-	 *
-	 * @param \WP_REST_Request $request Request object.
-	 *
-	 * @return \WP_REST_Response|\WP_Error
-	 */
-	/**
 	 * POST /posts/{id}/blocks/replace
 	 *
 	 * Atomically replace a range of top-level blocks with a new shape, in a
@@ -1876,6 +1902,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$start  = (int) $request->get_param( 'start' );
@@ -1904,12 +1935,24 @@ class REST_Controller {
 		}
 	}
 
+	/**
+	 * DELETE /posts/{id}/blocks/{index}
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
 	public function delete_block( $request ) {
 		try {
 			$post_id = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$index = (int) $request->get_param( 'index' );
@@ -1940,6 +1983,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$blocks = $request->get_param( 'blocks' );
@@ -1989,6 +2037,11 @@ class REST_Controller {
 				return $perm_check;
 			}
 
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
 			$pattern_id = $request->get_param( 'pattern_id' );
 			$synced     = (bool) $request->get_param( 'synced' );
 
@@ -2027,6 +2080,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
 			}
 
 			$op   = $request->get_param( 'op' );
@@ -2110,6 +2168,11 @@ class REST_Controller {
 				return $perm_check;
 			}
 
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
 			$result = $this->block_crud->revert_to_revision( $post_id, $revision_id );
 
 			if ( is_wp_error( $result ) ) {
@@ -2125,6 +2188,39 @@ class REST_Controller {
 	// =========================================================================
 	// Helpers
 	// =========================================================================
+
+	/**
+	 * Optimistic-concurrency precondition check.
+	 *
+	 * Reads the `If-Match` header (or the optional body field
+	 * `expected_revision` for transports that can't set headers) and
+	 * delegates to Block_CRUD::check_if_match. No-op when neither is set,
+	 * so existing callers see no behavior change.
+	 *
+	 * @param int               $post_id Post being written.
+	 * @param \WP_REST_Request  $request Incoming request.
+	 *
+	 * @return null|\WP_Error null = proceed; WP_Error 412 = stale revision.
+	 */
+	private function check_if_match_for_post( $post_id, $request ) {
+		$expected = '';
+		if ( $request && method_exists( $request, 'get_header' ) ) {
+			$header = $request->get_header( 'if_match' );
+			if ( is_string( $header ) && '' !== $header ) {
+				$expected = $header;
+			}
+		}
+		if ( '' === $expected ) {
+			$body_field = $request ? $request->get_param( 'expected_revision' ) : null;
+			if ( null !== $body_field && '' !== $body_field ) {
+				$expected = (string) $body_field;
+			}
+		}
+		if ( '' === $expected ) {
+			return null;
+		}
+		return $this->block_crud->check_if_match( $post_id, $expected );
+	}
 
 	/**
 	 * Check if the current user can edit a specific post, with detailed error.
@@ -2156,17 +2252,6 @@ class REST_Controller {
 	}
 
 	/**
-	 * Filter blocks by search text and/or block name.
-	 *
-	 * Returns a flat list of matching blocks from the tree (not nested).
-	 *
-	 * @param array  $blocks    Formatted blocks.
-	 * @param string $search    Text to search in innerHTML.
-	 * @param string $block_name Block name to filter by.
-	 *
-	 * @return array Flat list of matching blocks.
-	 */
-	/**
 	 * Recursively sanitizes a block definition from REST input.
 	 * Preserves innerBlocks so nested structures survive sanitization.
 	 *
@@ -2185,6 +2270,17 @@ class REST_Controller {
 		return $sanitized;
 	}
 
+	/**
+	 * Filter blocks by search text and/or block name.
+	 *
+	 * Returns a flat list of matching blocks from the tree (not nested).
+	 *
+	 * @param array  $blocks    Formatted blocks.
+	 * @param string $search    Text to search in innerHTML.
+	 * @param string $block_name Block name to filter by.
+	 *
+	 * @return array Flat list of matching blocks.
+	 */
 	private function search_blocks( $blocks, $search = '', $block_name = '' ) {
 		$results = array();
 

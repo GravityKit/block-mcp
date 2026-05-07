@@ -1041,6 +1041,80 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Get the most recent revision ID for a post, or 0 if there are none yet.
+	 *
+	 * Used as the optimistic-concurrency token: GETs surface it as an ETag,
+	 * writes can require it via `If-Match` to detect concurrent edits.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return int Revision post ID (0 = no revisions yet).
+	 */
+	public function get_latest_revision_id( $post_id ) {
+		$revisions = wp_get_post_revisions( $post_id, array(
+			'posts_per_page' => 1,
+			'orderby'        => 'date',
+			'order'          => 'DESC',
+		) );
+		return is_array( $revisions ) && ! empty( $revisions ) ? (int) key( $revisions ) : 0;
+	}
+
+	/**
+	 * Optimistic-concurrency check for write endpoints.
+	 *
+	 * If the caller supplied an `If-Match` header (or an explicit
+	 * `expected_revision` body field), this verifies the post's current
+	 * revision still matches. A mismatch means another writer raced ahead;
+	 * we return a 412 Precondition Failed with the current revision so
+	 * the caller can refresh and retry.
+	 *
+	 * Absent header → skip check (preserves current behavior; opt-in).
+	 *
+	 * @param int    $post_id           Post being written.
+	 * @param string $expected_revision Raw header value, e.g. `W/"123"` or `123`.
+	 *                                  Empty string skips the check.
+	 *
+	 * @return null|\WP_Error null = proceed; WP_Error = 412 with current_revision.
+	 */
+	public function check_if_match( $post_id, $expected_revision ) {
+		if ( ! is_string( $expected_revision ) || '' === $expected_revision ) {
+			return null;
+		}
+
+		// Accept "123", "W/\"123\"", or "\"123\"" — strip RFC 7232 ETag wrappers.
+		$normalized = trim( $expected_revision );
+		if ( 0 === strpos( $normalized, 'W/' ) ) {
+			$normalized = trim( substr( $normalized, 2 ) );
+		}
+		$normalized = trim( $normalized, '"' );
+
+		if ( ! preg_match( '/^[0-9]+$/', $normalized ) ) {
+			return new \WP_Error(
+				'invalid_if_match',
+				__( 'If-Match must be a revision ID, optionally wrapped in W/"...".', 'gk-block-api' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$expected = (int) $normalized;
+		$current  = $this->get_latest_revision_id( $post_id );
+
+		if ( $expected !== $current ) {
+			return new \WP_Error(
+				'stale_revision',
+				__( 'The post has changed since you fetched it. Re-fetch with get_page_blocks and retry.', 'gk-block-api' ),
+				array(
+					'status'           => 412,
+					'expected_revision' => $expected,
+					'current_revision'  => $current,
+				)
+			);
+		}
+
+		return null;
+	}
+
+	/**
 	 * Save new post content with before/after revision tracking.
 	 *
 	 * Relies on wp_update_post() to create revisions automatically, avoiding
@@ -1065,12 +1139,7 @@ class Block_CRUD {
 		}
 
 		// Get the current latest revision as the "before" snapshot.
-		$before_revisions = wp_get_post_revisions( $post_id, array(
-			'posts_per_page' => 1,
-			'orderby'        => 'date',
-			'order'          => 'DESC',
-		) );
-		$before_revision_id = is_array( $before_revisions ) && ! empty( $before_revisions ) ? key( $before_revisions ) : 0;
+		$before_revision_id = $this->get_latest_revision_id( $post_id );
 
 		// wp_update_post() runs wp_unslash() on post_content (it expects $_POST-shaped
 		// input). serialize_blocks() output is unslashed JSON, so without wp_slash()
@@ -1094,12 +1163,7 @@ class Block_CRUD {
 		}
 
 		// Get the new latest revision as the "after" snapshot.
-		$after_revisions = wp_get_post_revisions( $post_id, array(
-			'posts_per_page' => 1,
-			'orderby'        => 'date',
-			'order'          => 'DESC',
-		) );
-		$after_revision_id = is_array( $after_revisions ) && ! empty( $after_revisions ) ? key( $after_revisions ) : 0;
+		$after_revision_id = $this->get_latest_revision_id( $post_id );
 
 		return array(
 			'before_revision_id' => (int) $before_revision_id,
@@ -1628,16 +1692,6 @@ class Block_CRUD {
 	}
 
 	/**
-	 * Validate a block name against the registry and preference tiers.
-	 *
-	 * Returns an array with 'error' (WP_Error or null) and 'warnings' (array).
-	 * Legacy blocks produce a hard error; avoid blocks produce a warning.
-	 *
-	 * @param string $block_name Block type name.
-	 *
-	 * @return array { error: \WP_Error|null, warnings: array }
-	 */
-	/**
 	 * Recursively builds a WP block array from an API block definition.
 	 * Validates block names and collects preference warnings at every depth.
 	 *
@@ -1703,6 +1757,16 @@ class Block_CRUD {
 		);
 	}
 
+	/**
+	 * Validate a block name against the registry and preference tiers.
+	 *
+	 * Returns an array with 'error' (WP_Error or null) and 'warnings' (array).
+	 * Legacy blocks produce a hard error; avoid blocks produce a warning.
+	 *
+	 * @param string $block_name Block type name.
+	 *
+	 * @return array { error: \WP_Error|null, warnings: array }
+	 */
 	public function validate_block_def( $block_name ) {
 		$result = array( 'error' => null, 'warnings' => array() );
 

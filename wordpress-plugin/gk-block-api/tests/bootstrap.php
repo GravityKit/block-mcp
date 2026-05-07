@@ -316,9 +316,19 @@ if ( ! function_exists( 'wp_update_post' ) ) {
 	}
 }
 if ( ! function_exists( 'wp_get_post_revisions' ) ) {
+	// Backed by $GLOBALS['_gk_test_revisions'][ $post_id ] = array of revision IDs
+	// (newest first). Tests that care about the optimistic-concurrency path
+	// seed this directly; default behavior is "no revisions yet".
 	function wp_get_post_revisions( $post_id, $args = array() ) {
-		unset( $post_id, $args );
-		return array();
+		unset( $args );
+		$ids = isset( $GLOBALS['_gk_test_revisions'][ $post_id ] )
+			? $GLOBALS['_gk_test_revisions'][ $post_id ]
+			: array();
+		$out = array();
+		foreach ( $ids as $rev_id ) {
+			$out[ $rev_id ] = (object) array( 'ID' => $rev_id );
+		}
+		return $out;
 	}
 }
 if ( ! function_exists( 'setup_postdata' ) ) {
