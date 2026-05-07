@@ -85,6 +85,17 @@ const FAIL_FAST_BLOCK_MCP = process.env.FAIL_FAST_BLOCK_MCP === '1';
 const AI_ENGINE_MCP_URL = process.env.AI_ENGINE_MCP_URL;
 const AI_ENGINE_BEARER  = process.env.AI_ENGINE_BEARER;
 
+// Many WordPress dev environments (Local by Flywheel, MAMP, custom certs)
+// serve over HTTPS with a self-signed cert. The MCP servers we spawn run
+// node-based axios clients that reject those by default, which makes every
+// tool call fail with "unable to verify the first certificate". For bench
+// runs against a dev URL (https://*.test, https://*.local), set
+// NODE_TLS_REJECT_UNAUTHORIZED=0 in the spawned env so TLS verification is
+// skipped. This stays scoped to the bench's child processes — production
+// users hit a real cert and never see this flag.
+const isDevUrl = /\.(test|local)(:|$|\/)/.test(WP_BASE) || WP_BASE.startsWith('http://');
+const TLS_RELAX_ENV = isDevUrl ? { NODE_TLS_REJECT_UNAUTHORIZED: '0' } : {};
+
 const MCP_CONFIGS = {
   'block-mcp': {
     label: 'Block MCP',
@@ -97,6 +108,7 @@ const MCP_CONFIGS = {
             WORDPRESS_URL: WP_BASE,
             WORDPRESS_USER: WP_USER,
             WORDPRESS_APP_PASSWORD: WP_PASS,
+            ...TLS_RELAX_ENV,
           },
         },
       },
@@ -113,6 +125,7 @@ const MCP_CONFIGS = {
             WORDPRESS_API_URL: WP_BASE,
             WORDPRESS_USERNAME: WP_USER,
             WORDPRESS_PASSWORD: WP_PASS,
+            ...TLS_RELAX_ENV,
           },
         },
       },
@@ -627,7 +640,13 @@ function spawnClaude({ mcpConfigJsonPath, model, prompt }) {
       '--append-system-prompt', 'You are running inside an automated benchmark. Use the MCP tools available to you to complete the task. Be direct: call the tools, then state the result in one sentence.',
       prompt,
     ];
-    const child = spawn('claude', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // TLS_RELAX_ENV propagates to claude itself so the AI Engine HTTP MCP
+    // (an HTTPS transport claude connects to directly) also accepts the
+    // dev.test self-signed cert.
+    const child = spawn('claude', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...TLS_RELAX_ENV },
+    });
 
     let stdout = '', stderr = '';
     const timer = setTimeout(() => { child.kill('SIGTERM'); }, PER_CALL_TIMEOUT_MS);
@@ -729,6 +748,19 @@ async function main() {
           }
 
           process.stderr.write(`  → ${(r.wall_clock_ms / 1000).toFixed(1)}s · ${summary.tool_calls} tool calls · $${summary.cost_usd.toFixed(4)} · validation: ${validation.ok ? 'PASS' : `FAIL (${validation.why})`}\n`);
+
+          // On any validation failure, dump the agent's full transcript to a
+          // file so we can see WHICH tools it called with what arguments.
+          // Lets us tell "broken validator" from "agent confused about path
+          // semantics" from "MCP tool returned an error". Filename is unique
+          // per (scenario, mcp, trial) so the most recent run wins.
+          if (!validation.ok && r.parsed) {
+            const dumpPath = join(tmpDir, `transcript-${scenarioKey}-${mcpKey}-${model}-${trial + 1}.json`);
+            try {
+              writeFileSync(dumpPath, JSON.stringify(r.parsed, null, 2));
+              process.stderr.write(`     transcript: ${dumpPath}\n`);
+            } catch {}
+          }
 
           if (FAIL_FAST_BLOCK_MCP && mcpKey === 'block-mcp' && !validation.ok) {
             process.stderr.write(
