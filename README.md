@@ -69,38 +69,34 @@ What matters is whether the page is correct after the agent finishes. So we put 
 
 Three takeaways:
 
-**Block MCP works on the cheapest model — and finishes fastest.** Haiku passes every trial in 10 seconds at $0.014 per edit. The agent doesn't need to think hard about the page because the API is shaped exactly like the task. AI Engine Pro on Haiku takes 44 seconds when it works at all; InstaWP never does.
+**Block MCP works on the cheapest model — and finishes fastest.** Haiku passes every trial in 10 seconds. The agent doesn't need to think hard about the page because the API is shaped exactly like the task. AI Engine Pro on Haiku takes 44 seconds when it works at all; InstaWP never does.
 
 **InstaWP's wp/v2 wrapper fails 7 out of 9 times — even Opus only gets it right 2/3.** When the agent reports success, it's technically right that the heading text changed. But the whole-page round-trip through `update_page` strips every `<!-- wp:* -->` block marker. Reopen the page in the block editor and you'll see "This block contains unexpected or invalid content" warnings on most blocks. The standard REST API isn't broken — it does exactly what it's documented to do — but its data shape lets the AI corrupt content without realizing it.
 
-**AI Engine Pro is competitive with Sonnet and Opus but stumbles on Haiku.** Its `wp_alter_post` tool is block-aware (the post markup stays valid), but on the failed Haiku trials the rendered HTML and the block's declared attributes drift out of sync — e.g., the comment marker still says `level: 2` while the inner tag is `<h3>`. The block editor flags that as broken too. Sonnet and Opus retry until consistent (2–3 tool calls); Haiku sometimes gives up after declaring success. Cost-wise, AI Engine on Sonnet runs ~$0.07 per edit vs Block MCP on Haiku at $0.014.
+**AI Engine Pro is competitive with Sonnet and Opus but stumbles on Haiku.** Its `wp_alter_post` tool is block-aware (the post markup stays valid), but on the failed Haiku trials the rendered HTML and the block's declared attributes drift out of sync — e.g., the comment marker still says `level: 2` while the inner tag is `<h3>`. The block editor flags that as broken too. Sonnet and Opus retry until consistent (2–3 tool calls); Haiku sometimes gives up after declaring success.
 
-Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs). Cost across all 27 invocations: $2.22.
+Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs).
 
 ### Now try the structural ops agents actually need
 
 A single heading-level change is the easy case. The interesting work is when an agent has to move a block, drop a paragraph inside an existing container, modify a table, or delete a block — the kind of multi-step structural editing real content workflows demand.
 
-Five new scenarios, run with Claude Haiku (the cheapest model — if it works there it works everywhere). Each one is validated TWICE: once for **intent** (did the requested edit happen?), once for **structural integrity** (do the seed's distinctive blocks — list, quote, code, columns, group, pullquote, separator, preformatted — all still exist as named blocks, or did the page collapse to raw HTML?).
+Five harder scenarios. Same matrix: three MCPs × Claude Haiku.
 
 | Scenario | Block MCP | [AI Engine Pro](https://meowapps.com/ai-engine/) | [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) |
 |---|:---:|:---:|:---:|
-| **Move a block** to a new sibling position | ✅ 15 s · 2 calls · $0.02 | ✅ 25 s · 3 calls · $0.03 | ❌ structural fail · 29 s · $0.04 |
-| **Insert a paragraph inside a `core/group`** | ✅ 15 s · 2 calls · $0.02 | ✅ 20 s · 4 calls · $0.02 | ❌ structural fail · 32 s · $0.04 |
-| **Add a row** to a comparison table | ✅ 13 s · 2 calls · $0.02 | ✅ 25 s · 4 calls · $0.03 | ❌ structural fail · 32 s · $0.04 |
-| **Delete a column** from a table | ✅ 12 s · 2 calls · $0.02 | ✅ 24 s · 4 calls · $0.04 | ❌ structural fail · 26 s · $0.04 |
-| **Delete a heading block** | ✅ 12 s · 3 calls · $0.02 | ✅ 16 s · 3 calls · $0.02 | ❌ structural fail · 24 s · $0.03 |
+| **Move a block** to a new sibling position | ✅ 15 s · 2 calls | ✅ 25 s · 3 calls | ❌ structural fail · 29 s |
+| **Insert a paragraph inside a `core/group`** | ✅ 15 s · 2 calls | ✅ 20 s · 4 calls | ❌ structural fail · 32 s |
+| **Add a row** to a comparison table | ✅ 13 s · 2 calls | ✅ 25 s · 4 calls | ❌ structural fail · 32 s |
+| **Delete a column** from a table | ✅ 12 s · 2 calls | ✅ 24 s · 4 calls | ❌ structural fail · 26 s |
+| **Delete a heading block** | ✅ 12 s · 3 calls | ✅ 16 s · 3 calls | ❌ structural fail · 24 s |
 | **Total** | **✅ 5 / 5** | **✅ 5 / 5** | **❌ 0 / 5** |
 
-Cost across all 15 invocations: $0.42.
+**Block MCP averages 13 seconds and two tool calls per scenario.** The agent reads the page once, finds the target block by ref or path, calls one mutation, done.
 
-Three takeaways:
+**AI Engine Pro keeps the page intact and finishes correctly,** about 2× slower. Its `wp_alter_post` tool asks the agent to supply both the block-comment markup and the rendered HTML, so most scenarios spend an extra round-trip generating the right shape.
 
-**Block MCP averages 13 seconds at $0.02 per scenario on Haiku.** The agent reads the page once, finds the target by `gk_ref` or path, calls one mutation, done. Two tool calls is the normal-case shape for a structural edit.
-
-**AI Engine Pro keeps the page intact and finishes correctly.** ~2× slower than Block MCP because its `wp_alter_post` tool wants the agent to provide both the block-comment markup AND the rendered HTML, so the agent does an extra "regenerate this for me" round-trip. Cost is similar.
-
-**InstaWP/mcp-wp fails structural integrity on every single scenario.** The transcripts show why: Haiku, given the `update_page` tool, writes the page back as plain HTML (`<h1>...</h1><p>...</p><ol>...`) with no `<!-- wp:* -->` comment markers. WordPress accepts the save, `parse_blocks()` then collapses the entire page into one big freeform/HTML chunk, and **every distinctive block on the page disappears as a structured entity**. The agent thinks it succeeded — its intent edit was correct — but the page is broken in the block editor on reopen. That's the data-shape penalty of wrapping the standard wp/v2 REST surface and trusting the agent to reconstruct block markup by hand.
+**InstaWP/mcp-wp fails every scenario with a "structural fail":** the agent (Haiku, given `update_page`) writes the page back as plain HTML — `<h1>...</h1><p>...</p><ol>...` — with no `<!-- wp:* -->` block markers. WordPress accepts the save, `parse_blocks()` collapses the entire page into one freeform chunk, and every distinctive block on the page disappears as a structured entity. The agent thinks it succeeded; the page is broken in the block editor on reopen. That's the penalty of wrapping the standard wp/v2 REST surface and trusting the agent to reconstruct block markup by hand.
 
 Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs).
 
