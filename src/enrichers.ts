@@ -57,15 +57,28 @@ const SUPPORTED_LANGS = [
   'ini', 'diff', 'dockerfile', 'nginx',
 ] as const;
 
-let _hl: HighlighterGeneric<BundledLanguage, BundledTheme> | null = null;
-let _hlLangs: Set<string> | null = null;
+// Singleton promise (not bare references): on a page with N code blocks,
+// enrichBlocks() fires N concurrent calls into Promise.all. The original
+// `if (_hl) return { hl, langs: _hlLangs! }` had a race where caller A
+// finished setting `_hl` but had not yet set `_hlLangs` when caller B
+// passed the guard, blowing up the non-null assertion downstream.
+// A single in-flight promise dedupes the work and serialises field reads.
+let _hlPromise: Promise<{
+  hl: HighlighterGeneric<BundledLanguage, BundledTheme>;
+  langs: Set<string>;
+}> | null = null;
 
 async function getHighlighter() {
-  if (_hl) return { hl: _hl, langs: _hlLangs! };
-  const theme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-' });
-  _hl = await createHighlighter({ themes: [theme], langs: [...SUPPORTED_LANGS] }) as HighlighterGeneric<BundledLanguage, BundledTheme>;
-  _hlLangs = new Set(_hl.getLoadedLanguages());
-  return { hl: _hl, langs: _hlLangs };
+  if (_hlPromise) return _hlPromise;
+  _hlPromise = (async () => {
+    const theme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-' });
+    const hl = await createHighlighter({
+      themes: [theme],
+      langs: [...SUPPORTED_LANGS],
+    }) as HighlighterGeneric<BundledLanguage, BundledTheme>;
+    return { hl, langs: new Set(hl.getLoadedLanguages()) };
+  })();
+  return _hlPromise;
 }
 
 /**
@@ -106,6 +119,11 @@ export function inferLanguage(code: string): string {
     if (testFn(head)) return language;
   }
 
+  // The `=>\s*['"]?\w/` signal was here previously and matched JS arrow
+  // functions returning strings (e.g. `(x) => "hello"`), causing JS code
+  // to be misclassified as PHP. Each remaining signal is individually
+  // meaningful — `$var =` and `$var->` aren't legitimate JS patterns —
+  // so the threshold stays at 1.
   const phpSignals = [
     /<\?php\b/, /\?>/,
     /\bnamespace\s+[\w\\]+\s*;/, /\buse\s+[\w\\]+(?:\s+as\s+\w+)?\s*;/,
@@ -114,7 +132,7 @@ export function inferLanguage(code: string): string {
     /\bfunction\s+\w+\s*\([^)]*\)\s*\{/,
     /\b(?:do_action|apply_filters|add_action|add_filter|register_(?:post_type|taxonomy|setting|rest_route|block_type)|add_shortcode|wp_(?:enqueue|register)_(?:script|style)|get_(?:option|post_meta|user_meta)|update_(?:option|post_meta|user_meta))\s*\(/,
     /->\w+\s*\(/, /\(\s*(?:int|string|bool|float|array|object|self|static)\s*\)\s*\$\w+/,
-    /\$\w+\s*=/, /\$\w+\s*->/, /\barray\s*\(/, /=>\s*['"]?\w/,
+    /\$\w+\s*=/, /\$\w+\s*->/, /\barray\s*\(/,
   ];
   if (phpSignals.reduce((n, re) => n + (re.test(head) ? 1 : 0), 0) >= 1) return 'php';
   if (/^<!DOCTYPE\s|<html[\s>]|<body[\s>]|<div\s[^>]*>|<p>[\s\S]*<\/p>/i.test(head)) return 'html';

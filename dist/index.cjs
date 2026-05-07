@@ -39768,6 +39768,62 @@ var StdioServerTransport = class {
   }
 };
 
+// package.json
+var package_default = {
+  name: "@gravitykit/block-mcp",
+  version: "1.5.0",
+  description: "MCP server for WordPress block-level content management with preference-aware editing",
+  main: "dist/index.cjs",
+  type: "module",
+  scripts: {
+    build: "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs",
+    start: "node dist/index.cjs",
+    dev: "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --watch",
+    inspect: "npx @modelcontextprotocol/inspector node dist/index.cjs",
+    test: "vitest run",
+    "test:watch": "vitest",
+    eval: "tsx tests/evals/lib/runner.ts",
+    "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
+    prepare: "npm run build"
+  },
+  keywords: [
+    "mcp",
+    "wordpress",
+    "blocks",
+    "gutenberg",
+    "content-management",
+    "gravitykit"
+  ],
+  author: "GravityKit",
+  license: "MIT",
+  dependencies: {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    axios: "^1.7.9",
+    shiki: "^4.0.2"
+  },
+  devDependencies: {
+    "@anthropic-ai/sdk": "^0.91.1",
+    "@types/node": "^22.0.0",
+    esbuild: "^0.27.3",
+    tsx: "^4.21.0",
+    typescript: "^5.7.0",
+    vitest: "^3.2.4"
+  },
+  engines: {
+    node: ">=20.0.0"
+  },
+  files: [
+    "dist/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    ".env.example"
+  ],
+  publishConfig: {
+    access: "public"
+  }
+};
+
 // node_modules/axios/lib/helpers/bind.js
 function bind(fn, thisArg) {
   return function wrap() {
@@ -57535,14 +57591,18 @@ var SUPPORTED_LANGS = [
   "dockerfile",
   "nginx"
 ];
-var _hl = null;
-var _hlLangs = null;
+var _hlPromise = null;
 async function getHighlighter() {
-  if (_hl) return { hl: _hl, langs: _hlLangs };
-  const theme = createCssVariablesTheme({ name: "css-variables", variablePrefix: "--shiki-" });
-  _hl = await createHighlighter({ themes: [theme], langs: [...SUPPORTED_LANGS] });
-  _hlLangs = new Set(_hl.getLoadedLanguages());
-  return { hl: _hl, langs: _hlLangs };
+  if (_hlPromise) return _hlPromise;
+  _hlPromise = (async () => {
+    const theme = createCssVariablesTheme({ name: "css-variables", variablePrefix: "--shiki-" });
+    const hl = await createHighlighter({
+      themes: [theme],
+      langs: [...SUPPORTED_LANGS]
+    });
+    return { hl, langs: new Set(hl.getLoadedLanguages()) };
+  })();
+  return _hlPromise;
 }
 async function shikiHighlight(code, language, themeName) {
   const { hl, langs } = await getHighlighter();
@@ -57572,8 +57632,7 @@ function inferLanguage(code) {
     /\(\s*(?:int|string|bool|float|array|object|self|static)\s*\)\s*\$\w+/,
     /\$\w+\s*=/,
     /\$\w+\s*->/,
-    /\barray\s*\(/,
-    /=>\s*['"]?\w/
+    /\barray\s*\(/
   ];
   if (phpSignals.reduce((n, re3) => n + (re3.test(head2) ? 1 : 0), 0) >= 1) return "php";
   if (/^<!DOCTYPE\s|<html[\s>]|<body[\s>]|<div\s[^>]*>|<p>[\s\S]*<\/p>/i.test(head2)) return "html";
@@ -57638,6 +57697,10 @@ var INSERTED_REFS_SCHEMA = {
         properties: {
           top_level_counter: { type: "number" },
           path: { type: "array", items: { type: "integer" } },
+          // ref is present on every insert path the PHP plugin returns —
+          // bake it into the shared schema instead of overriding the parent
+          // shape per-tool.
+          ref: { type: "string" },
           name: { type: "string" }
         }
       }
@@ -57698,24 +57761,7 @@ var WRITE_TOOLS = [
     name: "insert_blocks",
     description: 'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref \u2014 recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
-    outputSchema: {
-      type: "object",
-      properties: {
-        ...INSERTED_REFS_SCHEMA.properties,
-        inserted: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              top_level_counter: { type: "number" },
-              path: { type: "array", items: { type: "integer" } },
-              ref: { type: "string" },
-              name: { type: "string" }
-            }
-          }
-        }
-      }
-    },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: "object",
       properties: {
@@ -58693,7 +58739,7 @@ var client = new WordPressBlockClient({
 var server = new McpServer(
   {
     name: "block-mcp",
-    version: "1.5.0"
+    version: package_default.version
   },
   {
     capabilities: {

@@ -478,8 +478,9 @@ class Block_Mutator {
 				}
 
 				// Build the child (validating + building innerBlocks recursively
-				// to any depth) via Block_CRUD's shared builder. This op
-				// previously dropped nested innerBlocks silently — see #1.
+				// to any depth) via Block_CRUD's shared builder. Replaces an
+				// earlier inline construction that silently dropped nested
+				// innerBlocks past one level deep.
 				$child_block = $this->crud->build_block_from_def( $new_block_def, $warnings );
 				if ( is_wp_error( $child_block ) ) {
 					return $child_block;

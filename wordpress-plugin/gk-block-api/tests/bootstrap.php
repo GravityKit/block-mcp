@@ -440,8 +440,8 @@ if ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {
 // These additional stubs cover the WordPress functions touched by the
 // v1.2 lifecycle managers. The stub layer focuses on validation/error
 // paths; real WP integration is proved by the gkclone E2E smoke
-// (scripts/e2e-gkclone.mjs). Issue #2 tracks moving to wp-env-based
-// PHPUnit for full integration coverage.
+// (scripts/e2e-gkclone.mjs). A wp-env-based PHPUnit harness is the
+// long-term direction.
 
 // Capabilities — controllable per test via $GLOBALS['_gk_test_caps'].
 // Default: every cap granted. Tests denying a cap set the array key to false.

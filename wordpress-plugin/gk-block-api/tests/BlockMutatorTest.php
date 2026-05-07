@@ -369,7 +369,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( 'core/paragraph', $saved[0]['innerBlocks'][0]['blockName'] );
 	}
 
-	// Issue #1 — replace-block must recurse to ANY depth, not just 1.
+	// replace-block must recurse to ANY depth, not just 1.
 	public function test_replace_block_preserves_grandchild_inner_blocks() {
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
 		$result = $this->mutator->mutate(
@@ -724,7 +724,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( 'legacy_block', $result->get_error_code() );
 	}
 
-	// Issue #1 — insert-child must build innerBlocks recursively, not drop them.
+	// insert-child must build innerBlocks recursively, not drop them.
 	public function test_insert_child_preserves_nested_inner_blocks() {
 		$this->make_post( array(
 			$this->block( 'core/group', array(), '<div></div>', array(
@@ -764,7 +764,7 @@ class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals( 'core/heading', $column['innerBlocks'][0]['blockName'] );
 	}
 
-	// Issue #1 — legacy blocks nested inside an otherwise-valid insert-child must hard-reject.
+	// Legacy blocks nested inside an otherwise-valid insert-child must hard-reject.
 	public function test_insert_child_rejects_nested_legacy_block() {
 		$this->make_post( array(
 			$this->block( 'core/group', array(), '<div></div>', array(

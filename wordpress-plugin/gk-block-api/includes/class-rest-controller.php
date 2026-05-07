@@ -1380,9 +1380,9 @@ class REST_Controller {
 				$blocks  = $this->filter_block_fields( $blocks, $allowed );
 			}
 
-			// Cursor-based pagination (issue #7). Opt-in: kicks in only when
-			// the caller passes `cursor` or `limit`. Walks top-level blocks
-			// and preserves each block's full nested innerBlocks tree, so
+			// Cursor-based pagination. Opt-in: kicks in only when the caller
+			// passes `cursor` or `limit`. Walks top-level blocks and
+			// preserves each block's full nested innerBlocks tree, so
 			// edit-precision semantics aren't broken across pages.
 			$cursor_param = $request->get_param( 'cursor' );
 			$limit_param  = $request->get_param( 'limit' );
@@ -1422,10 +1422,10 @@ class REST_Controller {
 				$response['pagination'] = $pagination_meta;
 			}
 
-			// Issue #6 — surface the current revision as a weak ETag so
-			// callers can do optimistic concurrency control on follow-up
-			// writes via the `If-Match` header (or `expected_revision` body
-			// field for transports that can't set headers).
+			// Surface the current revision as a weak ETag so callers can do
+			// optimistic concurrency control on follow-up writes via the
+			// `If-Match` header (or `expected_revision` body field for
+			// transports that can't set headers).
 			$current_revision        = $this->block_crud->get_latest_revision_id( $post_id );
 			$response['revision_id'] = $current_revision;
 			$rest_response           = new \WP_REST_Response( $response, 200 );

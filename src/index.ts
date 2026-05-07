@@ -20,6 +20,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+// Read the version from package.json so npm/CI bumps automatically flow
+// into the MCP handshake — keeps the runtime version in lockstep with the
+// published release. esbuild inlines this at bundle time.
+import pkg from '../package.json' with { type: 'json' };
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -87,7 +91,7 @@ const client = new WordPressBlockClient({
 const server = new McpServer(
   {
     name: 'block-mcp',
-    version: '1.5.0',
+    version: pkg.version,
   },
   {
     capabilities: {

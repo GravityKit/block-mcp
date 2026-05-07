@@ -186,6 +186,8 @@ export interface BlockUpdateResponse {
     index: number;
     name: string;
     attributes: Record<string, unknown>;
+    /** Stable gk_ref UUID (present when the block had/has a ref). Use to chain follow-up mutations. */
+    ref?: string;
   };
   /** WordPress revision ID of the pre-edit snapshot */
   before_revision_id: number;

@@ -43,6 +43,10 @@ const INSERTED_REFS_SCHEMA = {
         properties: {
           top_level_counter: { type: 'number' },
           path:              { type: 'array', items: { type: 'integer' } },
+          // ref is present on every insert path the PHP plugin returns —
+          // bake it into the shared schema instead of overriding the parent
+          // shape per-tool.
+          ref:               { type: 'string' },
           name:              { type: 'string' },
         },
       },
@@ -108,24 +112,7 @@ export const WRITE_TOOLS = [
     description:
       'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        ...INSERTED_REFS_SCHEMA.properties,
-        inserted: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              top_level_counter: { type: 'number' },
-              path:              { type: 'array', items: { type: 'integer' } },
-              ref:               { type: 'string' },
-              name:              { type: 'string' },
-            },
-          },
-        },
-      },
-    },
+    outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
       type: 'object' as const,
       properties: {

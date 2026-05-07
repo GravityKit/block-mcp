@@ -317,6 +317,14 @@ class Block_CRUD {
 			$block['blockName']
 		);
 
+		// Surface the stable ref so callers can chain mutations against the
+		// same block without re-reading. The TS outputSchema declares this
+		// field; without it agents that try to capture ref from update_block
+		// for follow-up edits would see undefined.
+		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+			$block_data['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+		}
+
 		return array(
 			'success'            => true,
 			'block'              => $block_data,
