@@ -223,8 +223,20 @@ export async function handleDiscoveryTool(
       ) {
         throw new Error('get_post_info requires one of: post_id, url, or slug');
       }
+      // Some MCP clients (and JSON without typed schema enforcement) send
+      // numeric IDs as strings. Coerce well-formed integer strings rather
+      // than silently dropping them — otherwise the call falls through to
+      // url/slug-only resolution, which probably isn't what was meant.
+      let normalizedPostId: number | undefined;
+      if (typeof postId === 'number' && Number.isFinite(postId)) {
+        normalizedPostId = postId;
+      } else if (typeof postId === 'string' && /^[0-9]+$/.test(postId)) {
+        normalizedPostId = parseInt(postId, 10);
+      } else if (postId !== undefined && postId !== null) {
+        throw new Error('get_post_info: post_id must be a positive integer');
+      }
       return await client.getPostInfo({
-        post_id:   typeof postId === 'number' ? postId : undefined,
+        post_id:   normalizedPostId,
         url:       typeof url === 'string' ? url : undefined,
         slug:      typeof slug === 'string' ? slug : undefined,
         post_type: args.post_type as string | undefined,

@@ -355,7 +355,7 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   }
   const url = (args?.url as string | undefined) ?? '';
   const seed = url
-    ? `Editing target: ${url}\n\nFirst tool call: get_page_blocks({ url: "${url}", summary_only: true }) for cheap orientation, then re-fetch with search/block_name filters as needed.\n\n`
+    ? `Editing target: ${url}\n\nFirst tool call: get_page_blocks({ url: ${JSON.stringify(url)}, summary_only: true }) for cheap orientation, then re-fetch with search/block_name filters as needed.\n\n`
     : '';
   return {
     description: 'Workflow primer for editing a WordPress page via block-mcp.',

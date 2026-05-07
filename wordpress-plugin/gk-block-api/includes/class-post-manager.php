@@ -159,6 +159,13 @@ class Post_Manager {
 		}
 		if ( isset( $args['author'] ) ) {
 			$author_id = (int) $args['author'];
+			if ( $author_id < 1 || ! get_userdata( $author_id ) ) {
+				return new \WP_Error(
+					'invalid_author',
+					__( 'The supplied author ID does not match an existing user.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
 			if ( $author_id !== get_current_user_id() ) {
 				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
 					? $pt_object->cap->edit_others_posts
@@ -402,6 +409,13 @@ class Post_Manager {
 		}
 		if ( array_key_exists( 'author', $args ) ) {
 			$author_id = (int) $args['author'];
+			if ( $author_id < 1 || ! get_userdata( $author_id ) ) {
+				return new \WP_Error(
+					'invalid_author',
+					__( 'The supplied author ID does not match an existing user.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
 			if ( $author_id !== get_current_user_id() ) {
 				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
 					? $pt_object->cap->edit_others_posts

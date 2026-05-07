@@ -225,9 +225,16 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
       /<pre class="shiki[\s\S]*?<\/pre>/,
       codeHTML
     );
+    // Encode `&`, `<`, `>` before injecting raw source code into the
+    // <textarea>'s text content. A literal `</textarea>` in the source
+    // would otherwise close the element early and corrupt innerHTML.
+    const encoded = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
-      (_m, open, _old, close) => `${open}${code}${close}`
+      (_m, open, _old, close) => `${open}${encoded}${close}`
     );
   }
 

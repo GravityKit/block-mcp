@@ -550,7 +550,7 @@ class BlockRefsTest extends \PHPUnit\Framework\TestCase {
 		$result = $this->crud->get_blocks( $this->post_id );
 
 		$this->assertNotEmpty( $result );
-		$this->assertNotEmpty( $result[0]['attributes']['metadata']['gk_ref'] );
+		$this->assertNotEmpty( $result[0]['ref'] );
 		$this->assertArrayNotHasKey(
 			'gk_block_api_ref_lock_' . $this->post_id,
 			$GLOBALS['_gk_test_object_cache'],
@@ -616,13 +616,13 @@ class BlockRefsTest extends \PHPUnit\Framework\TestCase {
 
 		// First call: assigns + persists + releases lock.
 		$first = $this->crud->get_blocks( $this->post_id );
-		$ref1  = $first[0]['attributes']['metadata']['gk_ref'];
+		$ref1  = $first[0]['ref'];
 
 		// Second call: should NOT block on the lock from call 1; should also
 		// be a no-op (refs already there) so the post_content hash stays the
 		// same.
 		$second = $this->crud->get_blocks( $this->post_id );
-		$ref2   = $second[0]['attributes']['metadata']['gk_ref'];
+		$ref2   = $second[0]['ref'];
 
 		$this->assertSame( $ref1, $ref2, 'refs must be stable across reads once persisted' );
 		$this->assertArrayNotHasKey(

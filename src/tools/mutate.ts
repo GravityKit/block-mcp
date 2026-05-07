@@ -28,7 +28,7 @@ const OPS: readonly MutationOp[] = [
 export const MUTATE_TOOLS = [{
   name: 'edit_block_tree',
   description:
-    'Run one structural op on a nested block tree. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Target the block via `ref` (stable gk_ref — recommended, survives sibling shifts) OR `path` (integer array, e.g. [0,2,1]). For move, the destination can be a `destination_ref` / `before_ref` instead of a path. Creates a revision.',
+    'Run one structural op on a nested block tree. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Target the block via `ref` (stable gk_ref — recommended, survives sibling shifts) OR `path` (integer array, e.g. [0,2,1]). For move, the destination can be a `destination_ref` instead of a path. Creates a revision.',
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Edit block tree' },
   outputSchema: {
     type: 'object',

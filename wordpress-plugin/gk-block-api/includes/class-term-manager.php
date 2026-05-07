@@ -101,7 +101,10 @@ class Term_Manager {
 			'parent'      => isset( $term->parent ) ? (int) $term->parent : 0,
 			'count'       => isset( $term->count ) ? (int) $term->count : 0,
 			'taxonomy'    => isset( $term->taxonomy ) ? (string) $term->taxonomy : '',
-			'link'        => function_exists( 'get_term_link' ) ? (string) get_term_link( $term ) : '',
+			// get_term_link() returns WP_Error for invalid terms / taxonomies;
+			// casting that to string would inject "Object of class WP_Error..."
+			// into the response. Resolve once and downgrade errors to ''.
+			'link'        => ( $link = get_term_link( $term ) ) && ! is_wp_error( $link ) ? (string) $link : '',
 		);
 	}
 }
