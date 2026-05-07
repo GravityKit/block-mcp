@@ -77,6 +77,24 @@ Three takeaways:
 
 Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs). Cost across all 27 invocations: $2.22.
 
+### Now try the structural ops agents actually need
+
+A single heading-level change is the easy case. The interesting work is when an agent has to move a block, drop a paragraph inside an existing container, or modify a table — the kind of multi-step structural editing real content workflows demand. Same Opus model, same 3 trials each, three new scenarios:
+
+| Scenario | Block MCP | [AI Engine Pro](https://meowapps.com/ai-engine/) | [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) |
+|---|:---:|:---:|:---:|
+| **Move a block** to a new sibling position | ✅ 3 / 3 · 12 s · $0.06 | ✅ 3 / 3 · 25 s · $0.20 | ✅ 3 / 3 · 49 s · $0.26 |
+| **Insert a paragraph inside an existing container** (`core/group`) | ✅ 3 / 3 · 12 s · $0.08 | ✅ 3 / 3 · 15 s · $0.09 | ✅ 3 / 3 · 58 s · $0.26 |
+| **Add a row** to an existing comparison table | ✅ 3 / 3 · 14 s · $0.06 | ✅ 3 / 3 · 13 s · $0.13 | ✅ 3 / 3 · 98 s · $0.41 |
+
+All three MCPs technically pass — the agent does eventually reach the right page state — but the cost and latency profile diverges hard:
+
+- **Block MCP averages ~13 seconds per scenario at ~$0.07 each.** The agent reads the page once, finds the block by `gk_ref` or path, calls one mutation, done.
+- **AI Engine Pro is ~2× slower and ~2× more expensive** on these scenarios. Still respectable.
+- **InstaWP/mcp-wp is 4–7× slower and 4× more expensive.** The "add a row to a table" scenario had a single trial blow out to **172 seconds and $0.67** — the agent was rewriting the entire page on each tool call to make a one-row change. That's the standard WP REST shape penalty: the more structurally aware the edit, the more whole-page round-trips it forces.
+
+A note on InstaWP passing here: validators check that the *intent* completed (the row is there, the column is gone, the block moved), not that the page is still healthy in the block editor. As the H2 → H3 numbers above show, the same agent + same MCP can mark a trial as "done" while leaving "this block contains unexpected or invalid content" warnings throughout. Pass rate alone undersells the gap.
+
 ## Why Block MCP
 
 Block MCP is the only WordPress MCP designed from the ground up for the way agents actually edit pages: one block at a time, across multiple turns, without corrupting anything along the way. The agent-loop bench reflects that — 9 of 9 across every Claude tier, including the cheapest.

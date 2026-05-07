@@ -361,11 +361,14 @@ const SCENARIOS = {
         JSON.stringify(table.attributes || {}),
       ].join(' ').toLowerCase();
 
-      // The Risk-column values must be gone.
-      const removed = ['risk', 'high', 'low'];
-      const surviving = removed.filter((s) => haystack.includes(s));
-      if (surviving.length) {
-        return { ok: false, why: `Risk-column values still present: ${surviving.join(', ')}` };
+      // Risk-column values must be gone — anchored to word boundaries so
+      // "low" doesn't false-positive on the surviving "Slow" cell, and
+      // "high" doesn't false-positive on attribute names like "highlight".
+      // \\b in JS regex means word boundary at the engine level.
+      const removed = [/\brisk\b/, /\bhigh\b/, /\blow\b/];
+      const survivingPatterns = removed.filter((re) => re.test(haystack));
+      if (survivingPatterns.length) {
+        return { ok: false, why: `Risk-column tokens still present: ${survivingPatterns.map((r) => r.source).join(', ')}` };
       }
 
       // The other two columns must survive.
@@ -621,6 +624,52 @@ async function readBlocks(postId) {
   return r.data.blocks;
 }
 
+/**
+ * Structural-integrity check: are the seed's distinctive blocks still
+ * recognizable as their original block types?
+ *
+ * The seed (seed-bench-page.php) has a fixed set of unique core/* block
+ * types — list, quote, code, columns, group, pullquote, separator, etc.
+ * A correct single-block edit MUST leave all of those alive. When an MCP
+ * round-trips the whole page through a "raw HTML" REST endpoint, the
+ * `<!-- wp:* -->` comment markers get stripped and parse_blocks() collapses
+ * the result into one big core/freeform / core/html / core/paragraph
+ * sequence — losing the structured tree the editor relies on. The agent's
+ * intent-level edit may technically have happened, but the page is broken
+ * in the block editor on reopen.
+ *
+ * This check fires BEFORE the scenario-specific validator on every trial.
+ * If it fails, the trial is reported as STRUCTURAL_FAIL — distinct from
+ * an intent-level FAIL — so the bench cleanly separates "agent didn't do
+ * the work" from "agent corrupted the page in the process".
+ *
+ * Skipped on the live-page bench (different fixture, different sentinels);
+ * the live-page integrity story uses a per-fixture sentinel set instead.
+ */
+const SYNTHETIC_SENTINEL_BLOCKS = [
+  'core/list', 'core/quote', 'core/code', 'core/columns',
+  'core/group', 'core/pullquote', 'core/separator', 'core/preformatted',
+];
+
+function checkStructuralIntegrity(blocks, sentinels = SYNTHETIC_SENTINEL_BLOCKS) {
+  const found = new Set();
+  const walk = (arr) => {
+    for (const b of arr) {
+      if (b && b.name) found.add(b.name);
+      if (b && b.innerBlocks) walk(b.innerBlocks);
+    }
+  };
+  walk(blocks);
+  const missing = sentinels.filter((n) => !found.has(n));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      why: `block-marker integrity broken — sentinels missing: ${missing.join(', ')} (likely whole-page HTML rewrite stripped wp:* markers)`,
+    };
+  }
+  return { ok: true };
+}
+
 function spawnClaude({ mcpConfigJsonPath, model, prompt }) {
   return new Promise((resolve) => {
     const start = process.hrtime.bigint();
@@ -738,16 +787,41 @@ async function main() {
           const summary = summarizeResult(r);
           totalCost += summary.cost_usd;
 
-          // 4. Validate page state independently
+          // 4. Validate page state independently. Structural integrity check
+          // runs first: did the page survive the round-trip with its block
+          // markup intact? An agent can pass the intent-level validator
+          // (heading is now H3, row was added, etc.) while having flattened
+          // the rest of the page into a single core/freeform / core/html
+          // block by stripping `<!-- wp:* -->` markers. That's a different
+          // failure mode from "agent didn't do the work" and we report it
+          // as STRUCTURAL_FAIL.
           let validation = { ok: false, why: 'not validated' };
+          let structural = { ok: true };
           try {
             const blocks = await readBlocks(postId);
+            // Live-page scenarios skip the synthetic sentinel set — the
+            // fixture has different distinctive blocks. (Live runs can
+            // populate scenario.sentinels to opt in to a fixture-specific
+            // check; absent that, structural is a no-op.)
+            if (!scenarioKey.startsWith('live-')) {
+              structural = checkStructuralIntegrity(blocks);
+            }
             validation = scenario.validate(blocks);
           } catch (e) {
             validation = { ok: false, why: `validation read failed: ${e.message}` };
           }
 
-          process.stderr.write(`  → ${(r.wall_clock_ms / 1000).toFixed(1)}s · ${summary.tool_calls} tool calls · $${summary.cost_usd.toFixed(4)} · validation: ${validation.ok ? 'PASS' : `FAIL (${validation.why})`}\n`);
+          // The trial passes only if BOTH integrity and intent are OK.
+          const overallPass = structural.ok && validation.ok;
+          let report;
+          if (overallPass) {
+            report = 'PASS';
+          } else if (!structural.ok) {
+            report = `STRUCTURAL_FAIL (${structural.why})`;
+          } else {
+            report = `FAIL (${validation.why})`;
+          }
+          process.stderr.write(`  → ${(r.wall_clock_ms / 1000).toFixed(1)}s · ${summary.tool_calls} tool calls · $${summary.cost_usd.toFixed(4)} · validation: ${report}\n`);
 
           // On any validation failure, dump the agent's full transcript to a
           // file so we can see WHICH tools it called with what arguments.
