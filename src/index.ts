@@ -122,32 +122,42 @@ const ALL_TOOLS = [
   ...YOAST_TOOLS,
 ];
 
-/** Set of discovery tool names for routing. */
-const DISCOVERY_TOOL_NAMES = new Set(DISCOVERY_TOOLS.map((t) => t.name));
+/**
+ * Tool dispatch table — name → handler function.
+ *
+ * Built once at startup from each tool group's `*_TOOLS` array paired
+ * with its `handle*Tool` dispatcher. A new tool added to any `*_TOOLS`
+ * array is automatically routable; an unrouted tool name produces a
+ * single point of failure (the Map lookup) instead of falling silently
+ * through an `else if` chain to "Unknown tool".
+ */
+type ToolHandler = (
+  name: string,
+  args: Record<string, unknown>,
+  client: WordPressBlockClient,
+) => Promise<unknown>;
 
-/** Set of read tool names for routing. */
-const READ_TOOL_NAMES = new Set(READ_TOOLS.map((t) => t.name));
+const TOOL_GROUPS: ReadonlyArray<{
+  tools: ReadonlyArray<{ name: string }>;
+  handle: ToolHandler;
+}> = [
+  { tools: DISCOVERY_TOOLS, handle: handleDiscoveryTool },
+  { tools: READ_TOOLS,      handle: handleReadTool },
+  { tools: WRITE_TOOLS,     handle: handleWriteTool },
+  { tools: PATTERN_TOOLS,   handle: handlePatternTool },
+  { tools: MUTATE_TOOLS,    handle: handleMutateTool },
+  { tools: POST_TOOLS,      handle: handlePostTool },
+  { tools: TERM_TOOLS,      handle: handleTermTool },
+  { tools: MEDIA_TOOLS,     handle: handleMediaTool },
+  { tools: YOAST_TOOLS,     handle: handleYoastTool },
+];
 
-/** Set of write tool names for routing. */
-const WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
-
-/** Set of pattern tool names for routing. */
-const PATTERN_TOOL_NAMES = new Set(PATTERN_TOOLS.map((t) => t.name));
-
-/** Set of mutate tool names for routing. */
-const MUTATE_TOOL_NAMES = new Set(MUTATE_TOOLS.map((t) => t.name));
-
-/** v1.2 — post lifecycle tool names. */
-const POST_TOOL_NAMES = new Set(POST_TOOLS.map((t) => t.name));
-
-/** v1.2 — term tool names. */
-const TERM_TOOL_NAMES = new Set(TERM_TOOLS.map((t) => t.name));
-
-/** v1.2 — media tool names. */
-const MEDIA_TOOL_NAMES = new Set(MEDIA_TOOLS.map((t) => t.name));
-
-/** v1.2 — yoast tool names. */
-const YOAST_TOOL_NAMES = new Set(YOAST_TOOLS.map((t) => t.name));
+const TOOL_DISPATCH = new Map<string, ToolHandler>();
+for (const { tools, handle } of TOOL_GROUPS) {
+  for (const tool of tools) {
+    TOOL_DISPATCH.set(tool.name, handle);
+  }
+}
 
 // ============================================
 // System prompt context resource
@@ -209,29 +219,11 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const toolArgs = (args ?? {}) as Record<string, unknown>;
 
   try {
-    let result: unknown;
-
-    if (DISCOVERY_TOOL_NAMES.has(name)) {
-      result = await handleDiscoveryTool(name, toolArgs, client);
-    } else if (READ_TOOL_NAMES.has(name)) {
-      result = await handleReadTool(name, toolArgs, client);
-    } else if (WRITE_TOOL_NAMES.has(name)) {
-      result = await handleWriteTool(name, toolArgs, client);
-    } else if (PATTERN_TOOL_NAMES.has(name)) {
-      result = await handlePatternTool(name, toolArgs, client);
-    } else if (MUTATE_TOOL_NAMES.has(name)) {
-      result = await handleMutateTool(name, toolArgs, client);
-    } else if (POST_TOOL_NAMES.has(name)) {
-      result = await handlePostTool(name, toolArgs, client);
-    } else if (TERM_TOOL_NAMES.has(name)) {
-      result = await handleTermTool(name, toolArgs, client);
-    } else if (MEDIA_TOOL_NAMES.has(name)) {
-      result = await handleMediaTool(name, toolArgs, client);
-    } else if (YOAST_TOOL_NAMES.has(name)) {
-      result = await handleYoastTool(name, toolArgs, client);
-    } else {
+    const handle = TOOL_DISPATCH.get(name);
+    if (!handle) {
       throw new Error(`Unknown tool: ${name}`);
     }
+    const result = await handle(name, toolArgs, client);
 
     // Emit `structuredContent` alongside the text fallback when the tool
     // declared an `outputSchema`. Clients that parse structured output

@@ -6,8 +6,66 @@
  * typed methods for every REST endpoint.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
+
+/** Max retry attempts for transient server / network errors. */
+const MAX_RETRIES = 2;
+
+/** Idempotent HTTP verbs — safe to retry without risking duplicate work. */
+const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options', 'delete']);
+
+/** Sleep for `ms` milliseconds. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Backoff delay (ms) for retry `attempt` (1-indexed). Exponential with jitter:
+ *   attempt 1 → ~500ms ± 25%
+ *   attempt 2 → ~1500ms ± 25%
+ * Jitter avoids thundering-herd retries from many MCP clients hitting the
+ * same WP host simultaneously.
+ */
+function backoffMs(attempt: number): number {
+  const base = 500 * 3 ** (attempt - 1);
+  const jitter = base * 0.25 * (Math.random() * 2 - 1);
+  return Math.round(base + jitter);
+}
+
+/**
+ * Decide whether an axios error is retryable.
+ *
+ * Policy:
+ *   - 429 (rate limited) → retry on any method. The WP plugin returns 429
+ *     BEFORE doing any work, so a retry is safe even for writes.
+ *   - 502 / 503 / 504 (server overload / gateway issues) → retry only
+ *     idempotent methods. The server may or may not have processed the
+ *     request; replaying a write could double-apply.
+ *   - Network errors with no response (ECONNRESET, ETIMEDOUT, ENETUNREACH)
+ *     → retry idempotent methods only.
+ *
+ * Anything else is a real error that the caller needs to see.
+ */
+function isRetryable(error: AxiosError): boolean {
+  const method = (error.config?.method ?? 'get').toLowerCase();
+  const idempotent = IDEMPOTENT_METHODS.has(method);
+
+  if (error.response) {
+    const status = error.response.status;
+    if (status === 429) return true;
+    if ((status === 502 || status === 503 || status === 504) && idempotent) return true;
+    return false;
+  }
+
+  // No response — network-level failure.
+  const code = error.code;
+  if (code === 'ECONNREFUSED') return false; // wrong URL / WP down — don't retry blindly
+  if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ENETUNREACH' || code === 'EAI_AGAIN') {
+    return idempotent;
+  }
+  return false;
+}
 import type {
   BlockMCPConfig,
   BlockType,
@@ -100,12 +158,24 @@ export class WordPressBlockClient {
       timeout: 30000,
     });
 
-    // Response interceptor for consistent error formatting. formatError now
-    // returns an Error already enriched with `wpCode`/`wpData`/`wpStatus`,
-    // so we throw it directly instead of wrapping (which would strip them).
-    this.client.interceptors.response.use((r) => r, (error: AxiosError) => {
-      throw this.formatError(error);
-    });
+    // Response interceptor: retry transient errors with exponential backoff,
+    // then format any final error so it carries wpCode/wpData/wpStatus for
+    // the server-level catch in src/index.ts.
+    this.client.interceptors.response.use(
+      (r) => r,
+      async (error: AxiosError) => {
+        const config = error.config as (AxiosRequestConfig & { __retryCount?: number }) | undefined;
+        if (config && isRetryable(error)) {
+          const attempt = (config.__retryCount ?? 0) + 1;
+          if (attempt <= MAX_RETRIES) {
+            config.__retryCount = attempt;
+            await sleep(backoffMs(attempt));
+            return this.client.request(config);
+          }
+        }
+        throw this.formatError(error);
+      },
+    );
   }
 
   /**

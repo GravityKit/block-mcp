@@ -44,18 +44,66 @@ export async function enrichBlock(block: BlockDef): Promise<BlockDef> {
   return { ...enriched, innerBlocks: await enrichBlocks(enriched.innerBlocks) };
 }
 
-/** Enrich an array of blocks (and their descendants) in parallel. */
+// Concurrency cap for enrichBlocks. Most enrichers (notably Shiki
+// highlighting) are CPU-bound; an unbounded Promise.all on a code-heavy
+// post can fan out 30+ simultaneous highlight calls and stall the event
+// loop. 8 is a reasonable default; tunable via BLOCK_MCP_ENRICH_CONCURRENCY
+// for sites that want different trade-offs (1 = serial; 32+ = old behavior).
+const ENRICH_CONCURRENCY: number = (() => {
+  const raw = parseInt(process.env.BLOCK_MCP_ENRICH_CONCURRENCY ?? '', 10);
+  return Number.isFinite(raw) && raw >= 1 ? raw : 8;
+})();
+
+/**
+ * Run an async mapper over an array with a concurrency cap. Preserves input
+ * order in the output. No external dep — we ship one place that needs this.
+ */
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (limit >= items.length || limit <= 0) {
+    return Promise.all(items.map((item, i) => mapper(item, i)));
+  }
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await mapper(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: limit }, () => worker());
+  await Promise.all(workers);
+  return out;
+}
+
+/** Enrich an array of blocks (and their descendants) with bounded concurrency. */
 export async function enrichBlocks(blocks: BlockDef[]): Promise<BlockDef[]> {
-  return Promise.all(blocks.map(enrichBlock));
+  return mapWithLimit(blocks, ENRICH_CONCURRENCY, enrichBlock);
 }
 
 // ── Shiki singleton ───────────────────────────────────────────────────────────
 
-const SUPPORTED_LANGS = [
+// Base list of Shiki grammars loaded into every highlighter instance.
+// Extend via the BLOCK_MCP_SHIKI_LANGS env var: a comma-separated list of
+// any Shiki bundled grammar (e.g. "rust,go,kotlin"). Unknown / misspelt
+// names are dropped silently by Shiki at load time.
+const BASE_LANGS = [
   'php', 'javascript', 'typescript', 'css', 'html', 'json', 'xml',
   'sql', 'bash', 'shell', 'python', 'ruby', 'yaml', 'markdown',
   'ini', 'diff', 'dockerfile', 'nginx',
 ] as const;
+
+function resolveSupportedLangs(): string[] {
+  const extra = (process.env.BLOCK_MCP_SHIKI_LANGS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0 && /^[a-z0-9._+-]+$/.test(s));
+  return [...new Set<string>([...BASE_LANGS, ...extra])];
+}
 
 // Singleton promise (not bare references): on a page with N code blocks,
 // enrichBlocks() fires N concurrent calls into Promise.all. The original
@@ -74,7 +122,7 @@ async function getHighlighter() {
     const theme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-' });
     const hl = await createHighlighter({
       themes: [theme],
-      langs: [...SUPPORTED_LANGS],
+      langs: resolveSupportedLangs(),
     }) as HighlighterGeneric<BundledLanguage, BundledTheme>;
     return { hl, langs: new Set(hl.getLoadedLanguages()) };
   })();

@@ -11,7 +11,7 @@
 - **Editor-safe round-trips.** `<!-- wp:* -->` block markers are preserved exactly. No "this block contains unexpected or invalid content" warnings on reopen.
 - **Tier policy enforced server-side.** Legacy/deprecated blocks (Stackable, UGB, Jetpack) are rejected before they hit disk, with suggested modern replacements.
 - **Optimistic concurrency built in.** ETag + If-Match handshake on every write. Two agents on the same post can't silently overwrite each other.
-- **Self-contained.** Yoast SEO bridge ships in the same plugin. No extra mu-plugin or theme glue.
+- **Yoast SEO support built in.** Read and write Yoast meta (titles, descriptions, focus keywords, canonical URLs, schema types, primary terms, Open Graph / Twitter cards) the moment Yoast SEO is active on the site.
 
 ## Table of Contents
 
