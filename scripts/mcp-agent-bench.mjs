@@ -75,6 +75,11 @@ const MODELS_FILTER    = (process.env.MODELS    || '').split(',').filter(Boolean
 const TRIALS           = Math.max(1, parseInt(process.env.TRIALS           || '2', 10));
 const MAX_BUDGET_USD   = process.env.MAX_BUDGET_USD || '0.50';
 const PER_CALL_TIMEOUT_MS = parseInt(process.env.PER_CALL_TIMEOUT_MS || '90000', 10);
+// FAIL_FAST_BLOCK_MCP=1 → abort the whole bench as soon as Block MCP fails
+// validation on any scenario. Used during scenario-tuning so a broken
+// validator or prompt doesn't burn the rest of the matrix on the other
+// MCPs. Default: off (run the full matrix even if Block MCP fails).
+const FAIL_FAST_BLOCK_MCP = process.env.FAIL_FAST_BLOCK_MCP === '1';
 
 // ── MCP configs (per-call isolation: only the named MCP is exposed) ────────
 const AI_ENGINE_MCP_URL = process.env.AI_ENGINE_MCP_URL;
@@ -187,25 +192,21 @@ const SCENARIOS = {
   // gets fragile.
 
   'move-conclusion-up': {
-    label: 'Move the Conclusion heading to right after the H1',
+    label: 'Move the Conclusion heading above Introduction',
     prompt: ({ POST_ID }) =>
-      `On WordPress page ${POST_ID}, find the H2 heading "Conclusion" and move just that heading block (not the paragraphs below it) to be the SECOND block on the page — immediately after the H1 "A long sample page for benchmarking". Use the available MCP. Keep the heading text identical.`,
+      `On WordPress page ${POST_ID}, find the H2 heading "Conclusion" near the bottom of the page and move just that heading block (not the paragraphs below it) so it appears ABOVE the H2 heading "Introduction" in the page order. The Conclusion heading must end up earlier in the block list than Introduction. Use the available MCP. Keep the heading text identical.`,
     validate(blocks) {
-      if (blocks.length < 2) return { ok: false, why: `page has only ${blocks.length} top-level blocks` };
-      // First block should still be the H1.
-      if (blocks[0].name !== 'core/heading' || blocks[0].attributes?.level !== 1) {
-        return { ok: false, why: `first block is no longer the H1 (got ${blocks[0].name})` };
+      // Find both at top level by their text. Conclusion must precede
+      // Introduction. We accept any reasonable destination — the spirit of
+      // the test is "the move actually happened", not pixel-perfect placement.
+      const concIdx  = blocks.findIndex((b) => b.name === 'core/heading' && (b.text_preview || '').trim() === 'Conclusion');
+      const introIdx = blocks.findIndex((b) => b.name === 'core/heading' && (b.text_preview || '').trim() === 'Introduction');
+      if (concIdx === -1)  return { ok: false, why: 'Conclusion heading missing from top level' };
+      if (introIdx === -1) return { ok: false, why: 'Introduction heading missing from top level' };
+      if (concIdx >= introIdx) {
+        return { ok: false, why: `Conclusion at idx ${concIdx} is not before Introduction at idx ${introIdx}` };
       }
-      // Second block must now be the H2 "Conclusion".
-      const second = blocks[1];
-      if (second.name !== 'core/heading') {
-        return { ok: false, why: `second block is ${second.name}, expected core/heading` };
-      }
-      const text = (second.text_preview || '').trim();
-      if (text !== 'Conclusion') {
-        return { ok: false, why: `second block heading text is "${text}", expected "Conclusion"` };
-      }
-      // It's a move, not a copy.
+      // Move, not copy.
       let count = 0;
       const walk = (arr) => {
         for (const b of arr) {
@@ -214,8 +215,8 @@ const SCENARIOS = {
         }
       };
       walk(blocks);
-      if (count !== 1) return { ok: false, why: `expected exactly 1 "Conclusion" heading after move; found ${count}` };
-      return { ok: true, why: '"Conclusion" heading moved to position 1 (after H1)' };
+      if (count !== 1) return { ok: false, why: `expected exactly 1 Conclusion heading; found ${count}` };
+      return { ok: true, why: `Conclusion (idx ${concIdx}) now precedes Introduction (idx ${introIdx})` };
     },
   },
 
@@ -587,7 +588,10 @@ function uploadSeedScript() {
 }
 
 function resetRateLimit(postId) {
-  try { runWP(`transient delete gk_block_api_rate_${postId}`); } catch {}
+  // 2>/dev/null swallows the noisy "Transient was not deleted" warning
+  // wp-cli emits when the transient doesn't exist yet (the common case
+  // on a freshly seeded post).
+  try { runWP(`transient delete gk_block_api_rate_${postId} 2>/dev/null`); } catch {}
 }
 
 // gk-block-api client for validation reads (independent of which MCP the agent used).
@@ -725,6 +729,14 @@ async function main() {
           }
 
           process.stderr.write(`  → ${(r.wall_clock_ms / 1000).toFixed(1)}s · ${summary.tool_calls} tool calls · $${summary.cost_usd.toFixed(4)} · validation: ${validation.ok ? 'PASS' : `FAIL (${validation.why})`}\n`);
+
+          if (FAIL_FAST_BLOCK_MCP && mcpKey === 'block-mcp' && !validation.ok) {
+            process.stderr.write(
+              `\nFAIL_FAST_BLOCK_MCP is set — Block MCP failed validation on scenario "${scenarioKey}". Aborting before burning the rest of the matrix on the other MCPs.\n`
+              + `Total spent so far: $${totalCost.toFixed(2)}. Diagnose the scenario / Block MCP, then rerun.\n`,
+            );
+            process.exit(2);
+          }
 
           results.push({
             scenario: scenarioKey,
