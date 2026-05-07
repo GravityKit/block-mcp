@@ -43623,7 +43623,9 @@ function extractHints(data) {
   const hints = { ...d2 };
   if (typeof d2.post_id === "number") hints.post_id = d2.post_id;
   if (typeof d2.ref === "string") hints.ref = d2.ref;
-  if (Array.isArray(d2.path)) hints.path = d2.path;
+  if (Array.isArray(d2.path) && d2.path.every((p2) => typeof p2 === "number" && Number.isFinite(p2))) {
+    hints.path = d2.path;
+  }
   if (typeof d2.block === "string") hints.block = d2.block;
   if (typeof d2.block_name === "string") hints.block_name = d2.block_name;
   if (typeof d2.suggested_replacement === "string") hints.suggested_replacement = d2.suggested_replacement;

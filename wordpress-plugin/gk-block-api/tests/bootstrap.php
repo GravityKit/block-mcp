@@ -655,7 +655,8 @@ if ( ! function_exists( 'get_post_type' ) ) {
 		if ( isset( $GLOBALS['_gk_test_posts'][ $id ] ) ) {
 			return $GLOBALS['_gk_test_posts'][ $id ]->post_type;
 		}
-		return 'post';
+		// Mirror WordPress core: false when the post doesn't exist.
+		return false;
 	}
 }
 

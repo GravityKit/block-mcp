@@ -42,7 +42,9 @@ function extractHints(data: unknown): ErrorContextHints {
 
   if (typeof d.post_id === 'number')             hints.post_id = d.post_id;
   if (typeof d.ref === 'string')                 hints.ref = d.ref;
-  if (Array.isArray(d.path))                     hints.path = d.path as number[];
+  if (Array.isArray(d.path) && d.path.every((p): p is number => typeof p === 'number' && Number.isFinite(p))) {
+    hints.path = d.path;
+  }
   if (typeof d.block === 'string')               hints.block = d.block;
   if (typeof d.block_name === 'string')          hints.block_name = d.block_name;
   if (typeof d.suggested_replacement === 'string') hints.suggested_replacement = d.suggested_replacement;
