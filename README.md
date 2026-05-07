@@ -2,7 +2,37 @@
 
 > Surgical block-level content editing for WordPress via the Model Context Protocol.
 
-An MCP server + WordPress plugin that lets AI agents read, edit, and restructure Gutenberg block content as nested JSON instead of raw HTML. Every edit creates a WordPress revision for rollback. Stable block refs let agents chain mutations without re-fetching the page.
+**Block MCP** is an MCP server plus WordPress plugin that lets AI agents read, edit, and restructure Gutenberg block content as nested JSON instead of raw HTML. Every edit creates a WordPress revision for rollback. Stable block refs let agents chain mutations without re-fetching the page.
+
+## Table of Contents
+
+* [At a glance](#at-a-glance)
+  * [The numbers](#the-numbers)
+  * [When you actually ask an AI to edit a page](#when-you-actually-ask-an-ai-to-edit-a-page)
+* [Why this MCP](#why-this-mcp)
+* [Compared to other WordPress MCPs](#compared-to-other-wordpress-mcps)
+* [Features](#features)
+* [How It Works](#how-it-works)
+* [Quick Start](#quick-start)
+  * [1. Install the WordPress plugin](#1-install-the-wordpress-plugin)
+  * [2. Create an Application Password](#2-create-an-application-password)
+  * [3. Install and configure the MCP server](#3-install-and-configure-the-mcp-server)
+  * [4. (Optional) Tune the settings](#4-optional-tune-the-settings)
+* [MCP Tools](#mcp-tools)
+* [Stable Refs](#stable-refs)
+* [Configuration](#configuration)
+  * [Namespace tier scores](#namespace-tier-scores)
+  * [Replacement map](#replacement-map)
+  * [Blocks that store data in two places](#blocks-that-store-data-in-two-places)
+  * [Post types AI agents can create](#post-types-ai-agents-can-create)
+  * [Storage-mode scan + reset](#storage-mode-scan--reset)
+* [Examples](#examples)
+* [Testing](#testing)
+* [Requirements](#requirements)
+* [Limitations](#limitations)
+* [Translations](#translations)
+* [License](#license)
+* [Contributing](#contributing)
 
 ## At a glance
 
@@ -332,10 +362,10 @@ With path-based addressing, the agent would need to re-fetch between every step.
 Run all suites locally:
 
 ```bash
-# TypeScript (Vitest) — 230 tests
+# TypeScript (Vitest) — 249 tests
 npm test
 
-# PHP (PHPUnit, stub WP bootstrap) — 286 tests
+# PHP (PHPUnit, stub WP bootstrap) — 326 tests
 cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
 ```
 
