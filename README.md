@@ -1,16 +1,14 @@
 # Block MCP
 
-> The WordPress MCP that AI agents actually finish the job with. **9 of 9** across Claude Haiku, Sonnet, and Opus in our agent-loop bench — versus 8/9 for AI Engine Pro and 2/9 for the popular InstaWP wrapper.
-
 **Block MCP** is the WordPress MCP built for the way agents actually edit — one block at a time, across multiple turns, without corrupting the page. It's an MCP server plus WordPress plugin that exposes Gutenberg content as a structured, addressable block tree instead of raw HTML, so an agent can change a single heading without rewriting the page. Every block carries a stable `gk_ref` UUID that survives sibling shifts (no other WordPress MCP has this), so multi-turn edit chains don't re-fetch the page between calls. Every write creates a WordPress revision for rollback, ETag/If-Match guards against concurrent overwrites, and a server-side tier policy stops legacy blocks from ever hitting disk. Backed by **326 PHP tests, 249 TypeScript tests**, CI on PHP 8.2/8.3 + Node 20, and translations to 20 languages.
 
 ### Why agents pick Block MCP
 
-- **Edits one block, not the whole page.** Change a heading's level without touching the surrounding HTML. Standard WP REST forces a full page rewrite on every edit; Block MCP touches just the one heading.
-- **Stable block refs no other WordPress MCP has.** Chain inserts, deletes, and updates across turns from a single read — sibling shifts don't invalidate the addresses.
+- **Edits one block, not the whole page.** Change a heading's level without touching the surrounding HTML. Standard MCPs force a full page rewrite on every edit; Block MCP touches just the one heading.
 - **Editor-safe round-trips.** `<!-- wp:* -->` block markers are preserved exactly. No "this block contains unexpected or invalid content" warnings on reopen.
-- **Tier policy enforced server-side.** Legacy/deprecated blocks (Stackable, UGB, Jetpack) are rejected before they hit disk, with suggested modern replacements.
-- **Optimistic concurrency built in.** ETag + If-Match handshake on every write. Two agents on the same post can't silently overwrite each other.
+- **Stable block refs no other WordPress MCP has.** Quickly chain inserts, deletes, and updates across turns from a single read.
+- **Tier policy enforced server-side.** Decide what blocks you want to allow or reject before they are saved, with suggested replacements.
+- **Optimistic concurrency built in.** Two agents working on the same post can't silently overwrite each other.
 - **Yoast SEO support built in.** Read and write Yoast meta (titles, descriptions, focus keywords, canonical URLs, schema types, primary terms, Open Graph / Twitter cards) the moment Yoast SEO is active on the site.
 
 ## Table of Contents
@@ -45,37 +43,22 @@
 
 ## At a glance
 
-Here's where Block MCP wins. Most other WordPress MCPs (including [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)) wrap the standard WordPress REST surface — fine for blogging, wrong shape for agents editing blocks. Every row below is an everyday request — "change a heading, then add a button, then fix the next paragraph" — and the difference between *the agent thinks it worked* and *the page actually still opens cleanly in the editor afterward*.
+Here's where Block MCP wins. Most other WordPress MCPs are wrappers around the standard WordPress REST API — fine for writing, but wrong for editing. "Change a heading, then add a button, then fix the next paragraph" could result in your post needing major rehab to get back to correct syntax. Block MCP is the answer to an WordPress block editor MCP that **just works**.
 
 | What the agent can do | Standard WP REST API | Block MCP |
 |---|:---:|:---:|
-| **Edit one heading without touching the rest of the page** | ❌ Has to rewrite the entire page on every edit | ✅ Updates just the one heading |
+| **Edit one heading without touching the rest of the page** | ❌ Rewrites the entire page on every edit | ✅ Updates just the one heading |
 | **Make 5 edits in a row without re-sending the whole page each time** | ❌ Sends the full page body 5× | ✅ Sends only what changed |
 | **Find which block contains "Pricing" without scanning rendered HTML** | ❌ No structured search — agent has to regex through HTML | ✅ Built-in search by text or block type |
-| **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Agent can write any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
-| **Edit a page and have it still open cleanly in the block editor afterward** | ❌ Edits go in as raw HTML — when you reopen the page, the block editor flags many blocks with **"This block contains unexpected or invalid content"** because the original block markers got stripped during the round-trip | ✅ Block markup is preserved exactly. The editor reopens the page with every block intact and editable. |
-| **Keep editing the right block after adding or removing other blocks above it** | ❌ Loses track once anything moves — has to re-read the whole page to figure out positions again | ✅ Each block has a stable ID, so the AI can keep working without re-reading |
-
-### The numbers
-
-Averaged over 5 trials against a 38-block fixture page. Reproduce via [`scripts/mcp-compare.mjs`](scripts/mcp-compare.mjs).
-
-| | Standard WP REST API | Block MCP |
-|---|---|---|
-| Time to read one page | 850 ms | 800 ms |
-| Time to make one edit | 1.9 s | 1.7 s |
-| Time for 5 edits in a row | 8.6 s | 9.2 s |
-| **Data sent for 5 edits** | **33 KB** *(the whole page, 5×)* | **0.1 KB** *(just the changes)* |
-
-Both tools take about the same amount of time per edit. The chained-edit row is roughly tied — the standard REST API ships the whole page each time but skips per-block parsing on the server, while Block MCP ships only the change but does extra work to parse and re-serialize. Speed isn't the win.
-
-The differences that matter are **what gets sent** and **whether the result is correct**. The standard REST API re-sends the entire page on every edit, which is roughly 260× more data over 5 edits and — more importantly — gives the AI the chance to accidentally touch parts of the page it didn't intend to. Block MCP only sends what changed, and because it works in WordPress's native block format the result opens cleanly in the block editor afterward (no "this block contains unexpected or invalid content" warnings).
+| **Stop legacy/deprecated blocks from being saved in the first place** | ❌ Writes any HTML, valid or not | ✅ Server rejects legacy blocks, suggests modern replacements |
+| **Edit a page and have it still open cleanly in the block editor afterward** | ❌ Edits as raw HTML — expect many blocks with **"This block contains unexpected or invalid content"** because the original block markers got stripped | ✅ Block markup is preserved exactly. |
+| **Keep editing the right block after adding or removing other blocks above it** | ❌ Re-reads the whole page after each edit | ✅ AI can keep working without re-reading |
 
 ### When you actually ask an AI to edit a page
 
-API benchmarks measure the wrong thing. The number that matters is whether the page is actually correct after the agent finishes. So we put Claude in front of each MCP, typed a real instruction — *"change the H2 heading 'Code samples' to H3"* — and then re-opened the page and inspected it.
+What matters is whether the page is correct after the agent finishes. So we put Claude in front of each MCP, typed a real instruction — *"change the H2 heading 'Code samples' to H3"* — then re-opened the page and inspected it.
 
-27 runs total: three MCP servers × Haiku, Sonnet, Opus × 3 trials each. **The agent's claim of success doesn't count — only the actual page state does.**
+27 runs total: three MCP servers × Haiku, Sonnet, Opus × 3 trials each.
 
 | Model | Block MCP | [AI Engine Pro](https://meowapps.com/ai-engine/) | [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) |
 |---|:---:|:---:|:---:|
@@ -94,7 +77,7 @@ Three takeaways:
 
 Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs). Cost across all 27 invocations: $2.22.
 
-## Why this MCP
+## Why Block MCP
 
 Block MCP is the only WordPress MCP designed from the ground up for the way agents actually edit pages: one block at a time, across multiple turns, without corrupting anything along the way. The agent-loop bench reflects that — 9 of 9 across every Claude tier, including the cheapest.
 
@@ -122,8 +105,6 @@ The WordPress MCP space is small, and Block MCP is the only one operating at the
 **[InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)** — A REST-API-wrapping MCP that operates on whole posts, plus broad coverage of users, comments, media, plugins, and plugin-repo search. Standout feature: multi-site management from one MCP instance. Reach for it when you need post-level CRUD across many sites or general-purpose WordPress administration. *Not block-aware:* editing a single heading inside a long page means reading and rewriting the entire post, and the round-trip through `wp/v2`'s `update_page` strips every `<!-- wp:* -->` block marker. In our bench it failed validation on 7 of 9 trials across Haiku/Sonnet/Opus.
 
 **[AI Engine Pro](https://meowapps.com/ai-engine/)** — Self-hosted MCP server inside WordPress (Streamable HTTP at `/wp-json/mcp/v1/http`), built by Meow Apps and the most-installed WordPress AI plugin (100K+). Free tier exposes posts/comments/users/media as MCP tools; Pro adds an Editor Assistant sidebar and additional MCP plumbing. Its `wp_alter_post` tool *is* block-aware — block-comment markers survive — but it can desync the block's declared attributes from its innerHTML (e.g., comment marker still says `level: 2` while the inner tag is `<h3>`), and the block editor flags that as broken too. Sonnet and Opus retry until consistent and pass; Haiku sometimes gives up at 7–12 tool calls. 8 of 9 in the bench.
-
-**[WordPress/mcp-adapter](https://github.com/WordPress/mcp-adapter)** — The official WordPress-org adapter that bridges WordPress's core Abilities API (`wp_register_ability()`, shipped in WP 6.9) to the MCP specification. *Framework, not an end-user tool* — by itself it exposes only built-in abilities. To make it useful for content editing, you (or some other plugin) still need to register abilities that do the actual work. Reach for it when you're building first-party WordPress AI integrations and want the blessed transport, permissions, and observability story. Not benched directly because there's nothing to bench until a plugin registers content-editing abilities through it.
 
 **Block MCP** (this project) — Operates one layer below: inside a single post's block tree. Path- and ref-based addressing, auto-transforms that keep attributes and innerHTML in sync server-side, preference-tier enforcement, per-block revisions. None of those exist in the other three. Reach for it when an agent needs to edit *blocks* — change a heading level, swap a column layout, insert a CTA after the third paragraph — without rewriting the surrounding content. 9 of 9 in the bench, perfect across all three Claude models, including the cheapest.
 
