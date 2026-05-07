@@ -187,21 +187,25 @@ const SCENARIOS = {
   // gets fragile.
 
   'move-conclusion-up': {
-    label: 'Move the Conclusion section to the top',
+    label: 'Move the Conclusion heading to right after the H1',
     prompt: ({ POST_ID }) =>
-      `On WordPress page ${POST_ID}, find the H2 heading "Conclusion" and move it (just the heading block, not anything below it) to be the first block on the page — before everything else, including before the H1. Use the available MCP. Keep the heading text identical.`,
+      `On WordPress page ${POST_ID}, find the H2 heading "Conclusion" and move just that heading block (not the paragraphs below it) to be the SECOND block on the page — immediately after the H1 "A long sample page for benchmarking". Use the available MCP. Keep the heading text identical.`,
     validate(blocks) {
-      if (!blocks.length) return { ok: false, why: 'page is empty' };
-      const first = blocks[0];
-      if (first.name !== 'core/heading') {
-        return { ok: false, why: `first block is ${first.name}, expected core/heading` };
+      if (blocks.length < 2) return { ok: false, why: `page has only ${blocks.length} top-level blocks` };
+      // First block should still be the H1.
+      if (blocks[0].name !== 'core/heading' || blocks[0].attributes?.level !== 1) {
+        return { ok: false, why: `first block is no longer the H1 (got ${blocks[0].name})` };
       }
-      const text = (first.text_preview || '').trim();
+      // Second block must now be the H2 "Conclusion".
+      const second = blocks[1];
+      if (second.name !== 'core/heading') {
+        return { ok: false, why: `second block is ${second.name}, expected core/heading` };
+      }
+      const text = (second.text_preview || '').trim();
       if (text !== 'Conclusion') {
-        return { ok: false, why: `first block heading text is "${text}", expected "Conclusion"` };
+        return { ok: false, why: `second block heading text is "${text}", expected "Conclusion"` };
       }
-      // Make sure no other heading still has text "Conclusion" — that'd mean
-      // the agent duplicated instead of moved.
+      // It's a move, not a copy.
       let count = 0;
       const walk = (arr) => {
         for (const b of arr) {
@@ -211,7 +215,7 @@ const SCENARIOS = {
       };
       walk(blocks);
       if (count !== 1) return { ok: false, why: `expected exactly 1 "Conclusion" heading after move; found ${count}` };
-      return { ok: true, why: '"Conclusion" heading moved to top of page' };
+      return { ok: true, why: '"Conclusion" heading moved to position 1 (after H1)' };
     },
   },
 
@@ -395,6 +399,159 @@ const SCENARIOS = {
       return { ok: true, why: '"Call to action" heading deleted, rest of page intact' };
     },
   },
+
+  // ── Live-page scenarios (use SEED_SCRIPT=seed-bench-page-live.php) ─────────
+  // These target a snapshot of https://www.gravitykit.com/for/developers/ —
+  // a real production marketing landing page heavy in Stackable blocks plus
+  // ten core/group sections (Header, Trusted by, features, Side to side,
+  // Perks, Tools, Testimonials, Case studies, FAQs). The agents see real
+  // production complexity: deep nesting, mixed namespaces (core + stackable),
+  // metadata.name-tagged sections, and a Stackable-heavy block mix where
+  // Block MCP's tier policy treats the namespace as 'avoid'.
+  //
+  // No core/table on this page → table-modification scenarios stay synthetic-only.
+
+  'live-change-h2-to-h3': {
+    label: '[live] Change H2 "Build anything and everything" to H3',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the H2 heading with the text "Build anything and everything" and change it to H3 (level 3). Don't paraphrase — keep the heading text exactly the same, just change the level. Use the available MCP.`,
+    validate(blocks) {
+      const found = [];
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/heading' && (b.text_preview || '').trim() === 'Build anything and everything') {
+            found.push({ level: b.attributes?.level });
+          }
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (found.length !== 1) return { ok: false, why: `expected exactly 1 "Build anything and everything" heading; found ${found.length}` };
+      if (found[0].level !== 3) return { ok: false, why: `heading is still level ${found[0].level}, expected 3` };
+      return { ok: true, why: 'heading changed to H3' };
+    },
+  },
+
+  'live-move-faqs-before-testimonials': {
+    label: '[live] Move the FAQs group to right before the Testimonials group',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, the page has these named core/group blocks at the top level (in order): Header, Trusted by, features, Tools, Testimonials, Case studies, FAQs. Move the "FAQs" group block (the entire group, with all its children) to be IMMEDIATELY BEFORE the "Testimonials" group. The new top-level order should be: Header, Trusted by, features, Tools, FAQs, Testimonials, Case studies. Don't change anything inside the groups. Use the available MCP.`,
+    validate(blocks) {
+      // Build the ordered list of named-group sections at the top level only.
+      const sections = blocks
+        .filter((b) => b.name === 'core/group' && b.attributes?.metadata?.name)
+        .map((b) => b.attributes.metadata.name);
+      const expected = ['Header', 'Trusted by', 'features', 'Tools', 'FAQs', 'Testimonials', 'Case studies'];
+      let cursor = 0;
+      for (const name of expected) {
+        const idx = sections.indexOf(name, cursor);
+        if (idx === -1) return { ok: false, why: `expected section "${name}" not found in order; got: ${sections.join(' → ')}` };
+        cursor = idx + 1;
+      }
+      const faqsIdx = sections.indexOf('FAQs');
+      const testimonialsIdx = sections.indexOf('Testimonials');
+      if (faqsIdx === -1 || testimonialsIdx === -1) return { ok: false, why: 'FAQs or Testimonials section missing' };
+      if (faqsIdx >= testimonialsIdx) return { ok: false, why: `FAQs (idx ${faqsIdx}) is not before Testimonials (idx ${testimonialsIdx})` };
+      const faqsCount = sections.filter((n) => n === 'FAQs').length;
+      if (faqsCount !== 1) return { ok: false, why: `expected exactly 1 FAQs section; found ${faqsCount}` };
+      return { ok: true, why: 'FAQs group moved to right before Testimonials' };
+    },
+  },
+
+  'live-insert-into-trusted-by': {
+    label: '[live] Add a paragraph inside the "Trusted by" group',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the core/group block whose metadata.name is "Trusted by". INSIDE that group block (as a child, after all existing children), add a new core/paragraph with the exact text: "Built by developers, for developers." It must be a child of the Trusted by group, not a top-level sibling. Don't touch anything else. Use the available MCP.`,
+    validate(blocks) {
+      const target = blocks.find((b) => b.name === 'core/group' && b.attributes?.metadata?.name === 'Trusted by');
+      if (!target) return { ok: false, why: 'no "Trusted by" group at top level' };
+      const children = target.innerBlocks || [];
+      if (!children.length) return { ok: false, why: '"Trusted by" group has no children at all' };
+      const last = children[children.length - 1];
+      if (last.name !== 'core/paragraph') {
+        return { ok: false, why: `last child of "Trusted by" is ${last.name}, expected core/paragraph` };
+      }
+      const text = (last.text_preview || last.innerHTML || '').toLowerCase();
+      if (!text.includes('built by developers, for developers')) {
+        return { ok: false, why: `last paragraph is "${text.slice(0, 80)}", expected the new tagline` };
+      }
+      // Make sure the agent didn't ALSO add it as a top-level sibling.
+      const stray = blocks.some(
+        (b) => b !== target
+          && b.name === 'core/paragraph'
+          && (b.text_preview || b.innerHTML || '').toLowerCase().includes('built by developers, for developers'),
+      );
+      if (stray) {
+        return { ok: false, why: 'paragraph was also added at the top level, not just inside the group' };
+      }
+      return { ok: true, why: 'paragraph correctly inserted as last child of "Trusted by" group' };
+    },
+  },
+
+  'live-add-h2-between-features-and-tools': {
+    label: '[live] Insert an H2 between the "features" group and the "Tools" group',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the core/group block whose metadata.name is "features" — it sits at the top level. Immediately after it (as a top-level sibling, BEFORE the next group whose metadata.name is "Tools"), insert a new core/heading at level 2 with the exact text: "What's next?" Don't touch the features group's contents or any other block. Use the available MCP.`,
+    validate(blocks) {
+      // featuresIdx is at top level; the very next non-empty top-level block
+      // must be the new H2. Spacers between sections are normal — skip them.
+      const featuresIdx = blocks.findIndex((b) => b.name === 'core/group' && b.attributes?.metadata?.name === 'features');
+      if (featuresIdx === -1) return { ok: false, why: 'no "features" group at top level' };
+
+      // Find the first non-spacer block after features.
+      let next = null;
+      for (let i = featuresIdx + 1; i < blocks.length; i++) {
+        if (blocks[i].name === 'core/spacer') continue;
+        next = blocks[i];
+        break;
+      }
+      if (!next) return { ok: false, why: 'nothing meaningful follows features at top level' };
+      if (next.name !== 'core/heading') {
+        return { ok: false, why: `first non-spacer block after features is ${next.name}, expected core/heading` };
+      }
+      if (next.attributes?.level !== 2) {
+        return { ok: false, why: `inserted heading is level ${next.attributes?.level}, expected 2` };
+      }
+      const text = (next.text_preview || '').trim();
+      if (text !== "What's next?") {
+        return { ok: false, why: `inserted heading text is "${text}", expected "What's next?"` };
+      }
+      // Tools must still appear after the inserted heading at the top level.
+      const toolsIdx = blocks.findIndex((b) => b.name === 'core/group' && b.attributes?.metadata?.name === 'Tools');
+      if (toolsIdx === -1) {
+        return { ok: false, why: 'Tools group is missing — agent likely clobbered it' };
+      }
+      return { ok: true, why: 'H2 "What\'s next?" inserted between features and Tools' };
+    },
+  },
+
+  'live-delete-h2': {
+    label: '[live] Delete the H2 "Avoid costly maintenance work"',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the heading with the text "Avoid costly maintenance work" and delete just that one heading block. Don't delete anything around it — only the heading itself. Use the available MCP.`,
+    validate(blocks) {
+      let count = 0;
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/heading' && (b.text_preview || '').trim() === 'Avoid costly maintenance work') count++;
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (count !== 0) return { ok: false, why: `"Avoid costly maintenance work" still present (found ${count})` };
+      // All nine named groups should still be at the top level — easy
+      // catch for over-deletion.
+      const sections = blocks
+        .filter((b) => b.name === 'core/group' && b.attributes?.metadata?.name)
+        .map((b) => b.attributes.metadata.name);
+      const expected = ['Header', 'Trusted by', 'features', 'Side to side', 'Perks', 'Tools', 'Testimonials', 'Case studies', 'FAQs'];
+      const missing = expected.filter((n) => !sections.includes(n));
+      if (missing.length) {
+        return { ok: false, why: `top-level groups missing after delete: ${missing.join(', ')}` };
+      }
+      return { ok: true, why: 'heading deleted; all top-level sections intact' };
+    },
+  },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -406,8 +563,15 @@ function runWP(cmd) {
   return execSync(`${ssh} "cd ${WP_PATH} && wp ${cmd.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });
 }
 
+// Which seed script to run. Default: seed-bench-page.php (synthetic). Override
+// to seed-bench-page-live.php for the live-page bench dimension that uses a
+// snapshot of a real published page. Anything else is an absolute path.
+const SEED_SCRIPT = process.env.SEED_SCRIPT || 'seed-bench-page.php';
+
 function reseedPage() {
-  const seedPath = LOCAL_WP_PATH ? join(import.meta.dirname, 'seed-bench-page.php') : '/tmp/seed-bench-page.php';
+  const seedPath = LOCAL_WP_PATH
+    ? join(import.meta.dirname, SEED_SCRIPT)
+    : `/tmp/${SEED_SCRIPT.split('/').pop()}`;
   const out = runWP(`eval-file ${seedPath} 2>&1 | grep -v Deprecated | tail -1`).trim();
   const id = parseInt(out, 10);
   if (!id) throw new Error(`reseed failed; got: ${out}`);
@@ -417,7 +581,9 @@ function reseedPage() {
 function uploadSeedScript() {
   if (LOCAL_WP_PATH) return; // local — file is in scripts/ already, no upload needed
   const scp = `sshpass -p "${WP_LIVE_SSH_PASSWORD}" scp -o StrictHostKeyChecking=no -P ${WP_LIVE_PORT}`;
-  execSync(`${scp} ${join(import.meta.dirname, 'seed-bench-page.php')} ${WP_LIVE_USER}@${WP_LIVE_HOST}:/tmp/seed-bench-page.php`, { stdio: 'ignore' });
+  const localScript = join(import.meta.dirname, SEED_SCRIPT);
+  const remoteName  = SEED_SCRIPT.split('/').pop();
+  execSync(`${scp} ${localScript} ${WP_LIVE_USER}@${WP_LIVE_HOST}:/tmp/${remoteName}`, { stdio: 'ignore' });
 }
 
 function resetRateLimit(postId) {
