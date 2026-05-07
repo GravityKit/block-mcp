@@ -179,6 +179,222 @@ const SCENARIOS = {
       return { ok: true, why: 'paragraph correctly inserted after Introduction' };
     },
   },
+
+  // ── Cool-ops scenarios that exercise structural editing ────────────────────
+  // Designed to exercise capabilities that go beyond "rewrite a block in place":
+  // moving across siblings, inserting INTO an existing container, deleting a
+  // block. These are where the standard WP REST API shape (whole-page rewrites)
+  // gets fragile.
+
+  'move-conclusion-up': {
+    label: 'Move the Conclusion section to the top',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the H2 heading "Conclusion" and move it (just the heading block, not anything below it) to be the first block on the page — before everything else, including before the H1. Use the available MCP. Keep the heading text identical.`,
+    validate(blocks) {
+      if (!blocks.length) return { ok: false, why: 'page is empty' };
+      const first = blocks[0];
+      if (first.name !== 'core/heading') {
+        return { ok: false, why: `first block is ${first.name}, expected core/heading` };
+      }
+      const text = (first.text_preview || '').trim();
+      if (text !== 'Conclusion') {
+        return { ok: false, why: `first block heading text is "${text}", expected "Conclusion"` };
+      }
+      // Make sure no other heading still has text "Conclusion" — that'd mean
+      // the agent duplicated instead of moved.
+      let count = 0;
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/heading' && (b.text_preview || '').trim() === 'Conclusion') count++;
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (count !== 1) return { ok: false, why: `expected exactly 1 "Conclusion" heading after move; found ${count}` };
+      return { ok: true, why: '"Conclusion" heading moved to top of page' };
+    },
+  },
+
+  'insert-into-group': {
+    label: 'Add a paragraph INSIDE the existing "Grouped section" group',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, there's an H2 "Grouped section" followed by a core/group block. INSIDE that group block (as a child, after the existing children), add a new paragraph with the exact text: "Inserted at the bottom of the group." Don't add it as a sibling to the group — it must be a child of the group. Use the available MCP.`,
+    validate(blocks) {
+      // Find the core/group that follows "Grouped section". It's a top-level
+      // sibling of the heading.
+      let headingIdx = -1;
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        if (b.name === 'core/heading' && (b.text_preview || '').trim() === 'Grouped section') {
+          headingIdx = i; break;
+        }
+      }
+      if (headingIdx === -1) return { ok: false, why: 'no "Grouped section" heading found' };
+      // The group is the next core/group sibling at the top level.
+      let group = null;
+      for (let i = headingIdx + 1; i < blocks.length; i++) {
+        if (blocks[i].name === 'core/group') { group = blocks[i]; break; }
+        if (blocks[i].name === 'core/heading') break; // hit the next section
+      }
+      if (!group) return { ok: false, why: 'no core/group after "Grouped section" heading' };
+      const children = group.innerBlocks || [];
+      if (!children.length) return { ok: false, why: 'group has no children at all' };
+      const last = children[children.length - 1];
+      if (last.name !== 'core/paragraph') {
+        return { ok: false, why: `last child of group is ${last.name}, expected core/paragraph` };
+      }
+      const text = (last.text_preview || '').trim();
+      if (!text.includes('Inserted at the bottom of the group')) {
+        return { ok: false, why: `last paragraph text is "${text}", expected to contain "Inserted at the bottom of the group."` };
+      }
+      // Make sure the agent didn't ALSO add it as a top-level sibling.
+      const topMatches = blocks.filter(
+        (b) => b.name === 'core/paragraph' && (b.text_preview || '').includes('Inserted at the bottom of the group'),
+      );
+      if (topMatches.length) {
+        return { ok: false, why: 'paragraph was added as a top-level sibling, not as a child of the group' };
+      }
+      return { ok: true, why: 'paragraph correctly inserted inside the group as the last child' };
+    },
+  },
+
+  'add-row-to-table': {
+    label: 'Add a row to the existing comparison table',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the existing core/table block (it has a header row "Approach | Risk | Speed" and two body rows). Add a third body row at the BOTTOM with these three cells, in order: "Hand-rolled HTML", "High", "Slow". Use the available MCP. Don't change any other rows or anything else on the page.`,
+    validate(blocks) {
+      // Find the table anywhere in the tree.
+      let table = null;
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/table' && !table) table = b;
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (!table) return { ok: false, why: 'no core/table block on the page' };
+
+      // Different shapes: WP usually stores rows in attributes.body[].cells[].content
+      // but some serialisers leave the data in innerHTML only. Build a single
+      // lowercased haystack.
+      const haystack = [
+        table.text_preview || '',
+        table.innerHTML || '',
+        JSON.stringify(table.attributes || {}),
+      ].join(' ').toLowerCase();
+
+      // The new row's cells must all be present.
+      const required = ['hand-rolled html', 'high', 'slow'];
+      const missing = required.filter((s) => !haystack.includes(s));
+      if (missing.length) {
+        return { ok: false, why: `table is missing required new-row cells: ${missing.join(', ')}` };
+      }
+
+      // The original cells must still be there too — we're adding, not replacing.
+      const original = ['approach', 'risk', 'speed', 'whole-page rewrite', 'block-level edit'];
+      const lost = original.filter((s) => !haystack.includes(s));
+      if (lost.length) {
+        return { ok: false, why: `original table cells were destroyed: ${lost.join(', ')}` };
+      }
+
+      // Body row count: try to detect via attributes.body; fall back to <tr> count
+      // in innerHTML excluding the header.
+      let bodyRowCount = null;
+      const attrs = table.attributes || {};
+      if (Array.isArray(attrs.body)) {
+        bodyRowCount = attrs.body.length;
+      } else if (typeof table.innerHTML === 'string' && table.innerHTML.length) {
+        const tbody = table.innerHTML.toLowerCase().match(/<tbody>[\s\S]*?<\/tbody>/);
+        if (tbody) {
+          bodyRowCount = (tbody[0].match(/<tr\b/g) || []).length;
+        } else {
+          // No explicit tbody — count <tr> outside of <thead>.
+          const thead = table.innerHTML.toLowerCase().match(/<thead>[\s\S]*?<\/thead>/);
+          const total = (table.innerHTML.toLowerCase().match(/<tr\b/g) || []).length;
+          const head  = thead ? (thead[0].match(/<tr\b/g) || []).length : 0;
+          bodyRowCount = total - head;
+        }
+      }
+      if (bodyRowCount !== null && bodyRowCount < 3) {
+        return { ok: false, why: `expected at least 3 body rows after add; found ${bodyRowCount}` };
+      }
+      return { ok: true, why: `row added; body now has ${bodyRowCount ?? 'unknown'} rows including the new one` };
+    },
+  },
+
+  'delete-column-from-table': {
+    label: 'Delete the "Risk" column from the comparison table',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the existing core/table block (it has a header row "Approach | Risk | Speed" and two body rows). Delete the entire "Risk" column — that means removing the "Risk" header cell AND the corresponding cell in every body row. The table should end up with just two columns: "Approach" and "Speed". Use the available MCP. Don't change anything else.`,
+    validate(blocks) {
+      let table = null;
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/table' && !table) table = b;
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (!table) return { ok: false, why: 'no core/table block on the page' };
+
+      const haystack = [
+        table.text_preview || '',
+        table.innerHTML || '',
+        JSON.stringify(table.attributes || {}),
+      ].join(' ').toLowerCase();
+
+      // The Risk-column values must be gone.
+      const removed = ['risk', 'high', 'low'];
+      const surviving = removed.filter((s) => haystack.includes(s));
+      if (surviving.length) {
+        return { ok: false, why: `Risk-column values still present: ${surviving.join(', ')}` };
+      }
+
+      // The other two columns must survive.
+      const required = ['approach', 'speed', 'whole-page rewrite', 'block-level edit'];
+      const lost = required.filter((s) => !haystack.includes(s));
+      if (lost.length) {
+        return { ok: false, why: `non-Risk columns were destroyed: ${lost.join(', ')}` };
+      }
+
+      // Cell count per row should be 2 — verify if we can read the structure.
+      const attrs = table.attributes || {};
+      const rowsToCheck = [];
+      if (Array.isArray(attrs.head) && attrs.head[0]?.cells) rowsToCheck.push(attrs.head[0].cells.length);
+      if (Array.isArray(attrs.body)) {
+        for (const r of attrs.body) {
+          if (Array.isArray(r?.cells)) rowsToCheck.push(r.cells.length);
+        }
+      }
+      if (rowsToCheck.length && rowsToCheck.some((n) => n !== 2)) {
+        return { ok: false, why: `expected every row to have 2 cells; got ${rowsToCheck.join(',')}` };
+      }
+      return { ok: true, why: '"Risk" column removed; Approach + Speed columns intact' };
+    },
+  },
+
+  'delete-cta': {
+    label: 'Delete the "Call to action" heading block',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the H2 heading "Call to action" and delete just that one heading block. Don't delete anything else — only the H2 heading itself. Use the available MCP.`,
+    validate(blocks) {
+      // Should be no heading anywhere with text "Call to action".
+      let count = 0;
+      const walk = (arr) => {
+        for (const b of arr) {
+          if (b.name === 'core/heading' && (b.text_preview || '').trim() === 'Call to action') count++;
+          if (b.innerBlocks) walk(b.innerBlocks);
+        }
+      };
+      walk(blocks);
+      if (count !== 0) return { ok: false, why: `"Call to action" heading still present (found ${count})` };
+      // Also: page should still have plenty of content (don't accept "deleted everything").
+      if (blocks.length < 8) {
+        return { ok: false, why: `page has only ${blocks.length} top-level blocks; agent likely over-deleted` };
+      }
+      return { ok: true, why: '"Call to action" heading deleted, rest of page intact' };
+    },
+  },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────

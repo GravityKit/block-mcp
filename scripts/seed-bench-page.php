@@ -40,6 +40,10 @@ $content = <<<'HTML'
 <blockquote class="wp-block-quote"><!-- wp:paragraph --><p>The format you expose to the agent shapes the kinds of edits it can make safely.</p><!-- /wp:paragraph --><cite>An author who has edited too much WordPress content with regex</cite></blockquote>
 <!-- /wp:quote -->
 
+<!-- wp:table -->
+<figure class="wp-block-table"><table><thead><tr><th class="has-text-align-left" data-align="left"><strong>Approach</strong></th><th class="has-text-align-center" data-align="center"><em>Risk</em></th><th class="has-text-align-right" data-align="right"><strong><em>Speed</em></strong></th></tr></thead><tbody><tr><td class="has-text-align-left" data-align="left">Whole-page rewrite</td><td class="has-text-align-center" data-align="center">High</td><td class="has-text-align-right" data-align="right">Slow</td></tr><tr><td class="has-text-align-left" data-align="left">Block-level edit</td><td class="has-text-align-center" data-align="center">Low</td><td class="has-text-align-right" data-align="right">Fast</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
 <!-- wp:heading {"level":2} -->
 <h2 class="wp-block-heading">Code samples</h2>
 <!-- /wp:heading -->
