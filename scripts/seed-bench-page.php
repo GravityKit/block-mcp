@@ -133,11 +133,20 @@ Tests       230 passed (230)</pre>
 <!-- /wp:paragraph -->
 HTML;
 
+// Resolve a sensible author. `wp eval-file --user=<id>` populates
+// get_current_user_id(); fall back to the first administrator so the
+// script stays portable across installations.
+$author_id = get_current_user_id();
+if ( ! $author_id ) {
+  $admins    = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID' ) );
+  $author_id = $admins ? (int) $admins[0] : 1;
+}
+
 $pid = wp_insert_post( array(
   'post_title'   => 'MCP Benchmark Test Page',
   'post_status'  => 'draft',
   'post_type'    => 'page',
-  'post_author'  => 23128,
+  'post_author'  => $author_id,
   'post_content' => $content,
 ), true );
 

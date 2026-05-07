@@ -212,7 +212,17 @@ function wpExec(cmd, { input } = {}) {
 }
 
 function discoverPostIds(blockNames) {
-  const likeList = blockNames.map(n => `post_content LIKE '%${n}%'`).join(' OR ');
+  // Validate block names against the canonical "namespace/name" shape
+  // before interpolation. Anything that isn't a-z / 0-9 / dash / slash gets
+  // rejected — keeps SQL injection out of the LIKE clause when block names
+  // come from --block CLI flags rather than the hardcoded defaults.
+  const validBlockName = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/;
+  const safeNames = blockNames.filter(n => typeof n === 'string' && validBlockName.test(n));
+  if (safeNames.length === 0) {
+    return [];
+  }
+
+  const likeList = safeNames.map(n => `post_content LIKE '%${n}%'`).join(' OR ');
   const php = `
 global $wpdb;
 $ids = $wpdb->get_col(

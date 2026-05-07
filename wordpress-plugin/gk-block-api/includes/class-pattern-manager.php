@@ -417,20 +417,23 @@ class Pattern_Manager {
 
 		global $wpdb;
 
-		// Match `"ref":<id>` regardless of surrounding attribute order or
-		// whitespace. `esc_like` neutralizes `%`/`_` if a future ID format
-		// ever contains them, and properly escapes the JSON colon/quotes
-		// for LIKE matching. Direct query because there's no WP API for
-		// content full-text search and post_meta would still require this
-		// pattern across post_content.
-		$needle = '%' . $wpdb->esc_like( '"ref":' . $pattern_id ) . '%';
+		// Match `"ref":<id>` followed by either `}` (closing the JSON object)
+		// or `,` (next attribute). Without a trailing boundary, "ref":123
+		// would also match "ref":1234, "ref":12345, etc. and inflate the
+		// count for low-numbered patterns. `esc_like` neutralizes `%`/`_`
+		// if a future ID format ever contains them. Direct query because
+		// there's no WP API for content full-text search.
+		$prefix       = '"ref":' . $pattern_id;
+		$needle_close = '%' . $wpdb->esc_like( $prefix . '}' ) . '%';
+		$needle_next  = '%' . $wpdb->esc_like( $prefix . ',' ) . '%';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$count = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT( DISTINCT ID ) FROM {$wpdb->posts}
 				WHERE post_status = 'publish'
-				AND post_content LIKE %s",
-				$needle
+				AND ( post_content LIKE %s OR post_content LIKE %s )",
+				$needle_close,
+				$needle_next
 			)
 		);
 

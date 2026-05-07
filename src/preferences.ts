@@ -66,6 +66,20 @@ export function enrichBlockList(blocks: Block[]): {
 } {
   const warnings: PreferenceWarning[] = [];
 
+  // Walk the full tree so legacy/avoid blocks nested inside core/group,
+  // core/columns, etc. surface in the warning summary too. The previous
+  // single-level loop missed them, letting deprecated namespaces hide
+  // a level deep.
+  walkBlocksForPreferences(blocks, warnings);
+
+  const summary = warnings.length > 0
+    ? `Found ${warnings.length} non-preferred block(s) on this page:\n${warnings.map((w) => `  - ${w.message}`).join('\n')}`
+    : 'All blocks on this page use preferred or acceptable namespaces.';
+
+  return { blocks, warnings, summary };
+}
+
+function walkBlocksForPreferences(blocks: Block[], warnings: PreferenceWarning[]): void {
   for (const block of blocks) {
     const tier = block.preference?.tier;
     if (tier === 'legacy' || tier === 'avoid') {
@@ -79,13 +93,10 @@ export function enrichBlockList(blocks: Block[]): {
         suggested_replacement: replacement,
       });
     }
+    if (block.innerBlocks?.length) {
+      walkBlocksForPreferences(block.innerBlocks, warnings);
+    }
   }
-
-  const summary = warnings.length > 0
-    ? `Found ${warnings.length} non-preferred block(s) on this page:\n${warnings.map((w) => `  - ${w.message}`).join('\n')}`
-    : 'All blocks on this page use preferred or acceptable namespaces.';
-
-  return { blocks, warnings, summary };
 }
 
 /**

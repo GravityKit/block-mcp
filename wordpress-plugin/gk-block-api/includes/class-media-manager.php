@@ -95,9 +95,29 @@ class Media_Manager {
 	 */
 	private function handle_multipart( array $args ) {
 		$field       = $args['file_field'];
-		$post_parent = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
+		$post_parent = isset( $args['post_id'] ) ? absint( $args['post_id'] ) : 0;
 
-		$file = $_FILES[ $field ];
+		if ( ! isset( $_FILES[ $field ] ) ) {
+			return new \WP_Error( 'no_file', __( 'No file uploaded.', 'gk-block-api' ), array( 'status' => 400 ) );
+		}
+		$file = $_FILES[ $field ]; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- caller is REST-authenticated.
+
+		// PHP transport-level error check. UPLOAD_ERR_INI_SIZE / FORM_SIZE /
+		// PARTIAL / NO_FILE / NO_TMP_DIR / CANT_WRITE / EXTENSION can leave
+		// $file['tmp_name'] empty or partial, which would crash the
+		// downstream wp_check_filetype_and_ext() / media_handle_upload()
+		// calls with confusing errors. Surface a clean 400 instead.
+		$err_code = isset( $file['error'] ) ? (int) $file['error'] : UPLOAD_ERR_NO_FILE;
+		if ( UPLOAD_ERR_OK !== $err_code ) {
+			if ( ! empty( $file['tmp_name'] ) ) {
+				@unlink( $file['tmp_name'] );
+			}
+			return new \WP_Error(
+				'upload_error',
+				sprintf( /* translators: %d: PHP UPLOAD_ERR_* code */ __( 'File upload failed (PHP code %d).', 'gk-block-api' ), $err_code ),
+				array( 'status' => 400, 'php_upload_error' => $err_code )
+			);
+		}
 
 		// Enforce site upload-size limit before move/copy. media_handle_upload
 		// will also enforce, but failing fast keeps us out of the WP error path.

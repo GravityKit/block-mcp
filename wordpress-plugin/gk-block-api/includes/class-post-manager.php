@@ -478,8 +478,18 @@ class Post_Manager {
 	 * @param array $blocks
 	 * @return array{blocks:array,warnings:array}|\WP_Error
 	 */
-	private function validate_blocks_for_insert( array $blocks ) {
-		$warnings = array();
+	/**
+	 * Walk a block tree applying validate_block_def at every depth.
+	 *
+	 * Returns a WP_Error on first hard rejection (legacy tier); accumulates
+	 * non-fatal warnings into the passed-by-reference array.
+	 *
+	 * @param array              $blocks   Block defs in API shape.
+	 * @param array<int, mixed>  $warnings Warning accumulator.
+	 *
+	 * @return null|\WP_Error
+	 */
+	private function walk_blocks_for_validation( array $blocks, array &$warnings ) {
 		foreach ( $blocks as $block ) {
 			$name = isset( $block['name'] ) ? (string) $block['name'] : '';
 			if ( '' === $name ) {
@@ -492,16 +502,47 @@ class Post_Manager {
 			if ( ! empty( $check['warnings'] ) ) {
 				$warnings = array_merge( $warnings, $check['warnings'] );
 			}
+			if ( isset( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) && ! empty( $block['innerBlocks'] ) ) {
+				$err = $this->walk_blocks_for_validation( $block['innerBlocks'], $warnings );
+				if ( $err instanceof \WP_Error ) {
+					return $err;
+				}
+			}
+		}
+		return null;
+	}
+
+	private function validate_blocks_for_insert( array $blocks ) {
+		$warnings = array();
+		// Walk the full tree so legacy/avoid blocks nested inside containers
+		// (core/group, core/columns, etc.) hit the same tier policy as
+		// top-level blocks. The previous single-level loop let nested
+		// legacy blocks slip past validation.
+		$err = $this->walk_blocks_for_validation( $blocks, $warnings );
+		if ( $err instanceof \WP_Error ) {
+			return $err;
 		}
 
 		$normalized = array_map(
 			function ( $block ) {
+				// innerContent is parallel to innerHTML — an array of HTML
+				// fragments interleaved with null placeholders for innerBlocks
+				// positions. Like innerHTML, every fragment ends up in
+				// post_content, so each non-null entry must be kses-sanitized
+				// to keep XSS payloads out of saved markup.
+				$inner_content = array();
+				if ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
+					foreach ( $block['innerContent'] as $piece ) {
+						$inner_content[] = ( null === $piece ) ? null : wp_kses_post( (string) $piece );
+					}
+				}
+
 				return array(
 					'blockName'    => $block['name'],
 					'attrs'        => isset( $block['attributes'] ) && is_array( $block['attributes'] ) ? $block['attributes'] : array(),
 					'innerBlocks'  => isset( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ? $block['innerBlocks'] : array(),
 					'innerHTML'    => isset( $block['innerHTML'] ) ? wp_kses_post( $block['innerHTML'] ) : '',
-					'innerContent' => isset( $block['innerContent'] ) ? $block['innerContent'] : array(),
+					'innerContent' => $inner_content,
 				);
 			},
 			$blocks

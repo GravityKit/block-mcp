@@ -284,7 +284,12 @@ class HTML_Transformer {
 		// attributes without needing to rebuild the wrapper div.
 		if ( 'kevinbatdorf/code-block-pro' === $block_name ) {
 			if ( array_key_exists( 'codeHTML', $changed_attrs ) ) {
-				$new_pre = $changed_attrs['codeHTML'];
+				// codeHTML is the Shiki-rendered <pre> block embedded in
+				// innerHTML. It contains styled spans / inline-style attributes
+				// that wp_kses_post permits, but kses also strips <script>,
+				// onload-style event attributes, and other XSS vectors so a
+				// malicious caller can't smuggle JS into the editor preview.
+				$new_pre = wp_kses_post( (string) $changed_attrs['codeHTML'] );
 				$html    = preg_replace(
 					'/<pre class="shiki[\s\S]*?<\/pre>/',
 					$new_pre,

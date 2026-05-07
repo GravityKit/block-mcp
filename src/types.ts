@@ -162,6 +162,12 @@ export interface Block {
     tier: 'preferred' | 'acceptable' | 'avoid' | 'legacy';
     suggested_replacement?: string;
   };
+  /**
+   * Children of container blocks (core/group, core/columns, etc.). Each
+   * child has the same Block shape, including its own ref / preference /
+   * innerBlocks fields, so policy walks recurse cleanly.
+   */
+  innerBlocks?: Block[];
 }
 
 // ============================================

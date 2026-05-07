@@ -1678,6 +1678,7 @@ class Block_CRUD {
 					$block['innerBlocks'],
 					$current_path,
 					$counter,
+					$top_level_counter,
 					$render
 				);
 			}
