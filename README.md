@@ -1,8 +1,17 @@
 # Block MCP
 
-> Surgical block-level content editing for WordPress via the Model Context Protocol.
+> The WordPress MCP that AI agents actually finish the job with. **9 of 9** across Claude Haiku, Sonnet, and Opus in our agent-loop bench — versus 8/9 for AI Engine Pro and 2/9 for the popular InstaWP wrapper.
 
-**Block MCP** is an MCP server plus WordPress plugin that lets AI agents read, edit, and restructure Gutenberg block content as nested JSON instead of raw HTML. Every edit creates a WordPress revision for rollback. Stable block refs let agents chain mutations without re-fetching the page.
+**Block MCP** is the WordPress MCP built for the way agents actually edit — one block at a time, across multiple turns, without corrupting the page. It's an MCP server plus WordPress plugin that exposes Gutenberg content as a structured, addressable block tree instead of raw HTML, so an agent can change a single heading without rewriting the page. Every block carries a stable `gk_ref` UUID that survives sibling shifts (no other WordPress MCP has this), so multi-turn edit chains don't re-fetch the page between calls. Every write creates a WordPress revision for rollback, ETag/If-Match guards against concurrent overwrites, and a server-side tier policy stops legacy blocks from ever hitting disk. Backed by **326 PHP tests, 249 TypeScript tests**, CI on PHP 8.2/8.3 + Node 20, and translations to 20 languages.
+
+### Why agents pick Block MCP
+
+- **Edits one block, not the whole page.** Change a heading's level without touching the surrounding HTML. Standard WP REST forces a full page rewrite on every edit; Block MCP touches just the one heading.
+- **Stable block refs no other WordPress MCP has.** Chain inserts, deletes, and updates across turns from a single read — sibling shifts don't invalidate the addresses.
+- **Editor-safe round-trips.** `<!-- wp:* -->` block markers are preserved exactly. No "this block contains unexpected or invalid content" warnings on reopen.
+- **Tier policy enforced server-side.** Legacy/deprecated blocks (Stackable, UGB, Jetpack) are rejected before they hit disk, with suggested modern replacements.
+- **Optimistic concurrency built in.** ETag + If-Match handshake on every write. Two agents on the same post can't silently overwrite each other.
+- **Self-contained.** Yoast SEO bridge ships in the same plugin. No extra mu-plugin or theme glue.
 
 ## Table of Contents
 
@@ -36,7 +45,7 @@
 
 ## At a glance
 
-How Block MCP compares to the standard WordPress REST API — the same surface that most other WordPress MCPs (like [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)) wrap.
+Here's where Block MCP wins. Most other WordPress MCPs (including [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)) wrap the standard WordPress REST surface — fine for blogging, wrong shape for agents editing blocks. Every row below is an everyday request — "change a heading, then add a button, then fix the next paragraph" — and the difference between *the agent thinks it worked* and *the page actually still opens cleanly in the editor afterward*.
 
 | What the agent can do | Standard WP REST API | Block MCP |
 |---|:---:|:---:|
@@ -64,9 +73,9 @@ The differences that matter are **what gets sent** and **whether the result is c
 
 ### When you actually ask an AI to edit a page
 
-The numbers above measure the API itself. The next test sits in front of Claude and types a real instruction — *"change the H2 heading 'Code samples' to H3"* — then checks whether the page is actually correct afterward.
+API benchmarks measure the wrong thing. The number that matters is whether the page is actually correct after the agent finishes. So we put Claude in front of each MCP, typed a real instruction — *"change the H2 heading 'Code samples' to H3"* — and then re-opened the page and inspected it.
 
-27 runs total: three MCP servers × Haiku, Sonnet, Opus × 3 trials each. After every run the page is re-read and inspected. **The AI's claim of success doesn't count — only the actual page state does.**
+27 runs total: three MCP servers × Haiku, Sonnet, Opus × 3 trials each. **The agent's claim of success doesn't count — only the actual page state does.**
 
 | Model | Block MCP | [AI Engine Pro](https://meowapps.com/ai-engine/) | [InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp) |
 |---|:---:|:---:|:---:|
@@ -77,7 +86,7 @@ The numbers above measure the API itself. The next test sits in front of Claude 
 
 Three takeaways:
 
-**Block MCP works on the cheapest model.** Haiku passes every trial in 10 seconds at $0.014 per edit. The agent doesn't need to think hard about the page because the API is shaped exactly like the task.
+**Block MCP works on the cheapest model — and finishes fastest.** Haiku passes every trial in 10 seconds at $0.014 per edit. The agent doesn't need to think hard about the page because the API is shaped exactly like the task. AI Engine Pro on Haiku takes 44 seconds when it works at all; InstaWP never does.
 
 **InstaWP's wp/v2 wrapper fails 7 out of 9 times — even Opus only gets it right 2/3.** When the agent reports success, it's technically right that the heading text changed. But the whole-page round-trip through `update_page` strips every `<!-- wp:* -->` block marker. Reopen the page in the block editor and you'll see "This block contains unexpected or invalid content" warnings on most blocks. The standard REST API isn't broken — it does exactly what it's documented to do — but its data shape lets the AI corrupt content without realizing it.
 
@@ -86,6 +95,8 @@ Three takeaways:
 Reproduce with [`scripts/mcp-agent-bench.mjs`](scripts/mcp-agent-bench.mjs). Cost across all 27 invocations: $2.22.
 
 ## Why this MCP
+
+Block MCP is the only WordPress MCP designed from the ground up for the way agents actually edit pages: one block at a time, across multiple turns, without corrupting anything along the way. The agent-loop bench reflects that — 9 of 9 across every Claude tier, including the cheapest.
 
 Most WordPress MCPs wrap the default REST API. That gives an agent post-level CRUD, but it stops there — to change one heading on a page, the agent has to read the entire `post_content` HTML, parse it, find the right tag, mutate it, and write the whole thing back. Block boundaries dissolve, structure breaks subtly, and there's no undo path.
 
@@ -106,7 +117,7 @@ The combination — block-aware, ref-stable, revision-tracked, policy-enforcing 
 
 ## Compared to other WordPress MCPs
 
-The WordPress MCP space is small. The projects work at different layers and target different workflows — they're often complementary rather than head-to-head, but the agent-loop bench above shows they don't all produce correct results when asked to edit a block.
+The WordPress MCP space is small, and Block MCP is the only one operating at the block-tree layer. The other projects work at different layers and target different workflows — they're often complementary rather than head-to-head, but the agent-loop bench above shows they don't all produce correct results when asked to edit a block.
 
 **[InstaWP/mcp-wp](https://github.com/InstaWP/mcp-wp)** — A REST-API-wrapping MCP that operates on whole posts, plus broad coverage of users, comments, media, plugins, and plugin-repo search. Standout feature: multi-site management from one MCP instance. Reach for it when you need post-level CRUD across many sites or general-purpose WordPress administration. *Not block-aware:* editing a single heading inside a long page means reading and rewriting the entire post, and the round-trip through `wp/v2`'s `update_page` strips every `<!-- wp:* -->` block marker. In our bench it failed validation on 7 of 9 trials across Haiku/Sonnet/Opus.
 
