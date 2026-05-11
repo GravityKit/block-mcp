@@ -58995,6 +58995,18 @@ The MCP does this for you:
 
 If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
 
+## Moving / reordering blocks
+
+NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls \u2014 if the delete is skipped or fails, the page ends up with an orphaned clone of the original. The atomic primitive is the \`move\` op on \`edit_block_tree\`:
+
+- Target the source with \`ref\` (the \`gk_ref\` from \`get_page_blocks\`) or \`path\`. Prefer \`ref\` \u2014 it survives sibling shifts; paths go stale the moment any earlier block is inserted or removed.
+- Express the destination with \`destination_ref\` or \`destination\` (path). For path destinations, use **pre-move** indexing \u2014 write the path as if the source were still in place; the server adjusts indices after the removal.
+- Use \`count\` to move N consecutive siblings in a single op.
+- The server rejects moves into the source itself or any of its descendants.
+- The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
+
+If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
+
 ## Block preferences (site-defined)
 
 Block preference policy is configured per-site in the WordPress admin (the
