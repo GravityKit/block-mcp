@@ -99,6 +99,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 = 1.5.1 =
 Write responses now echo a canonical `saved` snapshot (inner_html + attributes) so agents can verify edits without a follow-up read. New `get_block` endpoint mirrors the same shape for single-block re-reads. New `verbose` request param on batch-update (default false). All changes are additive — existing consumers continue to work unchanged.
 
+= 1.5.0 =
+Stable block refs (`gk_ref`) — every block gets a persistent ID that survives sibling inserts/removals, so chained mutations don't go stale. Atomic batch updates (`POST /posts/{id}/blocks/batch-update`) for N independent edits in ONE revision. ETag / If-Match optimistic concurrency for safe parallel writes. Cursor pagination on `get_page_blocks` for large pages. Yoast SEO bridge rolled into the plugin. WordPress admin settings page for editing tier scores, replacement map, dual-storage list, and post-type allow-list. Translations for 20 WordPress languages.
+
 = 1.4.0 =
 Settings UI added. Auto-discovery of dual-storage blocks. Atomic range-replace endpoint. Dual-storage write protection (refuses innerHTML-only updates on dual-storage blocks to prevent the corruption class fixed by BLOCK-3). Tool/method renames may break custom code that instantiated Block_CRUD or REST_Controller directly — see changelog.
 
@@ -116,6 +119,20 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 * New: `GET /posts/{id}/block?ref=...|flat_index=...` REST endpoint (single-block fetch).
 * New: `verbose` request param on `POST /posts/{id}/blocks/batch-update` (boolean, default false).
 * Doc: Plugin readme and inline docblocks now make the "response IS the verification" contract explicit — agents should not refetch the public page (or call `get_page_blocks`) to confirm what a write saved.
+
+= 1.5.0 =
+* New: Stable block refs — every block now carries a persistent `gk_ref` (e.g. `blk_a3f2c1q9`) stored in `metadata.gk_ref`. Refs survive sibling inserts/removals so chained mutations don't go stale. All write tools accept `ref` as a targeting alternative to `flat_index` / `path`.
+* New: `POST /posts/{id}/blocks/batch-update` — apply N independent block updates atomically in ONE WordPress revision. All-or-nothing validation; per-post rate-limit cost is one write regardless of N. Max 50 items per call.
+* New: ETag / If-Match optimistic concurrency on all write endpoints — pass `If-Match: <revision_id>` to reject a write whose pre-state has shifted since the agent's last read.
+* New: Cursor pagination on `GET /posts/{id}/blocks` (`cursor` + `limit` query params) — handle multi-thousand-block pages without bloating a single response.
+* New: Yoast SEO bridge rolled into the plugin — `yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo` tools backed by a `/yoast` REST namespace, sharing the same Application Password auth as the block routes.
+* New: WordPress admin settings page (Settings → Block MCP) — UI for editing tier scores, replacement map, dual-storage list, and post-type allow-list. Replaces the previous "edit `wp_options.gk_block_api_preferences` manually" workflow.
+* New: `POST /storage-modes/scan` — site-wide auto-discovery of static / dynamic / dual block classification.
+* New: Translations for 20 WordPress languages.
+* Deprecated: `before` alias on the `move` mutation op. Use `destination` instead — the alias still works for backwards compatibility.
+* Fixed: `replace-block` and `insert-child` mutations no longer drop nested `innerBlocks` from the replacement payload.
+* Fixed: Concurrent ref-assignment guarded by object-cache lock — eliminates the race where two simultaneous writes could assign the same `gk_ref` to different blocks.
+* Fixed: Block content passed to `wp_update_post` / `wp_insert_post` is now `wp_slash()`-encoded to prevent slash-stripping by core.
 
 = 1.4.0 =
 * New: Settings → Block MCP admin page for editing tier scores, replacement map, dual-storage list, and post-type allow-list.
