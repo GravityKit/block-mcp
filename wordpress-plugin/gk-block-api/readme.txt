@@ -102,6 +102,12 @@ Write responses now echo a canonical `saved` snapshot (inner_html + attributes) 
 = 1.5.0 =
 Stable block refs (`gk_ref`) — every block gets a persistent ID that survives sibling inserts/removals, so chained mutations don't go stale. Atomic batch updates (`POST /posts/{id}/blocks/batch-update`) for N independent edits in ONE revision. ETag / If-Match optimistic concurrency for safe parallel writes. Cursor pagination on `get_page_blocks` for large pages. Yoast SEO bridge rolled into the plugin. WordPress admin settings page for editing tier scores, replacement map, dual-storage list, and post-type allow-list. Translations for 20 WordPress languages.
 
+= 1.4.2 =
+Critical save-path fix: block content now goes through `wp_slash()` before reaching `wp_update_post` / `wp_insert_post`, so backslashes inside block-comment JSON (Code Block Pro escape sequences, CSS variable references, etc.) survive the round-trip instead of being stripped by core's automatic `wp_unslash()`. New `gk_block_api_format_block` filter for enriching block responses (used by the Code Block Pro integration).
+
+= 1.4.1 =
+Security and hardening pass: SSRF guard extended to IPv6, multisite uninstall sweep, registry-first storage scan with OOM/DoS hardening and query safety. Lifecycle hooks reorganized, global filter wiring cleaned up, log gating refined, all user-facing strings wrapped in `__()` for translation.
+
 = 1.4.0 =
 Settings UI added. Auto-discovery of dual-storage blocks. Atomic range-replace endpoint. Dual-storage write protection (refuses innerHTML-only updates on dual-storage blocks to prevent the corruption class fixed by BLOCK-3). Tool/method renames may break custom code that instantiated Block_CRUD or REST_Controller directly — see changelog.
 
@@ -126,13 +132,27 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 * New: ETag / If-Match optimistic concurrency on all write endpoints — pass `If-Match: <revision_id>` to reject a write whose pre-state has shifted since the agent's last read.
 * New: Cursor pagination on `GET /posts/{id}/blocks` (`cursor` + `limit` query params) — handle multi-thousand-block pages without bloating a single response.
 * New: Yoast SEO bridge rolled into the plugin — `yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo` tools backed by a `/yoast` REST namespace, sharing the same Application Password auth as the block routes.
-* New: WordPress admin settings page (Settings → Block MCP) — UI for editing tier scores, replacement map, dual-storage list, and post-type allow-list. Replaces the previous "edit `wp_options.gk_block_api_preferences` manually" workflow.
-* New: `POST /storage-modes/scan` — site-wide auto-discovery of static / dynamic / dual block classification.
 * New: Translations for 20 WordPress languages.
+* Improved: Settings UI polish — natural-sort tier rows, accessible live region for save feedback, refined empty-state copy.
 * Deprecated: `before` alias on the `move` mutation op. Use `destination` instead — the alias still works for backwards compatibility.
 * Fixed: `replace-block` and `insert-child` mutations no longer drop nested `innerBlocks` from the replacement payload.
 * Fixed: Concurrent ref-assignment guarded by object-cache lock — eliminates the race where two simultaneous writes could assign the same `gk_ref` to different blocks.
-* Fixed: Block content passed to `wp_update_post` / `wp_insert_post` is now `wp_slash()`-encoded to prevent slash-stripping by core.
+
+= 1.4.2 =
+* Fixed: Block content passed to `wp_update_post` / `wp_insert_post` is now `wp_slash()`-encoded so core's automatic `wp_unslash()` doesn't strip the leading backslash on every `\n`, `\"`, and `--` escape inside block-comment JSON. Without this, Code Block Pro's escape sequences and CSS variable references (`var(--foo)`) arrived in the database as invalid JSON, breaking block validation in Gutenberg ("This block has been modified externally").
+* New: `gk_block_api_format_block` filter — third-party integrations can enrich the formatted block response (used by the Code Block Pro integration to surface `codeHTML`).
+* New: Code Block Pro (CBP) dual-storage sync — when `code` / `language` / `theme` attributes change on a CBP block, the plugin auto-regenerates `codeHTML` via Shiki so the editor's preview stays in sync with the saved code.
+* Tests: enrichers + CBP auto-transform + format_block filter coverage (175 TypeScript + 249 PHP).
+
+= 1.4.1 =
+* Fixed: `insert_blocks` / `replace_blocks_range` silently dropped nested `innerBlocks` when serializing the inserted block tree (BLOCK-1).
+* Fixed: SSRF guard on `upload_media` URL sideload now blocks IPv6 reserved ranges in addition to IPv4 (link-local, ULA, loopback, IPv4-mapped).
+* Fixed: Uninstall now sweeps options + transients on every site of a multisite network, not just the active site.
+* Fixed: Storage-mode scan now uses `WP_Block_Type_Registry` as the primary source of truth (was building from `post_content` scans, which missed unused registered blocks); OOM/DoS hardened with bounded post queries and safe `wpdb` interpolation.
+* Fixed: Lifecycle hooks reorganized (instantiation moved off `plugins_loaded` onto `rest_api_init`); global `add_filter` calls replaced with named callbacks so they can be unhooked; debug-log writes gated on `WP_DEBUG`.
+* New: `/block-types` endpoint gained `outputSchema`, plus `tier`, `storage_mode`, `search`, and `usage_only` filter params.
+* Fixed: MCP server re-audit — stale resource URIs corrected, tool `outputSchema` declarations completed, annotation hints (`readOnlyHint` / `destructiveHint` / `idempotentHint`) aligned with actual behavior.
+* i18n: All remaining user-facing strings wrapped in `__()` / `_e()` with the `gk-block-api` text domain.
 
 = 1.4.0 =
 * New: Settings → Block MCP admin page for editing tier scores, replacement map, dual-storage list, and post-type allow-list.

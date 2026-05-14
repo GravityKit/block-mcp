@@ -483,6 +483,48 @@ Build output is a single `dist/index.cjs` file (~50KB) with all dependencies bun
 
 Copy the `wordpress-plugin/gk-block-api/` directory to the target site's `wp-content/plugins/` and activate. No build step required for the PHP plugin — it is pure PHP with no Composer dependencies.
 
+## Versioning & Releases
+
+The WordPress plugin (`wordpress-plugin/gk-block-api/`) and the MCP server (`package.json`) version independently. The plugin follows WordPress plugin conventions (`readme.txt` is the canonical changelog); the MCP server is just the bundle that talks to it.
+
+### Semver policy (plugin)
+
+- **MAJOR** (`x.0.0`) — breaking REST changes: removed endpoints, renamed routes, removed response fields, changed permission semantics, broken backwards compatibility on existing tool signatures. Bump only with a migration note.
+- **MINOR** (`x.y.0`) — new endpoints, new tools, new request/response fields, new shortcode-attr filters, new admin settings. Additive only — existing consumers must continue to work unchanged.
+- **PATCH** (`x.y.z`) — bug fixes, security patches, hardening, internal refactors, doc-only changes, test additions, i18n. No surface-area changes.
+
+### Required updates on every plugin version bump
+
+A version bump is not done until **all five** of these are updated to the new version:
+
+1. `wordpress-plugin/gk-block-api/gk-block-api.php` — `* Version:` plugin header
+2. `wordpress-plugin/gk-block-api/gk-block-api.php` — `GK_BLOCK_API_VERSION` constant
+3. `wordpress-plugin/gk-block-api/readme.txt` — `Stable tag:` line
+4. `wordpress-plugin/gk-block-api/readme.txt` — `== Upgrade Notice ==` section (one-paragraph summary, newest at top)
+5. `wordpress-plugin/gk-block-api/readme.txt` — `== Changelog ==` section (bulleted list of every notable change, grouped by `* New:` / `* Improved:` / `* Fixed:` / `* Deprecated:` / `* i18n:` / `* Tests:` / `* Doc:`, newest at top)
+
+The `Upgrade Notice` block is what WordPress.org shows to admins on the update screen — keep it scannable (1–3 sentences, headline value only). The `Changelog` block is the durable record — be specific.
+
+### Required updates on every MCP server version bump
+
+1. `package.json` — `"version"` field
+2. Optional: mention in the plugin's `readme.txt` Changelog if a server-side TS change is user-observable
+
+The MCP server version is informational; the plugin version is what site owners track.
+
+### Process
+
+1. Land feature/fix commits normally with descriptive messages.
+2. When ready to cut a release, in a single `chore(plugin): bump gk-block-api to X.Y.Z` commit:
+   - Update items 1–3 above
+   - Append the new `Upgrade Notice` and `Changelog` entries
+   - If the MCP server side also moved, bump `package.json` in the same commit
+3. Push.
+
+### Backfilling missing entries
+
+If a version was bumped without a corresponding `readme.txt` entry (it happens — historically `1.4.1`, `1.4.2`, and `1.5.0` all shipped without changelog updates), audit the commits that landed between the previous bump and the version bump commit (`git log <prev-bump>..<this-bump> -- wordpress-plugin/gk-block-api/`) and write the missing entries. Keep the Upgrade Notice and Changelog sections in strict reverse-chronological order across all versions.
+
 ## Gotchas
 
 - **Empty blocks in parse_blocks()**: WordPress includes whitespace-only blocks in `parse_blocks()` output. The plugin filters these (checks `blockName` is non-empty) for write operations but preserves raw indices for path-based addressing. The `index` field skips empties; the `path` field does not. This means `path: [2]` might address what appears to be the first block if indices 0 and 1 are whitespace.
