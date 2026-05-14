@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.5.1 =
+Write responses now echo a canonical `saved` snapshot (inner_html + attributes) so agents can verify edits without a follow-up read. New `get_block` endpoint mirrors the same shape for single-block re-reads. New `verbose` request param on batch-update (default false). All changes are additive — existing consumers continue to work unchanged.
+
 = 1.4.0 =
 Settings UI added. Auto-discovery of dual-storage blocks. Atomic range-replace endpoint. Dual-storage write protection (refuses innerHTML-only updates on dual-storage blocks to prevent the corruption class fixed by BLOCK-3). Tool/method renames may break custom code that instantiated Block_CRUD or REST_Controller directly — see changelog.
 
@@ -106,6 +109,13 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.5.1 =
+* New: `update_block` and `update_blocks_batch` responses now include a canonical `saved` snapshot — `{ flat_index, block_name, attributes, inner_html, is_dynamic, ref? }`. Single update_block always echoes; batch echoes per-result only when called with `verbose: true` (default false).
+* New: `Block_CRUD::get_block(post_id, ref|flat_index)` returns the same `saved` shape — lighter than `get_blocks()` for single-block verification reads.
+* New: `GET /posts/{id}/block?ref=...|flat_index=...` REST endpoint (single-block fetch).
+* New: `verbose` request param on `POST /posts/{id}/blocks/batch-update` (boolean, default false).
+* Doc: Plugin readme and inline docblocks now make the "response IS the verification" contract explicit — agents should not refetch the public page (or call `get_page_blocks`) to confirm what a write saved.
 
 = 1.4.0 =
 * New: Settings → Block MCP admin page for editing tier scores, replacement map, dual-storage list, and post-type allow-list.
