@@ -44115,15 +44115,43 @@ var WordPressBlockClient = class {
    * @param updates Update items (1..MAX_BATCH_SIZE).
    * @returns       Per-item results plus the single revision ID.
    */
-  async updateBlocksBatch(postId, updates) {
+  async updateBlocksBatch(postId, updates, options = {}) {
     if (postId === void 0 || postId === null) throw new Error("Post ID is required");
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error("updates must be a non-empty array");
     }
+    const body3 = { updates };
+    if (options.verbose) body3.verbose = true;
     const response = await this.client.post(
       `/posts/${postId}/blocks/batch-update`,
-      { updates }
+      body3
     );
+    return response.data;
+  }
+  /**
+   * Fetch a single block by stable ref or flat index. Returns the canonical
+   * `saved` snapshot — same shape that write endpoints echo, so verification
+   * reads use the identical contract as the writes that produced them.
+   *
+   * Lighter than getPageBlocks() when you only need one block. Use this when
+   * you want to confirm the current state of a known ref before chaining an
+   * edit, not to discover what's on the page.
+   *
+   * @param postId  WordPress post/page ID.
+   * @param target  Either `{ ref }` or `{ flatIndex }`. Exactly one required.
+   * @returns       { success, saved } where `saved` mirrors update_block's saved.
+   */
+  async getBlock(postId, target) {
+    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const hasRef = typeof target.ref === "string" && target.ref !== "";
+    const hasIdx = typeof target.flatIndex === "number";
+    if (hasRef === hasIdx) {
+      throw new Error("Provide exactly one of ref or flatIndex");
+    }
+    const params = {};
+    if (hasRef) params.ref = target.ref;
+    else params.flat_index = target.flatIndex;
+    const response = await this.client.get(`/posts/${postId}/block`, { params });
     return response.data;
   }
   /**
@@ -44810,6 +44838,43 @@ var READ_TOOLS = [
         }
       }
     }
+  },
+  {
+    name: "get_block",
+    description: "Fetch one block by stable ref OR flat_index \u2014 returns the canonical `saved` snapshot (inner_html + attributes) from the database. Same shape that update_block / update_blocks (with `verbose:true`) echo back, so verification reads use the identical contract as the writes that produced them. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`saved.is_dynamic`), `inner_html` is the stored template, not rendered output.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Get one block" },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        saved: {
+          type: "object",
+          properties: {
+            flat_index: { type: "number" },
+            block_name: { type: "string" },
+            attributes: { type: "object" },
+            inner_html: { type: "string" },
+            is_dynamic: { type: "boolean" },
+            ref: { type: "string" }
+          }
+        }
+      }
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "number", description: "Post ID." },
+        ref: {
+          type: "string",
+          description: "Stable gk_ref. Provide this OR flat_index."
+        },
+        flat_index: {
+          type: "number",
+          description: "Flat block index. Provide this OR ref."
+        }
+      },
+      required: ["post_id"]
+    }
   }
 ];
 async function handleReadTool(toolName, args, client2) {
@@ -44856,6 +44921,20 @@ async function handleReadTool(toolName, args, client2) {
         block_count: enriched.blocks.length,
         warnings: enriched.warnings
       };
+    }
+    case "get_block": {
+      const postId = args.post_id;
+      const ref = typeof args.ref === "string" && args.ref.length > 0 ? args.ref : void 0;
+      const flatIndex = typeof args.flat_index === "number" && Number.isFinite(args.flat_index) ? args.flat_index : void 0;
+      if (postId === void 0 || postId === null) {
+        throw new Error("post_id is required");
+      }
+      const hasRef = ref !== void 0;
+      const hasIdx = flatIndex !== void 0;
+      if (hasRef === hasIdx) {
+        throw new Error("Provide exactly one of ref or flat_index");
+      }
+      return await client2.getBlock(postId, hasRef ? { ref } : { flatIndex });
     }
     default:
       throw new Error(`Unknown read tool: ${toolName}`);
@@ -57826,7 +57905,7 @@ var REVISION_ONLY_SCHEMA = {
 var WRITE_TOOLS = [
   {
     name: "update_block",
-    description: "Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.",
+    description: "Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level \u2014 pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected. Response includes `saved.inner_html` and `saved.attributes` \u2014 the canonical post-save snapshot from the database. Do not fetch the public page to verify edits.",
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
@@ -57836,6 +57915,18 @@ var WRITE_TOOLS = [
       properties: {
         success: { type: "boolean" },
         block: { type: "object", properties: { index: { type: "number" }, name: { type: "string" }, attributes: { type: "object" }, ref: { type: "string" } } },
+        saved: {
+          type: "object",
+          description: "Canonical post-save snapshot of the updated block \u2014 exactly what is now in post_content. For dynamic blocks, inner_html is the stored template, not the rendered output.",
+          properties: {
+            flat_index: { type: "number" },
+            block_name: { type: "string" },
+            attributes: { type: "object" },
+            inner_html: { type: "string" },
+            is_dynamic: { type: "boolean" },
+            ref: { type: "string" }
+          }
+        },
         before_revision_id: { type: "number" },
         revision_id: { type: "number" }
       }
@@ -57864,7 +57955,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "update_blocks",
-    description: "Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors \u2014 no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post \u2014 keeps revision history clean.",
+    description: "Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors \u2014 no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post \u2014 keeps revision history clean. Pass `verbose: true` to include `saved.inner_html` + `saved.attributes` per result for per-item verification without a re-read.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Batch-update blocks" },
     outputSchema: {
       type: "object",
@@ -57883,6 +57974,18 @@ var WRITE_TOOLS = [
                   index: { type: "number" },
                   name: { type: "string" },
                   attributes: { type: "object" },
+                  ref: { type: "string" }
+                }
+              },
+              saved: {
+                type: "object",
+                description: "Canonical post-save snapshot. Present only when called with `verbose: true`.",
+                properties: {
+                  flat_index: { type: "number" },
+                  block_name: { type: "string" },
+                  attributes: { type: "object" },
+                  inner_html: { type: "string" },
+                  is_dynamic: { type: "boolean" },
                   ref: { type: "string" }
                 }
               }
@@ -57910,6 +58013,10 @@ var WRITE_TOOLS = [
               innerHTML: { type: "string", description: "Replacement innerHTML." }
             }
           }
+        },
+        verbose: {
+          type: "boolean",
+          description: "When true, each result includes `saved.inner_html` + `saved.attributes` (the canonical post-save snapshot). Default false to keep batch responses compact."
         }
       },
       required: ["post_id", "updates"]
@@ -58091,6 +58198,9 @@ async function handleWriteTool(toolName, args, client2) {
           ...attributes ? { attributes } : {},
           ...innerHTML !== void 0 ? { innerHTML } : {}
         });
+      }
+      if (args.verbose === true) {
+        return await client2.updateBlocksBatch(postId, normalized, { verbose: true });
       }
       return await client2.updateBlocksBatch(postId, normalized);
     }
@@ -58950,6 +59060,8 @@ var server = new McpServer(
     },
     instructions: `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
+After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification \u2014 do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) \u2014 same shape, no extra plumbing.
+
 Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`
   }
 );
@@ -59006,6 +59118,16 @@ NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls \u2014 if
 - The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
 
 If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
+
+## Verifying writes
+
+Every write echoes the canonical post-save snapshot. Use it. Do not fetch the public page to verify what saved.
+
+- \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` \u2014 the exact content that just landed in post_content. The write call IS the verification round-trip.
+- \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
+- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` \u2014 returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
+
+For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time \u2014 not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
 
 ## Block preferences (site-defined)
 

@@ -569,6 +569,38 @@ const SCENARIOS = {
       return { ok: true, why: 'heading deleted; all top-level sections intact' };
     },
   },
+
+  // Exercises the saved-in-response contract: an edit + an inline read should
+  // resolve in ONE tool call (update_block returns saved.inner_html), not two.
+  // The validator only confirms the edit landed; the secondary signal is the
+  // per-trial `tool_calls` count — block-mcp should land at ≤2 (one optional
+  // get_page_blocks for orientation, one update_block). MCPs without
+  // saved-in-response should re-fetch the page or the block to verify, pushing
+  // tool_calls higher.
+  'edit-and-confirm-without-refetch': {
+    label: 'Fix a typo and confirm via the write response (no extra refetch)',
+    prompt: ({ POST_ID }) =>
+      `On WordPress page ${POST_ID}, find the FIRST paragraph (it starts with "This page exists purely") and change its text so it now reads exactly: "This page is a verification-contract fixture. The write response includes the saved content; no extra read is required." Use the available MCP. After the edit, confirm the new content using ONLY information the write tool returned — do not call any read/get_page_blocks/get_block tool after the write.`,
+    validate(blocks) {
+      // The replacement text must be the first top-level paragraph.
+      let firstParaIdx = -1;
+      for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i].name === 'core/paragraph') { firstParaIdx = i; break; }
+      }
+      if (firstParaIdx === -1) return { ok: false, why: 'no top-level paragraph found' };
+      const text = (blocks[firstParaIdx].text_preview || '').trim();
+      const expectedFragment = 'verification-contract fixture';
+      if (!text.includes(expectedFragment)) {
+        return { ok: false, why: `first paragraph text is "${text}", expected to contain "${expectedFragment}"` };
+      }
+      // The original wording must be gone — catches "appended instead of replaced".
+      const original = 'comparing how different WordPress MCP servers';
+      if (text.includes(original)) {
+        return { ok: false, why: 'original paragraph text still present — agent appended instead of replacing' };
+      }
+      return { ok: true, why: 'first paragraph replaced; verify via saved-in-response should keep tool_calls ≤ 2' };
+    },
+  },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────

@@ -74,6 +74,44 @@ export const READ_TOOLS = [
       },
     },
   },
+  {
+    name: 'get_block',
+    description:
+      'Fetch one block by stable ref OR flat_index — returns the canonical `saved` snapshot (inner_html + attributes) from the database. Same shape that update_block / update_blocks (with `verbose:true`) echo back, so verification reads use the identical contract as the writes that produced them. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`saved.is_dynamic`), `inner_html` is the stored template, not rendered output.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get one block' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        saved: {
+          type: 'object',
+          properties: {
+            flat_index: { type: 'number' },
+            block_name: { type: 'string' },
+            attributes: { type: 'object' },
+            inner_html: { type: 'string' },
+            is_dynamic: { type: 'boolean' },
+            ref:        { type: 'string' },
+          },
+        },
+      },
+    },
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        post_id: { type: 'number', description: 'Post ID.' },
+        ref: {
+          type: 'string',
+          description: 'Stable gk_ref. Provide this OR flat_index.',
+        },
+        flat_index: {
+          type: 'number',
+          description: 'Flat block index. Provide this OR ref.',
+        },
+      },
+      required: ['post_id'],
+    },
+  },
 ];
 
 /**
@@ -135,6 +173,26 @@ export async function handleReadTool(
         block_count: enriched.blocks.length,
         warnings: enriched.warnings,
       };
+    }
+
+    case 'get_block': {
+      const postId = args.post_id as number;
+      const ref = typeof args.ref === 'string' && args.ref.length > 0 ? (args.ref as string) : undefined;
+      const flatIndex =
+        typeof args.flat_index === 'number' && Number.isFinite(args.flat_index)
+          ? (args.flat_index as number)
+          : undefined;
+
+      if (postId === undefined || postId === null) {
+        throw new Error('post_id is required');
+      }
+      const hasRef = ref !== undefined;
+      const hasIdx = flatIndex !== undefined;
+      if (hasRef === hasIdx) {
+        throw new Error('Provide exactly one of ref or flat_index');
+      }
+
+      return await client.getBlock(postId, hasRef ? { ref } : { flatIndex });
     }
 
     default:

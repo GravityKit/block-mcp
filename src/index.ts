@@ -102,6 +102,8 @@ const server = new McpServer(
     instructions:
       `Block-level WordPress CRUD. URL → post_id is resolved server-side — pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
+After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification — do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) — same shape, no extra plumbing.
+
 Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`,
   }
 );
@@ -194,6 +196,16 @@ NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls — if th
 - The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
 
 If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
+
+## Verifying writes
+
+Every write echoes the canonical post-save snapshot. Use it. Do not fetch the public page to verify what saved.
+
+- \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` — the exact content that just landed in post_content. The write call IS the verification round-trip.
+- \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
+- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` — returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
+
+For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time — not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
 
 ## Block preferences (site-defined)
 

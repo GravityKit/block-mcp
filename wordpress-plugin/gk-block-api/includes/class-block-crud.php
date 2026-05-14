@@ -282,9 +282,42 @@ class Block_CRUD {
 		return array(
 			'success'            => true,
 			'block'              => $block_data,
+			'saved'              => $this->format_saved_block( $block, $index ),
 			'before_revision_id' => $result['before_revision_id'],
 			'revision_id'        => $result['revision_id'],
 		);
+	}
+
+	/**
+	 * Build the canonical post-save block snapshot returned to write callers.
+	 *
+	 * Single source of truth for what the agent sees in the response: the
+	 * exact innerHTML and attributes that just landed in post_content (so
+	 * after-write reads via this MCP are unnecessary — the response IS the
+	 * verification). Includes `is_dynamic` so callers know whether the
+	 * stored innerHTML represents the rendered output or just the template
+	 * that runs at render time.
+	 *
+	 * @param array $block      Parsed block array, post-mutation.
+	 * @param int   $flat_index Flat index of this block in the post.
+	 * @return array Saved snapshot for response payload.
+	 */
+	private function format_saved_block( $block, $flat_index ) {
+		$block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
+
+		$saved = array(
+			'flat_index' => (int) $flat_index,
+			'block_name' => $block_name,
+			'attributes' => isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : array(),
+			'inner_html' => isset( $block['innerHTML'] ) ? (string) $block['innerHTML'] : '',
+			'is_dynamic' => $block_name ? $this->safety->is_dynamic_block( $block_name ) : false,
+		);
+
+		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+			$saved['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+		}
+
+		return $saved;
 	}
 
 	/**
@@ -370,12 +403,16 @@ class Block_CRUD {
 	 * @param int   $post_id Post ID.
 	 * @param array $updates List of update items. Each: { ref XOR flat_index,
 	 *                       attributes?, innerHTML? }.
+	 * @param bool  $verbose When true, each result includes a `saved` snapshot
+	 *                       (post-save innerHTML + attributes). Default false to
+	 *                       keep batch responses compact — opt in when you want
+	 *                       per-item verification without a re-read.
 	 * @return array|\WP_Error On success: { success, count, results[],
 	 *                       before_revision_id, revision_id }. On validation
 	 *                       failure: WP_Error 'batch_validation_failed' (400)
 	 *                       with `errors` data array.
 	 */
-	public function update_blocks_batch( $post_id, $updates ) {
+	public function update_blocks_batch( $post_id, $updates, $verbose = false ) {
 		$rate_check = $this->check_rate_limit( $post_id, 'write' );
 		if ( is_wp_error( $rate_check ) ) {
 			return $rate_check;
@@ -572,10 +609,14 @@ class Block_CRUD {
 			if ( isset( $block_ref['attrs']['metadata']['gk_ref'] ) ) {
 				$block_data['ref'] = (string) $block_ref['attrs']['metadata']['gk_ref'];
 			}
-			$results[] = array(
+			$result_item = array(
 				'batch_index' => $r['batch_index'],
 				'block'       => $block_data,
 			);
+			if ( $verbose ) {
+				$result_item['saved'] = $this->format_saved_block( $block_ref, $r['flat_index'] );
+			}
+			$results[] = $result_item;
 
 			// Break the reference so the next loop iteration doesn't alias
 			// the previous block when it rebinds.
@@ -1556,6 +1597,81 @@ class Block_CRUD {
 				$ref
 			),
 			array( 'status' => 404, 'ref' => $ref )
+		);
+	}
+
+	/**
+	 * Fetch a single block by ref or flat index. Returns the same `saved`
+	 * snapshot shape that write endpoints echo, so verification reads use the
+	 * identical contract as the writes that produced them.
+	 *
+	 * Lighter than get_blocks() when you only need one block — useful for
+	 * after-the-fact re-checks when the original write response was lost or
+	 * the agent wants to confirm the current state of a known ref before
+	 * chaining another edit.
+	 *
+	 * @param int             $post_id Post ID.
+	 * @param string|int|null $ref     Stable gk_ref. Provide this OR flat_index.
+	 * @param int|null        $flat_index Flat index. Provide this OR ref.
+	 * @return array|\WP_Error { saved: {...} } on success, WP_Error on failure.
+	 */
+	public function get_block( $post_id, $ref = null, $flat_index = null ) {
+		$has_ref = is_string( $ref ) && '' !== $ref;
+		$has_idx = null !== $flat_index && is_numeric( $flat_index );
+
+		if ( $has_ref === $has_idx ) {
+			return new \WP_Error(
+				'invalid_target',
+				__( 'Provide exactly one of ref or flat_index.', 'gk-block-api' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return new \WP_Error(
+				'post_not_found',
+				__( 'Post not found.', 'gk-block-api' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		$blocks = parse_blocks( $post->post_content );
+		if ( ! is_array( $blocks ) ) {
+			$blocks = array();
+		}
+		$flat = $this->flatten_blocks( $blocks );
+
+		if ( $has_ref ) {
+			$resolved = $this->resolve_ref_to_index( $post_id, $ref );
+			if ( is_wp_error( $resolved ) ) {
+				return $resolved;
+			}
+			$flat_idx = (int) $resolved;
+		} else {
+			$flat_idx = (int) $flat_index;
+			if ( $flat_idx < 0 || $flat_idx >= count( $flat ) ) {
+				return new \WP_Error(
+					'invalid_index',
+					__( 'flat_index out of range.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+		}
+
+		$path  = $flat[ $flat_idx ]['path'];
+		$block = $this->get_block_by_path( $blocks, $path );
+		if ( null === $block || ! is_array( $block ) ) {
+			return new \WP_Error(
+				'block_not_found',
+				__( 'Could not resolve block at the computed path.', 'gk-block-api' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		return array(
+			'success' => true,
+			'saved'   => $this->format_saved_block( $block, $flat_idx ),
 		);
 	}
 

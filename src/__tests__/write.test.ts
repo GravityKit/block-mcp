@@ -129,6 +129,43 @@ describe('handleWriteTool', () => {
       const [, normalized] = mockClient.updateBlocksBatch.mock.calls[0];
       expect(normalized[0].attributes).toEqual({ level: 2, enriched: true });
     });
+
+    it('omits verbose option from client call when flag is not set', async () => {
+      // Default path: keep the old two-arg signature so unrelated tests/spies
+      // that assert the historical shape don't break.
+      await handleWriteTool('update_blocks', {
+        post_id: 7,
+        updates: [{ ref: 'blk_x', attributes: { level: 2 } }],
+      }, mockClient);
+      const call = mockClient.updateBlocksBatch.mock.calls[0];
+      expect(call.length).toBe(2);
+    });
+
+    it('forwards verbose:true to the client when requested', async () => {
+      await handleWriteTool('update_blocks', {
+        post_id: 7,
+        updates: [{ ref: 'blk_x', attributes: { level: 2 } }],
+        verbose: true,
+      }, mockClient);
+      // No block_name supplied → enricher is skipped, attributes pass through as-is.
+      expect(mockClient.updateBlocksBatch).toHaveBeenCalledWith(
+        7,
+        [{ ref: 'blk_x', attributes: { level: 2 } }],
+        { verbose: true }
+      );
+    });
+
+    it('treats non-boolean verbose values as false', async () => {
+      // Schema declares verbose as boolean; defensive against agents that pass
+      // "true" / 1 / etc. — we only opt in on strict boolean true.
+      await handleWriteTool('update_blocks', {
+        post_id: 7,
+        updates: [{ ref: 'blk_x', attributes: { level: 2 } }],
+        verbose: 'true' as unknown as boolean,
+      }, mockClient);
+      const call = mockClient.updateBlocksBatch.mock.calls[0];
+      expect(call.length).toBe(2);
+    });
   });
 
   describe('insert_blocks', () => {

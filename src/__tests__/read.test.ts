@@ -28,6 +28,17 @@ const mockClient = {
     slug: 'gravityedit',
     edit_url: 'https://example.com/wp-admin/post.php?post=532208&action=edit',
   }),
+  getBlock: vi.fn().mockResolvedValue({
+    success: true,
+    saved: {
+      flat_index: 9,
+      block_name: 'core/paragraph',
+      attributes: { metadata: { gk_ref: 'blk_4cac605a' } },
+      inner_html: '<p>Now here\'s the same statement but written using the <code>[gvlogic]</code> shortcode:</p>',
+      is_dynamic: false,
+      ref: 'blk_4cac605a',
+    },
+  }),
 } as any;
 
 describe('handleReadTool', () => {
@@ -195,5 +206,53 @@ describe('handleReadTool', () => {
     expect(result.warnings).toBeDefined();
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.blocks).toBeDefined();
+  });
+
+  // ── get_block ─────────────────────────────────────────────────
+  describe('get_block', () => {
+    it('requires post_id', async () => {
+      await expect(handleReadTool('get_block', { ref: 'blk_x' }, mockClient)).rejects.toThrow(/post_id/);
+    });
+
+    it('requires exactly one of ref or flat_index (neither)', async () => {
+      await expect(handleReadTool('get_block', { post_id: 1 }, mockClient)).rejects.toThrow(/exactly one/);
+    });
+
+    it('requires exactly one of ref or flat_index (both)', async () => {
+      await expect(handleReadTool('get_block', { post_id: 1, ref: 'blk_x', flat_index: 0 }, mockClient))
+        .rejects.toThrow(/exactly one/);
+    });
+
+    it('routes ref calls through client.getBlock', async () => {
+      await handleReadTool('get_block', { post_id: 1, ref: 'blk_4cac605a' }, mockClient);
+      expect(mockClient.getBlock).toHaveBeenCalledWith(1, { ref: 'blk_4cac605a' });
+    });
+
+    it('routes flat_index calls through client.getBlock', async () => {
+      await handleReadTool('get_block', { post_id: 1, flat_index: 9 }, mockClient);
+      expect(mockClient.getBlock).toHaveBeenCalledWith(1, { flatIndex: 9 });
+    });
+
+    it('returns the canonical saved snapshot to the caller', async () => {
+      const result = await handleReadTool(
+        'get_block',
+        { post_id: 1, ref: 'blk_4cac605a' },
+        mockClient
+      ) as any;
+      expect(result.success).toBe(true);
+      expect(result.saved).toMatchObject({
+        flat_index: 9,
+        block_name: 'core/paragraph',
+        ref: 'blk_4cac605a',
+        is_dynamic: false,
+      });
+      expect(result.saved.inner_html).toContain('[gvlogic]');
+      expect(result.saved.inner_html).not.toContain('[[gvlogic]]');
+    });
+
+    it('treats empty-string ref as "no ref provided" (XOR check fires)', async () => {
+      await expect(handleReadTool('get_block', { post_id: 1, ref: '' }, mockClient))
+        .rejects.toThrow(/exactly one/);
+    });
   });
 });

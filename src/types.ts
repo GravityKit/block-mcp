@@ -184,6 +184,33 @@ export interface PreferenceWarning {
   suggested_replacement?: string;
 }
 
+/**
+ * Canonical post-save snapshot of one block. Echoed in write responses
+ * (`update_block`, `update_blocks` with `verbose: true`) and returned by
+ * `get_block` — same shape on both sides, so the contract is identical
+ * for "what just got saved" and "what's there now".
+ *
+ * For dynamic blocks (`is_dynamic: true`), `inner_html` is the stored
+ * template, not the rendered output — render happens at page-load time.
+ */
+export interface SavedBlock {
+  /** Flat index of this block in the post (matches `get_page_blocks` index). */
+  flat_index: number;
+  /** Fully-qualified block name (e.g., `core/paragraph`). */
+  block_name: string;
+  /** Post-save attributes, post-transform (matches what's now in post_content). */
+  attributes: Record<string, unknown>;
+  /** Post-save innerHTML — exactly what was just serialized into post_content. */
+  inner_html: string;
+  /**
+   * True if this block type has a PHP render callback. When true, `inner_html`
+   * is the stored template, not the rendered HTML the visitor sees.
+   */
+  is_dynamic: boolean;
+  /** Stable gk_ref (when the block has one). */
+  ref?: string;
+}
+
 /** Response from block update (PATCH) operations. */
 export interface BlockUpdateResponse {
   success: boolean;
@@ -195,10 +222,23 @@ export interface BlockUpdateResponse {
     /** Stable gk_ref UUID (present when the block had/has a ref). Use to chain follow-up mutations. */
     ref?: string;
   };
+  /**
+   * Canonical post-save snapshot — exactly what's now in `post_content` for
+   * this block. The write call is the verification: no need to re-read the
+   * block to confirm what saved.
+   */
+  saved: SavedBlock;
   /** WordPress revision ID of the pre-edit snapshot */
   before_revision_id: number;
   /** WordPress revision ID of the post-edit state */
   revision_id: number;
+}
+
+/** Response from `get_block` — single-block fetch by ref or flat_index. */
+export interface GetBlockResponse {
+  success: boolean;
+  /** Canonical snapshot — same shape as `BlockUpdateResponse.saved`. */
+  saved: SavedBlock;
 }
 
 /** Single entry describing a block written by `insert_blocks` / `rewrite_post_blocks`. */
@@ -302,6 +342,11 @@ export interface BlockBatchUpdateResult {
     attributes: Record<string, unknown>;
     ref?: string;
   };
+  /**
+   * Canonical post-save snapshot. Present only when the batch was called
+   * with `verbose: true` (default is false to keep batch responses compact).
+   */
+  saved?: SavedBlock;
 }
 
 /** Response from `POST /posts/{id}/blocks/batch-update`. ONE revision for N updates. */

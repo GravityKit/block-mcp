@@ -388,6 +388,44 @@ class REST_Controller {
 								),
 							),
 						),
+						'verbose' => array(
+							'type'        => 'boolean',
+							'required'    => false,
+							'default'     => false,
+							'description' => 'When true, each result includes a `saved` snapshot (post-save innerHTML + attributes). Default false to keep batch responses compact.',
+						),
+					),
+				),
+			)
+		);
+
+		// GET — single-block fetch by ref or flat_index. Returns the same
+		// `saved` shape that write endpoints echo, so verification reads use
+		// the identical contract as the writes that produced them.
+		register_rest_route(
+			self::NAMESPACE,
+			'/posts/(?P<id>\d+)/block',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_block' ),
+					'permission_callback' => array( $this, 'check_edit_permissions' ),
+					'args'                => array(
+						'id' => array(
+							'type'              => 'integer',
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						),
+						'ref' => array(
+							'type'        => 'string',
+							'required'    => false,
+							'description' => 'Stable gk_ref. Provide this OR flat_index.',
+						),
+						'flat_index' => array(
+							'type'        => 'integer',
+							'required'    => false,
+							'description' => 'Flat block index. Provide this OR ref.',
+						),
 					),
 				),
 			)
@@ -1885,7 +1923,44 @@ class REST_Controller {
 				);
 			}
 
-			$result = $this->block_crud->update_blocks_batch( $post_id, $updates );
+			$verbose = (bool) $request->get_param( 'verbose' );
+			$result  = $this->block_crud->update_blocks_batch( $post_id, $updates, $verbose );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /posts/{id}/block?ref={ref}|flat_index={n}
+	 *
+	 * Single-block fetch. Returns the same `saved` snapshot shape that write
+	 * endpoints echo, so verification reads use the identical contract as the
+	 * writes that produced them.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_block( $request ) {
+		try {
+			$post_id = (int) $request->get_param( 'id' );
+			$perm    = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm ) ) {
+				return $perm;
+			}
+
+			$ref        = $request->get_param( 'ref' );
+			$flat_index = $request->get_param( 'flat_index' );
+			$ref        = ( is_string( $ref ) && '' !== $ref ) ? $ref : null;
+			$flat_index = ( null !== $flat_index && '' !== $flat_index ) ? (int) $flat_index : null;
+
+			$result = $this->block_crud->get_block( $post_id, $ref, $flat_index );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;

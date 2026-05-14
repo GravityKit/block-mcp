@@ -78,6 +78,7 @@ import type {
   BlockReplaceRangeResponse,
   BlockBatchUpdateItem,
   BlockBatchUpdateResponse,
+  GetBlockResponse,
   StorageModeScanResult,
   PatternInsertResponse,
   MutationRequest,
@@ -555,17 +556,53 @@ export class WordPressBlockClient {
    */
   async updateBlocksBatch(
     postId: number,
-    updates: BlockBatchUpdateItem[]
+    updates: BlockBatchUpdateItem[],
+    options: { verbose?: boolean } = {}
   ): Promise<BlockBatchUpdateResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error('updates must be a non-empty array');
     }
 
+    const body: { updates: BlockBatchUpdateItem[]; verbose?: boolean } = { updates };
+    if (options.verbose) body.verbose = true;
+
     const response = await this.client.post<BlockBatchUpdateResponse>(
       `/posts/${postId}/blocks/batch-update`,
-      { updates }
+      body
     );
+    return response.data;
+  }
+
+  /**
+   * Fetch a single block by stable ref or flat index. Returns the canonical
+   * `saved` snapshot — same shape that write endpoints echo, so verification
+   * reads use the identical contract as the writes that produced them.
+   *
+   * Lighter than getPageBlocks() when you only need one block. Use this when
+   * you want to confirm the current state of a known ref before chaining an
+   * edit, not to discover what's on the page.
+   *
+   * @param postId  WordPress post/page ID.
+   * @param target  Either `{ ref }` or `{ flatIndex }`. Exactly one required.
+   * @returns       { success, saved } where `saved` mirrors update_block's saved.
+   */
+  async getBlock(
+    postId: number,
+    target: { ref?: string; flatIndex?: number }
+  ): Promise<GetBlockResponse> {
+    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const hasRef = typeof target.ref === 'string' && target.ref !== '';
+    const hasIdx = typeof target.flatIndex === 'number';
+    if (hasRef === hasIdx) {
+      throw new Error('Provide exactly one of ref or flatIndex');
+    }
+
+    const params: Record<string, string | number> = {};
+    if (hasRef) params.ref = target.ref!;
+    else params.flat_index = target.flatIndex!;
+
+    const response = await this.client.get<GetBlockResponse>(`/posts/${postId}/block`, { params });
     return response.data;
   }
 

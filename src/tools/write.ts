@@ -71,7 +71,7 @@ export const WRITE_TOOLS = [
   {
     name: 'update_block',
     description:
-      'Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected.',
+      'Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected. Response includes `saved.inner_html` and `saved.attributes` — the canonical post-save snapshot from the database. Do not fetch the public page to verify edits.',
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
@@ -81,6 +81,18 @@ export const WRITE_TOOLS = [
       properties: {
         success: { type: 'boolean' },
         block: { type: 'object', properties: { index: { type: 'number' }, name: { type: 'string' }, attributes: { type: 'object' }, ref: { type: 'string' } } },
+        saved: {
+          type: 'object',
+          description: 'Canonical post-save snapshot of the updated block — exactly what is now in post_content. For dynamic blocks, inner_html is the stored template, not the rendered output.',
+          properties: {
+            flat_index: { type: 'number' },
+            block_name: { type: 'string' },
+            attributes: { type: 'object' },
+            inner_html: { type: 'string' },
+            is_dynamic: { type: 'boolean' },
+            ref: { type: 'string' },
+          },
+        },
         before_revision_id: { type: 'number' },
         revision_id: { type: 'number' },
       },
@@ -110,7 +122,7 @@ export const WRITE_TOOLS = [
   {
     name: 'update_blocks',
     description:
-      'Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors — no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post — keeps revision history clean.',
+      'Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors — no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post — keeps revision history clean. Pass `verbose: true` to include `saved.inner_html` + `saved.attributes` per result for per-item verification without a re-read.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Batch-update blocks' },
     outputSchema: {
       type: 'object',
@@ -129,6 +141,18 @@ export const WRITE_TOOLS = [
                   index:      { type: 'number' },
                   name:       { type: 'string' },
                   attributes: { type: 'object' },
+                  ref:        { type: 'string' },
+                },
+              },
+              saved: {
+                type: 'object',
+                description: 'Canonical post-save snapshot. Present only when called with `verbose: true`.',
+                properties: {
+                  flat_index: { type: 'number' },
+                  block_name: { type: 'string' },
+                  attributes: { type: 'object' },
+                  inner_html: { type: 'string' },
+                  is_dynamic: { type: 'boolean' },
                   ref:        { type: 'string' },
                 },
               },
@@ -156,6 +180,10 @@ export const WRITE_TOOLS = [
               innerHTML:  { type: 'string', description: 'Replacement innerHTML.' },
             },
           },
+        },
+        verbose: {
+          type: 'boolean',
+          description: 'When true, each result includes `saved.inner_html` + `saved.attributes` (the canonical post-save snapshot). Default false to keep batch responses compact.',
         },
       },
       required: ['post_id', 'updates'],
@@ -378,6 +406,9 @@ export async function handleWriteTool(
         });
       }
 
+      if (args.verbose === true) {
+        return await client.updateBlocksBatch(postId, normalized, { verbose: true });
+      }
       return await client.updateBlocksBatch(postId, normalized);
     }
 
