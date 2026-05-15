@@ -11,6 +11,7 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import type { CreatePostRequest, UpdatePostRequest } from '../types.js';
+import { BLOCK_INPUT_SCHEMA } from './write.js';
 
 const POST_STATUS_CREATE = ['draft', 'pending', 'private', 'publish', 'future'] as const;
 const POST_STATUS_UPDATE = ['draft', 'pending', 'private', 'publish', 'future', 'trash'] as const;
@@ -39,11 +40,7 @@ export const POST_TOOLS = [
           type: 'array',
           description:
             'Structured blocks. Validated against block registry and preference tier — legacy blocks are rejected.',
-          items: {
-            type: 'object',
-            properties: { name: { type: 'string' } },
-            required: ['name'],
-          },
+          items: BLOCK_INPUT_SCHEMA,
         },
         slug: { type: 'string' },
         parent: { type: 'number', description: 'Parent post ID (hierarchical post types only).' },

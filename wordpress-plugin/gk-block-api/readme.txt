@@ -124,6 +124,7 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 * New: `Block_CRUD::get_block(post_id, ref|flat_index)` returns the same `saved` shape — lighter than `get_blocks()` for single-block verification reads.
 * New: `GET /posts/{id}/block?ref=...|flat_index=...` REST endpoint (single-block fetch).
 * New: `verbose` request param on `POST /posts/{id}/blocks/batch-update` (boolean, default false).
+* Fixed: MCP server `create_post` tool dropped `attributes`, `innerHTML`, and `innerBlocks` from each block in its `blocks` array because the input schema only declared `name`. Posts created with structured blocks landed as empty shells, surfacing as "Block contains unexpected or invalid content" in the editor. The schema now uses the shared `BLOCK_INPUT_SCHEMA` constant so all four fields pass through. No PHP-side change — `Post_Manager::create_post()` was always ready to accept the full shape.
 * Doc: Plugin readme and inline docblocks now make the "response IS the verification" contract explicit — agents should not refetch the public page (or call `get_page_blocks`) to confirm what a write saved.
 
 = 1.5.0 =

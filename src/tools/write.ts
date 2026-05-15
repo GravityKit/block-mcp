@@ -13,7 +13,7 @@ import { formatPreferenceWarning } from '../preferences.js';
 import { enrichBlock, enrichBlocks, type BlockDef } from '../enrichers.js';
 
 /** Shape shared by every block-input arg in this module. */
-const BLOCK_INPUT_SCHEMA = {
+export const BLOCK_INPUT_SCHEMA = {
   type: 'object',
   properties: {
     name: { type: 'string', description: 'Fully-qualified block name (e.g. "core/heading").' },

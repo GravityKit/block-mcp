@@ -39771,7 +39771,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "1.5.0",
+  version: "1.5.1",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   type: "module",
@@ -58573,11 +58573,7 @@ var POST_TOOLS = [
         blocks: {
           type: "array",
           description: "Structured blocks. Validated against block registry and preference tier \u2014 legacy blocks are rejected.",
-          items: {
-            type: "object",
-            properties: { name: { type: "string" } },
-            required: ["name"]
-          }
+          items: BLOCK_INPUT_SCHEMA
         },
         slug: { type: "string" },
         parent: { type: "number", description: "Parent post ID (hierarchical post types only)." },
