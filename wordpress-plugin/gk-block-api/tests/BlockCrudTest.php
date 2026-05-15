@@ -671,6 +671,229 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		$this->assertCount( 0, $this->current_blocks() );
 	}
 
+	// ── replace_all_blocks: innerBlocks regression ────────────────────
+
+	public function test_replace_all_blocks_preserves_inner_blocks() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>Old</p>' ) ) );
+		$result = $this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<ul class="wp-block-list"></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>One</li>' ),
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>Two</li>' ),
+					),
+				),
+			)
+		);
+
+		$this->assertTrue( $result['success'] );
+
+		$blocks = $this->current_blocks();
+		$this->assertCount( 1, $blocks );
+		$this->assertSame( 'core/list', $blocks[0]['blockName'] );
+		$this->assertCount( 2, $blocks[0]['innerBlocks'] );
+		$this->assertSame( 'core/list-item', $blocks[0]['innerBlocks'][0]['blockName'] );
+		$this->assertSame( '<li>One</li>', $blocks[0]['innerBlocks'][0]['innerHTML'] );
+		$this->assertSame( 'core/list-item', $blocks[0]['innerBlocks'][1]['blockName'] );
+		$this->assertSame( '<li>Two</li>', $blocks[0]['innerBlocks'][1]['innerHTML'] );
+	}
+
+	public function test_replace_all_blocks_inner_content_has_null_per_child() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<ul></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>A</li>' ),
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>B</li>' ),
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>C</li>' ),
+					),
+				),
+			)
+		);
+
+		$blocks      = $this->current_blocks();
+		$null_count  = count( array_filter( $blocks[0]['innerContent'], fn( $p ) => null === $p ) );
+		$this->assertSame( 3, $null_count, 'innerContent must have one null placeholder per child for serialize_blocks() round-trip.' );
+	}
+
+	public function test_replace_all_blocks_deeply_nested_inner_blocks() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/columns',
+					'innerHTML'   => '<div class="wp-block-columns"></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div class="wp-block-column"></div>',
+							'innerBlocks' => array(
+								array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Nested</p>' ),
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		// Depth 0 — columns.
+		$this->assertSame( 'core/columns', $blocks[0]['blockName'] );
+		$this->assertCount( 1, $blocks[0]['innerBlocks'] );
+		// Depth 1 — column.
+		$col = $blocks[0]['innerBlocks'][0];
+		$this->assertSame( 'core/column', $col['blockName'] );
+		$this->assertCount( 1, $col['innerBlocks'] );
+		// Depth 2 — paragraph leaf.
+		$leaf = $col['innerBlocks'][0];
+		$this->assertSame( 'core/paragraph', $leaf['blockName'] );
+		$this->assertSame( '<p>Nested</p>', $leaf['innerHTML'] );
+	}
+
+	public function test_replace_all_blocks_assigns_refs_to_nested_blocks() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<ul></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>One</li>' ),
+					),
+				),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		$this->assertArrayHasKey( 'metadata', $blocks[0]['attrs'] );
+		$this->assertArrayHasKey( 'gk_ref', $blocks[0]['attrs']['metadata'], 'Top-level block must receive a stable ref.' );
+		$this->assertArrayHasKey( 'metadata', $blocks[0]['innerBlocks'][0]['attrs'] );
+		$this->assertArrayHasKey( 'gk_ref', $blocks[0]['innerBlocks'][0]['attrs']['metadata'], 'Nested blocks must also receive refs so subsequent edit_block_tree calls can target them.' );
+	}
+
+	// ── replace_all_blocks: XSS sanitization across the tree ──────────
+
+	public function test_replace_all_blocks_strips_script_from_leaf_inner_html() {
+		$this->make_post( array() );
+		$GLOBALS['_gk_test_kses_calls'] = array();
+
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p>ok</p><script>alert(1)</script>' ),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		// See PostManagerTest counterpart: real wp_kses_post strips the
+		// <script> tag markers but leaves the text content as inert text.
+		$this->assertStringNotContainsStringIgnoringCase( '<script', $blocks[0]['innerHTML'] );
+		$this->assertSame( $blocks[0]['innerHTML'], $blocks[0]['innerContent'][0] );
+		$this->assertContains( '<p>ok</p><script>alert(1)</script>', $GLOBALS['_gk_test_kses_calls'], 'wp_kses_post must be called on the raw innerHTML before serialization.' );
+	}
+
+	public function test_replace_all_blocks_strips_event_handler_attribute() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p><img src="x" onerror="alert(1)"></p>' ),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		$this->assertStringNotContainsStringIgnoringCase( 'onerror', $blocks[0]['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( 'alert(1)', $blocks[0]['innerHTML'] );
+		$this->assertStringContainsString( '<img src="x"', $blocks[0]['innerHTML'] );
+	}
+
+	public function test_replace_all_blocks_neutralizes_javascript_url() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p><a href="javascript:alert(1)">x</a></p>' ),
+			)
+		);
+
+		$blocks = $this->current_blocks();
+		$this->assertStringNotContainsStringIgnoringCase( 'javascript:', $blocks[0]['innerHTML'] );
+		$this->assertStringContainsString( '<a ', $blocks[0]['innerHTML'] );
+	}
+
+	public function test_replace_all_blocks_strips_xss_in_container_split_innerhtml() {
+		// Regression guard for the strpos-based wrapper split in
+		// build_block_from_def. kses runs before the split — executable tag
+		// markers must not resurface in the opening or closing slice of
+		// innerContent.
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/list',
+					'innerHTML'   => '<script>alert(1)</script><ul></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/list-item', 'innerHTML' => '<li>one</li>' ),
+					),
+				),
+			)
+		);
+
+		$container = $this->current_blocks()[0];
+		foreach ( $container['innerContent'] as $piece ) {
+			if ( null === $piece ) {
+				continue;
+			}
+			$this->assertStringNotContainsStringIgnoringCase( '<script', $piece );
+		}
+	}
+
+	public function test_replace_all_blocks_strips_xss_from_deeply_nested_inner_blocks() {
+		$this->make_post( array() );
+		$this->crud->replace_all_blocks(
+			$this->post_id,
+			array(
+				array(
+					'name'        => 'core/columns',
+					'innerHTML'   => '<div class="wp-block-columns"></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/column',
+							'innerHTML'   => '<div class="wp-block-column"></div>',
+							'innerBlocks' => array(
+								array(
+									'name'      => 'core/paragraph',
+									'innerHTML' => '<p onclick="alert(1)">deep <script>alert(2)</script></p>',
+								),
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$leaf = $this->current_blocks()[0]['innerBlocks'][0]['innerBlocks'][0];
+		// Executable surface gone: no <script>, no on*= handler. The
+		// onclick="alert(1)" value is removed with the attribute; the text
+		// "alert(2)" inside the stripped <script> survives as inert text,
+		// matching real wp_kses behavior.
+		$this->assertStringNotContainsStringIgnoringCase( 'onclick', $leaf['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( '<script', $leaf['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( 'alert(1)', $leaf['innerHTML'] );
+		$this->assertStringContainsString( 'deep', $leaf['innerHTML'] );
+		$this->assertSame( $leaf['innerHTML'], $leaf['innerContent'][0] );
+	}
+
 	// ── Rate limiting ──────────────────────────────────────────────
 
 	public function test_rate_limit_passes_when_empty() {
@@ -715,7 +938,7 @@ class BlockCrudTest extends \PHPUnit\Framework\TestCase {
 		$this->assertTrue( $result );
 	}
 
-	// ── insert_blocks with innerBlocks (BLOCK-1) ──────────────────
+	// ── insert_blocks with innerBlocks ────────────────────────────
 
 	public function test_insert_blocks_with_inner_blocks_preserved() {
 		$this->make_post( array() );
