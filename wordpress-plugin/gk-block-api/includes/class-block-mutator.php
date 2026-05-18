@@ -589,7 +589,19 @@ class Block_Mutator {
 				// (associative arrays, scalars, null) so this preserves the
 				// innerContent null placeholders that serialize_blocks() depends
 				// on, without invoking the discouraged serialize()/unserialize().
-				$clone = json_decode( wp_json_encode( $original ), true );
+				$encoded = wp_json_encode( $original );
+				$clone   = ( false === $encoded ) ? null : json_decode( $encoded, true );
+
+				// Abort if the round-trip didn't yield an array. parse_blocks() output
+				// is JSON-shaped so this only fires on truly malformed input (resources,
+				// invalid UTF-8); bailing prevents inserting null into the sibling array.
+				if ( ! is_array( $clone ) ) {
+					return new \WP_Error(
+						'duplicate_failed',
+						__( 'Failed to clone block for duplication.', 'gk-block-api' ),
+						array( 'status' => 500 )
+					);
+				}
 
 				// Strip & replace refs on the clone — every block in the clone tree
 				// must have a fresh ref so the duplicate doesn't share identity with
