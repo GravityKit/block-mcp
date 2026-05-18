@@ -24,9 +24,10 @@ class BlockMutatorTest extends WP_UnitTestCase {
 	private $crud;
 
 	/** @var int */
-	private $post_id = 99101;
+	private $post_id;
 
 	protected function setUp(): void {
+		parent::setUp();
 		// Register core blocks used in tests.
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( array(
@@ -58,11 +59,12 @@ class BlockMutatorTest extends WP_UnitTestCase {
 		$this->crud        = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
 		$this->mutator     = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
 
-		// Reset test post content at start of each test.
-		$this->make_post( array() );
-
-		// Reset transients so rate limiting doesn't carry across tests.
-		$GLOBALS['_gk_test_transients'] = array();
+		$this->post_id = self::factory()->post->create( array(
+			'post_type'    => 'page',
+			'post_status'  => 'publish',
+			'post_title'   => 'Test Post',
+			'post_content' => '',
+		) );
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────
@@ -71,22 +73,17 @@ class BlockMutatorTest extends WP_UnitTestCase {
 	 * Create or replace the test post with the given blocks array.
 	 */
 	private function make_post( array $blocks ): void {
-		$post                = new \stdClass();
-		$post->ID            = $this->post_id;
-		$post->post_type     = 'page';
-		$post->post_status   = 'publish';
-		$post->post_title    = 'Test Post';
-		$post->post_content  = json_encode( $blocks );
-		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+		wp_update_post( array(
+			'ID'           => $this->post_id,
+			'post_content' => serialize_blocks( $blocks ),
+		) );
 	}
 
 	/**
 	 * Read the current blocks stored on the test post.
 	 */
 	private function current_blocks(): array {
-		$content = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
-		$decoded = json_decode( $content, true );
-		return is_array( $decoded ) ? $decoded : array();
+		return parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
 	}
 
 	/**
@@ -433,16 +430,16 @@ class BlockMutatorTest extends WP_UnitTestCase {
 
 	public function test_remove_block_synced_pattern_warning() {
 		// Register a pattern post so the warning can look up its title.
-		$pattern            = new \stdClass();
-		$pattern->ID        = 555;
-		$pattern->post_type = 'wp_block';
-		$pattern->post_title = 'My Pattern';
-		$GLOBALS['_gk_test_posts'][555] = $pattern;
+		$pattern_id = self::factory()->post->create( array(
+			'post_type'   => 'wp_block',
+			'post_status' => 'publish',
+			'post_title'  => 'My Pattern',
+		) );
 
 		$this->make_post( array(
 			array(
 				'blockName'    => 'core/block',
-				'attrs'        => array( 'ref' => 555 ),
+				'attrs'        => array( 'ref' => $pattern_id ),
 				'innerHTML'    => '',
 				'innerContent' => array(),
 				'innerBlocks'  => array(),
@@ -1083,9 +1080,13 @@ class BlockMutatorTest extends WP_UnitTestCase {
 		// Fill the rate limit bucket.
 		$key = 'gk_block_api_rate_' . $this->post_id;
 		$now = time();
-		$GLOBALS['_gk_test_transients'][ $key ] = array(
-			'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES, $now ),
-			'puts'   => array(),
+		set_transient(
+			$key,
+			array(
+				'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES, $now ),
+				'puts'   => array(),
+			),
+			120
 		);
 
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );

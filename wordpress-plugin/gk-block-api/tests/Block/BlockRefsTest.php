@@ -36,9 +36,10 @@ class BlockRefsTest extends WP_UnitTestCase {
 	private $mutator;
 
 	/** @var int */
-	private $post_id = 99301;
+	private $post_id;
 
 	protected function setUp(): void {
+		parent::setUp();
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( array(
 			'core/paragraph',
@@ -62,20 +63,21 @@ class BlockRefsTest extends WP_UnitTestCase {
 		$this->crud    = new Block_CRUD( $preferences, $safety, $transformer, $inventory );
 		$this->mutator = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
 
-		$GLOBALS['_gk_test_transients'] = array();
-		$this->make_post( array() );
+		$this->post_id = self::factory()->post->create( array(
+			'post_type'    => 'page',
+			'post_status'  => 'publish',
+			'post_title'   => 'Refs Test',
+			'post_content' => '',
+		) );
 	}
 
 	// ── Fixtures ───────────────────────────────────────────────────────
 
 	private function make_post( array $blocks ): void {
-		$post               = new \stdClass();
-		$post->ID           = $this->post_id;
-		$post->post_type    = 'page';
-		$post->post_status  = 'publish';
-		$post->post_title   = 'Refs Test';
-		$post->post_content = json_encode( $blocks );
-		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+		wp_update_post( array(
+			'ID'           => $this->post_id,
+			'post_content' => serialize_blocks( $blocks ),
+		) );
 	}
 
 	private function block( string $name, array $attrs = array(), string $html = '', array $children = array() ): array {
@@ -103,9 +105,7 @@ class BlockRefsTest extends WP_UnitTestCase {
 	}
 
 	private function current_blocks(): array {
-		$content = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
-		$decoded = json_decode( $content, true );
-		return is_array( $decoded ) ? $decoded : array();
+		return parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
 	}
 
 	// ── generate_ref ───────────────────────────────────────────────────
@@ -346,9 +346,9 @@ class BlockRefsTest extends WP_UnitTestCase {
 	public function test_get_blocks_does_not_rewrite_when_all_refs_present() {
 		$blocks = array( $this->_with_ref( $this->block( 'core/paragraph', array(), '<p>r</p>' ), 'blk_STABLE' ) );
 		$this->make_post( $blocks );
-		$before = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
+		$before = (string) get_post_field( 'post_content', $this->post_id );
 		$this->crud->get_blocks( $this->post_id );
-		$after = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
+		$after = (string) get_post_field( 'post_content', $this->post_id );
 		$this->assertSame( $before, $after, 'Persist should be a no-op when all refs already exist' );
 	}
 
@@ -544,16 +544,15 @@ class BlockRefsTest extends WP_UnitTestCase {
 	 * still write) and that the ref-assignment did happen.
 	 */
 	public function test_get_blocks_acquires_and_releases_ref_lock() {
-		$GLOBALS['_gk_test_object_cache'] = array();
+		wp_cache_delete( 'gk_block_api_ref_lock_' . $this->post_id, 'gk_block_api' );
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) ) );
 
 		$result = $this->crud->get_blocks( $this->post_id );
 
 		$this->assertNotEmpty( $result );
 		$this->assertNotEmpty( $result[0]['ref'] );
-		$this->assertArrayNotHasKey(
-			'gk_block_api_ref_lock_' . $this->post_id,
-			$GLOBALS['_gk_test_object_cache'],
+		$this->assertFalse(
+			wp_cache_get( 'gk_block_api_ref_lock_' . $this->post_id, 'gk_block_api' ),
 			'lock must be released so the next reader can also write'
 		);
 	}
@@ -568,15 +567,17 @@ class BlockRefsTest extends WP_UnitTestCase {
 	 * writes; everyone else reads.
 	 */
 	public function test_get_blocks_skips_persistence_when_lock_held_by_another_worker() {
-		// Seed the lock as already held — simulating another worker mid-flight.
-		$GLOBALS['_gk_test_object_cache']                                  = array();
-		$GLOBALS['_gk_test_object_cache'][ 'gk_block_api_ref_lock_' . $this->post_id ] = 1;
+		$lock_key = 'gk_block_api_ref_lock_' . $this->post_id;
+		wp_cache_delete( $lock_key, 'gk_block_api' );
 
 		// Start with a fresh post (no refs yet) so get_blocks would normally
 		// trigger the assign-and-persist path.
 		$blocks = array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) );
 		$this->make_post( $blocks );
-		$content_before = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
+		$content_before = (string) get_post_field( 'post_content', $this->post_id );
+
+		// Seed the lock as already held — simulating another worker mid-flight.
+		wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
 
 		$result = $this->crud->get_blocks( $this->post_id );
 
@@ -585,7 +586,7 @@ class BlockRefsTest extends WP_UnitTestCase {
 		// and any subsequent read by us will see those refs.
 		$this->assertSame(
 			$content_before,
-			$GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content,
+			(string) get_post_field( 'post_content', $this->post_id ),
 			'no write should happen when another worker holds the lock'
 		);
 
@@ -595,11 +596,12 @@ class BlockRefsTest extends WP_UnitTestCase {
 		$this->assertNotEmpty( $result );
 
 		// The lock we seeded must still be there — we didn't release someone
-		// else's lock. (Cleared at end of test by setUp on the next run.)
-		$this->assertArrayHasKey(
-			'gk_block_api_ref_lock_' . $this->post_id,
-			$GLOBALS['_gk_test_object_cache']
-		);
+		// else's lock.
+		$this->assertSame( 1, wp_cache_get( $lock_key, 'gk_block_api' ) );
+
+		// Cleanup so it doesn't leak into the next test if WP_UnitTestCase's
+		// object-cache reset doesn't catch this group.
+		wp_cache_delete( $lock_key, 'gk_block_api' );
 	}
 
 	/**
@@ -611,7 +613,8 @@ class BlockRefsTest extends WP_UnitTestCase {
 	 * by making two sequential calls and confirming both produce refs.
 	 */
 	public function test_get_blocks_lock_released_after_success_allows_subsequent_reads() {
-		$GLOBALS['_gk_test_object_cache'] = array();
+		$lock_key = 'gk_block_api_ref_lock_' . $this->post_id;
+		wp_cache_delete( $lock_key, 'gk_block_api' );
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>fresh</p>' ) ) );
 
 		// First call: assigns + persists + releases lock.
@@ -625,10 +628,7 @@ class BlockRefsTest extends WP_UnitTestCase {
 		$ref2   = $second[0]['ref'];
 
 		$this->assertSame( $ref1, $ref2, 'refs must be stable across reads once persisted' );
-		$this->assertArrayNotHasKey(
-			'gk_block_api_ref_lock_' . $this->post_id,
-			$GLOBALS['_gk_test_object_cache']
-		);
+		$this->assertFalse( wp_cache_get( $lock_key, 'gk_block_api' ) );
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────

@@ -21,9 +21,10 @@ class BlockCrudTest extends WP_UnitTestCase {
 	private $crud;
 
 	/** @var int */
-	private $post_id = 99201;
+	private $post_id;
 
 	protected function setUp(): void {
+		parent::setUp();
 		// Register blocks used in tests.
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( array(
@@ -51,26 +52,25 @@ class BlockCrudTest extends WP_UnitTestCase {
 			new Block_Inventory()
 		);
 
-		$this->make_post( array() );
-		$GLOBALS['_gk_test_transients'] = array();
+		$this->post_id = self::factory()->post->create( array(
+			'post_type'    => 'page',
+			'post_status'  => 'publish',
+			'post_title'   => 'Test Post',
+			'post_content' => '',
+		) );
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────
 
 	private function make_post( array $blocks ): void {
-		$post                = new \stdClass();
-		$post->ID            = $this->post_id;
-		$post->post_type     = 'page';
-		$post->post_status   = 'publish';
-		$post->post_title    = 'Test Post';
-		$post->post_content  = json_encode( $blocks );
-		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+		wp_update_post( array(
+			'ID'           => $this->post_id,
+			'post_content' => serialize_blocks( $blocks ),
+		) );
 	}
 
 	private function current_blocks(): array {
-		$content = $GLOBALS['_gk_test_posts'][ $this->post_id ]->post_content;
-		$decoded = json_decode( $content, true );
-		return is_array( $decoded ) ? $decoded : array();
+		return parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
 	}
 
 	private function block( string $name, array $attrs = array(), string $html = '', array $children = array() ): array {
@@ -167,17 +167,17 @@ class BlockCrudTest extends WP_UnitTestCase {
 	}
 
 	public function test_format_blocks_synced_pattern_ref() {
-		$pattern             = new \stdClass();
-		$pattern->ID         = 777;
-		$pattern->post_type  = 'wp_block';
-		$pattern->post_title = 'Pattern Seven';
-		$pattern->post_content = '';
-		$GLOBALS['_gk_test_posts'][777] = $pattern;
+		$pattern_id = self::factory()->post->create( array(
+			'post_type'    => 'wp_block',
+			'post_status'  => 'publish',
+			'post_title'   => 'Pattern Seven',
+			'post_content' => '',
+		) );
 
 		$blocks = array(
 			array(
 				'blockName'    => 'core/block',
-				'attrs'        => array( 'ref' => 777 ),
+				'attrs'        => array( 'ref' => $pattern_id ),
 				'innerHTML'    => '',
 				'innerContent' => array(),
 				'innerBlocks'  => array(),
@@ -186,7 +186,7 @@ class BlockCrudTest extends WP_UnitTestCase {
 		$formatted = $this->crud->format_blocks( $blocks );
 
 		$this->assertArrayHasKey( 'pattern_ref', $formatted[0] );
-		$this->assertEquals( 777, $formatted[0]['pattern_ref']['id'] );
+		$this->assertEquals( $pattern_id, $formatted[0]['pattern_ref']['id'] );
 		$this->assertEquals( 'Pattern Seven', $formatted[0]['pattern_ref']['name'] );
 	}
 
@@ -323,14 +323,12 @@ class BlockCrudTest extends WP_UnitTestCase {
 	}
 
 	public function test_get_blocks_empty_content_returns_empty() {
-		$post                = new \stdClass();
-		$post->ID            = 99299;
-		$post->post_type     = 'page';
-		$post->post_status   = 'publish';
-		$post->post_content  = '';
-		$GLOBALS['_gk_test_posts'][99299] = $post;
-
-		$result = $this->crud->get_blocks( 99299 );
+		$empty_id = self::factory()->post->create( array(
+			'post_type'    => 'page',
+			'post_status'  => 'publish',
+			'post_content' => '',
+		) );
+		$result = $this->crud->get_blocks( $empty_id );
 		$this->assertEquals( array(), $result );
 	}
 
@@ -784,7 +782,6 @@ class BlockCrudTest extends WP_UnitTestCase {
 
 	public function test_replace_all_blocks_strips_script_from_leaf_inner_html() {
 		$this->make_post( array() );
-		$GLOBALS['_gk_test_kses_calls'] = array();
 
 		$this->crud->replace_all_blocks(
 			$this->post_id,
@@ -794,11 +791,12 @@ class BlockCrudTest extends WP_UnitTestCase {
 		);
 
 		$blocks = $this->current_blocks();
-		// See PostManagerTest counterpart: real wp_kses_post strips the
-		// <script> tag markers but leaves the text content as inert text.
+		// Real wp_kses_post strips the <script> tag markup. The text content
+		// ("alert(1)") survives as inert text — that's authentic WP behavior;
+		// we assert only the security invariant.
 		$this->assertStringNotContainsStringIgnoringCase( '<script', $blocks[0]['innerHTML'] );
+		$this->assertStringContainsString( '<p>ok</p>', $blocks[0]['innerHTML'] );
 		$this->assertSame( $blocks[0]['innerHTML'], $blocks[0]['innerContent'][0] );
-		$this->assertContains( '<p>ok</p><script>alert(1)</script>', $GLOBALS['_gk_test_kses_calls'], 'wp_kses_post must be called on the raw innerHTML before serialization.' );
 	}
 
 	public function test_replace_all_blocks_strips_event_handler_attribute() {
@@ -929,9 +927,13 @@ class BlockCrudTest extends WP_UnitTestCase {
 	public function test_rate_limit_old_entries_expire() {
 		// Manually plant ancient timestamps (outside the 60s window).
 		$old = time() - 120;
-		$GLOBALS['_gk_test_transients'][ 'gk_block_api_rate_' . $this->post_id ] = array(
-			'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES + 5, $old ),
-			'puts'   => array(),
+		set_transient(
+			'gk_block_api_rate_' . $this->post_id,
+			array(
+				'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES + 5, $old ),
+				'puts'   => array(),
+			),
+			120
 		);
 		// Stale entries should be filtered; check should pass.
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
