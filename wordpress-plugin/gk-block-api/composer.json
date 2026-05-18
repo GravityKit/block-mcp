@@ -4,7 +4,7 @@
     "type": "wordpress-plugin",
     "license": "GPL-2.0-or-later",
     "require": {
-        "php": ">=8.1"
+        "php": ">=7.4"
     },
     "require-dev": {
         "composer/installers": "^2.2",

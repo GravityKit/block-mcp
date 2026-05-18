@@ -213,11 +213,18 @@ class Media_Manager {
 		 * @param array  $overrides Override array passed verbatim to media_handle_upload().
 		 * @param string $field     The $_FILES key being uploaded.
 		 */
-		$overrides = apply_filters(
+		$default_overrides = array( 'test_form' => false );
+		$overrides         = apply_filters(
 			'gk_block_api_media_upload_overrides',
-			array( 'test_form' => false ),
+			$default_overrides,
 			$field
 		);
+		// Defensive: a misbehaving filter could return null / a string /
+		// false. media_handle_upload() iterates the overrides array
+		// directly so a non-array would crash it.
+		if ( ! is_array( $overrides ) ) {
+			$overrides = $default_overrides;
+		}
 
 		return media_handle_upload( $field, $post_parent, array(), $overrides );
 	}

@@ -34,6 +34,7 @@ class RestSummaryTest extends WP_UnitTestCase {
 	private $controller;
 
 	public function set_up(): void {
+		parent::set_up();
 		$preferences     = new Preferences();
 		$safety          = new Block_Safety();
 		$transformer     = new HTML_Transformer();
@@ -67,8 +68,10 @@ class RestSummaryTest extends WP_UnitTestCase {
 	private function callPrivate( string $method_name, array $args ) {
 		$reflection = new \ReflectionClass( REST_Controller::class );
 		$method     = $reflection->getMethod( $method_name );
-		// PHP 8.1+ allows ReflectionMethod::invokeArgs on private methods
-		// without setAccessible; setAccessible is deprecated.
+		// PHP 8.1+ makes setAccessible() a no-op for non-public methods,
+		// but the plugin's documented minimum is 7.4 — keep the explicit
+		// call so the suite still works against the lower bound.
+		$method->setAccessible( true );
 		return $method->invokeArgs( $this->controller, $args );
 	}
 

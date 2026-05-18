@@ -13,6 +13,7 @@ use GravityKit\BlockAPI\Block_Safety;
 class BlockSafetyTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
+		parent::set_up();
 		// Register some block types for testing.
 		$registry = WP_Block_Type_Registry::get_instance();
 
