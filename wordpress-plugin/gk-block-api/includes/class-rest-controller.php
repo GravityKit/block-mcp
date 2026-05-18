@@ -2119,41 +2119,24 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function replace_all_blocks( $request ) {
-		try {
-			$post_id    = (int) $request->get_param( 'id' );
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$blocks = $req->get_param( 'blocks' );
+
+				if ( empty( $blocks ) || ! is_array( $blocks ) ) {
+					return new \WP_Error(
+						'missing_blocks',
+						__( 'The "blocks" parameter is required and must be a non-empty array.', 'gk-block-api' ),
+						array( 'status' => 400 )
+					);
+				}
+
+				// Sanitize block definitions recursively (preserves innerBlocks).
+				$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
+				return $this->block_crud->replace_all_blocks( $post_id, $sanitized_blocks );
 			}
-
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
-
-			$blocks = $request->get_param( 'blocks' );
-
-			if ( empty( $blocks ) || ! is_array( $blocks ) ) {
-				return new \WP_Error(
-					'missing_blocks',
-					__( 'The "blocks" parameter is required and must be a non-empty array.', 'gk-block-api' ),
-					array( 'status' => 400 )
-				);
-			}
-
-			// Sanitize block definitions recursively (preserves innerBlocks).
-			$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
-
-			$result = $this->block_crud->replace_all_blocks( $post_id, $sanitized_blocks );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 200 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+		);
 	}
 
 	/**
