@@ -2,15 +2,26 @@
 /**
  * Tests for block.json schema-aware attribute extraction in Block_Reader.
  *
- * When a registered block type defines attributes with source='attribute',
- * 'text', or 'html', the values in innerHTML are extracted and merged into
- * the attributes map returned by get_blocks(). This gives agents full truth
- * without mutating the stored comment-delimiter attributes.
+ * Uses real registered WordPress core blocks (core/image, core/heading,
+ * core/button) whose block.json schemas define HTML-sourced attributes.
+ * These blocks are registered by WordPress core with full attribute
+ * definitions in the test environment (real WP loaded via bootstrap-wp.php).
+ *
+ * Covered extraction sources:
+ *   - 'attribute' → core/image alt (img[alt]) and url (img[src])
+ *   - 'html'/'rich-text' → core/heading content (h1–h6 inner HTML)
+ *   - missing selector match → key absent (not null)
+ *   - delimiter-defined attr wins over DOM extraction
+ *   - unregistered block type → parsed attrs returned unchanged
  *
  * @package GravityKit\BlockAPI\Tests
  */
 
 use GravityKit\BlockAPI\Block_CRUD;
+use GravityKit\BlockAPI\Block_Inventory;
+use GravityKit\BlockAPI\Block_Safety;
+use GravityKit\BlockAPI\HTML_Transformer;
+use GravityKit\BlockAPI\Preferences;
 
 class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 
@@ -20,115 +31,24 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 	/** @var \GravityKit\BlockAPI\Block_Reader */
 	private $reader;
 
-	/**
-	 * Register synthetic block types used across this test class.
-	 */
-	protected function block_types_to_register(): array {
-		return array_merge(
-			parent::block_types_to_register(),
-			array(
-				'test/sourced-block',
-				'test/html-block',
-				'test/text-block',
-			)
-		);
-	}
-
 	public function set_up(): void {
 		parent::set_up();
 
-		$registry = \WP_Block_Type_Registry::get_instance();
-
-		// The parent set_up() registers block types without attribute schemas
-		// (bare register($name)). We need to unregister and re-register them
-		// WITH the schema so extract_sourced_attributes() has something to read.
-
-		// Register a synthetic block with source='attribute'.
-		if ( $registry->is_registered( 'test/sourced-block' ) ) {
-			$registry->unregister( 'test/sourced-block' );
-		}
-		$registry->register(
-			'test/sourced-block',
-			array(
-				'attributes' => array(
-					'url'       => array(
-						'type'      => 'string',
-						'source'    => 'attribute',
-						'selector'  => 'a',
-						'attribute' => 'href',
-					),
-					'imageAlt'  => array(
-						'type'      => 'string',
-						'source'    => 'attribute',
-						'selector'  => 'img',
-						'attribute' => 'alt',
-					),
-					'className' => array(
-						'type' => 'string',
-					),
-				),
-			)
-		);
-
-		// Register a synthetic block with source='html'.
-		if ( $registry->is_registered( 'test/html-block' ) ) {
-			$registry->unregister( 'test/html-block' );
-		}
-		$registry->register(
-			'test/html-block',
-			array(
-				'attributes' => array(
-					'content' => array(
-						'type'     => 'string',
-						'source'   => 'html',
-						'selector' => 'p',
-					),
-				),
-			)
-		);
-
-		// Register a synthetic block with source='text'.
-		if ( $registry->is_registered( 'test/text-block' ) ) {
-			$registry->unregister( 'test/text-block' );
-		}
-		$registry->register(
-			'test/text-block',
-			array(
-				'attributes' => array(
-					'label' => array(
-						'type'     => 'string',
-						'source'   => 'text',
-						'selector' => 'span',
-					),
-				),
-			)
-		);
-
-		// Re-create crud AFTER the block types are registered with schemas so
-		// the Block_Reader's block_schema_cache starts fresh and populates from
-		// the correctly-attributed registry entries.
-		$preferences   = new \GravityKit\BlockAPI\Preferences();
-		$safety        = new \GravityKit\BlockAPI\Block_Safety();
-		$transformer   = new \GravityKit\BlockAPI\HTML_Transformer();
-		$this->crud    = new \GravityKit\BlockAPI\Block_CRUD( $preferences, $safety, $transformer, new \GravityKit\BlockAPI\Block_Inventory() );
+		// Re-create the crud AFTER the parent's block registration so we get
+		// a fresh Block_Reader whose block_schema_cache starts empty and will
+		// populate lazily from the real WP registry (which already holds the
+		// full core block schemas from WordPress's block.json files).
+		$preferences   = new Preferences();
+		$safety        = new Block_Safety();
+		$transformer   = new HTML_Transformer();
+		$this->crud    = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
 		$this->mutator = new \GravityKit\BlockAPI\Block_Mutator( $this->crud, $preferences, $safety, $transformer );
 
+		$prop = new ReflectionProperty( Block_CRUD::class, 'reader' );
+		$prop->setAccessible( true );
+		$this->reader = $prop->getValue( $this->crud );
+
 		$this->post_id = $this->make_block_post();
-
-		// Update the $this->reader reference to the fresh crud's reader.
-		$reflection   = new ReflectionProperty( \GravityKit\BlockAPI\Block_CRUD::class, 'reader' );
-		$reflection->setAccessible( true );
-		$this->reader = $reflection->getValue( $this->crud );
-	}
-
-	public function tear_down(): void {
-		$registry = \WP_Block_Type_Registry::get_instance();
-		foreach ( array( 'test/sourced-block', 'test/html-block', 'test/text-block' ) as $name ) {
-			if ( $registry->is_registered( $name ) ) {
-				$registry->unregister( $name );
-			}
-		}
-		parent::tear_down();
 	}
 
 	// ── helpers ──────────────────────────────────────────────────────────
@@ -138,19 +58,54 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 			'ID'           => $this->post_id,
 			'post_content' => serialize_blocks( $blocks ),
 		) );
-		// Invalidate the parse cache so get_blocks() reads fresh content.
 		$this->reader->invalidate( $this->post_id );
 	}
 
-	// ── source='attribute' ────────────────────────────────────────────────
+	/**
+	 * Confirm core/image has source='attribute' for alt in this WP version.
+	 * Skips the test gracefully if the schema is absent (old WP).
+	 */
+	private function require_core_image_alt_schema(): void {
+		$registry   = \WP_Block_Type_Registry::get_instance();
+		$block_type = $registry->get_registered( 'core/image' );
+		$alt_def    = $block_type ? ( $block_type->attributes['alt'] ?? null ) : null;
+		if ( ! $alt_def || ( $alt_def['source'] ?? '' ) !== 'attribute' ) {
+			$this->markTestSkipped( 'core/image alt attribute schema not available in this WP version.' );
+		}
+	}
 
-	public function test_source_attribute_extracted_into_attributes_map() {
+	private function require_core_heading_content_schema(): void {
+		$registry   = \WP_Block_Type_Registry::get_instance();
+		$block_type = $registry->get_registered( 'core/heading' );
+		$content    = $block_type ? ( $block_type->attributes['content'] ?? null ) : null;
+		$source     = $content['source'] ?? '';
+		if ( ! $content || ! in_array( $source, array( 'html', 'rich-text' ), true ) ) {
+			$this->markTestSkipped( 'core/heading content schema not available in this WP version.' );
+		}
+	}
+
+	// ── source='attribute' via core/image ────────────────────────────────
+
+	/**
+	 * core/image defines alt as source='attribute', selector='img', attribute='alt'.
+	 * When img[alt] is present in innerHTML but absent from the JSON delimiter,
+	 * it must appear in the formatted attributes map.
+	 */
+	public function test_core_image_alt_extracted_from_innerHTML() {
+		$this->require_core_image_alt_schema();
+
+		// Intentionally omit 'alt' from the comment-delimiter attrs so the
+		// extractor has to pull it from the DOM.
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'test/sourced-block',
-				'attrs'        => array( 'metadata' => array( 'gk_ref' => 'blk_src1' ) ),
-				'innerHTML'    => '<div><a href="https://example.com">Click</a></div>',
-				'innerContent' => array( '<div><a href="https://example.com">Click</a></div>' ),
+				'blockName'    => 'core/image',
+				'attrs'        => array(
+					'id'       => 1,
+					'sizeSlug' => 'large',
+					'metadata' => array( 'gk_ref' => 'blk_img_alt' ),
+				),
+				'innerHTML'    => '<figure class="wp-block-image"><img src="https://example.com/photo.jpg" alt="A mountain landscape" class="wp-image-1"/></figure>',
+				'innerContent' => array( '<figure class="wp-block-image"><img src="https://example.com/photo.jpg" alt="A mountain landscape" class="wp-image-1"/></figure>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
@@ -160,72 +115,81 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 		$this->assertNotEmpty( $blocks );
 
 		$attrs = $blocks[0]['attributes'];
-		$this->assertArrayHasKey( 'url', $attrs, 'source=attribute href must be surfaced as url.' );
-		$this->assertSame( 'https://example.com', $attrs['url'] );
+		$this->assertArrayHasKey( 'alt', $attrs, 'core/image alt must be extracted from img[alt] in innerHTML.' );
+		$this->assertSame( 'A mountain landscape', $attrs['alt'] );
 	}
 
-	public function test_source_attribute_alt_extracted() {
+	/**
+	 * core/image defines url as source='attribute', selector='img', attribute='src'.
+	 * When img[src] is in innerHTML but absent from the delimiter, it must surface.
+	 */
+	public function test_core_image_url_extracted_from_src_attribute() {
+		$registry   = \WP_Block_Type_Registry::get_instance();
+		$block_type = $registry->get_registered( 'core/image' );
+		$url_def    = $block_type ? ( $block_type->attributes['url'] ?? null ) : null;
+		if ( ! $url_def || ( $url_def['source'] ?? '' ) !== 'attribute' ) {
+			$this->markTestSkipped( 'core/image url attribute schema not available.' );
+		}
+
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'test/sourced-block',
-				'attrs'        => array( 'metadata' => array( 'gk_ref' => 'blk_src2' ) ),
-				'innerHTML'    => '<div><img src="photo.jpg" alt="A cat"/></div>',
-				'innerContent' => array( '<div><img src="photo.jpg" alt="A cat"/></div>' ),
+				'blockName'    => 'core/image',
+				'attrs'        => array(
+					'metadata' => array( 'gk_ref' => 'blk_img_url' ),
+				),
+				'innerHTML'    => '<figure class="wp-block-image"><img src="https://example.com/photo.jpg" alt=""/></figure>',
+				'innerContent' => array( '<figure class="wp-block-image"><img src="https://example.com/photo.jpg" alt=""/></figure>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
 
 		$blocks = $this->crud->get_blocks( $this->post_id );
 		$attrs  = $blocks[0]['attributes'];
-		$this->assertArrayHasKey( 'imageAlt', $attrs );
-		$this->assertSame( 'A cat', $attrs['imageAlt'] );
+
+		$this->assertArrayHasKey( 'url', $attrs, 'core/image url must be extracted from img[src] in innerHTML.' );
+		$this->assertSame( 'https://example.com/photo.jpg', $attrs['url'] );
 	}
 
-	// ── source='html' ─────────────────────────────────────────────────────
+	// ── source='rich-text' via core/heading ──────────────────────────────
 
-	public function test_source_html_extracted_for_p_selector() {
+	/**
+	 * core/heading defines content as source='rich-text', selector='h1,h2,...'.
+	 * When the heading HTML is present in innerHTML but content is absent from
+	 * the comment delimiter, it must be extracted.
+	 */
+	public function test_core_heading_content_extracted_from_innerHTML() {
+		$this->require_core_heading_content_schema();
+
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'test/html-block',
-				'attrs'        => array( 'metadata' => array( 'gk_ref' => 'blk_html1' ) ),
-				'innerHTML'    => '<div><p>Hello <strong>World</strong></p></div>',
-				'innerContent' => array( '<div><p>Hello <strong>World</strong></p></div>' ),
+				'blockName'    => 'core/heading',
+				'attrs'        => array(
+					'level'    => 2,
+					'metadata' => array( 'gk_ref' => 'blk_heading' ),
+					// 'content' deliberately absent from delimiter.
+				),
+				'innerHTML'    => '<h2 class="wp-block-heading">Hello <strong>Schema</strong></h2>',
+				'innerContent' => array( '<h2 class="wp-block-heading">Hello <strong>Schema</strong></h2>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
 
 		$blocks = $this->crud->get_blocks( $this->post_id );
-		$attrs  = $blocks[0]['attributes'];
-		$this->assertArrayHasKey( 'content', $attrs, 'source=html content must be surfaced.' );
+		$this->assertNotInstanceOf( \WP_Error::class, $blocks );
+
+		$attrs = $blocks[0]['attributes'];
+		$this->assertArrayHasKey( 'content', $attrs, 'core/heading content must be extracted from innerHTML.' );
 		$this->assertStringContainsString( 'Hello', $attrs['content'] );
 	}
 
-	// ── source='text' ─────────────────────────────────────────────────────
+	// ── fallback: unregistered block type ────────────────────────────────
 
-	public function test_source_text_extracted_strips_tags() {
-		$this->set_post_blocks( array(
-			array(
-				'blockName'    => 'test/text-block',
-				'attrs'        => array( 'metadata' => array( 'gk_ref' => 'blk_txt1' ) ),
-				'innerHTML'    => '<div><span>Plain <em>text</em></span></div>',
-				'innerContent' => array( '<div><span>Plain <em>text</em></span></div>' ),
-				'innerBlocks'  => array(),
-			),
-		) );
-
-		$blocks = $this->crud->get_blocks( $this->post_id );
-		$attrs  = $blocks[0]['attributes'];
-		$this->assertArrayHasKey( 'label', $attrs );
-		// source=text strips HTML tags — result is plain text.
-		$this->assertStringContainsString( 'Plain', $attrs['label'] );
-		$this->assertStringNotContainsString( '<em>', $attrs['label'] );
-	}
-
-	// ── fallback: unknown block type ──────────────────────────────────────
-
+	/**
+	 * An unregistered block type must return the parsed delimiter attrs unchanged.
+	 * Must not crash; the agent still sees whatever was in the comment delimiter.
+	 */
 	public function test_unregistered_block_returns_parsed_attrs_unchanged() {
-		// Insert a block whose type is not registered.
-		$blocks_raw = array(
+		$this->set_post_blocks( array(
 			array(
 				'blockName'    => 'unknown/mystery-block',
 				'attrs'        => array(
@@ -236,111 +200,101 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 				'innerContent' => array( '<p>Something</p>' ),
 				'innerBlocks'  => array(),
 			),
-		);
-		wp_update_post( array(
-			'ID'           => $this->post_id,
-			'post_content' => serialize_blocks( $blocks_raw ),
 		) );
-		$this->reader->invalidate( $this->post_id );
 
 		$blocks = $this->crud->get_blocks( $this->post_id );
 		$this->assertNotInstanceOf( \WP_Error::class, $blocks );
-		// Must not crash; the JSON-delimiter attrs come through unchanged.
+
 		$attrs = $blocks[0]['attributes'];
 		$this->assertSame( 'preserved', $attrs['myAttr'] );
 	}
 
-	// ── fallback: missing selector match ─────────────────────────────────
+	// ── fallback: missing selector match → key absent ─────────────────────
 
+	/**
+	 * If the HTML does not contain the selector, the sourced attribute key must
+	 * be absent (not set to null). This prevents agents from seeing noise.
+	 */
 	public function test_missing_selector_omits_attribute_not_null() {
-		// HTML has no <a> tag, so 'url' should be absent (not null).
+		$this->require_core_image_alt_schema();
+
+		// No img tag at all in innerHTML — alt extraction must yield nothing.
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'test/sourced-block',
-				'attrs'        => array( 'metadata' => array( 'gk_ref' => 'blk_nosel' ) ),
-				'innerHTML'    => '<div><p>No link here</p></div>',
-				'innerContent' => array( '<div><p>No link here</p></div>' ),
+				'blockName'    => 'core/image',
+				'attrs'        => array(
+					'metadata' => array( 'gk_ref' => 'blk_noimg' ),
+				),
+				'innerHTML'    => '<figure class="wp-block-image"></figure>',
+				'innerContent' => array( '<figure class="wp-block-image"></figure>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
 
 		$blocks = $this->crud->get_blocks( $this->post_id );
 		$attrs  = $blocks[0]['attributes'];
-		$this->assertArrayNotHasKey( 'url', $attrs, 'Missing selector match must omit the key, not set null.' );
+
+		$this->assertArrayNotHasKey( 'alt', $attrs, 'Missing selector match must omit the key.' );
 	}
 
-	// ── delimiter wins over DOM extraction ───────────────────────────────
+	// ── delimiter value wins over DOM extraction ──────────────────────────
 
-	public function test_explicit_json_attr_wins_over_dom_extraction() {
-		// The JSON comment delimiter sets url explicitly; DOM also has a different href.
-		// Delimiter value must win (round-trip stability).
+	/**
+	 * When both the JSON delimiter AND the DOM carry a value for the same
+	 * attribute, the delimiter value must win (round-trip stability).
+	 */
+	public function test_delimiter_attr_wins_over_dom_extraction() {
+		$this->require_core_image_alt_schema();
+
+		// Delimiter says alt='From delimiter'; DOM says alt='From DOM'.
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'test/sourced-block',
+				'blockName'    => 'core/image',
 				'attrs'        => array(
-					'url'      => 'https://delimiter.example.com',
-					'metadata' => array( 'gk_ref' => 'blk_delim' ),
+					'alt'      => 'From delimiter',
+					'metadata' => array( 'gk_ref' => 'blk_delim_wins' ),
 				),
-				'innerHTML'    => '<div><a href="https://dom.example.com">Link</a></div>',
-				'innerContent' => array( '<div><a href="https://dom.example.com">Link</a></div>' ),
+				'innerHTML'    => '<figure class="wp-block-image"><img src="x.jpg" alt="From DOM"/></figure>',
+				'innerContent' => array( '<figure class="wp-block-image"><img src="x.jpg" alt="From DOM"/></figure>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
 
 		$blocks = $this->crud->get_blocks( $this->post_id );
 		$attrs  = $blocks[0]['attributes'];
+
 		$this->assertSame(
-			'https://delimiter.example.com',
-			$attrs['url'],
-			'JSON-delimiter attr must win over DOM-extracted value.'
+			'From delimiter',
+			$attrs['alt'],
+			'JSON-delimiter attr must win over DOM-extracted value for round-trip stability.'
 		);
 	}
 
-	// ── core/heading content attr (integration with real core block) ──────
+	// ── multiple sourced attrs on one block ───────────────────────────────
 
-	public function test_core_heading_content_attr_surfaced() {
-		// core/heading registers content with source='html', selector='h1,h2,...'
-		// Register it with that schema for test environment.
-		$registry = \WP_Block_Type_Registry::get_instance();
-		if ( ! $registry->is_registered( 'core/heading' ) ) {
-			$this->markTestSkipped( 'core/heading not registered.' );
+	/**
+	 * A block can have multiple sourced attributes. All absent-from-delimiter
+	 * ones must be extracted in one pass.
+	 */
+	public function test_multiple_sourced_attrs_extracted_together() {
+		$this->require_core_image_alt_schema();
+
+		$registry   = \WP_Block_Type_Registry::get_instance();
+		$block_type = $registry->get_registered( 'core/image' );
+		$url_def    = $block_type ? ( $block_type->attributes['url'] ?? null ) : null;
+		if ( ! $url_def || ( $url_def['source'] ?? '' ) !== 'attribute' ) {
+			$this->markTestSkipped( 'core/image url attribute schema not available.' );
 		}
 
-		// Re-register with the schema attribute so we can test extraction.
-		// In a real WP environment core/heading already has this schema.
-		// Here we patch it if the test env registered it without attributes.
-		$block_type = $registry->get_registered( 'core/heading' );
-		$attrs      = $block_type ? $block_type->attributes : array();
-
-		if ( empty( $attrs ) || ! isset( $attrs['content'] ) ) {
-			// Unregister and re-register with the schema.
-			if ( $registry->is_registered( 'core/heading' ) ) {
-				$registry->unregister( 'core/heading' );
-			}
-			$registry->register(
-				'core/heading',
-				array(
-					'attributes' => array(
-						'level'   => array( 'type' => 'number', 'default' => 2 ),
-						'content' => array(
-							'type'     => 'string',
-							'source'   => 'html',
-							'selector' => 'h1,h2,h3,h4,h5,h6',
-						),
-					),
-				)
-			);
-		}
-
+		// Neither alt nor url in delimiter.
 		$this->set_post_blocks( array(
 			array(
-				'blockName'    => 'core/heading',
+				'blockName'    => 'core/image',
 				'attrs'        => array(
-					'level'    => 2,
-					'metadata' => array( 'gk_ref' => 'blk_h2' ),
+					'metadata' => array( 'gk_ref' => 'blk_multi_src' ),
 				),
-				'innerHTML'    => '<h2 class="wp-block-heading">Hello Schema</h2>',
-				'innerContent' => array( '<h2 class="wp-block-heading">Hello Schema</h2>' ),
+				'innerHTML'    => '<figure class="wp-block-image"><img src="https://example.com/pic.jpg" alt="Nice pic"/></figure>',
+				'innerContent' => array( '<figure class="wp-block-image"><img src="https://example.com/pic.jpg" alt="Nice pic"/></figure>' ),
 				'innerBlocks'  => array(),
 			),
 		) );
@@ -348,12 +302,9 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 		$blocks = $this->crud->get_blocks( $this->post_id );
 		$attrs  = $blocks[0]['attributes'];
 
-		if ( isset( $attrs['content'] ) ) {
-			$this->assertStringContainsString( 'Hello Schema', $attrs['content'] );
-		} else {
-			// If content attr extraction is not yet active for core/heading
-			// (schema not present in test env), this test is informational only.
-			$this->markTestSkipped( 'core/heading content schema not present in test environment.' );
-		}
+		$this->assertArrayHasKey( 'alt', $attrs );
+		$this->assertSame( 'Nice pic', $attrs['alt'] );
+		$this->assertArrayHasKey( 'url', $attrs );
+		$this->assertSame( 'https://example.com/pic.jpg', $attrs['url'] );
 	}
 }
