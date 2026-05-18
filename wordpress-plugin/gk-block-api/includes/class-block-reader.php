@@ -168,7 +168,18 @@ class Block_Reader {
 			return array();
 		}
 
-		$blocks = $this->parse( $post_id );
+		// Work on the cached entry directly via reference so that
+		// assign_missing_refs_recursive() writes its in-memory ref assignments
+		// back into the cache. Any subsequent parse() call within the same request
+		// will then return the already-assigned tree instead of a fresh copy
+		// with no refs, ensuring ref stability across multiple reads without
+		// requiring a DB write.
+		$cache_key = $post_id . ':' . md5( $content );
+		if ( ! isset( $this->parse_cache[ $cache_key ] ) ) {
+			$parsed                          = parse_blocks( $content );
+			$this->parse_cache[ $cache_key ] = is_array( $parsed ) ? $parsed : array();
+		}
+		$blocks = &$this->parse_cache[ $cache_key ];
 
 		if ( ! is_array( $blocks ) ) {
 			$blocks = array();
@@ -177,7 +188,8 @@ class Block_Reader {
 		// Lazy-assign block refs. When $persist_refs is true (default), any blocks
 		// missing attrs.metadata.gk_ref get a fresh one and the post is updated
 		// silently (no revision) so the refs survive across reads/writes.
-		// When false, refs are still surfaced in the response but won't resolve later.
+		// When false, refs are still surfaced in-memory via the cache reference above
+		// so a second read in the same request sees the same ephemeral refs.
 		$dirty = $this->crud->assign_missing_refs_recursive( $blocks );
 		if ( $dirty && $persist_refs ) {
 			// Concurrency guard. Two readers landing on a fresh post could both
