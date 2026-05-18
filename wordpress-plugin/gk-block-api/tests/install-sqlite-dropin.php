@@ -24,10 +24,10 @@ if ( ! is_dir( $wp_dir ) ) {
 }
 
 if ( ! is_dir( $wp_content ) ) {
-	mkdir( $wp_content, 0o755, true );
+	mkdir( $wp_content, 0755, true );
 }
 if ( ! is_dir( $plugins_dir ) ) {
-	mkdir( $plugins_dir, 0o755, true );
+	mkdir( $plugins_dir, 0755, true );
 }
 
 if ( ! is_dir( $sqlite_plugin ) ) {
