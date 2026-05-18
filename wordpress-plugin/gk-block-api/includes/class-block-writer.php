@@ -536,7 +536,16 @@ class Block_Writer {
 			'warnings' => array(),
 		);
 
-		if ( empty( $block_name ) ) {
+		// Empty / non-string name used to silently pass through; serialize_blocks
+		// then dropped the block entirely (blockName='' produces no output) so the
+		// agent's insert appeared to succeed but nothing landed on disk. Reject
+		// early with a clear error.
+		if ( ! is_string( $block_name ) || '' === $block_name ) {
+			$result['error'] = new \WP_Error(
+				'invalid_block',
+				__( 'Block "name" is required and must be a non-empty string.', 'gk-block-api' ),
+				array( 'status' => 400 )
+			);
 			return $result;
 		}
 

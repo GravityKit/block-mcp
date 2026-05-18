@@ -231,10 +231,13 @@ class BlockCrudTest extends BlockApiTestCase {
 
 	// ── validate_block_def ─────────────────────────────────────────
 
-	public function test_validate_block_def_empty_name_no_error() {
+	public function test_validate_block_def_empty_name_rejects() {
+		// Previously empty name silently passed; serialize_blocks would then
+		// drop the resulting block (blockName='' produces no output), so the
+		// agent's insert appeared to succeed but nothing landed on disk.
 		$result = $this->crud->validate_block_def( '' );
-		$this->assertNull( $result['error'] );
-		$this->assertEmpty( $result['warnings'] );
+		$this->assertInstanceOf( \WP_Error::class, $result['error'] );
+		$this->assertSame( 'invalid_block', $result['error']->get_error_code() );
 	}
 
 	public function test_validate_block_def_core_passes_silently() {
