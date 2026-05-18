@@ -32,7 +32,13 @@ define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
  *
  * Named function (rather than a closure) so WP.org Plugin Check and
  * static-analysis tools can trace registrations. Maps
- * `GravityKit\BlockAPI\Some_Class` → `includes/class-some-class.php`.
+ * `GravityKit\BlockAPI\Some_Class`               → `includes/class-some-class.php`
+ * `GravityKit\BlockAPI\Block_Enrichers\Core_Foo` → `includes/block-enrichers/class-core-foo.php`
+ *
+ * Each sub-namespace segment becomes a directory under `includes/`, with
+ * underscores converted to hyphens (mirrors the file-naming convention WP
+ * coding standards expect). The final segment is the class file itself,
+ * prefixed `class-`.
  *
  * @param string $class_name Fully-qualified class name being requested.
  */
@@ -46,7 +52,15 @@ function autoload( $class_name ) {
 	}
 
 	$relative_class = substr( $class_name, $len );
-	$file           = $base_dir . 'class-' . strtolower( str_replace( '_', '-', $relative_class ) ) . '.php';
+	$parts          = explode( '\\', $relative_class );
+	$class_basename = array_pop( $parts );
+
+	$sub_path = '';
+	if ( ! empty( $parts ) ) {
+		$sub_path = strtolower( str_replace( '_', '-', implode( '/', $parts ) ) ) . '/';
+	}
+
+	$file = $base_dir . $sub_path . 'class-' . strtolower( str_replace( '_', '-', $class_basename ) ) . '.php';
 
 	if ( file_exists( $file ) ) {
 		require_once $file;
@@ -78,6 +92,14 @@ function register_global_filters() {
 	// Block-type integrations — each file registers its own gk_block_api_* filters.
 	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
 		require_once $integration;
+	}
+
+	// Block-type enrichers — one class per block-name namespace, each calling
+	// add_filter on gk_block_api_format_block. Pattern modeled on Automattic's
+	// vip-block-data-api block-additions/ directory. Each file ends with
+	// `Foo_Enricher::init();` to self-register the filter.
+	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
+		require_once $enricher;
 	}
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );

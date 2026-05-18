@@ -395,34 +395,12 @@ class Block_Reader {
 				$data['section'] = $block['attrs']['metadata']['name'];
 			}
 
-			// Resolve synced pattern reference names and optionally their content.
-			if ( 'core/block' === $block['blockName'] && isset( $block['attrs']['ref'] ) ) {
-				$ref_post = get_post( (int) $block['attrs']['ref'] );
-				if ( $ref_post ) {
-					$pattern_data = array(
-						'id'   => (int) $block['attrs']['ref'],
-						'name' => $ref_post->post_title,
-					);
-
-					// Optionally include the pattern's parsed block tree.
-					if ( $render && ! empty( $ref_post->post_content ) ) {
-						$pattern_blocks = parse_blocks( $ref_post->post_content );
-						if ( is_array( $pattern_blocks ) ) {
-							$pattern_counter           = 0;
-							$pattern_top_level_counter = 0;
-							$pattern_data['blocks']    = $this->format_blocks_recursive(
-								$pattern_blocks,
-								array(),
-								$pattern_counter,
-								$pattern_top_level_counter,
-								true
-							);
-						}
-					}
-
-					$data['pattern_ref'] = $pattern_data;
-				}
-			}
+			// Synced-pattern (core/block) `pattern_ref` expansion lives in the
+			// Core_Block_Enricher at includes/block-enrichers/class-core-block-enricher.php
+			// and fires via the gk_block_api_format_block filter below. The enricher
+			// receives the parsed block + this Reader instance through filter context
+			// so it can recursively format the pattern's own block tree under render
+			// mode without touching this loop.
 
 			// Mark blocks as dynamic or static (cached per block name).
 			static $dynamic_cache = array();
@@ -516,12 +494,32 @@ class Block_Reader {
 			 * Filter a formatted block before it is included in the response.
 			 *
 			 * Use this to strip computed/derived fields (e.g. codeHTML, innerHTML)
-			 * from specific block types so agents never see large noise payloads.
+			 * from specific block types so agents never see large noise payloads,
+			 * or to enrich the block with metadata (e.g. attachment size for
+			 * core/image, pattern_ref for core/block).
 			 *
 			 * @param array  $data       Formatted block data.
 			 * @param string $block_name Fully-qualified block type name.
+			 * @param array  $context    {
+			 *     Additional context for enrichers that need it.
+			 *
+			 *     @type array  $parsed_block Raw parse_blocks() entry for this block.
+			 *     @type bool   $render       Whether render-mode is active.
+			 *     @type object $reader       This Block_Reader instance (enables
+			 *                                recursive formatting of nested trees,
+			 *                                e.g. synced pattern contents).
+			 * }
 			 */
-			$data = apply_filters( 'gk_block_api_format_block', $data, $block['blockName'] );
+			$data = apply_filters(
+				'gk_block_api_format_block',
+				$data,
+				$block['blockName'],
+				array(
+					'parsed_block' => $block,
+					'render'       => $render,
+					'reader'       => $this,
+				)
+			);
 
 			$formatted[] = $data;
 		}
