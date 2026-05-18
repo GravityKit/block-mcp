@@ -14,8 +14,6 @@ declare(strict_types=1);
 
 use GravityKit\BlockAPI\Yoast_Bridge;
 
-require_once __DIR__ . '/bootstrap.php';
-
 /**
  * Yoast_Bridge subclass that exposes the protected read/write methods.
  *

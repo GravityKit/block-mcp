@@ -75,7 +75,7 @@ class MediaManagerTest extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function test_base64_happy_path() {
-		$png    = file_get_contents( __DIR__ . '/fixtures/sample.png' );
+		$png    = file_get_contents( __DIR__ . '/../fixtures/sample.png' );
 		$result = $this->mm->upload( array(
 			'data_base64' => base64_encode( $png ),
 			'filename'    => 'sample.png',
@@ -98,7 +98,7 @@ class MediaManagerTest extends \PHPUnit\Framework\TestCase {
 
 	public function test_base64_enforces_max_upload_size() {
 		$GLOBALS['_gk_test_max_upload_size'] = 8;
-		$png = file_get_contents( __DIR__ . '/fixtures/sample.png' );
+		$png = file_get_contents( __DIR__ . '/../fixtures/sample.png' );
 		$result = $this->mm->upload( array(
 			'data_base64' => base64_encode( $png ),
 			'filename'    => 'sample.png',
@@ -110,7 +110,7 @@ class MediaManagerTest extends \PHPUnit\Framework\TestCase {
 	// ── multipart path ──
 
 	public function test_multipart_happy_path() {
-		$src = __DIR__ . '/fixtures/sample.png';
+		$src = __DIR__ . '/../fixtures/sample.png';
 		$tmp = tempnam( sys_get_temp_dir(), 'multipart' );
 		copy( $src, $tmp );
 		$_FILES['file'] = array(
@@ -153,7 +153,7 @@ class MediaManagerTest extends \PHPUnit\Framework\TestCase {
 		// Use a TEST-NET-3 documentation IP (RFC5737 203.0.113.0/24) — public
 		// space, not in any SSRF-blocked range, and (when used as a literal in
 		// the URL) bypasses DNS resolution.
-		$src = __DIR__ . '/fixtures/sample.png';
+		$src = __DIR__ . '/../fixtures/sample.png';
 		$tmp = tempnam( sys_get_temp_dir(), 'fetched' );
 		copy( $src, $tmp );
 		$url = 'https://203.0.113.1/test.png';

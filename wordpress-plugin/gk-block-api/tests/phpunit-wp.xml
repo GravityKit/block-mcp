@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<phpunit
+	bootstrap="bootstrap-wp.php"
+	colors="true"
+	convertErrorsToExceptions="true"
+	convertNoticesToExceptions="true"
+	convertWarningsToExceptions="true"
+	beStrictAboutCoversAnnotation="true"
+	beStrictAboutOutputDuringTests="true"
+	beStrictAboutTodoAnnotatedTests="true"
+	verbose="true">
+	<testsuites>
+		<testsuite name="gk-block-api (real WP)">
+			<file>SmokeTest.php</file>
+		</testsuite>
+	</testsuites>
+</phpunit>

@@ -19,8 +19,6 @@ use GravityKit\BlockAPI\HTML_Transformer;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Inventory;
 
-require_once __DIR__ . '/bootstrap.php';
-
 class IfMatchTest extends \PHPUnit\Framework\TestCase {
 
 	/** @var Block_CRUD */

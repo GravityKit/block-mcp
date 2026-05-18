@@ -139,7 +139,7 @@ class BlockRefsTest extends \PHPUnit\Framework\TestCase {
 		$this->assertNotEquals( '', $ref_before );
 		// Real proof is reading the source — generate_ref must not CALL
 		// wp_generate_password. (References in comments/docblocks are fine.)
-		$source = file_get_contents( __DIR__ . '/../includes/class-block-crud.php' );
+		$source = file_get_contents( __DIR__ . '/../../includes/class-block-crud.php' );
 		$this->assertDoesNotMatchRegularExpression( '/\bwp_generate_password\s*\(/', $source );
 	}
 
