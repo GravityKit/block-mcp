@@ -19,7 +19,7 @@ use GravityKit\BlockAPI\HTML_Transformer;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Inventory;
 
-class IfMatchTest extends \PHPUnit\Framework\TestCase {
+class IfMatchTest extends WP_UnitTestCase {
 
 	/** @var Block_CRUD */
 	private $crud;

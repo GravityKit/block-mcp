@@ -18,7 +18,7 @@ use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
 
-class PostManagerTest extends \PHPUnit\Framework\TestCase {
+class PostManagerTest extends WP_UnitTestCase {
 
 	/** @var Post_Manager */
 	private $pm;

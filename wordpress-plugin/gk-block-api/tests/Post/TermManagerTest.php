@@ -7,7 +7,7 @@
 
 use GravityKit\BlockAPI\Term_Manager;
 
-class TermManagerTest extends \PHPUnit\Framework\TestCase {
+class TermManagerTest extends WP_UnitTestCase {
 
 	/** @var Term_Manager */
 	private $tm;

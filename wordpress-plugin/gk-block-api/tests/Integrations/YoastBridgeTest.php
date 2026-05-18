@@ -50,7 +50,7 @@ class Yoast_Bridge_Testable extends Yoast_Bridge {
 /**
  * Yoast_Bridge unit-test suite.
  */
-class YoastBridgeTest extends \PHPUnit\Framework\TestCase {
+class YoastBridgeTest extends WP_UnitTestCase {
 
 	/**
 	 * Bridge under test.

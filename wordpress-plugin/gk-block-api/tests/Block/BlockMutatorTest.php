@@ -15,7 +15,7 @@ use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
 
-class BlockMutatorTest extends \PHPUnit\Framework\TestCase {
+class BlockMutatorTest extends WP_UnitTestCase {
 
 	/** @var Block_Mutator */
 	private $mutator;

@@ -10,7 +10,7 @@
 
 use GravityKit\BlockAPI\HTML_Transformer;
 
-class HtmlTransformerTest extends \PHPUnit\Framework\TestCase {
+class HtmlTransformerTest extends WP_UnitTestCase {
 
 	/**
 	 * @var HTML_Transformer|null

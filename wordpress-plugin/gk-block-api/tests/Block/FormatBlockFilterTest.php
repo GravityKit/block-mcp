@@ -11,7 +11,7 @@
  * @package GravityKit\BlockAPI\Tests
  */
 
-class FormatBlockFilterTest extends \PHPUnit\Framework\TestCase {
+class FormatBlockFilterTest extends WP_UnitTestCase {
 
 	/**
 	 * Simulate what the CBP filter does: strip codeHTML, highestLineNumber,

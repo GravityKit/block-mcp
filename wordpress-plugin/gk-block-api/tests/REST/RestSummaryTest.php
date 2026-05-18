@@ -28,7 +28,7 @@ use GravityKit\BlockAPI\Post_Manager;
 use GravityKit\BlockAPI\Term_Manager;
 use GravityKit\BlockAPI\Media_Manager;
 
-class RestSummaryTest extends \PHPUnit\Framework\TestCase {
+class RestSummaryTest extends WP_UnitTestCase {
 
 	/** @var REST_Controller */
 	private $controller;

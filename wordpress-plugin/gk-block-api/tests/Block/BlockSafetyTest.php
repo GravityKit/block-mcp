@@ -10,7 +10,7 @@
 
 use GravityKit\BlockAPI\Block_Safety;
 
-class BlockSafetyTest extends \PHPUnit\Framework\TestCase {
+class BlockSafetyTest extends WP_UnitTestCase {
 
 	protected function setUp(): void {
 		// Register some block types for testing.

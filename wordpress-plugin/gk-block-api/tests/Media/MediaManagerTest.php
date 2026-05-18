@@ -11,7 +11,7 @@
 
 use GravityKit\BlockAPI\Media_Manager;
 
-class MediaManagerTest extends \PHPUnit\Framework\TestCase {
+class MediaManagerTest extends WP_UnitTestCase {
 
 	/** @var Media_Manager */
 	private $mm;

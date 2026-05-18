@@ -11,7 +11,7 @@
 
 use GravityKit\BlockAPI\Preferences;
 
-class PreferencesTest extends \PHPUnit\Framework\TestCase {
+class PreferencesTest extends WP_UnitTestCase {
 
 	// ── Block scoring ──
 

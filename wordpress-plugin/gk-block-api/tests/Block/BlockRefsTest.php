@@ -27,7 +27,7 @@ use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
 use GravityKit\BlockAPI\Preferences;
 
-class BlockRefsTest extends \PHPUnit\Framework\TestCase {
+class BlockRefsTest extends WP_UnitTestCase {
 
 	/** @var Block_CRUD */
 	private $crud;
