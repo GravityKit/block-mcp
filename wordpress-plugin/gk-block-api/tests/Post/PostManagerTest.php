@@ -708,4 +708,84 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'rate_limit_exceeded', $result->get_error_code() );
 	}
+
+	/**
+	 * post_date must parse as a real datetime.
+	 *
+	 * Pre-fix, sanitize_text_field stripped HTML but left arbitrary text
+	 * intact, so wp_insert_post stored unparseable strings verbatim and
+	 * corrupted admin sort order + date-relative queries. Now: parse via
+	 * strtotime, normalize via gmdate; reject unparseable input with
+	 * invalid_date 400.
+	 */
+	public function test_create_post_rejects_unparseable_date() {
+		$result = $this->pm->create_post(
+			array(
+				'title' => 'X',
+				'date'  => 'not-a-date',
+			)
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_date', $result->get_error_code() );
+	}
+
+	/**
+	 * Same contract as create_post — update_post must also reject
+	 * unparseable post_date strings.
+	 */
+	public function test_update_post_rejects_unparseable_date() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'date' => 'banana-2026' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_date', $result->get_error_code() );
+	}
+
+	/**
+	 * Parseable dates are normalized to MySQL datetime via gmdate.
+	 *
+	 * ISO 8601 input ("2030-06-15T12:00:00Z") must land on disk as
+	 * "2030-06-15 12:00:00" regardless of the wire format — same
+	 * shape Yoast / WP admin / SQL queries all expect.
+	 */
+	public function test_create_post_normalizes_iso8601_date() {
+		$result = $this->pm->create_post(
+			array(
+				'title' => 'X',
+				'date'  => '2030-06-15T12:00:00Z',
+			)
+		);
+		$this->assertNotInstanceOf( \WP_Error::class, $result );
+		$post = get_post( $result['id'] );
+		$this->assertSame( '2030-06-15 12:00:00', $post->post_date_gmt );
+	}
+
+	/**
+	 * comment_status must reject unknown values, not silently coerce.
+	 *
+	 * Pre-fix, an in_array-with-fallback-to-'closed' silently disabled
+	 * comments for any typo (`opn`, `Open`, `true`) while reporting
+	 * success to the caller. Now: unknown values return invalid_status
+	 * 400 so the caller knows their input was wrong.
+	 */
+	public function test_create_post_rejects_invalid_comment_status() {
+		$result = $this->pm->create_post(
+			array(
+				'title'          => 'X',
+				'comment_status' => 'opn',
+			)
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_status', $result->get_error_code() );
+	}
+
+	/**
+	 * ping_status follows the same contract as comment_status — unknown
+	 * values get rejected, not silently coerced.
+	 */
+	public function test_update_post_rejects_invalid_ping_status() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'ping_status' => 'maybe' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_status', $result->get_error_code() );
+	}
 }

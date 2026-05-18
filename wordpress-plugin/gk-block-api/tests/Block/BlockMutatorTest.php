@@ -482,6 +482,41 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertEquals( 'invalid_block', $result->get_error_code() );
 	}
 
+	/**
+	 * Wrapper tagName must come from a fixed allowlist.
+	 *
+	 * Without an allowlist check, sanitize_key alone allowed `script`,
+	 * `iframe`, `object`, etc. through. The wrapper innerHTML is built by
+	 * raw string concatenation in the immediate response (no wp_kses_post
+	 * round-trip on the wrapper itself), so an attacker-controlled tagName
+	 * could embed active markup in the API response payload.
+	 *
+	 * Contract pinned here: a disallowed tagName silently falls back to
+	 * the safe default <div> rather than raising — the mutate op still
+	 * succeeds, the response just never carries <script>/<iframe>/<object>.
+	 */
+	public function test_wrap_in_group_tag_allowlist_rejects_arbitrary_tags() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'wrap-in-group',
+			array( 0 ),
+			array(
+				'wrapper' => array(
+					'name'       => 'core/group',
+					'attributes' => array( 'tagName' => 'script' ),
+				),
+			)
+		);
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'Wrapping should still succeed; just the tagName falls back to the default.' );
+
+		$readback = $this->crud->get_blocks( $this->post_id );
+		$this->assertIsArray( $readback );
+		$wrapper_html = $readback[0]['innerHTML'] ?? '';
+		$this->assertStringNotContainsString( '<script', $wrapper_html, 'Wrapper innerHTML must NOT contain <script> regardless of caller-supplied tagName.' );
+		$this->assertStringContainsString( '<div', $wrapper_html, 'Disallowed tagName must fall back to the safe default <div>.' );
+	}
+
 	// ── unwrap-group ───────────────────────────────────────────────
 
 	public function test_unwrap_group_promotes_children() {
