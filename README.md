@@ -38,6 +38,7 @@
 * [Testing](#testing)
 * [Requirements](#requirements)
 * [Limitations](#limitations)
+* [Error Codes](#error-codes)
 * [Translations](#translations)
 * [License](#license)
 * [Contributing](#contributing)
@@ -401,9 +402,150 @@ An end-to-end smoke script is included under `scripts/` for live-WordPress valid
 
 ## Limitations
 
+**Scope**
+
 - Edits work on posts stored as blocks. Block-theme templates (`wp_template`, `wp_template_part`) and widget areas are not yet supported.
-- Rate limits are per-post, not per-user — multiple agents editing the same post share the budget.
-- Static block innerHTML cannot be regenerated server-side (WordPress has no PHP equivalent of the React `save` function). Auto-transforms cover the common cases; for anything else, supply innerHTML explicitly.
+- Custom post types must declare `show_in_rest: true` (or be in the configured allow-list) to be writable.
+- innerHTML passes through `wp_kses_post` on every write — `<script>`, inline event handlers, and other disallowed markup are stripped. Whitelist additional tags with the `wp_kses_allowed_html` filter if needed.
+
+**Tier policy**
+
+- Legacy-tier blocks (score < 10) are **hard-rejected** on insert, `replace-block`, `insert-child`, `wrap-in-group`, and `replace_all_blocks`. The error includes a suggested replacement when one is mapped.
+- Avoid-tier blocks (score 10–49) write through with warnings, not errors.
+- Tier policy is **insert-only** — `update-attrs` and `update-html` can mutate a legacy block that's already on the page (so existing pages aren't bricked).
+
+**Structural caps**
+
+- Block nesting depth is capped at **32** levels (`MAX_BLOCK_DEPTH`). Trees deeper than that reject with `block_depth_exceeded`. Not filterable.
+- Batch writes (`update_blocks`) cap at **50 items** per call (`MAX_BATCH_SIZE`). One batch counts as one write against the rate limit regardless of N.
+
+**Rate limits**
+
+- Per-post, per-minute, transient-backed. **10 writes/min** for `update_*`/`delete_*`/`insert_*`/`mutate_*`/`update_post`; **2/min** for full-rewrite `PUT /blocks`.
+- Buckets are per-post, not per-user — multiple agents editing the same post share the budget.
+- Returns HTTP 429 `rate_limit_exceeded`; resets naturally after 60 s.
+
+**Static block innerHTML**
+
+- WordPress has no PHP equivalent of the React `save` function, so the server cannot regenerate the rendered markup of a static block from its attributes alone. Auto-transforms cover heading level, list ordered, group `tagName`, button URL, image `src`/`alt`, video/audio booleans, spacer height/width, details `open`, and quote citation. For anything else, send `innerHTML` along with `attributes` (`update_block` will refuse dual-storage writes that omit either side).
+
+**Dual-storage blocks**
+
+- A small set of blocks (notably `yoast/faq-block`) duplicate state across `attributes` *and* `innerHTML`. The API requires both fields together on update (`dual_storage_requires_both` error otherwise) and the dual-storage list is configurable at **Settings → Block MCP**.
+
+**Block Bindings API**
+
+- Requires WordPress 6.5+ on the target site.
+- Attributes listed in `attrs.metadata.bindings` are **write-locked** by default — a write that targets a bound attribute returns 400 `bound_attribute`. Pass `allow_bound_writes: true` on the update to override.
+- Reads surface the binding map as a top-level `bindings` field and a `bound_attributes` array; binding *resolution* (rendering the dynamic value) happens only in `render` mode.
+
+**Schema-aware attribute extraction**
+
+- Reads merge attributes sourced via `block.json` (`source: attribute | html | rich-text | text`) into the response.
+- `source: 'query'` is not yet supported — it returns the delimiter attrs only with a TODO. `source: 'meta'` is deprecated and ignored.
+
+**Patterns**
+
+- Registered patterns are always inlined on insert. Only synced patterns (`wp_block` CPT entries) can be inserted as a `core/block` reference.
+
+**Media uploads**
+
+- URL sideload is capped at **25 MB** and uses a 10 s timeout.
+- SSRF guard rejects RFC1918 / loopback / link-local / cloud-metadata (`169.254.0.0/16`) hosts before download. The block list is extensible via the `gk_block_api_url_sideload_blocked_ranges` filter.
+- Uploads can be disabled site-wide with the kill-switch at **Settings → Block MCP**.
+
+**Render mode**
+
+- `?render=true` resolves dynamic blocks, expands shortcodes, and follows synced pattern references. Disabled by default — read paths return raw block markup so an agent sees what the editor sees.
+
+## Error Codes
+
+Every REST endpoint returns errors as JSON in the standard WordPress shape `{ code, message, data: { status, … } }`. The MCP server forwards the HTTP status and code through to the tool result so the agent can dispatch on `code` directly.
+
+### Auth & permissions (HTTP 403)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `rest_forbidden` | Caller lacks `edit_posts` capability on the request | Use an Application Password for a user with `edit_posts` |
+| `rest_cannot_edit` | Caller lacks `edit_post` for the specific post | Reassign the post or elevate the user's capability |
+| `rest_cannot_create` | Caller lacks `edit_posts` (or post-type-specific create cap) for `create_post` | Same |
+| `rest_cannot_publish` | `create_post` / `update_post` requested `publish` but caller lacks `publish_posts` | Lower status to `draft`/`pending`, or elevate the user |
+| `rest_cannot_upload` | `upload_media` called without `upload_files` cap | Elevate the user |
+| `rest_cannot_assign_author` | `create_post` / `update_post` set `author` to another user without `edit_others_posts` | Drop the `author` field or elevate |
+| `uploads_disabled` | Site admin flipped the uploads kill-switch off at Settings → Block MCP | Re-enable in admin or stop calling `upload_media` |
+
+### Not found (HTTP 404)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `post_not_found` | `post_id` doesn't resolve to a post | Re-run `resolve_url` or `find_posts` |
+| `block_not_found` | `flat_index` / `path` / `ref` doesn't address an existing block | Re-fetch `get_page_blocks` |
+| `ref_stale` | `gk_ref` no longer exists in the post (deleted or replaced) | Re-fetch and re-bind |
+| `pattern_not_found` | `pattern_id` doesn't match a synced or registered pattern | Use `list_patterns` |
+| `revision_not_found` | `revert_to_revision` got an ID that isn't a revision of the target post | Use `update_post` history or query the post's revisions |
+| `not_found` | Generic resource-not-found for endpoints that don't have a specific code | Inspect `message` for which resource |
+
+### Precondition / concurrency (HTTP 412)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `stale_revision` | `If-Match` header / `if_match` body field didn't match the current revision ID (someone else edited the post) | Re-fetch, re-apply changes against fresh state, retry |
+
+### Validation (HTTP 400)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `legacy_block` | Inserting a block in the legacy tier | Use the suggested replacement returned in `data.suggested_replacement` |
+| `dual_storage_requires_both` | Updating a dual-storage block with only `attributes` or only `innerHTML` | Send both fields together |
+| `bound_attribute` | Update targets an attribute listed in `attrs.metadata.bindings` | Resolve the binding upstream, or pass `allow_bound_writes: true` |
+| `batch_too_large` | `update_blocks` payload exceeds `MAX_BATCH_SIZE` (50) | Split into multiple batches |
+| `batch_validation_failed` | One or more items in a batch failed validation; the whole call was rejected before any disk write | Inspect `data.errors[]` for the per-item codes and retry valid items |
+| `empty_batch` | `update_blocks` called with `updates: []` | Skip the call |
+| `block_depth_exceeded` | Tree depth would exceed 32 levels after the write | Flatten the block structure |
+| `invalid_path` / `invalid_destination` / `invalid_target` | Path array is not non-negative integers, or doesn't address a block | Re-fetch and use a fresh path |
+| `invalid_ref` | Ref isn't a valid `blk_XXXXXXXX` shape | Re-fetch and use a returned ref |
+| `ref_not_top_level` | Operation requires a top-level block (e.g. `replace_block_range`) but ref points into a nested block | Pass the top-level ancestor's ref |
+| `invalid_op` | `edit_block_tree` op not in the 9-op enum | Use one of `update-attrs`, `update-html`, `replace-block`, `remove-block`, `wrap-in-group`, `unwrap-group`, `insert-child`, `duplicate`, `move` |
+| `invalid_block` | Block definition is malformed (missing `name`, name not registered, etc.) | Check the block name with `list_block_types` |
+| `missing_attributes` / `missing_html` / `missing_block` / `missing_blocks` / `missing_destination` / `missing_target` / `missing_data` / `missing_lookup` / `missing_file` / `missing_title` | Required field omitted | Include the field |
+| `invalid_count` / `invalid_range` / `invalid_index` / `invalid_limit` / `invalid_cursor` | Numeric arg out of range or wrong shape | See `message` for the expected bounds |
+| `invalid_updates` | `update_blocks` updates array malformed | Re-shape per the `update_blocks` schema |
+| `invalid_post_type` / `invalid_status` / `invalid_taxonomy` / `invalid_term` / `invalid_author` / `invalid_parent` / `invalid_featured_media` | `create_post` / `update_post` field validation | Check the value against the relevant WordPress registry |
+| `cycle_parent` | Parent assignment would create a hierarchy loop | Pick a different parent |
+| `mixed_trash_payload` | `update_post` mixed `status: trash` with other fields | Trash first, then update separately |
+| `invalid_if_match` | Header is present but not a positive integer | Send `If-Match: <revision_id>` |
+| `revision_mismatch` | Internal — captured revision ID didn't match before save | Retry; if persistent, file an issue |
+| `no_inner_blocks` | `unwrap-group` on a block that has none | Either remove the wrapper differently or insert children first |
+| `no_file` / `missing_file` | `upload_media` got no multipart payload | Send a `file` field, `url`, or `data_base64` |
+| `multiple_inputs` / `mutually_exclusive` | `upload_media` got more than one of `file` / `url` / `data_base64` | Send exactly one |
+| `invalid_filename` / `disallowed_mime` / `file_too_large` / `invalid_base64` / `invalid_url` | `upload_media` payload rejected | See `message` for which gate failed |
+| `upload_error` | WordPress' upload handler returned an error | Inspect `message` |
+| `empty_pattern` | `insert_pattern` got a pattern with no parsed blocks | Pick a different pattern |
+| `invalid_body` | Request JSON body could not be parsed | Validate JSON shape |
+
+### Rate limit (HTTP 429)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `rate_limit_exceeded` | Per-post write budget exhausted (10 writes/min, or 2 full-rewrites/min) | Wait up to 60 s and retry; consider batching with `update_blocks` |
+| `scan_rate_limited` | Settings-page scan triggered too frequently | Wait; this affects admin-side scans only |
+
+### Upstream (HTTP 502)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `url_fetch_failed` | `upload_media` URL sideload failed at HTTP layer (DNS, TLS, non-2xx, or SSRF block) | Verify the URL is publicly reachable and not in a blocked IP range |
+
+### Server error (HTTP 500)
+
+| Code | When it fires | How to recover |
+|---|---|---|
+| `internal_error` | Uncaught exception bubbled up to the REST envelope | File an issue with the message + reproduction |
+| `wp_insert_post_failed` | `wp_insert_post` returned a `WP_Error` | Inspect `message`; often a missing required field at the DB layer |
+| `duplicate_failed` | `edit_block_tree` op `duplicate` could not JSON-clone the block (only fires on truly malformed input — resources, invalid UTF-8) | File an issue with the block definition |
+| `sideload_failed` | `upload_media` URL passed SSRF + HTTP layers but `media_handle_sideload` failed | Inspect `message`; often disk-quota or MIME registration |
+| `attachment_missing` | `upload_media` created the attachment but couldn't find it for metadata | File an issue |
+| `trash_failed` / `untrash_failed` | `wp_trash_post` / `wp_untrash_post` returned `false` | Retry; if persistent, check for filter conflicts |
 
 ## Translations
 
