@@ -22,6 +22,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
 	delete_option( 'gk_block_api_post_types_allowlist' );
+	delete_option( 'gk_block_api_uploads_enabled' );
 	delete_option( 'gk_block_api_dual_storage_blocks_manual' );
 	delete_option( 'gk_block_api_storage_modes' );
 	delete_option( 'gk_block_api_storage_modes_last_run' );

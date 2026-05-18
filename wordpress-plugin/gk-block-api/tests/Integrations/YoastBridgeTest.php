@@ -60,35 +60,21 @@ class YoastBridgeTest extends WP_UnitTestCase {
 	protected $bridge;
 
 	/**
-	 * Fixed post ID used by every test.
+	 * Post ID assigned by the factory in setUp.
 	 *
 	 * @var int
 	 */
-	protected $post_id = 7700;
+	protected $post_id;
 
-	/**
-	 * Reset global stub state and seed a single test post.
-	 */
 	protected function setUp(): void {
 		parent::setUp();
-
-		$this->bridge = new Yoast_Bridge_Testable();
-
-		// Reset all per-test global state.
-		$GLOBALS['_gk_test_posts']        = array();
-		$GLOBALS['_gk_test_post_meta']    = array();
-		$GLOBALS['_gk_test_terms']        = array();
-		$GLOBALS['_gk_test_post_terms']   = array();
-		$GLOBALS['_gk_test_next_term_id'] = 1;
-
-		// Seed a post the bridge can read against.
-		$post                                          = new \stdClass();
-		$post->ID                                      = $this->post_id;
-		$post->post_type                               = 'post';
-		$post->post_status                             = 'publish';
-		$post->post_title                              = 'Yoast Test Post';
-		$post->post_content                            = '';
-		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+		$this->bridge  = new Yoast_Bridge_Testable();
+		$this->post_id = self::factory()->post->create( array(
+			'post_type'    => 'post',
+			'post_status'  => 'publish',
+			'post_title'   => 'Yoast Test Post',
+			'post_content' => '',
+		) );
 	}
 
 	// ── read_fields ────────────────────────────────────────────────
@@ -334,7 +320,7 @@ class YoastBridgeTest extends WP_UnitTestCase {
 	public function test_write_primary_terms_persists_per_taxonomy_meta() {
 		// Seed a real category term so get_term() returns it. The helper
 		// auto-assigns the term_id; capture it so we can pass it back.
-		$term = _gk_test_make_term( 'category', 'Docs' );
+		$term = self::factory()->term->create_and_get( array( 'taxonomy' => 'category', 'name' => 'Docs' ) );
 
 		$this->bridge->write_fields_public(
 			$this->post_id,

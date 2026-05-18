@@ -109,6 +109,27 @@ class Settings_Page {
 				'default'           => array(),
 			)
 		);
+
+		// 4. Global media-uploads kill-switch. Stored as the string '0' or
+		//    '1' rather than a PHP bool because update_option() can't
+		//    reliably persist boolean false when the option is missing
+		//    (the equality check against the "doesn't exist → false" default
+		//    short-circuits the write).
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => static function ( $value ) {
+					if ( is_bool( $value ) ) {
+						return $value ? '1' : '0';
+					}
+					$truthy = in_array( strtolower( (string) $value ), array( '1', 'on', 'true', 'yes' ), true );
+					return $truthy ? '1' : '0';
+				},
+				'default'           => '1',
+			)
+		);
 	}
 
 	// ──────────────────────────────────────────────────────────────────

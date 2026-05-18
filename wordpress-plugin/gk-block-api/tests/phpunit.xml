@@ -8,6 +8,7 @@
             <directory>Media</directory>
             <directory>Preferences</directory>
             <directory>Integrations</directory>
+            <directory>Security</directory>
         </testsuite>
     </testsuites>
 </phpunit>

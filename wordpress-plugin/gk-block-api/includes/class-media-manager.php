@@ -44,10 +44,64 @@ class Media_Manager {
 	);
 
 	/**
+	 * Option key for the global uploads kill-switch.
+	 *
+	 * When the option is set to a falsy value, the plugin refuses every
+	 * upload mode (multipart, URL sideload, base64) with HTTP 403
+	 * `uploads_disabled` before any file I/O or DNS resolution happens.
+	 */
+	const UPLOADS_OPTION = 'gk_block_api_uploads_enabled';
+
+	/**
+	 * Whether MCP-driven media uploads are permitted on this site.
+	 *
+	 * Default: true (uploads allowed). Site owners can flip this to a
+	 * read-only block surface in two ways:
+	 *
+	 *   1. Programmatic: `update_option( 'gk_block_api_uploads_enabled', false );`
+	 *   2. Filter:       `add_filter( 'gk_block_api_uploads_enabled', '__return_false' );`
+	 *
+	 * The filter wins over the option so emergencies (e.g., a
+	 * compromised API token) can be patched without writing to the DB.
+	 *
+	 * @return bool
+	 */
+	public static function uploads_enabled(): bool {
+		// Stored as the string '0' or '1' (not a PHP bool) — update_option()
+		// silently no-ops when storing boolean false against a missing key
+		// because get_option() returns false as both the missing-default and
+		// the actual value, and update_option's equality check short-circuits
+		// before any DB write. The string form avoids that ambiguity.
+		$raw = get_option( self::UPLOADS_OPTION, '1' );
+		$enabled = ( '0' !== (string) $raw && false !== $raw );
+		/**
+		 * Filter: gk_block_api_uploads_enabled.
+		 *
+		 * Last-mile override for the per-site uploads kill-switch. Return
+		 * false here to refuse every MCP upload regardless of the option.
+		 *
+		 * @param bool $enabled Current option value.
+		 */
+		return (bool) apply_filters( 'gk_block_api_uploads_enabled', $enabled );
+	}
+
+	/**
 	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.4.
 	 * @return array|\WP_Error
 	 */
 	public function upload( array $args ) {
+		// Hard kill-switch. Site owners can disable every MCP-driven upload
+		// path (multipart / URL sideload / base64) with a single setting —
+		// useful when an integrator wants the plugin's block-editing surface
+		// but doesn't trust agents to write to the media library.
+		if ( ! self::uploads_enabled() ) {
+			return new \WP_Error(
+				'uploads_disabled',
+				__( 'Media uploads via the block API are disabled on this site.', 'gk-block-api' ),
+				array( 'status' => 403 )
+			);
+		}
+
 		$this->require_admin_includes();
 
 		$has_multipart = ! empty( $args['file_field'] )
@@ -143,7 +197,29 @@ class Media_Manager {
 			);
 		}
 
-		return media_handle_upload( $field, $post_parent );
+		/**
+		 * Filter: gk_block_api_media_upload_overrides.
+		 *
+		 * Lets a site administrator or test harness inject `wp_handle_upload()`
+		 * overrides for the multipart path. Real callers should leave this
+		 * alone — the default `test_form => false` matches what every
+		 * `media_handle_upload()` site-side caller already gets.
+		 *
+		 * Tests use this to set `action => 'wp_handle_sideload'`, which makes
+		 * `_wp_handle_upload()` swap the `is_uploaded_file()` precondition
+		 * for `is_readable()` so PHPUnit fixtures (which were never
+		 * HTTP-POSTed) reach the rest of the pipeline.
+		 *
+		 * @param array  $overrides Override array passed verbatim to media_handle_upload().
+		 * @param string $field     The $_FILES key being uploaded.
+		 */
+		$overrides = apply_filters(
+			'gk_block_api_media_upload_overrides',
+			array( 'test_form' => false ),
+			$field
+		);
+
+		return media_handle_upload( $field, $post_parent, array(), $overrides );
 	}
 
 	/**

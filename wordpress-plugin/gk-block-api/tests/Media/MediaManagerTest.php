@@ -108,19 +108,31 @@ class MediaManagerTest extends WP_UnitTestCase {
 	// ── multipart path ──
 
 	public function test_multipart_happy_path() {
-		// media_handle_upload() hardcodes action='wp_handle_upload', which
-		// requires PHP's is_uploaded_file() to return true — i.e. an actual
-		// HTTP POST. There is no in-process way to satisfy this from PHPUnit
-		// (PHP doesn't expose the uploaded-file list, and the action override
-		// isn't reachable from media_handle_upload's call chain).
-		//
-		// The multipart REST path is exercised end-to-end by scripts/e2e-gkclone.mjs
-		// which posts real multipart bodies. Here we only cover the input
-		// validation surface (mime rejection, missing file, multiple inputs),
-		// which is what unit tests can meaningfully assert.
-		$this->markTestSkipped(
-			'multipart move_uploaded_file path requires a real HTTP upload context; covered by gkclone E2E.'
+		$src = __DIR__ . '/../fixtures/sample.png';
+		$tmp = tempnam( sys_get_temp_dir(), 'multipart' );
+		copy( $src, $tmp );
+		$_FILES['file'] = array(
+			'name'     => 'sample.png',
+			'type'     => 'image/png',
+			'tmp_name' => $tmp,
+			'error'    => 0,
+			'size'     => filesize( $tmp ),
 		);
+		// _wp_handle_upload() short-circuits to `is_readable()` instead of
+		// `is_uploaded_file()` whenever the action is anything other than
+		// the literal 'wp_handle_upload'. The plugin's
+		// gk_block_api_media_upload_overrides filter lets us swap to the
+		// sideload action so PHPUnit-staged temp files reach the rest of
+		// the pipeline.
+		add_filter( 'gk_block_api_media_upload_overrides', static function ( $overrides ) {
+			$overrides['action'] = 'wp_handle_sideload';
+			return $overrides;
+		} );
+
+		$result = $this->mm->upload( array( 'file_field' => 'file', 'alt_text' => 'alt' ) );
+		$this->assertIsArray( $result, is_object( $result ) ? $result->get_error_message() : '' );
+		$this->assertSame( 'alt', $result['alt_text'] );
+		$this->assertSame( 'image/png', $result['mime_type'] );
 	}
 
 	public function test_multipart_rejects_disallowed_mime() {
