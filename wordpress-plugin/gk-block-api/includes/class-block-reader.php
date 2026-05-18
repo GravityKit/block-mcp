@@ -33,6 +33,18 @@ class Block_Reader {
 	private $parse_cache = array();
 
 	/**
+	 * Per-instance cache of registered block type attribute schemas.
+	 *
+	 * Keyed by block name. Populated lazily on first call to
+	 * extract_sourced_attributes() for a given block type. Using an instance
+	 * property (not a static local) prevents stale entries from leaking across
+	 * test cases that register/unregister block types in the same process.
+	 *
+	 * @var array<string, array>
+	 */
+	private $block_schema_cache = array();
+
+	/**
 	 * Reference back to the owning Block_CRUD instance for shared utilities.
 	 *
 	 * @var Block_CRUD
@@ -307,11 +319,20 @@ class Block_Reader {
 
 			$current_path = array_merge( $parent_path, array( (int) $raw_index ) );
 
+			$parsed_attrs = isset( $block['attrs'] ) ? $block['attrs'] : array();
+			$inner_html   = isset( $block['innerHTML'] ) ? $block['innerHTML'] : '';
+
+			// Merge schema-sourced attributes extracted from innerHTML into the
+			// attribute map. Delimiter-defined attrs take precedence (round-trip
+			// stability). The underlying parse_blocks() output is NOT mutated —
+			// this is a read-only enrichment for the formatted response only.
+			$merged_attrs = $this->extract_sourced_attributes( $block['blockName'], $parsed_attrs, $inner_html );
+
 			$data = array(
 				'index'      => $counter,
 				'path'       => $current_path,
 				'name'       => $block['blockName'],
-				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				'attributes' => $merged_attrs,
 			);
 
 			// Surface the stable ref (from attrs.metadata.gk_ref). Refs let agents
@@ -466,5 +487,206 @@ class Block_Reader {
 		}
 
 		return $formatted;
+	}
+
+	/**
+	 * Merge schema-sourced attributes from innerHTML into the parsed attrs map.
+	 *
+	 * WordPress stores some block attributes inline in HTML rather than in the
+	 * JSON comment delimiter. parse_blocks() only surfaces delimiter attrs.
+	 * This method reads the registered block type's attribute schema and
+	 * extracts HTML-sourced values so agents see the full attribute set.
+	 *
+	 * Supported sources:
+	 *   - 'attribute' + selector + attribute  → DOM attribute value
+	 *   - 'html'      + selector              → inner HTML of matched element
+	 *   - 'rich-text' + selector              → same as 'html'
+	 *   - 'text'      + selector              → text content (tags stripped)
+	 *   - 'query'     → skipped (TODO: array-of-objects — complex, deferred)
+	 *   - 'meta'      → skipped (deprecated, returns nothing)
+	 *
+	 * Delimiter-defined values always win — HTML extraction only fills in attrs
+	 * that are absent from the JSON comment, preserving round-trip stability.
+	 *
+	 * @param string $block_name   Fully-qualified block type name.
+	 * @param array  $parsed_attrs Attributes already decoded from the comment delimiter.
+	 * @param string $inner_html   The block's innerHTML from parse_blocks().
+	 *
+	 * @return array Merged attribute map (parsed_attrs + any extracted sourced values).
+	 */
+	private function extract_sourced_attributes( $block_name, array $parsed_attrs, $inner_html ) {
+		if ( '' === $block_name || empty( $inner_html ) ) {
+			return $parsed_attrs;
+		}
+
+		// Per-instance cache for block type attribute schemas — registry lookup
+		// can be non-trivial in large environments; no need to repeat it per block.
+		// Instance property (not static local) so test cases that register/
+		// unregister block types don't see stale cache entries from prior tests.
+		if ( ! isset( $this->block_schema_cache[ $block_name ] ) ) {
+			$registry = \WP_Block_Type_Registry::get_instance();
+			if ( ! $registry ) {
+				return $parsed_attrs;
+			}
+			$block_type                              = $registry->get_registered( $block_name );
+			$this->block_schema_cache[ $block_name ] = ( $block_type && ! empty( $block_type->attributes ) )
+				? $block_type->attributes
+				: array();
+		}
+
+		$schema = $this->block_schema_cache[ $block_name ];
+		if ( empty( $schema ) ) {
+			return $parsed_attrs;
+		}
+
+		$extracted = array();
+
+		foreach ( $schema as $attr_name => $attr_def ) {
+			// Delimiter value already present — delimiter wins, skip DOM extraction.
+			if ( array_key_exists( $attr_name, $parsed_attrs ) ) {
+				continue;
+			}
+
+			$source = isset( $attr_def['source'] ) ? $attr_def['source'] : '';
+
+			// Unsupported / deprecated sources.
+			if ( '' === $source || 'meta' === $source || 'query' === $source ) {
+				// TODO: 'query' source returns an array-of-objects; deferred to v2.
+				continue;
+			}
+
+			$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
+
+			// Use WP_HTML_Tag_Processor for attribute extraction.
+			// For html/text sources we fall back to a simple regex when the
+			// selector is a single tag name, since WP_HTML_Tag_Processor cannot
+			// navigate CSS selectors or extract innerHTML.
+			if ( 'attribute' === $source ) {
+				if ( '' === $selector || ! isset( $attr_def['attribute'] ) ) {
+					continue;
+				}
+				$value = $this->extract_dom_attribute( $inner_html, $selector, $attr_def['attribute'] );
+				if ( null !== $value ) {
+					$extracted[ $attr_name ] = $value;
+				}
+			} elseif ( 'html' === $source || 'rich-text' === $source ) {
+				if ( '' === $selector ) {
+					continue;
+				}
+				$value = $this->extract_inner_html( $inner_html, $selector );
+				if ( null !== $value ) {
+					$extracted[ $attr_name ] = $value;
+				}
+			} elseif ( 'text' === $source ) {
+				if ( '' === $selector ) {
+					continue;
+				}
+				$value = $this->extract_inner_html( $inner_html, $selector );
+				if ( null !== $value ) {
+					$extracted[ $attr_name ] = wp_strip_all_tags( $value );
+				}
+			}
+		}
+
+		if ( empty( $extracted ) ) {
+			return $parsed_attrs;
+		}
+
+		// Delimiter-parsed attrs win — merge extracted underneath.
+		return array_merge( $extracted, $parsed_attrs );
+	}
+
+	/**
+	 * Extract a DOM attribute value from the first element matching a CSS
+	 * tag-name selector using WP_HTML_Tag_Processor.
+	 *
+	 * Only simple tag-name selectors (e.g. 'a', 'img') and comma-separated
+	 * tag-name lists are supported. Class/ID/attribute selectors are skipped.
+	 *
+	 * @param string $html      The HTML to search.
+	 * @param string $selector  CSS selector string (tag name(s), comma-separated).
+	 * @param string $attribute DOM attribute name to read (e.g. 'href', 'alt').
+	 *
+	 * @return string|null Attribute value, or null if not found.
+	 */
+	private function extract_dom_attribute( $html, $selector, $attribute ) {
+		$tags = $this->selector_to_tag_names( $selector );
+		if ( empty( $tags ) ) {
+			return null;
+		}
+
+		$processor = new \WP_HTML_Tag_Processor( $html );
+		while ( $processor->next_tag() ) {
+			$tag_name = strtolower( $processor->get_tag() );
+			if ( in_array( $tag_name, $tags, true ) ) {
+				$value = $processor->get_attribute( $attribute );
+				if ( null !== $value ) {
+					// get_attribute() returns the unescaped value — correct for JSON consumers.
+					return (string) $value;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Extract the inner HTML of the first element matching a tag-name selector.
+	 *
+	 * WP_HTML_Tag_Processor cannot extract innerHTML directly, so this uses a
+	 * targeted regex to pull out the content between the matched opening and
+	 * closing tags. Only simple single or comma-separated tag names are supported.
+	 *
+	 * @param string $html     The HTML to search.
+	 * @param string $selector CSS selector string (tag name(s), comma-separated).
+	 *
+	 * @return string|null Inner HTML of matched element, or null if not found.
+	 */
+	private function extract_inner_html( $html, $selector ) {
+		$tags = $this->selector_to_tag_names( $selector );
+		if ( empty( $tags ) ) {
+			return null;
+		}
+
+		foreach ( $tags as $tag ) {
+			// Regex: match opening tag (with optional attributes) then capture
+			// everything until the corresponding closing tag. Non-greedy.
+			// Flags: s (DOTALL) so . matches newlines.
+			$pattern = '/<' . preg_quote( $tag, '/' ) . '(?:\s[^>]*)?>(.+?)<\/' . preg_quote( $tag, '/' ) . '>/is';
+			if ( preg_match( $pattern, $html, $matches ) ) {
+				return $matches[1];
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Convert a CSS selector string to an array of lowercase tag names.
+	 *
+	 * Only plain tag names and comma-separated lists thereof are handled.
+	 * Selectors with class (.), ID (#), attribute ([]), pseudo (:), or
+	 * combinators ( >) are skipped entirely — return empty array.
+	 *
+	 * @param string $selector CSS selector string, e.g. 'h1,h2,h3' or 'a'.
+	 *
+	 * @return string[] Lowercase tag names, or empty array if selector is too complex.
+	 */
+	private function selector_to_tag_names( $selector ) {
+		if ( '' === $selector ) {
+			return array();
+		}
+
+		$parts = array_map( 'trim', explode( ',', $selector ) );
+		$tags  = array();
+
+		foreach ( $parts as $part ) {
+			// Accept only pure tag names: letters, digits, hyphens (custom elements).
+			if ( ! preg_match( '/^[a-zA-Z][a-zA-Z0-9-]*$/', $part ) ) {
+				// Complex selector — skip entire list to stay safe.
+				return array();
+			}
+			$tags[] = strtolower( $part );
+		}
+
+		return $tags;
 	}
 }
