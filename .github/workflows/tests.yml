@@ -108,15 +108,16 @@ jobs:
   ts-integration:
     name: TypeScript MCP server (integration — live WP)
     runs-on: ubuntu-latest
-    # Run only when:
-    #   • workflow_dispatch with run_integration=true, OR
-    #   • commit message contains [integration], OR
-    #   • the WORDPRESS_URL secret is configured on this repo/fork
-    # The last condition gracefully skips on forks without secrets.
+    # Run only on explicit opt-in. GitHub Actions rejects `secrets.X` in
+    # job-level `if` expressions at workflow-validation time (the previous
+    # `secrets.WORDPRESS_URL != ''` clause caused every push to fail with
+    # "workflow file issue" before any job started). Forks without the
+    # secret configured simply don't have [integration] in their commit
+    # messages or won't invoke workflow_dispatch, so this is equivalent in
+    # practice while keeping the file valid.
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') ||
-      contains(github.event.head_commit.message, '[integration]') ||
-      secrets.WORDPRESS_URL != ''
+      contains(github.event.head_commit.message, '[integration]')
     steps:
       - uses: actions/checkout@v4
 
