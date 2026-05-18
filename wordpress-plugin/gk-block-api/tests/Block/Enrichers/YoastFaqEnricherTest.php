@@ -42,6 +42,35 @@ class YoastFaqEnricherTest extends BlockApiTestCase {
 		$this->assertStringStartsWith( '42, obviously.', $result['faq_summary'][0]['answer_excerpt'] );
 	}
 
+	// ── multibyte answers are truncated at codepoint boundaries, not bytes ─
+
+	public function test_enrich_excerpt_is_valid_utf8_for_multibyte_answer() {
+		// Mix one ASCII char with many 3-byte Japanese chars so a byte-based
+		// substr() lands MID-codepoint and produces broken UTF-8. A
+		// codepoint-aware substr (mb_substr) cuts cleanly between chars.
+		$answer = 'a' . str_repeat( 'あ', 200 );
+		$data   = array(
+			'name'       => 'yoast/faq-block',
+			'attributes' => array(
+				'questions' => array(
+					array(
+						'jsonQuestion' => 'Q?',
+						'jsonAnswer'   => $answer,
+					),
+				),
+			),
+		);
+
+		$result  = Yoast_Faq_Enricher::enrich( $data, 'yoast/faq-block' );
+		$excerpt = $result['faq_summary'][0]['answer_excerpt'];
+
+		$this->assertSame(
+			1,
+			preg_match( '//u', $excerpt ),
+			'Excerpt must be valid UTF-8 — byte-based truncation cuts mid-codepoint and corrupts the string.'
+		);
+	}
+
 	// ── long answers get an excerpt, not the full text ────────────────────
 
 	public function test_enrich_truncates_long_answers() {

@@ -92,8 +92,15 @@ class Yoast_Faq_Enricher {
 	private static function excerpt( $html ) {
 		$plain = wp_strip_all_tags( $html );
 		$plain = trim( preg_replace( '/\s+/', ' ', $plain ) );
-		if ( strlen( $plain ) > self::ANSWER_EXCERPT_LENGTH ) {
-			$plain = substr( $plain, 0, self::ANSWER_EXCERPT_LENGTH - 1 ) . "\u{2026}";
+
+		// Codepoint-aware truncation. byte-based substr() cuts inside
+		// multibyte UTF-8 sequences (Japanese, Arabic, emoji) and produces
+		// broken bytes that turn into mojibake or replacement characters in
+		// the JSON response. mb_substr respects codepoint boundaries.
+		// Length is also compared in codepoints (mb_strlen), not bytes, so
+		// the documented limit is what an agent sees, not what fits on disk.
+		if ( mb_strlen( $plain, 'UTF-8' ) > self::ANSWER_EXCERPT_LENGTH ) {
+			$plain = mb_substr( $plain, 0, self::ANSWER_EXCERPT_LENGTH - 1, 'UTF-8' ) . "\u{2026}";
 		}
 		return $plain;
 	}
