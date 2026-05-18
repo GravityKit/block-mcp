@@ -8,6 +8,8 @@
  *   - rejects stale revisions with 412 + current_revision in the data envelope,
  *   - accepts both bare integers and W/"<n>" / "<n>" wrapped forms.
  *
+ * Runs against real WordPress revisions created via wp_save_post_revision().
+ *
  * @package GravityKit\BlockAPI\Tests
  */
 
@@ -25,7 +27,7 @@ class IfMatchTest extends WP_UnitTestCase {
 	private $crud;
 
 	/** @var int */
-	private $post_id = 8800;
+	private $post_id;
 
 	protected function setUp(): void {
 		parent::setUp();
@@ -36,22 +38,31 @@ class IfMatchTest extends WP_UnitTestCase {
 			new Block_Inventory()
 		);
 
-		// Reset state.
-		$GLOBALS['_gk_test_posts']     = array();
-		$GLOBALS['_gk_test_revisions'] = array();
-
-		$post                                       = new \stdClass();
-		$post->ID                                   = $this->post_id;
-		$post->post_type                            = 'post';
-		$post->post_status                          = 'publish';
-		$post->post_title                           = 'If-Match Test';
-		$post->post_content                         = '';
-		$GLOBALS['_gk_test_posts'][ $this->post_id ] = $post;
+		$this->post_id = self::factory()->post->create( array(
+			'post_title'   => 'If-Match Test',
+			'post_status'  => 'publish',
+			'post_content' => 'seed',
+		) );
 	}
 
-	private function set_revisions( array $rev_ids ): void {
-		// Seed in newest-first order, since wp_get_post_revisions sorts DESC.
-		$GLOBALS['_gk_test_revisions'][ $this->post_id ] = $rev_ids;
+	/**
+	 * Create N revisions of the test post and return their IDs in newest-first
+	 * order (matching wp_get_post_revisions()'s default sort).
+	 *
+	 * @param int $count Number of revisions to create.
+	 * @return int[]
+	 */
+	private function add_revisions( int $count = 1 ): array {
+		for ( $i = 0; $i < $count; $i++ ) {
+			wp_update_post( array(
+				'ID'           => $this->post_id,
+				'post_content' => 'revision ' . $i . ' ' . microtime( true ),
+			) );
+		}
+		return array_values( array_map(
+			static fn( $rev ) => (int) $rev->ID,
+			wp_get_post_revisions( $this->post_id )
+		) );
 	}
 
 	/**
@@ -59,7 +70,7 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * every caller that doesn't opt in.
 	 */
 	public function test_empty_value_is_a_noop() {
-		$this->set_revisions( array( 200, 100 ) );
+		$this->add_revisions( 2 );
 		$this->assertNull( $this->crud->check_if_match( $this->post_id, '' ) );
 	}
 
@@ -75,8 +86,9 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * Bare integer string matching the current revision passes silently.
 	 */
 	public function test_bare_integer_matching_current_revision_passes() {
-		$this->set_revisions( array( 200, 100 ) );
-		$this->assertNull( $this->crud->check_if_match( $this->post_id, '200' ) );
+		$revs    = $this->add_revisions( 2 );
+		$current = $revs[0];
+		$this->assertNull( $this->crud->check_if_match( $this->post_id, (string) $current ) );
 	}
 
 	/**
@@ -86,10 +98,11 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * the bridge must accept both shapes interchangeably.
 	 */
 	public function test_weak_etag_format_is_accepted() {
-		$this->set_revisions( array( 200 ) );
-		$this->assertNull( $this->crud->check_if_match( $this->post_id, 'W/"200"' ) );
-		$this->assertNull( $this->crud->check_if_match( $this->post_id, '"200"' ) );
-		$this->assertNull( $this->crud->check_if_match( $this->post_id, '  W/"200"  ' ) );
+		$revs    = $this->add_revisions( 1 );
+		$current = $revs[0];
+		$this->assertNull( $this->crud->check_if_match( $this->post_id, "W/\"$current\"" ) );
+		$this->assertNull( $this->crud->check_if_match( $this->post_id, "\"$current\"" ) );
+		$this->assertNull( $this->crud->check_if_match( $this->post_id, "  W/\"$current\"  " ) );
 	}
 
 	/**
@@ -98,15 +111,18 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * whole post just to learn the new ETag.
 	 */
 	public function test_stale_revision_returns_412_with_current_revision() {
-		$this->set_revisions( array( 250 ) );
-		$err = $this->crud->check_if_match( $this->post_id, '200' );
+		$revs    = $this->add_revisions( 2 );
+		$current = $revs[0];
+		$stale   = $revs[1];
+
+		$err = $this->crud->check_if_match( $this->post_id, (string) $stale );
 
 		$this->assertInstanceOf( \WP_Error::class, $err );
 		$this->assertSame( 'stale_revision', $err->get_error_code() );
 		$data = $err->get_error_data();
 		$this->assertSame( 412, $data['status'] );
-		$this->assertSame( 200, $data['expected_revision'] );
-		$this->assertSame( 250, $data['current_revision'] );
+		$this->assertSame( $stale, $data['expected_revision'] );
+		$this->assertSame( $current, $data['current_revision'] );
 	}
 
 	/**
@@ -115,7 +131,7 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * concurrency conflict).
 	 */
 	public function test_malformed_value_returns_400() {
-		$this->set_revisions( array( 200 ) );
+		$this->add_revisions( 1 );
 		$err = $this->crud->check_if_match( $this->post_id, 'not-a-number' );
 		$this->assertInstanceOf( \WP_Error::class, $err );
 		$this->assertSame( 'invalid_if_match', $err->get_error_code() );
@@ -132,7 +148,7 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * stale ETag from one server while a different server reset revisions.
 	 */
 	public function test_zero_current_revision_still_compares() {
-		$this->set_revisions( array() );
+		$this->assertSame( array(), wp_get_post_revisions( $this->post_id ), 'fixture: no revisions yet' );
 		$err = $this->crud->check_if_match( $this->post_id, '50' );
 		$this->assertInstanceOf( \WP_Error::class, $err );
 		$this->assertSame( 'stale_revision', $err->get_error_code() );
@@ -145,7 +161,7 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * that want to fail rather than overwrite an existing edit.
 	 */
 	public function test_zero_expected_matches_zero_current() {
-		$this->set_revisions( array() );
+		$this->assertSame( array(), wp_get_post_revisions( $this->post_id ), 'fixture: no revisions yet' );
 		$this->assertNull( $this->crud->check_if_match( $this->post_id, '0' ) );
 	}
 
@@ -155,10 +171,10 @@ class IfMatchTest extends WP_UnitTestCase {
 	 * ETag on GETs, so the response/precondition handshake stays consistent.
 	 */
 	public function test_get_latest_revision_id_returns_newest() {
-		$this->set_revisions( array( 250, 200, 100 ) );
-		$this->assertSame( 250, $this->crud->get_latest_revision_id( $this->post_id ) );
+		$revs = $this->add_revisions( 3 );
+		$this->assertSame( $revs[0], $this->crud->get_latest_revision_id( $this->post_id ) );
 
-		$this->set_revisions( array() );
-		$this->assertSame( 0, $this->crud->get_latest_revision_id( $this->post_id ) );
+		$fresh_post = self::factory()->post->create();
+		$this->assertSame( 0, $this->crud->get_latest_revision_id( $fresh_post ) );
 	}
 }
