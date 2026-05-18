@@ -2160,79 +2160,62 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function mutate_block_tree( $request ) {
-		try {
-			$post_id = (int) $request->get_param( 'id' );
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$op   = $req->get_param( 'op' );
+				$path = $req->get_param( 'path' );
+				$ref  = $req->get_param( 'ref' );
 
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
-			}
-
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
-
-			$op   = $request->get_param( 'op' );
-			$path = $request->get_param( 'path' );
-			$ref  = $request->get_param( 'ref' );
-
-			// Resolve ref → path if no explicit path supplied.
-			if ( ( null === $path || ( is_array( $path ) && empty( $path ) ) ) && is_string( $ref ) && '' !== $ref ) {
-				$resolved = $this->block_crud->resolve_ref( $post_id, $ref );
-				if ( is_wp_error( $resolved ) ) {
-					return $resolved;
+				// Resolve ref → path if no explicit path supplied.
+				if ( ( null === $path || ( is_array( $path ) && empty( $path ) ) ) && is_string( $ref ) && '' !== $ref ) {
+					$resolved = $this->block_crud->resolve_ref( $post_id, $ref );
+					if ( is_wp_error( $resolved ) ) {
+						return $resolved;
+					}
+					$path = $resolved;
 				}
-				$path = $resolved;
-			}
 
-			if ( ! is_array( $path ) || empty( $path ) ) {
-				return new \WP_Error(
-					'missing_target',
-					__( 'Either "path" or "ref" is required.', 'gk-block-api' ),
-					array( 'status' => 400 )
+				if ( ! is_array( $path ) || empty( $path ) ) {
+					return new \WP_Error(
+						'missing_target',
+						__( 'Either "path" or "ref" is required.', 'gk-block-api' ),
+						array( 'status' => 400 )
+					);
+				}
+
+				// Cast path elements to integers.
+				$path = array_map( 'intval', $path );
+
+				$params = array(
+					'attributes'  => $req->get_param( 'attributes' ),
+					'innerHTML'   => $req->get_param( 'innerHTML' ),
+					'block'       => $req->get_param( 'block' ),
+					'wrapper'     => $req->get_param( 'wrapper' ),
+					'position'    => $req->get_param( 'position' ),
+					'destination' => $req->get_param( 'destination' ),
+					'count'       => $req->get_param( 'count' ),
 				);
-			}
 
-			// Cast path elements to integers.
-			$path = array_map( 'intval', $path );
-
-			$params = array(
-				'attributes'  => $request->get_param( 'attributes' ),
-				'innerHTML'   => $request->get_param( 'innerHTML' ),
-				'block'       => $request->get_param( 'block' ),
-				'wrapper'     => $request->get_param( 'wrapper' ),
-				'position'    => $request->get_param( 'position' ),
-				'destination' => $request->get_param( 'destination' ),
-				'count'       => $request->get_param( 'count' ),
-			);
-
-			// Resolve destination_ref to a path for the move op.
-			$dest_ref = $request->get_param( 'destination_ref' );
-			if ( null === $params['destination'] && is_string( $dest_ref ) && '' !== $dest_ref ) {
-				$resolved = $this->block_crud->resolve_ref( $post_id, $dest_ref );
-				if ( is_wp_error( $resolved ) ) {
-					return $resolved;
+				// Resolve destination_ref to a path for the move op.
+				$dest_ref = $req->get_param( 'destination_ref' );
+				if ( null === $params['destination'] && is_string( $dest_ref ) && '' !== $dest_ref ) {
+					$resolved = $this->block_crud->resolve_ref( $post_id, $dest_ref );
+					if ( is_wp_error( $resolved ) ) {
+						return $resolved;
+					}
+					$params['destination'] = $resolved;
 				}
-				$params['destination'] = $resolved;
+
+				// Cast destination to integers if present.
+				if ( is_array( $params['destination'] ) ) {
+					$params['destination'] = array_map( 'intval', $params['destination'] );
+				}
+
+				$dry_run = (bool) $req->get_param( 'dry_run' );
+				return $this->block_mutator->mutate( $post_id, $op, $path, $params, $dry_run );
 			}
-
-			// Cast destination to integers if present.
-			if ( is_array( $params['destination'] ) ) {
-				$params['destination'] = array_map( 'intval', $params['destination'] );
-			}
-
-			$dry_run = (bool) $request->get_param( 'dry_run' );
-			$result  = $this->block_mutator->mutate( $post_id, $op, $path, $params, $dry_run );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 200 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+		);
 	}
 
 	/**
