@@ -1971,38 +1971,21 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function update_blocks_batch( $request ) {
-		try {
-			$post_id    = (int) $request->get_param( 'id' );
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$updates = $req->get_param( 'updates' );
+				if ( ! is_array( $updates ) ) {
+					return new \WP_Error(
+						'invalid_updates',
+						__( '"updates" must be an array.', 'gk-block-api' ),
+						array( 'status' => 400 )
+					);
+				}
+				$verbose = (bool) $req->get_param( 'verbose' );
+				return $this->block_crud->update_blocks_batch( $post_id, $updates, $verbose );
 			}
-
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
-
-			$updates = $request->get_param( 'updates' );
-			if ( ! is_array( $updates ) ) {
-				return new \WP_Error(
-					'invalid_updates',
-					__( '"updates" must be an array.', 'gk-block-api' ),
-					array( 'status' => 400 )
-				);
-			}
-
-			$verbose = (bool) $request->get_param( 'verbose' );
-			$result  = $this->block_crud->update_blocks_batch( $post_id, $updates, $verbose );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 200 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+		);
 	}
 
 	/**
