@@ -159,13 +159,17 @@ class HTML_Transformer {
 				}
 
 				$processor = new \WP_HTML_Tag_Processor( $html );
+				// filter_var with FILTER_VALIDATE_BOOLEAN understands real bools, "true"/"false",
+				// "1"/"0", "yes"/"no", "on"/"off". A plain `if ( $x )` would treat the literal
+				// string "false" (any non-empty string) as truthy and incorrectly set autoplay.
+				$enable = filter_var( $changed_attrs[ $attr ], FILTER_VALIDATE_BOOLEAN );
 				while ( $processor->next_tag() ) {
 					$tag = strtolower( $processor->get_tag() );
 					if ( ! in_array( $tag, array( 'audio', 'video' ), true ) ) {
 						continue;
 					}
 
-					if ( $changed_attrs[ $attr ] ) {
+					if ( $enable ) {
 						$processor->set_attribute( $attr, true );
 					} else {
 						$processor->remove_attribute( $attr );
@@ -179,7 +183,9 @@ class HTML_Transformer {
 			if ( 'core/details' === $block_name && array_key_exists( 'showContent', $changed_attrs ) ) {
 				$processor = new \WP_HTML_Tag_Processor( $html );
 				if ( $processor->next_tag( 'details' ) ) {
-					if ( $changed_attrs['showContent'] ) {
+					// Same FILTER_VALIDATE_BOOLEAN handling as autoplay/loop — string
+					// "false" must disable, not enable.
+					if ( filter_var( $changed_attrs['showContent'], FILTER_VALIDATE_BOOLEAN ) ) {
 						$processor->set_attribute( 'open', true );
 					} else {
 						$processor->remove_attribute( 'open' );
@@ -208,9 +214,14 @@ class HTML_Transformer {
 					if ( null !== $style && false !== strpos( $style, $css_prop ) ) {
 						// Negative lookbehind on [-\w] ensures we don't match inside
 						// compound properties like line-height, min-width, max-height.
-						$new_style = preg_replace(
+						// preg_replace_callback (not preg_replace) — $new_val comes from
+						// caller-controlled input. A literal "$1" inside it would be
+						// interpreted as a backreference, producing corrupted CSS.
+						$new_style = preg_replace_callback(
 							'/(?<![-\w])' . preg_quote( $css_prop, '/' ) . '\s*:\s*[^;"]+(;?)/',
-							$css_prop . ':' . $new_val . '$1',
+							static function ( $matches ) use ( $css_prop, $new_val ) {
+								return $css_prop . ':' . $new_val . $matches[1];
+							},
 							$style
 						);
 						$processor->set_attribute( 'style', $new_style );
@@ -290,9 +301,14 @@ class HTML_Transformer {
 					// onload-style event attributes, and other XSS vectors so a
 					// malicious caller can't smuggle JS into the editor preview.
 					$new_pre = wp_kses_post( (string) $changed_attrs['codeHTML'] );
-					$html    = preg_replace(
+					// preg_replace_callback (not preg_replace) — $new_pre is user-supplied
+					// and a literal "$1" inside it would otherwise be interpreted as a
+					// backreference, producing corrupted output.
+					$html = preg_replace_callback(
 						'/<pre class="shiki[\s\S]*?<\/pre>/',
-						$new_pre,
+						static function () use ( $new_pre ) {
+							return $new_pre;
+						},
 						$html,
 						1
 					);

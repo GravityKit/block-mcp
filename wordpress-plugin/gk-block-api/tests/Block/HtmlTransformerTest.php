@@ -159,6 +159,48 @@ class HtmlTransformerTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( ' open', $result );
 	}
 
+	// ── Regression: string "false" / "0" must disable (not enable) the attr ──
+
+	public function test_details_close_with_string_false() {
+		$this->require_tag_processor();
+		$t      = $this->get_transformer();
+		$html   = '<details class="wp-block-details" open><summary>S</summary></details>';
+		$result = $t->auto_transform_html( 'core/details', array( 'showContent' => 'false' ), $html );
+		$this->assertStringNotContainsString( ' open', $result, 'String "false" must disable showContent, not enable it via PHP truthiness.' );
+	}
+
+	public function test_video_autoplay_with_string_false() {
+		$this->require_tag_processor();
+		$t      = $this->get_transformer();
+		$html   = '<video src="x.mp4" autoplay></video>';
+		$result = $t->auto_transform_html( 'core/video', array( 'autoplay' => 'false' ), $html );
+		$this->assertStringNotContainsString( 'autoplay', $result, 'String "false" must disable autoplay.' );
+	}
+
+	// ── Regression: preg_replace replacement injection ($N, \N) in user input ─
+
+	public function test_height_with_dollar_n_in_value() {
+		$this->require_tag_processor();
+		$t      = $this->get_transformer();
+		// A literal "$1" in the width value would be interpreted as a backreference
+		// by preg_replace, swallowing the captured trailing semicolon and producing
+		// corrupted CSS like `width:100;;` or worse.
+		$html   = '<div style="width: 50px; padding: 10px;"></div>';
+		$result = $t->auto_transform_html( 'core/spacer', array( 'width' => '100$1px' ), $html );
+		$this->assertStringContainsString( 'width:100$1px', $result, 'Dollar-N in value must survive verbatim — not be interpreted as a regex backreference.' );
+	}
+
+	public function test_codeHTML_with_dollar_n_in_value() {
+		$t      = $this->get_transformer();
+		$html   = '<div><pre class="shiki"><code>old</code></pre></div>';
+		// codeHTML with $1 inside — old code used preg_replace and would have
+		// substituted the captured group, mangling the output.
+		$new    = '<pre class="shiki"><code>new $1 still $1</code></pre>';
+		$result = $t->auto_transform_html( 'kevinbatdorf/code-block-pro', array( 'codeHTML' => $new ), $html );
+		$this->assertNotNull( $result );
+		$this->assertStringContainsString( 'new $1 still $1', $result, 'Dollar-N must survive verbatim inside codeHTML replacement.' );
+	}
+
 	// ── Text content transforms (regex-based, no WP_HTML_Tag_Processor needed) ──
 
 	public function test_quote_citation() {
