@@ -1934,45 +1934,29 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function update_block( $request ) {
-		try {
-			$post_id    = (int) $request->get_param( 'id' );
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
-			}
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$index      = (int) $req->get_param( 'index' );
+				$attributes = $req->get_param( 'attributes' );
+				$inner_html = $req->get_param( 'innerHTML' );
 
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
+				if ( null === $attributes && null === $inner_html ) {
+					return new \WP_Error(
+						'missing_data',
+						__( 'At least one of "attributes" or "innerHTML" must be provided.', 'gk-block-api' ),
+						array( 'status' => 400 )
+					);
+				}
 
-			$index      = (int) $request->get_param( 'index' );
-			$attributes = $request->get_param( 'attributes' );
-			$inner_html = $request->get_param( 'innerHTML' );
-
-			if ( null === $attributes && null === $inner_html ) {
-				return new \WP_Error(
-					'missing_data',
-					__( 'At least one of "attributes" or "innerHTML" must be provided.', 'gk-block-api' ),
-					array( 'status' => 400 )
+				return $this->block_crud->update_block(
+					$post_id,
+					$index,
+					is_array( $attributes ) ? $attributes : array(),
+					$inner_html
 				);
 			}
-
-			$result = $this->block_crud->update_block(
-				$post_id,
-				$index,
-				is_array( $attributes ) ? $attributes : array(),
-				$inner_html
-			);
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 200 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+		);
 	}
 
 	/**
