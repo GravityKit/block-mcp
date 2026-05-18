@@ -314,7 +314,8 @@ class Block_CRUD {
 	/**
 	 * Validate, serialize, and save a block tree as the new post_content.
 	 *
-	 * Delegates to Block_Writer. Preserved as a facade so existing callers need no changes.
+	 * Delegates to Block_Writer, then invalidates the reader parse-cache so the
+	 * next read in the same request sees the freshly-saved content.
 	 *
 	 * @param int   $post_id Post ID.
 	 * @param array $blocks  Block tree in WP-internal shape.
@@ -322,13 +323,18 @@ class Block_CRUD {
 	 * @return array|\WP_Error
 	 */
 	public function save_blocks( $post_id, array $blocks ) {
-		return $this->writer->save_blocks( $post_id, $blocks );
+		$result = $this->writer->save_blocks( $post_id, $blocks );
+		if ( ! is_wp_error( $result ) ) {
+			$this->reader->invalidate( (int) $post_id );
+		}
+		return $result;
 	}
 
 	/**
 	 * Save serialized block content to a post, tracking before/after revision IDs.
 	 *
-	 * Delegates to Block_Writer. Preserved as a facade so existing callers need no changes.
+	 * Delegates to Block_Writer, then invalidates the reader parse-cache so the
+	 * next read in the same request sees the freshly-saved content.
 	 *
 	 * @param int    $post_id     Post ID.
 	 * @param string $new_content Serialized block markup to save.
@@ -336,7 +342,11 @@ class Block_CRUD {
 	 * @return array|\WP_Error
 	 */
 	public function save_post_content( $post_id, $new_content ) {
-		return $this->writer->save_post_content( $post_id, $new_content );
+		$result = $this->writer->save_post_content( $post_id, $new_content );
+		if ( ! is_wp_error( $result ) ) {
+			$this->reader->invalidate( (int) $post_id );
+		}
+		return $result;
 	}
 
 	/**

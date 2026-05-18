@@ -23,6 +23,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Block_Reader {
 
 	/**
+	 * Per-request parse_blocks() memo.
+	 *
+	 * Keyed on "{post_id}:{md5(post_content)}". Cleared by invalidate() after
+	 * any write to that post so stale results never escape a single request.
+	 *
+	 * @var array<string, array>
+	 */
+	private $parse_cache = array();
+
+	/**
 	 * Reference back to the owning Block_CRUD instance for shared utilities.
 	 *
 	 * @var Block_CRUD
@@ -75,6 +85,62 @@ class Block_Reader {
 	}
 
 	/**
+	 * Return memoized parse_blocks() output for a post.
+	 *
+	 * The cache key is "{post_id}:{md5(post_content)}" so a content change
+	 * automatically busts the entry even without an explicit invalidate() call.
+	 * Callers on the write path should still call invalidate() after a save so
+	 * the next read re-fetches the freshly-saved content from the DB rather than
+	 * a stale WP post object that may be cached in the object-cache.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array Parsed blocks (same shape as parse_blocks() — may include
+	 *               empty/whitespace entries). Returns empty array for missing
+	 *               posts or non-string post_content.
+	 */
+	public function parse( $post_id ) {
+		$post = get_post( (int) $post_id );
+		if ( ! $post ) {
+			return array();
+		}
+
+		$content = $post->post_content;
+		if ( ! is_string( $content ) ) {
+			return array();
+		}
+
+		$key = $post_id . ':' . md5( $content );
+
+		if ( ! isset( $this->parse_cache[ $key ] ) ) {
+			$parsed                    = parse_blocks( $content );
+			$this->parse_cache[ $key ] = is_array( $parsed ) ? $parsed : array();
+		}
+
+		return $this->parse_cache[ $key ];
+	}
+
+	/**
+	 * Invalidate the parse cache for a specific post.
+	 *
+	 * Must be called by the write path (Block_Writer::save_blocks /
+	 * save_post_content) after a successful save so that the next read in the
+	 * same request sees the newly-persisted content.
+	 *
+	 * @param int $post_id Post ID whose cache entries to remove.
+	 *
+	 * @return void
+	 */
+	public function invalidate( $post_id ) {
+		$prefix = $post_id . ':';
+		foreach ( array_keys( $this->parse_cache ) as $key ) {
+			if ( 0 === strpos( $key, $prefix ) ) {
+				unset( $this->parse_cache[ $key ] );
+			}
+		}
+	}
+
+	/**
 	 * Get all blocks for a post.
 	 *
 	 * Always uses parse_blocks() to ensure index consistency with write operations.
@@ -102,7 +168,7 @@ class Block_Reader {
 			return array();
 		}
 
-		$blocks = parse_blocks( $content );
+		$blocks = $this->parse( $post_id );
 
 		if ( ! is_array( $blocks ) ) {
 			$blocks = array();
@@ -126,16 +192,25 @@ class Block_Reader {
 			if ( $got_lock ) {
 				try {
 					// Re-parse current content under the lock — another writer
-					// may have raced in between our parse_blocks() above and
-					// our lock acquisition. If they did, their refs are now on
-					// disk; assign_missing_refs_recursive() will be a no-op and
-					// we won't double-write.
-					$fresh = parse_blocks( (string) get_post_field( 'post_content', $post_id ) );
+					// may have raced in between our parse() call above and our
+					// lock acquisition. If they did, their refs are now on disk;
+					// assign_missing_refs_recursive() will be a no-op and we
+					// won't double-write. Bypass the memo here so we read the
+					// authoritative post_content directly from the DB.
+					$fresh_content = (string) get_post_field( 'post_content', $post_id );
+					$fresh         = parse_blocks( $fresh_content );
 					if ( is_array( $fresh ) && ! empty( $fresh ) ) {
 						$blocks = $fresh;
+						// Update the cache with the direct-from-DB content.
+						$this->invalidate( $post_id );
+						$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 					}
 					if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
 						$this->crud->persist_ref_assignments( $post_id, $blocks );
+						// After persisting, re-warm the cache with the new content.
+						$this->invalidate( $post_id );
+						$new_content = (string) get_post_field( 'post_content', $post_id );
+						$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
 					}
 				} finally {
 					wp_cache_delete( $lock_key, 'gk_block_api' );
@@ -146,9 +221,13 @@ class Block_Reader {
 				// instead of our locally-generated random refs (which would
 				// be stale by the time the response leaves this server).
 				usleep( 50000 ); // 50 ms.
-				$fresh = parse_blocks( (string) get_post_field( 'post_content', $post_id ) );
+				$fresh_content = (string) get_post_field( 'post_content', $post_id );
+				$fresh         = parse_blocks( $fresh_content );
 				if ( is_array( $fresh ) && ! empty( $fresh ) ) {
 					$blocks = $fresh;
+					// Update the cache with the direct-from-DB content.
+					$this->invalidate( $post_id );
+					$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 				}
 			}
 		}
