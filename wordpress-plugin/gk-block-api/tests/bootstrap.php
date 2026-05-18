@@ -26,7 +26,48 @@ if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 // ── WordPress function stubs ──
 
 if ( ! function_exists( 'wp_kses_post' ) ) {
-	function wp_kses_post( $data ) { return $data; }
+	/**
+	 * Approximation of wp_kses_post() — strips the disallowed-tag wrappers,
+	 * event-handler attributes, and bad-protocol prefixes that real WP strips
+	 * for the inputs our tests use, while preserving the same residue real WP
+	 * leaves behind. The behaviors mirrored here were verified against real
+	 * WordPress via `wp eval` (see commit notes):
+	 *
+	 *   <script>alert(1)</script> → "alert(1)"    (tag markers gone, text kept)
+	 *   <img onerror="x">          → <img>          (whole attribute removed)
+	 *   href="javascript:foo"     → href="foo"     (prefix gone, value kept)
+	 *
+	 * Calls are recorded in $GLOBALS['_gk_test_kses_calls'] so tests can also
+	 * assert invocation.
+	 */
+	function wp_kses_post( $data ) {
+		if ( ! is_string( $data ) ) {
+			return $data;
+		}
+		$GLOBALS['_gk_test_kses_calls'][] = $data;
+
+		// Strip disallowed tag MARKUP only (open and close), leaving any text
+		// content between them in place — that's what real wp_kses does.
+		$bad_tags = '(?:script|iframe|style|noscript|embed)';
+		$out      = preg_replace( '#</?' . $bad_tags . '\b[^>]*/?>#i', '', $data );
+
+		// Strip event-handler attributes (on*= ...).
+		$out = preg_replace( '#\son\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', (string) $out );
+
+		// Strip the leading javascript:/data:/vbscript: prefix from URL
+		// attribute values; the remainder of the URL stays as an inert string,
+		// matching real wp_kses_bad_protocol().
+		$out = preg_replace_callback(
+			'#((?:href|src|xlink:href)\s*=\s*)("|\'|)([^"\'>]*)\2#i',
+			static function ( $m ) {
+				$cleaned = preg_replace( '#^\s*(?:javascript|data|vbscript):#i', '', $m[3] );
+				return $m[1] . $m[2] . $cleaned . $m[2];
+			},
+			(string) $out
+		);
+
+		return (string) $out;
+	}
 }
 if ( ! function_exists( 'wp_hash' ) ) {
 	function wp_hash( $data, $scheme = 'auth' ) {
@@ -525,16 +566,24 @@ if ( ! function_exists( 'wp_insert_post' ) ) {
 		unset( $wp_error );
 		$id = ++$GLOBALS['_gk_test_next_post_id'];
 
+		// Real WP unslashes string fields once before storage (callers must
+		// wp_slash() before passing them in). Mirror that here — otherwise the
+		// wp_slash() inside Post_Manager::create_post would leave doubled
+		// backslashes in post_content and break any test that decodes it.
+		$unslash = function ( $value ) {
+			return is_string( $value ) ? stripslashes( $value ) : $value;
+		};
+
 		$post                 = new \stdClass();
 		$post->ID             = $id;
 		$post->post_type      = isset( $args['post_type'] ) ? $args['post_type'] : 'post';
 		$post->post_status    = isset( $args['post_status'] ) ? $args['post_status'] : 'draft';
-		$post->post_title     = isset( $args['post_title'] ) ? $args['post_title'] : '';
-		$post->post_content   = isset( $args['post_content'] ) ? $args['post_content'] : '';
-		$post->post_excerpt   = isset( $args['post_excerpt'] ) ? $args['post_excerpt'] : '';
-		$post->post_name      = isset( $args['post_name'] ) ? $args['post_name'] : sanitize_title( $post->post_title );
+		$post->post_title     = isset( $args['post_title'] ) ? $unslash( $args['post_title'] ) : '';
+		$post->post_content   = isset( $args['post_content'] ) ? $unslash( $args['post_content'] ) : '';
+		$post->post_excerpt   = isset( $args['post_excerpt'] ) ? $unslash( $args['post_excerpt'] ) : '';
+		$post->post_name      = isset( $args['post_name'] ) ? $unslash( $args['post_name'] ) : sanitize_title( $post->post_title );
 		$post->post_parent    = isset( $args['post_parent'] ) ? (int) $args['post_parent'] : 0;
-		$post->post_date      = isset( $args['post_date'] ) ? $args['post_date'] : '2026-01-01 00:00:00';
+		$post->post_date      = isset( $args['post_date'] ) ? $unslash( $args['post_date'] ) : '2026-01-01 00:00:00';
 		$post->menu_order     = isset( $args['menu_order'] ) ? (int) $args['menu_order'] : 0;
 		$post->comment_status = isset( $args['comment_status'] ) ? $args['comment_status'] : 'closed';
 		$post->ping_status    = isset( $args['ping_status'] ) ? $args['ping_status'] : 'closed';

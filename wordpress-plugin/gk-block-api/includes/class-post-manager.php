@@ -486,13 +486,6 @@ class Post_Manager {
 	}
 
 	/**
-	 * Validate blocks via Block_CRUD's existing tier policy. Aggregates
-	 * avoid-tier warnings; bails on the first hard error.
-	 *
-	 * @param array $blocks
-	 * @return array{blocks:array,warnings:array}|\WP_Error
-	 */
-	/**
 	 * Walk a block tree applying validate_block_def at every depth.
 	 *
 	 * Returns a WP_Error on first hard rejection (legacy tier); accumulates
@@ -528,40 +521,81 @@ class Post_Manager {
 
 	private function validate_blocks_for_insert( array $blocks ) {
 		$warnings = array();
-		// Walk the full tree so legacy/avoid blocks nested inside containers
-		// (core/group, core/columns, etc.) hit the same tier policy as
-		// top-level blocks. The previous single-level loop let nested
-		// legacy blocks slip past validation.
+		// Walk the full tree so nested blocks hit the same tier policy as top-level ones.
 		$err = $this->walk_blocks_for_validation( $blocks, $warnings );
 		if ( $err instanceof \WP_Error ) {
 			return $err;
 		}
 
 		$normalized = array_map(
-			function ( $block ) {
-				// innerContent is parallel to innerHTML — an array of HTML
-				// fragments interleaved with null placeholders for innerBlocks
-				// positions. Like innerHTML, every fragment ends up in
-				// post_content, so each non-null entry must be kses-sanitized
-				// to keep XSS payloads out of saved markup.
-				$inner_content = array();
-				if ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
-					foreach ( $block['innerContent'] as $piece ) {
-						$inner_content[] = ( null === $piece ) ? null : wp_kses_post( (string) $piece );
-					}
-				}
-
-				return array(
-					'blockName'    => $block['name'],
-					'attrs'        => isset( $block['attributes'] ) && is_array( $block['attributes'] ) ? $block['attributes'] : array(),
-					'innerBlocks'  => isset( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ? $block['innerBlocks'] : array(),
-					'innerHTML'    => isset( $block['innerHTML'] ) ? wp_kses_post( $block['innerHTML'] ) : '',
-					'innerContent' => $inner_content,
-				);
-			},
+			array( $this, 'normalize_block_def_for_insert' ),
 			$blocks
 		);
 		return array( 'blocks' => $normalized, 'warnings' => $warnings );
+	}
+
+	/**
+	 * Recursively convert an API-shaped block definition (name / attributes /
+	 * innerHTML / innerBlocks) into the WP internal shape (blockName / attrs /
+	 * innerHTML / innerContent / innerBlocks) that serialize_blocks() expects.
+	 *
+	 * innerContent is derived from innerHTML: for leaf blocks it becomes
+	 * array( $innerHTML ); for container blocks the wrapper HTML is split into
+	 * an opening fragment, one null placeholder per child, and a closing fragment.
+	 *
+	 * @param array $block API-shaped block definition.
+	 * @return array WP internal block shape.
+	 */
+	private function normalize_block_def_for_insert( array $block ) {
+		$inner_html = isset( $block['innerHTML'] ) ? wp_kses_post( $block['innerHTML'] ) : '';
+		$attrs      = isset( $block['attributes'] ) && is_array( $block['attributes'] ) ? $block['attributes'] : array();
+
+		// Recurse into children first so container blocks have a fully-formed
+		// innerBlocks array before we compute innerContent.
+		$children = array();
+		if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+			foreach ( $block['innerBlocks'] as $child_def ) {
+				$children[] = $this->normalize_block_def_for_insert( $child_def );
+			}
+		}
+
+		// Build innerContent.
+		if ( ! empty( $children ) ) {
+			$n = count( $children );
+			if ( ! empty( $inner_html ) ) {
+				// Split the wrapper HTML into opening/closing halves and
+				// interleave null placeholders for each child block.
+				$first_close = strpos( $inner_html, '>' );
+				if ( false !== $first_close ) {
+					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
+					for ( $i = 0; $i < $n; $i++ ) {
+						$inner_content[] = null;
+					}
+					$inner_content[] = substr( $inner_html, $first_close + 1 );
+				} else {
+					$inner_content = array_fill( 0, $n, null );
+				}
+			} else {
+				$inner_content = array_fill( 0, $n, null );
+			}
+		} elseif ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
+			// Caller supplied explicit innerContent — sanitize each string piece.
+			$inner_content = array();
+			foreach ( $block['innerContent'] as $piece ) {
+				$inner_content[] = ( null === $piece ) ? null : wp_kses_post( (string) $piece );
+			}
+		} else {
+			// Leaf block: innerContent is simply array( $innerHTML ) or empty.
+			$inner_content = ! empty( $inner_html ) ? array( $inner_html ) : array();
+		}
+
+		return array(
+			'blockName'    => $block['name'],
+			'attrs'        => $attrs,
+			'innerBlocks'  => $children,
+			'innerHTML'    => ! empty( $children ) ? '' : $inner_html,
+			'innerContent' => $inner_content,
+		);
 	}
 
 	/**

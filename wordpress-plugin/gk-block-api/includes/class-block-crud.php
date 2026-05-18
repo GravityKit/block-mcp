@@ -1100,28 +1100,14 @@ class Block_CRUD {
 		$new_blocks = array();
 
 		foreach ( $blocks as $block_def ) {
-			$name = isset( $block_def['name'] ) ? $block_def['name'] : '';
-
-			// Validate block name and preference tier.
-			$validation = $this->validate_block_def( $name );
-			if ( $validation['error'] ) {
-				return $validation['error'];
+			$built = $this->build_block_from_def( $block_def, $warnings );
+			if ( is_wp_error( $built ) ) {
+				return $built;
 			}
-			$warnings = array_merge( $warnings, $validation['warnings'] );
-
-			$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-			$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
-
-			$new_blocks[] = array(
-				'blockName'    => $name,
-				'attrs'        => $attrs,
-				'innerHTML'    => $inner_html,
-				'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
-				'innerBlocks'  => array(),
-			);
+			$new_blocks[] = $built;
 		}
 
-		// Stable refs for the new block tree.
+		// Stable refs for the new block tree (all depths).
 		$this->assign_missing_refs_recursive( $new_blocks );
 
 		// Serialize and save.

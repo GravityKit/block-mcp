@@ -2156,15 +2156,8 @@ class REST_Controller {
 				);
 			}
 
-			// Sanitize block definitions.
-			$sanitized_blocks = array();
-			foreach ( $blocks as $block_def ) {
-				$sanitized_blocks[] = array(
-					'name'       => isset( $block_def['name'] ) ? sanitize_text_field( $block_def['name'] ) : '',
-					'attributes' => isset( $block_def['attributes'] ) ? $block_def['attributes'] : array(),
-					'innerHTML'  => isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '',
-				);
-			}
+			// Sanitize block definitions recursively (preserves innerBlocks).
+			$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
 
 			$result = $this->block_crud->replace_all_blocks( $post_id, $sanitized_blocks );
 
@@ -2518,7 +2511,7 @@ class REST_Controller {
 			),
 			'min_score' => array(
 				'type'              => 'integer',
-				'sanitize_callback' => 'intval',
+				'sanitize_callback' => 'absint',
 			),
 			'category'  => array(
 				'type'              => 'string',

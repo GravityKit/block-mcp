@@ -17,7 +17,6 @@ use GravityKit\BlockAPI\Block_CRUD;
 use GravityKit\BlockAPI\Block_Inventory;
 use GravityKit\BlockAPI\Block_Safety;
 use GravityKit\BlockAPI\HTML_Transformer;
-// Note: Preferences only used inside the test setUp to construct Block_CRUD.
 
 class PostManagerTest extends \PHPUnit\Framework\TestCase {
 
@@ -142,6 +141,237 @@ class PostManagerTest extends \PHPUnit\Framework\TestCase {
 		$content = $GLOBALS['_gk_test_posts'][ $result['id'] ]->post_content;
 		// serialize_blocks stub returns JSON; just verify content is non-empty.
 		$this->assertNotEmpty( $content );
+	}
+
+	// ── create_post: innerHTML round-trip regression ─────────────────
+
+	public function test_create_post_leaf_block_innerhtml_becomes_inner_content() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Hello world</p>' ),
+			),
+		) );
+		$this->assertIsArray( $result );
+
+		$blocks = $this->stored_blocks( $result['id'] );
+
+		$this->assertCount( 1, $blocks );
+		$this->assertSame( 'core/paragraph', $blocks[0]['blockName'] );
+		$this->assertSame( '<p>Hello world</p>', $blocks[0]['innerHTML'] );
+		$this->assertSame( array( '<p>Hello world</p>' ), $blocks[0]['innerContent'] );
+		$this->assertSame( array(), $blocks[0]['innerBlocks'] );
+	}
+
+	/**
+	 * Read the stored block tree for the given post ID. The test bootstrap's
+	 * serialize_blocks stub JSON-encodes the WP-internal block shape, so we
+	 * round-trip via json_decode to inspect the saved structure.
+	 */
+	private function stored_blocks( int $post_id ): array {
+		$content = $GLOBALS['_gk_test_posts'][ $post_id ]->post_content;
+		$decoded = json_decode( $content, true );
+		return is_array( $decoded ) ? $decoded : array();
+	}
+
+	public function test_create_post_container_inner_blocks_recursed_and_split() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array(
+					'name'        => 'core/heading',
+					'attributes'  => array( 'level' => 2 ),
+					'innerHTML'   => '<h2>Heading</h2>',
+				),
+				array(
+					'name'        => 'core/paragraph',
+					'innerHTML'   => '<ul class="wp-block-list"></ul>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/paragraph', 'innerHTML' => '<p>A</p>' ),
+						array( 'name' => 'core/paragraph', 'innerHTML' => '<p>B</p>' ),
+					),
+				),
+			),
+		) );
+		$this->assertIsArray( $result );
+
+		$blocks = $this->stored_blocks( $result['id'] );
+		$this->assertCount( 2, $blocks );
+
+		// Container block: children are normalized to WP internal shape (blockName,
+		// not name) and the wrapper HTML is split into opening/null-per-child/closing.
+		$container = $blocks[1];
+		$this->assertCount( 2, $container['innerBlocks'] );
+		$this->assertSame( 'core/paragraph', $container['innerBlocks'][0]['blockName'] );
+		$this->assertSame( '<p>A</p>', $container['innerBlocks'][0]['innerHTML'] );
+		$this->assertSame( 'core/paragraph', $container['innerBlocks'][1]['blockName'] );
+
+		$this->assertSame(
+			array( '<ul class="wp-block-list">', null, null, '</ul>' ),
+			$container['innerContent'],
+			'Container innerContent must interleave a null placeholder per child.'
+		);
+		// Container blocks have empty innerHTML in WP's saved shape; the wrapper
+		// lives entirely in innerContent so serialize_blocks() can interpolate
+		// children at the right positions.
+		$this->assertSame( '', $container['innerHTML'] );
+	}
+
+	public function test_create_post_deeply_nested_inner_blocks_normalized() {
+		// Register the blocks needed for this nesting.
+		\WP_Block_Type_Registry::get_instance()->register( 'core/group' );
+		\WP_Block_Type_Registry::get_instance()->register( 'core/list' );
+		\WP_Block_Type_Registry::get_instance()->register( 'core/list-item' );
+
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array(
+					'name'        => 'core/group',
+					'innerHTML'   => '<div class="wp-block-group"></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/list',
+							'innerHTML'   => '<ul></ul>',
+							'innerBlocks' => array(
+								array( 'name' => 'core/list-item', 'innerHTML' => '<li>One</li>' ),
+							),
+						),
+					),
+				),
+			),
+		) );
+		$this->assertIsArray( $result );
+
+		$blocks = $this->stored_blocks( $result['id'] );
+
+		// Depth 0 — group with one child.
+		$this->assertSame( 'core/group', $blocks[0]['blockName'] );
+		$this->assertCount( 1, $blocks[0]['innerBlocks'] );
+		// Depth 1 — list with one child.
+		$list = $blocks[0]['innerBlocks'][0];
+		$this->assertSame( 'core/list', $list['blockName'] );
+		$this->assertCount( 1, $list['innerBlocks'] );
+		// Depth 2 — list-item leaf.
+		$item = $list['innerBlocks'][0];
+		$this->assertSame( 'core/list-item', $item['blockName'] );
+		$this->assertSame( '<li>One</li>', $item['innerHTML'] );
+		$this->assertSame( array( '<li>One</li>' ), $item['innerContent'] );
+	}
+
+	// ── create_post: XSS sanitization across the tree ────────────────
+
+	public function test_create_post_strips_script_tag_from_leaf_inner_html() {
+		$GLOBALS['_gk_test_kses_calls'] = array();
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Hi</p><script>alert(1)</script>' ),
+			),
+		) );
+		$blocks = $this->stored_blocks( $result['id'] );
+
+		// Real wp_kses_post strips the <script> tag markers but leaves the
+		// text content ("alert(1)") as inert text — see bootstrap.php stub
+		// docblock. We assert the *security invariant* (no executable tag),
+		// not the stripped-content side-effect.
+		$this->assertStringNotContainsStringIgnoringCase( '<script', $blocks[0]['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( '<script', $blocks[0]['innerContent'][0] );
+		$this->assertContains( '<p>Hi</p><script>alert(1)</script>', $GLOBALS['_gk_test_kses_calls'], 'wp_kses_post must be called on the raw innerHTML.' );
+	}
+
+	public function test_create_post_strips_event_handler_attribute() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p><img src="x" onerror="alert(1)"></p>' ),
+			),
+		) );
+		$blocks = $this->stored_blocks( $result['id'] );
+
+		$this->assertStringNotContainsStringIgnoringCase( 'onerror', $blocks[0]['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( 'alert(1)', $blocks[0]['innerHTML'] );
+		// The benign <img> tag itself should survive.
+		$this->assertStringContainsString( '<img src="x"', $blocks[0]['innerHTML'] );
+	}
+
+	public function test_create_post_neutralizes_javascript_url() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array( 'name' => 'core/paragraph', 'innerHTML' => '<p><a href="javascript:alert(1)">x</a></p>' ),
+			),
+		) );
+		$blocks = $this->stored_blocks( $result['id'] );
+
+		$this->assertStringNotContainsStringIgnoringCase( 'javascript:', $blocks[0]['innerHTML'] );
+		$this->assertStringContainsString( '<a ', $blocks[0]['innerHTML'], 'The <a> wrapper survives; only the javascript: URL is neutralized.' );
+	}
+
+	public function test_create_post_strips_xss_in_container_split_innerhtml() {
+		// Regression guard for the strpos-based wrapper split in
+		// normalize_block_def_for_insert. kses runs before the split, so even
+		// if the wrapper carries a <script>, the executable tag markers must
+		// not resurface in innerContent's opening or closing slice.
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array(
+					'name'        => 'core/paragraph',
+					'innerHTML'   => '<script>alert(1)</script><div class="wp-block-group"></div>',
+					'innerBlocks' => array(
+						array( 'name' => 'core/paragraph', 'innerHTML' => '<p>child</p>' ),
+					),
+				),
+			),
+		) );
+		$container = $this->stored_blocks( $result['id'] )[0];
+
+		foreach ( $container['innerContent'] as $piece ) {
+			if ( null === $piece ) {
+				continue;
+			}
+			$this->assertStringNotContainsStringIgnoringCase( '<script', $piece );
+		}
+	}
+
+	public function test_create_post_strips_xss_from_nested_inner_blocks() {
+		\WP_Block_Type_Registry::get_instance()->register( 'core/group' );
+		\WP_Block_Type_Registry::get_instance()->register( 'core/list' );
+		\WP_Block_Type_Registry::get_instance()->register( 'core/list-item' );
+
+		$result = $this->pm->create_post( array(
+			'title'  => 'X',
+			'blocks' => array(
+				array(
+					'name'        => 'core/group',
+					'innerHTML'   => '<div></div>',
+					'innerBlocks' => array(
+						array(
+							'name'        => 'core/list',
+							'innerHTML'   => '<ul></ul>',
+							'innerBlocks' => array(
+								array(
+									'name'      => 'core/list-item',
+									'innerHTML' => '<li onclick="alert(1)">deep <script>alert(2)</script></li>',
+								),
+							),
+						),
+					),
+				),
+			),
+		) );
+		$leaf = $this->stored_blocks( $result['id'] )[0]['innerBlocks'][0]['innerBlocks'][0];
+
+		// Executable surface gone: no <script> tag, no on*= handler, and the
+		// onclick="alert(1)" attribute value is removed with the attribute.
+		// The text "alert(2)" inside the stripped <script> survives as inert
+		// text, matching real wp_kses behavior.
+		$this->assertStringNotContainsStringIgnoringCase( 'onclick', $leaf['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( '<script', $leaf['innerHTML'] );
+		$this->assertStringNotContainsStringIgnoringCase( 'alert(1)', $leaf['innerHTML'] );
+		$this->assertStringContainsString( 'deep', $leaf['innerHTML'] );
+		$this->assertSame( $leaf['innerHTML'], $leaf['innerContent'][0] );
 	}
 
 	public function test_create_post_rejects_legacy_block() {
