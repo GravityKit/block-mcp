@@ -72,6 +72,16 @@ class Block_Inventory {
 	/** Minimum interval between full storage-mode scans (seconds). */
 	const STORAGE_SCAN_MIN_INTERVAL = HOUR_IN_SECONDS;
 
+	/**
+	 * Minimum interval between manual get_stats(refresh=true) calls.
+	 * Matches CACHE_TTL so a refresh can never run more often than the
+	 * cache would naturally expire — every refresh is bounded amplification.
+	 */
+	const REFRESH_MIN_INTERVAL = HOUR_IN_SECONDS;
+
+	/** Option key tracking the last get_stats refresh timestamp. */
+	const REFRESH_LAST_RUN_OPTION = 'gk_block_api_stats_refresh_last';
+
 	// ──────────────────────────────────────────────────────────────────
 	// Storage-mode classification.
 	//
@@ -430,6 +440,25 @@ class Block_Inventory {
 			if ( false !== $cached ) {
 				return $cached;
 			}
+		}
+
+		// Refresh rate-limit. build_stats() runs a chunked WP_Query across every
+		// published post of every public post type, parse_blocks()-ing each one.
+		// On a 10k-post site that's 10k+ DB fetches + parses — a cheap REST call
+		// (/site-usage?refresh=true) amplifies into expensive backend work.
+		// Cap manual refreshes at one per CACHE_TTL even when refresh=true; when
+		// the budget is exhausted, fall back to the cached result instead of
+		// erroring (the cache might be stale but is still useful).
+		if ( $refresh ) {
+			$last_refresh = (int) get_option( self::REFRESH_LAST_RUN_OPTION, 0 );
+			if ( $last_refresh && ( time() - $last_refresh ) < self::REFRESH_MIN_INTERVAL ) {
+				$cached = get_transient( self::CACHE_KEY );
+				if ( false !== $cached ) {
+					return $cached;
+				}
+				// No cache yet either — fall through and accept the cost.
+			}
+			update_option( self::REFRESH_LAST_RUN_OPTION, time(), false );
 		}
 
 		try {

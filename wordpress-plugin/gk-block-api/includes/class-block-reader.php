@@ -489,7 +489,14 @@ class Block_Reader {
 				}
 			}
 
-			if ( ! empty( $block['innerBlocks'] ) ) {
+			if ( ! empty( $block['innerBlocks'] ) && count( $current_path ) < Block_CRUD::MAX_BLOCK_DEPTH ) {
+				// Depth guard. Block_CRUD::MAX_BLOCK_DEPTH caps writes, but
+				// pre-cap content (or anything bypassing the write path —
+				// direct DB inserts, imports) could in theory be deeper. Recursing
+				// past MAX_BLOCK_DEPTH would stack-overflow the read path before
+				// the formatter could return. Truncate innerBlocks at the cap;
+				// the tree above remains visible, the agent sees a flag-free
+				// drop at the boundary. Same constant the write side enforces.
 				$data['innerBlocks'] = $this->format_blocks_recursive(
 					$block['innerBlocks'],
 					$current_path,
