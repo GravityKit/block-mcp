@@ -1282,6 +1282,18 @@ class REST_Controller {
 
 			$post = get_post( $post_id );
 
+			// Visibility gate matching post_info / find_posts. url_to_postid
+			// resolves drafts and private posts too on logged-in front-ends,
+			// so without this gate an Author could resolve another user's
+			// draft URL and pull its title / status.
+			if ( ! $post || ! \GravityKit\BlockAPI\Block_CRUD::is_post_readable( $post ) ) {
+				return new \WP_Error(
+					'not_found',
+					__( 'No post found for this URL.', 'gk-block-api' ),
+					array( 'status' => 404 )
+				);
+			}
+
 			return new \WP_REST_Response(
 				array(
 					'post_id'   => $post_id,
@@ -1357,6 +1369,11 @@ class REST_Controller {
 				// Author-level users could see each other's drafts. Filtering
 				// in the query (not the result loop) also keeps found_posts
 				// and pagination counts honest.
+				//
+				// Note: WP's `perm` check is status + ownership only — it does
+				// NOT consider post_password. The post-result loop below
+				// applies Block_CRUD::is_post_readable() to catch the
+				// password-protected case.
 				'perm'                => 'readable',
 			);
 			if ( ! empty( $search ) ) {
@@ -1366,6 +1383,10 @@ class REST_Controller {
 			$query = new \WP_Query( $args );
 			$out   = array();
 			foreach ( $query->posts as $p ) {
+				// Post-filter for password-protected (perm:'readable' misses it).
+				if ( ! \GravityKit\BlockAPI\Block_CRUD::is_post_readable( $p ) ) {
+					continue;
+				}
 				$out[] = array(
 					'post_id'     => (int) $p->ID,
 					'title'       => $p->post_title,
