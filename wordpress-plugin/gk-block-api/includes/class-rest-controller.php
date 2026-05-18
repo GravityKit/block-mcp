@@ -2228,30 +2228,13 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function revert_to_revision( $request ) {
-		try {
-			$post_id     = (int) $request->get_param( 'id' );
-			$revision_id = (int) $request->get_param( 'revision_id' );
-
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$revision_id = (int) $req->get_param( 'revision_id' );
+				return $this->block_crud->revert_to_revision( $post_id, $revision_id );
 			}
-
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
-
-			$result = $this->block_crud->revert_to_revision( $post_id, $revision_id );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 200 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+		);
 	}
 
 	// =========================================================================
