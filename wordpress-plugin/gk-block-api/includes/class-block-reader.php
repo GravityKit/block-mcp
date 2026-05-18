@@ -585,44 +585,9 @@ class Block_Reader {
 				continue;
 			}
 
-			$source = isset( $attr_def['source'] ) ? $attr_def['source'] : '';
-
-			// Unsupported / deprecated sources.
-			if ( '' === $source || 'meta' === $source || 'query' === $source ) {
-				// TODO: 'query' source returns an array-of-objects; deferred to v2.
-				continue;
-			}
-
-			$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
-
-			// Use WP_HTML_Tag_Processor for attribute extraction.
-			// For html/text sources we fall back to a simple regex when the
-			// selector is a single tag name, since WP_HTML_Tag_Processor cannot
-			// navigate CSS selectors or extract innerHTML.
-			if ( 'attribute' === $source ) {
-				if ( '' === $selector || ! isset( $attr_def['attribute'] ) ) {
-					continue;
-				}
-				$value = $this->extract_dom_attribute( $inner_html, $selector, $attr_def['attribute'] );
-				if ( null !== $value ) {
-					$extracted[ $attr_name ] = $value;
-				}
-			} elseif ( 'html' === $source || 'rich-text' === $source ) {
-				if ( '' === $selector ) {
-					continue;
-				}
-				$value = $this->extract_inner_html( $inner_html, $selector );
-				if ( null !== $value ) {
-					$extracted[ $attr_name ] = $value;
-				}
-			} elseif ( 'text' === $source ) {
-				if ( '' === $selector ) {
-					continue;
-				}
-				$value = $this->extract_inner_html( $inner_html, $selector );
-				if ( null !== $value ) {
-					$extracted[ $attr_name ] = wp_strip_all_tags( $value );
-				}
+			$value = $this->source_attribute_value( $attr_def, $inner_html );
+			if ( null !== $value ) {
+				$extracted[ $attr_name ] = $value;
 			}
 		}
 
@@ -632,6 +597,119 @@ class Block_Reader {
 
 		// Delimiter-parsed attrs win — merge extracted underneath.
 		return array_merge( $extracted, $parsed_attrs );
+	}
+
+	/**
+	 * Dispatch a single attribute definition to the matching per-source resolver.
+	 *
+	 * One method per source.json source type, mirroring Automattic's
+	 * vip-block-data-api content-parser layout. The dispatcher is the
+	 * single open-closed seam — adding a new source means adding one method
+	 * here and one case below.
+	 *
+	 * Supported sources: `attribute`, `html`, `rich-text`, `text`. Unsupported
+	 * (`query`, `meta`, `node`, `children`, `raw`, `tag`) return null so the
+	 * caller falls back to delimiter-only attrs. See README.md → Limitations
+	 * for what's intentionally unsupported in v1.
+	 *
+	 * @param array  $attr_def   Block-attribute definition from block.json.
+	 * @param string $inner_html Block's innerHTML for DOM extraction.
+	 *
+	 * @return string|null Extracted value, or null if the source / selector
+	 *                     doesn't match or isn't supported.
+	 */
+	private function source_attribute_value( array $attr_def, $inner_html ) {
+		$source = isset( $attr_def['source'] ) ? $attr_def['source'] : '';
+
+		switch ( $source ) {
+			case 'attribute':
+				return $this->source_attribute( $attr_def, $inner_html );
+			case 'html':
+				return $this->source_html( $attr_def, $inner_html );
+			case 'rich-text':
+				return $this->source_rich_text( $attr_def, $inner_html );
+			case 'text':
+				return $this->source_text( $attr_def, $inner_html );
+			default:
+				// 'query', 'meta', 'node', 'children', 'raw', 'tag' — not yet
+				// supported; the WP_HTML_Tag_Processor backend can't do real
+				// CSS selectors or array-of-objects sourcing. See README.md
+				// → Limitations.
+				return null;
+		}
+	}
+
+	/**
+	 * Resolve a `source: attribute` definition — reads a DOM attribute value.
+	 *
+	 * @param array  $attr_def   Block-attribute definition. Requires `selector`
+	 *                           and `attribute` keys to be useful.
+	 * @param string $inner_html Block's innerHTML.
+	 *
+	 * @return string|null Attribute value, or null if missing.
+	 */
+	private function source_attribute( array $attr_def, $inner_html ) {
+		$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
+		if ( '' === $selector || ! isset( $attr_def['attribute'] ) ) {
+			return null;
+		}
+		return $this->extract_dom_attribute( $inner_html, $selector, $attr_def['attribute'] );
+	}
+
+	/**
+	 * Resolve a `source: html` definition — returns the inner HTML of the
+	 * first matching element.
+	 *
+	 * @param array  $attr_def   Block-attribute definition. Requires `selector`.
+	 * @param string $inner_html Block's innerHTML.
+	 *
+	 * @return string|null Inner HTML, or null if the selector doesn't match.
+	 */
+	private function source_html( array $attr_def, $inner_html ) {
+		$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
+		if ( '' === $selector ) {
+			return null;
+		}
+		return $this->extract_inner_html( $inner_html, $selector );
+	}
+
+	/**
+	 * Resolve a `source: rich-text` definition — returns the inner HTML of the
+	 * first matching element. Kept distinct from source_html so future
+	 * divergence (e.g. RichText-format normalization) lands in one place.
+	 *
+	 * @param array  $attr_def   Block-attribute definition. Requires `selector`.
+	 * @param string $inner_html Block's innerHTML.
+	 *
+	 * @return string|null Inner HTML, or null if the selector doesn't match.
+	 */
+	private function source_rich_text( array $attr_def, $inner_html ) {
+		$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
+		if ( '' === $selector ) {
+			return null;
+		}
+		return $this->extract_inner_html( $inner_html, $selector );
+	}
+
+	/**
+	 * Resolve a `source: text` definition — returns the matched element's
+	 * inner content stripped of all HTML tags.
+	 *
+	 * @param array  $attr_def   Block-attribute definition. Requires `selector`.
+	 * @param string $inner_html Block's innerHTML.
+	 *
+	 * @return string|null Plain text, or null if the selector doesn't match.
+	 */
+	private function source_text( array $attr_def, $inner_html ) {
+		$selector = isset( $attr_def['selector'] ) ? $attr_def['selector'] : '';
+		if ( '' === $selector ) {
+			return null;
+		}
+		$html = $this->extract_inner_html( $inner_html, $selector );
+		if ( null === $html ) {
+			return null;
+		}
+		return wp_strip_all_tags( $html );
 	}
 
 	/**
