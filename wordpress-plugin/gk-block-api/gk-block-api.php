@@ -90,7 +90,10 @@ function register_global_filters() {
 	add_filter( 'gk_block_api_dual_storage_blocks', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
 
 	// Block-type integrations — each file registers its own gk_block_api_* filters.
-	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
+	// (array) cast guards against glob() returning false on permission errors or
+	// a missing directory — PHP 8+ fatals on `foreach (false)` (TypeError),
+	// taking down `plugins_loaded` for every request on the site.
+	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
 		require_once $integration;
 	}
 
@@ -98,7 +101,7 @@ function register_global_filters() {
 	// add_filter on gk_block_api_format_block. Pattern modeled on Automattic's
 	// vip-block-data-api block-additions/ directory. Each file ends with
 	// `Foo_Enricher::init();` to self-register the filter.
-	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
+	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
 		require_once $enricher;
 	}
 }
