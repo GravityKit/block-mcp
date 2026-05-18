@@ -96,6 +96,20 @@ class Block_CRUD {
 	private $inventory;
 
 	/**
+	 * Read-path collaborator.
+	 *
+	 * @var Block_Reader
+	 */
+	private $reader;
+
+	/**
+	 * Write-path collaborator.
+	 *
+	 * @var Block_Writer
+	 */
+	private $writer;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Preferences      $preferences Preferences instance.
@@ -108,6 +122,8 @@ class Block_CRUD {
 		$this->safety      = $safety;
 		$this->transformer = $transformer;
 		$this->inventory   = $inventory;
+		$this->reader      = new Block_Reader( $this, $preferences, $safety, $transformer, $inventory );
+		$this->writer      = new Block_Writer( $this, $preferences, $safety, $transformer, $inventory );
 	}
 
 	/**
