@@ -110,4 +110,92 @@ class TermManagerTest extends WP_UnitTestCase {
 		$this->assertSame( 'Apple', $asc['terms'][0]['name'] );
 		$this->assertSame( 'Zebra', $desc['terms'][0]['name'] );
 	}
+
+	/**
+	 * /terms must refuse taxonomies the site has marked private.
+	 *
+	 * Plugins commonly register internal-state taxonomies with
+	 * `public: false` and `show_in_rest: false` (workflow status,
+	 * license keys, audit tags). Pre-fix, list_terms only checked
+	 * taxonomy_exists() — anyone with edit_posts could call
+	 * /terms?taxonomy=<private_slug> and enumerate every term. Same
+	 * gate WP's own /wp/v2/taxonomies endpoint enforces.
+	 */
+	public function test_list_terms_refuses_non_rest_taxonomy() {
+		register_taxonomy(
+			'gk_internal_only',
+			'post',
+			array(
+				'public'       => false,
+				'show_in_rest' => false,
+				'label'        => 'Internal Only',
+			)
+		);
+
+		wp_insert_term( 'Secret state', 'gk_internal_only' );
+
+		$result = $this->tm->list_terms( array( 'taxonomy' => 'gk_internal_only' ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_taxonomy', $result->get_error_code() );
+
+		unregister_taxonomy( 'gk_internal_only' );
+	}
+
+	/**
+	 * `gk_block_api_allow_taxonomy_in_terms` lets admins opt a deliberately-
+	 * private taxonomy back in.
+	 *
+	 * The agent-editing use case: a CPT with a workflow-state taxonomy
+	 * (e.g. "Editorial Status") that the site explicitly hides from
+	 * /wp/v2/taxonomies but wants reachable through this MCP so agents
+	 * can assign statuses. The filter is the override seam.
+	 */
+	public function test_list_terms_filter_can_allow_private_taxonomy() {
+		register_taxonomy(
+			'gk_editorial_status',
+			'post',
+			array(
+				'public'       => false,
+				'show_in_rest' => false,
+				'label'        => 'Editorial Status',
+			)
+		);
+		wp_insert_term( 'In Review', 'gk_editorial_status' );
+
+		$callback = static function ( $allow, $taxonomy ) {
+			return 'gk_editorial_status' === $taxonomy ? true : $allow;
+		};
+		add_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10, 2 );
+
+		try {
+			$result = $this->tm->list_terms( array( 'taxonomy' => 'gk_editorial_status' ) );
+			$this->assertIsArray( $result );
+			$this->assertSame( 'gk_editorial_status', $result['taxonomy'] );
+			$this->assertNotEmpty( $result['terms'] );
+		} finally {
+			remove_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10 );
+			unregister_taxonomy( 'gk_editorial_status' );
+		}
+	}
+
+	/**
+	 * The same filter can also deny a normally-listable taxonomy. Useful
+	 * for sites that want to keep, e.g., `post_tag` off the MCP surface
+	 * without un-registering it from WP-admin.
+	 */
+	public function test_list_terms_filter_can_deny_public_taxonomy() {
+		$callback = static function ( $allow, $taxonomy ) {
+			return 'post_tag' === $taxonomy ? false : $allow;
+		};
+		add_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10, 2 );
+
+		try {
+			$result = $this->tm->list_terms( array( 'taxonomy' => 'post_tag' ) );
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'invalid_taxonomy', $result->get_error_code() );
+		} finally {
+			remove_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10 );
+		}
+	}
 }

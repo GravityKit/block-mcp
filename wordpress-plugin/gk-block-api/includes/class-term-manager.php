@@ -38,6 +38,51 @@ class Term_Manager {
 			);
 		}
 
+		// Only surface taxonomies the site has opted into REST exposure.
+		// Plugins commonly register internal-state taxonomies with
+		// `public: false` and `show_in_rest: false` for their own
+		// bookkeeping (workflow state, license keys, etc.). Without this
+		// gate, /terms?taxonomy=<that_internal_slug> would list every term
+		// in that taxonomy to any edit_posts caller. Matches the
+		// invariant WordPress's own /wp/v2/taxonomies endpoint enforces.
+		//
+		// Override via the `gk_block_api_allow_taxonomy_in_terms` filter:
+		// agents editing a CPT with a deliberately-private taxonomy
+		// (workflow state, internal department) still need to discover
+		// term IDs to assign them — site admins can grant per-taxonomy
+		// access by returning true from the filter without globally
+		// flipping show_in_rest.
+		$tax_object  = get_taxonomy( $taxonomy );
+		$rest_listed = $tax_object && ! empty( $tax_object->show_in_rest );
+
+		/**
+		 * Filter whether a taxonomy is listable via /terms.
+		 *
+		 * Default: true iff the taxonomy's `show_in_rest` is true. Override
+		 * to permit a deliberately-internal taxonomy (one with show_in_rest
+		 * false) for the agent-editing use case without exposing it through
+		 * the rest of WordPress's REST surface. Return false to deny a
+		 * normally-listable taxonomy.
+		 *
+		 * @param bool                   $allow      Default decision.
+		 * @param string                 $taxonomy   Sanitized taxonomy slug.
+		 * @param \WP_Taxonomy|null|false $tax_object Taxonomy object (null/false if not registered).
+		 */
+		$allow = apply_filters(
+			'gk_block_api_allow_taxonomy_in_terms',
+			$rest_listed,
+			$taxonomy,
+			$tax_object
+		);
+
+		if ( ! $tax_object || ! $allow ) {
+			return new \WP_Error(
+				'invalid_taxonomy',
+				sprintf( /* translators: %s: taxonomy slug */ __( 'Taxonomy "%s" does not exist.', 'gk-block-api' ), $taxonomy ),
+				array( 'status' => 400 )
+			);
+		}
+
 		$per_page = isset( $args['per_page'] ) ? (int) $args['per_page'] : 100;
 		$per_page = max( 1, min( self::MAX_PER_PAGE, $per_page ) );
 		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
