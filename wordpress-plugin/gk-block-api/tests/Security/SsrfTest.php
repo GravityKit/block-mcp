@@ -85,30 +85,32 @@ class SsrfTest extends WP_UnitTestCase {
 	// ── Encoded IP bypass attempts ─────────────────────────────────
 
 	public function test_blocks_decimal_encoded_loopback() {
-		// 2130706433 == 127.0.0.1
-		$result = $this->mm->upload( array( 'url' => 'http://2130706433/admin' ) );
-		// wp_parse_url() reports the host as "2130706433"; the guard tries
-		// dns_get_record on that, gets nothing, falls back to
-		// gethostbyname(). gethostbyname accepts decimal-encoded IPs on
-		// many systems and returns 127.0.0.1, which the guard rejects.
-		// If the host fails to resolve, the guard also rejects with
-		// 'invalid_url'. Either rejection is fine.
-		$this->assertInstanceOf( \WP_Error::class, $result, 'decimal IP 2130706433 must not reach download_url' );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		// 2130706433 == 127.0.0.1. wp_parse_url() reports the host as
+		// "2130706433"; the guard tries dns_get_record on that, gets
+		// nothing, falls back to gethostbyname(). gethostbyname accepts
+		// decimal-encoded IPs on many systems and returns 127.0.0.1,
+		// which the guard rejects. If the host fails to resolve, the
+		// guard also rejects with 'invalid_url'. Either rejection is fine.
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'http://2130706433/admin' ) ),
+			'decimal-encoded loopback (2130706433)'
+		);
 	}
 
 	public function test_blocks_hex_encoded_loopback() {
 		// 0x7f000001 == 127.0.0.1
-		$result = $this->mm->upload( array( 'url' => 'http://0x7f000001/' ) );
-		$this->assertInstanceOf( \WP_Error::class, $result, 'hex-encoded IP must not reach download_url' );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'http://0x7f000001/' ) ),
+			'hex-encoded loopback (0x7f000001)'
+		);
 	}
 
 	public function test_blocks_octal_encoded_loopback() {
 		// 0177.0.0.1 — octal representation of 127.0.0.1
-		$result = $this->mm->upload( array( 'url' => 'http://0177.0.0.1/' ) );
-		$this->assertInstanceOf( \WP_Error::class, $result, 'octal IP must not reach download_url' );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'http://0177.0.0.1/' ) ),
+			'octal-encoded loopback (0177.0.0.1)'
+		);
 	}
 
 	// ── IPv6 hostile literals ──────────────────────────────────────
@@ -174,23 +176,26 @@ class SsrfTest extends WP_UnitTestCase {
 	}
 
 	public function test_blocks_non_http_scheme_file() {
-		$result = $this->mm->upload( array( 'url' => 'file:///etc/passwd' ) );
-		$this->assertInstanceOf( \WP_Error::class, $result, 'file:// must be rejected' );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'file:///etc/passwd' ) ),
+			'file:// scheme'
+		);
 	}
 
 	public function test_blocks_non_http_scheme_gopher() {
-		$result = $this->mm->upload( array( 'url' => 'gopher://127.0.0.1:6379/' ) );
-		$this->assertInstanceOf( \WP_Error::class, $result, 'gopher:// (Redis RCE class) must be rejected' );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'gopher://127.0.0.1:6379/' ) ),
+			'gopher:// (Redis RCE class)'
+		);
 	}
 
 	// ── No-host / malformed URLs ──────────────────────────────────
 
 	public function test_blocks_url_without_host() {
-		$result = $this->mm->upload( array( 'url' => 'http:///path' ) );
-		$this->assertInstanceOf( \WP_Error::class, $result );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'http:///path' ) ),
+			'URL with no host'
+		);
 	}
 
 	/**
@@ -198,11 +203,10 @@ class SsrfTest extends WP_UnitTestCase {
 	 * default rather than letting `download_url()` try.
 	 */
 	public function test_blocks_unresolvable_host() {
-		$result = $this->mm->upload(
-			array( 'url' => 'http://this-host-definitely-does-not-exist.invalid.gk-block-api-test/' )
+		$this->assertRejected(
+			$this->mm->upload( array( 'url' => 'http://this-host-definitely-does-not-exist.invalid.gk-block-api-test/' ) ),
+			'unresolvable host'
 		);
-		$this->assertInstanceOf( \WP_Error::class, $result );
-		$this->assertSame( 'invalid_url', $result->get_error_code() );
 	}
 
 	// ── Filter-extensibility ──────────────────────────────────────
@@ -250,7 +254,12 @@ class SsrfTest extends WP_UnitTestCase {
 	 * `pre_http_request` hook trips the assertion.
 	 */
 	public function test_no_redirect_following_into_private_ip() {
-		$private_url = 'http://169.254.169.254/latest/meta-data/iam';
+		$private_url        = 'http://169.254.169.254/latest/meta-data/iam';
+		$public_url         = 'https://203.0.113.5/redirect.png';
+		$initial_hook_fired = false;
+
+		// Inner guard: if the plugin EVER calls out for the private URL,
+		// the redirect was followed → failing.
 		add_filter( 'pre_http_request', function ( $preempt, $args, $url ) use ( $private_url ) {
 			unset( $args ); // Positional placeholder — signature requires it for $url.
 			$this->assertNotSame(
@@ -261,12 +270,16 @@ class SsrfTest extends WP_UnitTestCase {
 			return $preempt;
 		}, 10, 3 );
 
-		// Simulate the 302-to-private response on the initial public URL.
-		$public_url = 'https://203.0.113.5/redirect.png';
-		add_filter( 'pre_http_request', function ( $preempt, $args, $url ) use ( $public_url, $private_url ) {
+		// Outer hook: simulate the 302-to-private response on the initial
+		// public URL. Sets the `$initial_hook_fired` flag so we can later
+		// verify the public-URL fetch actually ran — without this flag
+		// the test could pass vacuously if download_url() rejected the
+		// public URL upstream of any HTTP fetch.
+		add_filter( 'pre_http_request', function ( $preempt, $args, $url ) use ( $public_url, $private_url, &$initial_hook_fired ) {
 			if ( $url !== $public_url ) {
 				return $preempt;
 			}
+			$initial_hook_fired = true;
 			// Return a Location redirect to the private IP. download_url
 			// uses wp_safe_remote_get which follows redirects up to 5
 			// hops by default — if it follows, the assertion above fires.
@@ -280,6 +293,10 @@ class SsrfTest extends WP_UnitTestCase {
 		}, 10, 3 );
 
 		$result = $this->mm->upload( array( 'url' => $public_url ) );
+		$this->assertTrue(
+			$initial_hook_fired,
+			'public-URL pre_http_request hook must have fired; otherwise the redirect-not-followed assertion is vacuous'
+		);
 		// The download attempt fails (either rejected by SSRF re-check,
 		// or the response 302 wasn't followed) — either way the upload
 		// returns an error, not a successful attachment.

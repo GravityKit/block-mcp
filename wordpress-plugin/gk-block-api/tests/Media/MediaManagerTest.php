@@ -25,6 +25,14 @@ class MediaManagerTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		$_FILES = array();
+		// WP_UnitTestCase backs up + restores $wp_filter around each test, so
+		// per-test add_filter() calls don't normally leak. The explicit
+		// remove_all_filters here is belt-and-braces against the specific
+		// hooks this file attaches — useful if a future base-class change
+		// drops the hook-backup behavior.
+		remove_all_filters( 'upload_size_limit' );
+		remove_all_filters( 'gk_block_api_media_upload_overrides' );
+		remove_all_filters( 'pre_http_request' );
 		parent::tear_down();
 	}
 

@@ -77,7 +77,10 @@ class MutationChaosTest extends BlockApiTestCase {
 		$content = (string) get_post_field( 'post_content', $this->post_id );
 		$blocks  = parse_blocks( $content );
 
-		$walker = function ( $blocks, $where ) use ( $iteration, &$walker, &$refs_seen ) {
+		// Initialize before the closure so the `&$refs_seen` reference
+		// captured below has a defined target at every call.
+		$refs_seen = array();
+		$walker    = function ( $blocks, $where ) use ( $iteration, &$walker, &$refs_seen ) {
 			foreach ( $blocks as $i => $block ) {
 				if ( null === $block['blockName'] ) {
 					continue;
@@ -108,7 +111,6 @@ class MutationChaosTest extends BlockApiTestCase {
 				$walker( $block['innerBlocks'], $here );
 			}
 		};
-		$refs_seen = array();
 		$walker( $blocks, '' );
 
 		// Re-parse of re-serialized content matches the parsed tree —
