@@ -465,20 +465,29 @@ class Block_CRUD {
 	 *
 	 * @return int
 	 */
-	public static function tree_depth( array $blocks ): int {
-		if ( empty( $blocks ) ) {
-			return 0;
+	public static function tree_depth( array $blocks, int $depth_so_far = 0 ): int {
+		// Hard early-exit. Without this, an adversarial 100k-deep block tree
+		// would recurse 100k times before validate_tree_depth could reject it,
+		// blowing the PHP stack (segfault) before we got a chance to return a
+		// proper 400 WP_Error. Return MAX_BLOCK_DEPTH + 1 as soon as we know
+		// the bound is exceeded; the depth value past the limit is meaningless
+		// to the caller (validate_tree_depth only compares > MAX_BLOCK_DEPTH).
+		if ( $depth_so_far > self::MAX_BLOCK_DEPTH ) {
+			return $depth_so_far;
 		}
-		$max = 0;
+		if ( empty( $blocks ) ) {
+			return $depth_so_far;
+		}
+		$max = $depth_so_far;
 		foreach ( $blocks as $block ) {
 			if ( ! is_array( $block ) ) {
 				continue;
 			}
-			$child_depth = 0;
+			$child_depth = $depth_so_far + 1;
 			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				$child_depth = self::tree_depth( $block['innerBlocks'] );
+				$child_depth = self::tree_depth( $block['innerBlocks'], $depth_so_far + 1 );
 			}
-			$max = max( $max, 1 + $child_depth );
+			$max = max( $max, $child_depth );
 		}
 		return $max;
 	}
