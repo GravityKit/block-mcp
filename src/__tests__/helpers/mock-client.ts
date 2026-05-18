@@ -5,49 +5,11 @@
  * individual methods with .mockResolvedValueOnce() as needed.
  *
  * Usage:
- *   import { makeMockClient, type MockClient } from '../helpers/mock-client.js';
+ *   import { makeMockClient } from '../helpers/mock-client.js';
  *   const client = makeMockClient();
  *   client.getPageBlocks.mockResolvedValueOnce(pageBlocksResponse);
  */
 import { vi } from 'vitest';
-import type {
-  pageBlocksResponse,
-  updateBlockResponse,
-  insertBlocksResponse,
-  deleteBlockResponse,
-  batchUpdateResponse,
-  replaceRangeResponse,
-  getBlockResponse,
-  mutationUpdateAttrsResponse,
-  patternInsertResponse,
-  createPostResponse,
-  updatePostResponse,
-  yoastSEOResponse,
-  blockTypesResponse,
-  patternsResponse,
-  siteUsageResponse,
-  resolveUrlResponse,
-} from '../fixtures/rest-responses.js';
-
-// ── Infer result types from the fixture values ──────────────────────────────
-// We re-declare as types so tests can import and use them for assertions.
-
-type PageBlocksResult = typeof pageBlocksResponse;
-type UpdateBlockResult = typeof updateBlockResponse;
-type InsertBlocksResult = typeof insertBlocksResponse;
-type DeleteBlockResult = typeof deleteBlockResponse;
-type BatchUpdateResult = typeof batchUpdateResponse;
-type ReplaceRangeResult = typeof replaceRangeResponse;
-type GetBlockResult = typeof getBlockResponse;
-type MutationResult = typeof mutationUpdateAttrsResponse;
-type PatternInsertResult = typeof patternInsertResponse;
-type CreatePostResult = typeof createPostResponse;
-type UpdatePostResult = typeof updatePostResponse;
-type YoastSEOResult = typeof yoastSEOResponse;
-type BlockTypesResult = typeof blockTypesResponse;
-type PatternsResult = typeof patternsResponse;
-type SiteUsageResult = typeof siteUsageResponse;
-type ResolveUrlResult = typeof resolveUrlResponse;
 
 /** The full shape of the mock client returned by makeMockClient(). */
 export type MockClient = ReturnType<typeof makeMockClient>;
@@ -60,20 +22,20 @@ export type MockClient = ReturnType<typeof makeMockClient>;
 export function makeMockClient() {
   return {
     // ── Discovery ────────────────────────────────────────────────────────
-    getBlockTypes: vi.fn<[], Promise<BlockTypesResult>>().mockResolvedValue(
+    getBlockTypes: vi.fn().mockResolvedValue(
       { block_types: [] }
     ),
-    getPatterns: vi.fn<[], Promise<PatternsResult>>().mockResolvedValue(
+    getPatterns: vi.fn().mockResolvedValue(
       { patterns: [] }
     ),
     getPattern: vi.fn().mockResolvedValue({ id: 1, name: 'Test Pattern' }),
-    searchPatterns: vi.fn<[], Promise<PatternsResult>>().mockResolvedValue(
+    searchPatterns: vi.fn().mockResolvedValue(
       { patterns: [] }
     ),
     getSiteUsage: vi.fn().mockResolvedValue(
       { block_usage: {}, namespace_totals: {}, pattern_references: {}, legacy_patterns: [] }
     ),
-    resolveUrl: vi.fn<[], Promise<ResolveUrlResult>>().mockResolvedValue({
+    resolveUrl: vi.fn().mockResolvedValue({
       post_id: 1,
       post_type: 'page',
       title: 'Test Page',
@@ -97,10 +59,10 @@ export function makeMockClient() {
     }),
 
     // ── Read ─────────────────────────────────────────────────────────────
-    getPageBlocks: vi.fn<[], Promise<PageBlocksResult>>().mockResolvedValue(
-      { blocks: [], summary: undefined as any }
+    getPageBlocks: vi.fn().mockResolvedValue(
+      { blocks: [], summary: undefined }
     ),
-    getBlock: vi.fn<[], Promise<GetBlockResult>>().mockResolvedValue({
+    getBlock: vi.fn().mockResolvedValue({
       success: true,
       saved: {
         flat_index: 0, block_name: 'core/paragraph',
@@ -109,7 +71,7 @@ export function makeMockClient() {
     }),
 
     // ── Write ────────────────────────────────────────────────────────────
-    updateBlock: vi.fn<[], Promise<UpdateBlockResult>>().mockResolvedValue({
+    updateBlock: vi.fn().mockResolvedValue({
       success: true,
       block: { index: 0, name: 'core/paragraph', attributes: {} },
       saved: {
@@ -119,7 +81,7 @@ export function makeMockClient() {
       before_revision_id: 1,
       revision_id: 2,
     }),
-    updateBlockByRef: vi.fn<[], Promise<UpdateBlockResult>>().mockResolvedValue({
+    updateBlockByRef: vi.fn().mockResolvedValue({
       success: true,
       block: { index: 0, name: 'core/paragraph', attributes: {}, ref: 'blk_test0001' },
       saved: {
@@ -129,29 +91,29 @@ export function makeMockClient() {
       before_revision_id: 1,
       revision_id: 2,
     }),
-    updateBlocksBatch: vi.fn<[], Promise<BatchUpdateResult>>().mockResolvedValue({
+    updateBlocksBatch: vi.fn().mockResolvedValue({
       success: true, count: 0, results: [], before_revision_id: 1, revision_id: 2,
     }),
-    insertBlocks: vi.fn<[], Promise<InsertBlocksResult>>().mockResolvedValue({
+    insertBlocks: vi.fn().mockResolvedValue({
       success: true,
       inserted: [{ index: 0, name: 'core/paragraph' }],
       warnings: [],
       before_revision_id: 1,
       revision_id: 2,
     }),
-    deleteBlock: vi.fn<[], Promise<DeleteBlockResult>>().mockResolvedValue(
+    deleteBlock: vi.fn().mockResolvedValue(
       { success: true, removed: 1, before_revision_id: 1, revision_id: 2 }
     ),
-    deleteBlockByRef: vi.fn<[], Promise<DeleteBlockResult>>().mockResolvedValue(
+    deleteBlockByRef: vi.fn().mockResolvedValue(
       { success: true, removed: 1, before_revision_id: 1, revision_id: 2 }
     ),
-    replaceBlocksRange: vi.fn<[], Promise<ReplaceRangeResult>>().mockResolvedValue({
+    replaceBlocksRange: vi.fn().mockResolvedValue({
       success: true, removed: 0,
       inserted: [{ index: 0, name: 'core/paragraph' }],
       warnings: [],
       before_revision_id: 1, revision_id: 2,
     }),
-    replaceAllBlocks: vi.fn<[], Promise<InsertBlocksResult>>().mockResolvedValue({
+    replaceAllBlocks: vi.fn().mockResolvedValue({
       success: true,
       inserted: [],
       warnings: [],
@@ -161,7 +123,7 @@ export function makeMockClient() {
     revertToRevision: vi.fn().mockResolvedValue({ success: true, revision_id: 1 }),
 
     // ── Mutation ─────────────────────────────────────────────────────────
-    mutateBlockTree: vi.fn<[], Promise<MutationResult>>().mockResolvedValue({
+    mutateBlockTree: vi.fn().mockResolvedValue({
       success: true,
       op: 'update-attrs' as const,
       path: [0],
@@ -172,7 +134,7 @@ export function makeMockClient() {
     }),
 
     // ── Pattern ──────────────────────────────────────────────────────────
-    insertPattern: vi.fn<[], Promise<PatternInsertResult>>().mockResolvedValue({
+    insertPattern: vi.fn().mockResolvedValue({
       success: true,
       inserted: { index: 0, name: 'core/block', attributes: { ref: 1 }, synced: true },
       pattern_name: 'Test Pattern',
@@ -182,13 +144,13 @@ export function makeMockClient() {
     }),
 
     // ── Post lifecycle ────────────────────────────────────────────────────
-    createPost: vi.fn<[], Promise<CreatePostResult>>().mockResolvedValue({
+    createPost: vi.fn().mockResolvedValue({
       success: true, id: 1, post_type: 'post', status: 'draft',
       title: 'Test Post', slug: 'test-post',
       permalink: 'https://example.test/test-post/',
       edit_link: '', before_revision_id: null, revision_id: null, warnings: [],
     }),
-    updatePost: vi.fn<[], Promise<UpdatePostResult>>().mockResolvedValue({
+    updatePost: vi.fn().mockResolvedValue({
       success: true, id: 1, post_type: 'post', status: 'publish',
       title: 'Test Post', slug: 'test-post',
       permalink: 'https://example.test/test-post/',
@@ -210,11 +172,11 @@ export function makeMockClient() {
     }),
 
     // ── Yoast ─────────────────────────────────────────────────────────────
-    getYoastSEO: vi.fn<[], Promise<YoastSEOResult>>().mockResolvedValue({
+    getYoastSEO: vi.fn().mockResolvedValue({
       post_id: 1, title: '', description: '', noindex: null,
       seo_score: null, readability_score: null, inclusive_language_score: null,
     }),
-    updateYoastSEO: vi.fn<[], Promise<YoastSEOResult>>().mockResolvedValue({
+    updateYoastSEO: vi.fn().mockResolvedValue({
       post_id: 1, title: 'Updated', description: '', noindex: null,
       seo_score: 80, readability_score: 70, inclusive_language_score: null,
     }),

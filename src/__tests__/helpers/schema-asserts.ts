@@ -27,7 +27,7 @@ export function assertHasKeys<T extends object>(
 ): asserts value is T {
   expect(value, `${label} must not be null/undefined`).toBeDefined();
   expect(typeof value, `${label} must be an object`).toBe('object');
-  const obj = value as Record<string, unknown>;
+  const obj = value as unknown as Record<string, unknown>;
   for (const key of keys as string[]) {
     expect(obj, `${label} must have key "${key}"`).toHaveProperty(key);
   }
@@ -42,12 +42,12 @@ export function assertHasKeys<T extends object>(
  */
 export function assertSavedBlock(value: unknown): void {
   assertHasKeys(value, ['flat_index', 'block_name', 'attributes', 'inner_html', 'is_dynamic'], 'SavedBlock');
-  const b = value as Record<string, unknown>;
-  expect(typeof b.flat_index, 'SavedBlock.flat_index must be number').toBe('number');
-  expect(typeof b.block_name, 'SavedBlock.block_name must be string').toBe('string');
-  expect(typeof b.attributes, 'SavedBlock.attributes must be object').toBe('object');
-  expect(typeof b.inner_html, 'SavedBlock.inner_html must be string').toBe('string');
-  expect(typeof b.is_dynamic, 'SavedBlock.is_dynamic must be boolean').toBe('boolean');
+  const b = value as unknown as Record<string, unknown>;
+  expect(typeof b['flat_index'], 'SavedBlock.flat_index must be number').toBe('number');
+  expect(typeof b['block_name'], 'SavedBlock.block_name must be string').toBe('string');
+  expect(typeof b['attributes'], 'SavedBlock.attributes must be object').toBe('object');
+  expect(typeof b['inner_html'], 'SavedBlock.inner_html must be string').toBe('string');
+  expect(typeof b['is_dynamic'], 'SavedBlock.is_dynamic must be boolean').toBe('boolean');
 }
 
 /**
@@ -56,11 +56,11 @@ export function assertSavedBlock(value: unknown): void {
  */
 export function assertBlock(value: unknown): void {
   assertHasKeys(value, ['index', 'name', 'attributes'], 'Block');
-  const b = value as Record<string, unknown>;
-  expect(typeof b.index, 'Block.index must be number').toBe('number');
-  expect(typeof b.name, 'Block.name must be string').toBe('string');
-  expect(b.name as string).toMatch(/^\w[\w-]*\/[\w-]+$/, 'Block.name must be namespace/name');
-  expect(typeof b.attributes, 'Block.attributes must be object').toBe('object');
+  const b = value as unknown as Record<string, unknown>;
+  expect(typeof b['index'], 'Block.index must be number').toBe('number');
+  expect(typeof b['name'], 'Block.name must be string').toBe('string');
+  expect(b['name'] as string).toMatch(/^\w[\w-]*\/[\w-]+$/);
+  expect(typeof b['attributes'], 'Block.attributes must be object').toBe('object');
 }
 
 /**
@@ -68,11 +68,11 @@ export function assertBlock(value: unknown): void {
  */
 export function assertBlockUpdateResponse(value: unknown): void {
   assertHasKeys(value, ['success', 'block', 'saved', 'before_revision_id', 'revision_id'], 'BlockUpdateResponse');
-  const r = value as Record<string, unknown>;
-  expect(r.success).toBe(true);
-  assertSavedBlock(r.saved);
-  expect(typeof r.before_revision_id, 'before_revision_id must be number').toBe('number');
-  expect(typeof r.revision_id, 'revision_id must be number').toBe('number');
+  const r = value as unknown as Record<string, unknown>;
+  expect(r['success']).toBe(true);
+  assertSavedBlock(r['saved']);
+  expect(typeof r['before_revision_id'], 'before_revision_id must be number').toBe('number');
+  expect(typeof r['revision_id'], 'revision_id must be number').toBe('number');
 }
 
 /**
@@ -80,10 +80,10 @@ export function assertBlockUpdateResponse(value: unknown): void {
  */
 export function assertBlockWriteResponse(value: unknown): void {
   assertHasKeys(value, ['success', 'inserted', 'warnings', 'before_revision_id', 'revision_id'], 'BlockWriteResponse');
-  const r = value as Record<string, unknown>;
-  expect(r.success).toBe(true);
-  expect(Array.isArray(r.inserted), 'inserted must be an array').toBe(true);
-  expect(Array.isArray(r.warnings), 'warnings must be an array').toBe(true);
+  const r = value as unknown as Record<string, unknown>;
+  expect(r['success']).toBe(true);
+  expect(Array.isArray(r['inserted']), 'inserted must be an array').toBe(true);
+  expect(Array.isArray(r['warnings']), 'warnings must be an array').toBe(true);
 }
 
 /**
@@ -91,10 +91,10 @@ export function assertBlockWriteResponse(value: unknown): void {
  */
 export function assertMutationResponse(value: unknown): void {
   assertHasKeys(value, ['success', 'op', 'path', 'warnings', 'before_revision_id', 'revision_id'], 'MutationResponse');
-  const r = value as Record<string, unknown>;
-  expect(r.success).toBe(true);
-  expect(typeof r.op).toBe('string');
-  expect(Array.isArray(r.path)).toBe(true);
+  const r = value as unknown as Record<string, unknown>;
+  expect(r['success']).toBe(true);
+  expect(typeof r['op']).toBe('string');
+  expect(Array.isArray(r['path'])).toBe(true);
 }
 
 /**
@@ -102,9 +102,9 @@ export function assertMutationResponse(value: unknown): void {
  */
 export function assertPreferenceWarning(value: unknown): void {
   assertHasKeys(value, ['block', 'message'], 'PreferenceWarning');
-  const w = value as Record<string, unknown>;
-  expect(typeof w.block).toBe('string');
-  expect(typeof w.message).toBe('string');
+  const w = value as unknown as Record<string, unknown>;
+  expect(typeof w['block']).toBe('string');
+  expect(typeof w['message']).toBe('string');
 }
 
 /**
@@ -112,9 +112,9 @@ export function assertPreferenceWarning(value: unknown): void {
  */
 export function assertPostMutationResponse(value: unknown): void {
   assertHasKeys(value, ['success', 'id', 'post_type', 'status', 'title', 'slug', 'permalink'], 'PostMutationResponse');
-  const r = value as Record<string, unknown>;
-  expect(r.success).toBe(true);
-  expect(typeof r.id).toBe('number');
+  const r = value as unknown as Record<string, unknown>;
+  expect(r['success']).toBe(true);
+  expect(typeof r['id']).toBe('number');
 }
 
 /**
@@ -122,6 +122,6 @@ export function assertPostMutationResponse(value: unknown): void {
  */
 export function assertYoastSEOMeta(value: unknown): void {
   assertHasKeys(value, ['post_id'], 'YoastSEOMeta');
-  const r = value as Record<string, unknown>;
-  expect(typeof r.post_id).toBe('number');
+  const r = value as unknown as Record<string, unknown>;
+  expect(typeof r['post_id']).toBe('number');
 }
