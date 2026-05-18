@@ -76,15 +76,7 @@ class Core_Block_Enricher {
 		// Without this check, an editor who can read the embedding post but
 		// not the referenced pattern would see its title and (with render)
 		// its full block tree — a quiet information disclosure.
-		//
-		// Treat publish-without-password as "public" (always expandable).
-		// Anything else (draft / pending / private / trash / password-protected)
-		// requires the caller to pass current_user_can('read_post'), which
-		// WP's cap-mapping resolves against post status, ownership, and the
-		// `read_private_posts` cap. AND, not OR — published-no-password is
-		// public content and must expand even for low-privilege auth contexts.
-		$is_public = 'publish' === $ref_post->post_status && empty( $ref_post->post_password );
-		if ( ! $is_public && ! current_user_can( 'read_post', $ref_post->ID ) ) {
+		if ( ! \GravityKit\BlockAPI\Block_CRUD::is_post_readable( $ref_post ) ) {
 			return $data;
 		}
 

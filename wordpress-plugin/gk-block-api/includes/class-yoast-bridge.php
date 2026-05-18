@@ -362,7 +362,17 @@ class Yoast_Bridge {
 			}
 
 			if ( 'is_cornerstone' === $field ) {
-				update_post_meta( $post_id, $meta_key, $value ? '1' : 'false' );
+				// Yoast convention: meta = '1' to enable, MISSING (or empty)
+				// to disable. The previous code stored the literal string
+				// 'false' on disable, which PHP treats as truthy — so
+				// toggling cornerstone off via this API silently left it
+				// enabled in Yoast's view. Match the same pattern nofollow
+				// uses above: write '1' to enable, delete to disable.
+				if ( $value ) {
+					update_post_meta( $post_id, $meta_key, '1' );
+				} else {
+					delete_post_meta( $post_id, $meta_key );
+				}
 				continue;
 			}
 

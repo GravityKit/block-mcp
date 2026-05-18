@@ -1559,6 +1559,20 @@ class Block_Writer {
 				);
 			}
 
+			// Visibility gate. Inserting a draft / private / password-protected
+			// pattern would (a) copy its content verbatim under inline mode or
+			// (b) embed a core/block ref that anonymous front-end visitors then
+			// see when the host post renders. Either way it leaks content the
+			// caller might not have rights to see. Shared with the read-side
+			// enricher — see Block_CRUD::is_post_readable() for the contract.
+			if ( ! Block_CRUD::is_post_readable( $pattern_post ) ) {
+				return new \WP_Error(
+					'pattern_not_found',
+					__( 'Synced pattern not found.', 'gk-block-api' ),
+					array( 'status' => 404 )
+				);
+			}
+
 			$pattern_name    = $pattern_post->post_title;
 			$pattern_content = $pattern_post->post_content;
 		} else {

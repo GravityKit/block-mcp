@@ -457,11 +457,45 @@ class Block_CRUD {
 	// =========================================================================
 
 	/**
+	 * Visibility gate shared by the read enricher and the insert-pattern
+	 * write path. Returns true if a wp_block CPT post is safe to surface /
+	 * inline / reference for the current caller.
+	 *
+	 * WordPress doesn't expose a single helper that matches this contract:
+	 *   - is_post_publicly_viewable() factors in the post type's `public`
+	 *     flag, which wp_block lacks, so it returns false even for a
+	 *     plainly-published synced pattern.
+	 *   - post_password_required() covers only the password case.
+	 *   - current_user_can('read_post') alone over-blocks: published patterns
+	 *     should expand for unauthenticated test contexts too.
+	 *
+	 * Treat publish-without-password as universally readable. For any other
+	 * status (or a password-protected publish), fall back to the standard
+	 * read_post cap-check, which WP cap-maps against ownership + status +
+	 * read_private_<post_type> + the password cookie.
+	 *
+	 * @param \WP_Post|null $post Post object, typically from get_post().
+	 *
+	 * @return bool True if the caller may see this post's title/content.
+	 */
+	public static function is_post_readable( $post ): bool {
+		if ( ! $post instanceof \WP_Post ) {
+			return false;
+		}
+		$is_public = 'publish' === $post->post_status && empty( $post->post_password );
+		return $is_public || current_user_can( 'read_post', $post->ID );
+	}
+
+	/**
 	 * Compute the maximum nesting depth of a block tree. A flat array
 	 * (no innerBlocks anywhere) is depth 1. Empty input is depth 0.
 	 *
-	 * @param array $blocks Block tree in either WP-internal shape
-	 *                      (`innerBlocks`) or API shape (`innerBlocks`).
+	 * @param array $blocks       Block tree in either WP-internal shape
+	 *                            (`innerBlocks`) or API shape (`innerBlocks`).
+	 * @param int   $depth_so_far Internal recursion accumulator. Callers
+	 *                            should leave this at the default 0; the
+	 *                            recursive walker uses it to implement the
+	 *                            early-exit at MAX_BLOCK_DEPTH + 1.
 	 *
 	 * @return int
 	 */
