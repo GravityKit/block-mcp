@@ -1,22 +1,29 @@
 /**
- * Client-level URL routing tests for the ref endpoints.
+ * Client-level URL routing tests for ref endpoints.
  *
- * These verify the WordPressBlockClient builds the correct URLs and
- * encodes refs properly. Uses an axios adapter to capture requests
- * without hitting the network.
+ * These verify WordPressBlockClient builds the correct URLs and encodes
+ * refs properly. Uses an axios adapter to capture requests without hitting
+ * the network.
  *
- * Coverage:
+ * Covers:
  *   - updateBlockByRef → PATCH /posts/{id}/blocks/by-ref/{ref}
  *   - deleteBlockByRef → DELETE /posts/{id}/blocks/by-ref/{ref}
- *   - getPageBlocks    → persist_refs query param presence
- *   - insertBlocks     → after_ref/before_ref body params
- *   - mutateBlockTree  → body carries ref / before_ref / destination_ref
- *   - URL encoding     → refs with reserved chars round-trip safely
- *   - Input guards     → empty ref, missing post_id, missing data
+ *   - deleteBlockByRef count > 1 → query param
+ *   - deleteBlockByRef count <= 1 → no count param
+ *   - updateBlock (index path) → PATCH /posts/{id}/blocks/{index} (no by-ref)
+ *   - URL encoding for refs with reserved characters
+ *   - getPageBlocks persist_refs query param (omit / false / true)
+ *   - insertBlocks after_ref / before_ref in body
+ *   - mutateBlockTree ref in body (path absent)
+ *   - mutateBlockTree path in body (ref absent)
+ *   - mutateBlockTree before_ref in move body
+ *   - mutateBlockTree destination_ref in move body
+ *   - Input guards: empty ref, missing post_id, missing data
  */
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import axios from 'axios';
-import { WordPressBlockClient } from '../client.js';
+import { WordPressBlockClient } from '../../../client.js';
 
 type CapturedRequest = {
   method: string;
@@ -32,8 +39,6 @@ function safeJsonParse(s: string): unknown {
   try { return JSON.parse(s); } catch { return s; }
 }
 
-// Save the real axios.create once. Each test installs a recording adapter on
-// every instance the client constructs.
 const realCreate = axios.create.bind(axios);
 
 beforeEach(() => {
@@ -50,10 +55,7 @@ beforeEach(() => {
       });
       return Promise.resolve({
         data: { success: true, blocks: [], inserted: [], removed: 0, before_revision_id: 1, revision_id: 2 },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config,
+        status: 200, statusText: 'OK', headers: {}, config,
       });
     }) as any;
     return inst;
@@ -67,7 +69,9 @@ function makeClient() {
   });
 }
 
-describe('Client — URL routing for ref endpoints', () => {
+// ── URL routing ───────────────────────────────────────────────────────────────
+
+describe('Client — ref endpoint URL routing', () => {
   it('updateBlockByRef hits /blocks/by-ref/{ref} with PATCH', async () => {
     const client = makeClient();
     await client.updateBlockByRef(42, 'blk_a3f2c1q9', { attributes: { level: 3 } });
@@ -91,7 +95,6 @@ describe('Client — URL routing for ref endpoints', () => {
     const client = makeClient();
     await client.deleteBlockByRef(42, 'blk_target', 3);
     const req = captured.find((r) => r.url.includes('/blocks/by-ref/'));
-    expect(req).toBeDefined();
     expect(req!.params).toEqual({ count: '3' });
   });
 
@@ -99,28 +102,26 @@ describe('Client — URL routing for ref endpoints', () => {
     const client = makeClient();
     await client.deleteBlockByRef(42, 'blk_target', 1);
     const req = captured.find((r) => r.url.includes('/blocks/by-ref/'));
-    expect(req).toBeDefined();
     expect(req!.params).toEqual({});
   });
 
-  it('updateBlock (index path) hits /blocks/{index} with PATCH — no by-ref crossover', async () => {
+  it('updateBlock (index path) hits /blocks/{index} — no by-ref crossover', async () => {
     const client = makeClient();
     await client.updateBlock(42, 7, { attributes: { foo: 'bar' } });
     const req = captured.find((r) => r.method === 'PATCH');
-    expect(req).toBeDefined();
     expect(req!.url).toBe('/posts/42/blocks/7');
     expect(req!.url).not.toContain('by-ref');
   });
 
   it('encodeURIComponent escapes refs with reserved characters', async () => {
     const client = makeClient();
-    // Real refs are wp_hash hex so this is paranoid coverage; if a future
-    // generator emits / or # the URL must still be safe.
     await client.updateBlockByRef(42, 'weird/ref#abc', { innerHTML: '<p>x</p>' });
     const req = captured.find((r) => r.url.includes('/blocks/by-ref/'));
     expect(req!.url).toBe('/posts/42/blocks/by-ref/weird%2Fref%23abc');
   });
 });
+
+// ── persist_refs query param ──────────────────────────────────────────────────
 
 describe('Client — getPageBlocks persist_refs', () => {
   it('omits persist_refs when not specified', async () => {
@@ -137,10 +138,7 @@ describe('Client — getPageBlocks persist_refs', () => {
     expect(req!.params?.persist_refs).toBe('false');
   });
 
-  it('sends persist_refs=true explicitly when set', async () => {
-    // Forwarding the value (instead of relying on server default) keeps tool/
-    // client/server intent aligned and avoids ambiguous wire behavior if the
-    // server default ever changes.
+  it('sends persist_refs=true explicitly', async () => {
     const client = makeClient();
     await client.getPageBlocks(42, { persist_refs: true });
     const req = captured.find((r) => r.url === '/posts/42/blocks' && r.method === 'GET');
@@ -148,7 +146,9 @@ describe('Client — getPageBlocks persist_refs', () => {
   });
 });
 
-describe('Client — insertBlocks after_ref/before_ref body', () => {
+// ── insertBlocks after_ref / before_ref body params ───────────────────────────
+
+describe('Client — insertBlocks ref body params', () => {
   it('forwards after_ref in JSON body', async () => {
     const client = makeClient();
     await client.insertBlocks(42, {
@@ -156,8 +156,7 @@ describe('Client — insertBlocks after_ref/before_ref body', () => {
       blocks: [{ name: 'core/paragraph', innerHTML: '<p>x</p>' }],
     });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/blocks');
-    const body = req!.data as Record<string, unknown>;
-    expect(body.after_ref).toBe('blk_anchor');
+    expect((req!.data as Record<string, unknown>).after_ref).toBe('blk_anchor');
   });
 
   it('forwards before_ref in JSON body', async () => {
@@ -167,19 +166,16 @@ describe('Client — insertBlocks after_ref/before_ref body', () => {
       blocks: [{ name: 'core/paragraph', innerHTML: '<p>x</p>' }],
     });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/blocks');
-    const body = req!.data as Record<string, unknown>;
-    expect(body.before_ref).toBe('blk_anchor2');
+    expect((req!.data as Record<string, unknown>).before_ref).toBe('blk_anchor2');
   });
 });
 
-describe('Client — mutateBlockTree ref body', () => {
-  it('sends ref in body when provided', async () => {
+// ── mutateBlockTree ref body ──────────────────────────────────────────────────
+
+describe('Client — mutateBlockTree ref/path body', () => {
+  it('sends ref in body when provided (no path)', async () => {
     const client = makeClient();
-    await client.mutateBlockTree(42, {
-      op: 'update-attrs',
-      ref: 'blk_target',
-      attributes: { level: 3 },
-    });
+    await client.mutateBlockTree(42, { op: 'update-attrs', ref: 'blk_target', attributes: { level: 3 } });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/mutate');
     const body = req!.data as Record<string, unknown>;
     expect(body.ref).toBe('blk_target');
@@ -188,11 +184,7 @@ describe('Client — mutateBlockTree ref body', () => {
 
   it('sends path in body when provided (no ref)', async () => {
     const client = makeClient();
-    await client.mutateBlockTree(42, {
-      op: 'update-attrs',
-      path: [0, 1],
-      attributes: { level: 3 },
-    });
+    await client.mutateBlockTree(42, { op: 'update-attrs', path: [0, 1], attributes: { level: 3 } });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/mutate');
     const body = req!.data as Record<string, unknown>;
     expect(body.path).toEqual([0, 1]);
@@ -201,57 +193,40 @@ describe('Client — mutateBlockTree ref body', () => {
 
   it('forwards before_ref in move body', async () => {
     const client = makeClient();
-    await client.mutateBlockTree(42, {
-      op: 'move',
-      ref: 'blk_source',
-      before_ref: 'blk_anchor',
-    });
+    await client.mutateBlockTree(42, { op: 'move', ref: 'blk_source', before_ref: 'blk_anchor' });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/mutate');
-    expect(req).toBeDefined();
-    const body = req!.data as Record<string, unknown>;
-    expect(body.before_ref).toBe('blk_anchor');
+    expect((req!.data as Record<string, unknown>).before_ref).toBe('blk_anchor');
   });
 
   it('forwards destination_ref in move body', async () => {
     const client = makeClient();
-    await client.mutateBlockTree(42, {
-      op: 'move',
-      ref: 'blk_source',
-      destination_ref: 'blk_parent',
-    });
+    await client.mutateBlockTree(42, { op: 'move', ref: 'blk_source', destination_ref: 'blk_parent' });
     const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/mutate');
-    expect(req).toBeDefined();
-    const body = req!.data as Record<string, unknown>;
-    expect(body.destination_ref).toBe('blk_parent');
+    expect((req!.data as Record<string, unknown>).destination_ref).toBe('blk_parent');
   });
 });
+
+// ── Input guards ──────────────────────────────────────────────────────────────
 
 describe('Client — input guards', () => {
   it('updateBlockByRef rejects empty ref', async () => {
     const client = makeClient();
-    await expect(
-      client.updateBlockByRef(42, '', { attributes: {} })
-    ).rejects.toThrow(/Ref is required/);
+    await expect(client.updateBlockByRef(42, '', { attributes: {} })).rejects.toThrow(/Ref is required/);
   });
 
-  it('updateBlockByRef rejects missing post id', async () => {
+  it('updateBlockByRef rejects missing post_id', async () => {
     const client = makeClient();
-    await expect(
-      client.updateBlockByRef(undefined as any, 'blk_x', { attributes: {} })
-    ).rejects.toThrow(/Post ID is required/);
+    await expect(client.updateBlockByRef(undefined as any, 'blk_x', { attributes: {} }))
+      .rejects.toThrow(/Post ID is required/);
   });
 
   it('updateBlockByRef requires attributes or innerHTML', async () => {
     const client = makeClient();
-    await expect(
-      client.updateBlockByRef(42, 'blk_x', {})
-    ).rejects.toThrow(/attributes or innerHTML/);
+    await expect(client.updateBlockByRef(42, 'blk_x', {})).rejects.toThrow(/attributes or innerHTML/);
   });
 
   it('deleteBlockByRef rejects empty ref', async () => {
     const client = makeClient();
-    await expect(
-      client.deleteBlockByRef(42, '')
-    ).rejects.toThrow(/Ref is required/);
+    await expect(client.deleteBlockByRef(42, '')).rejects.toThrow(/Ref is required/);
   });
 });
