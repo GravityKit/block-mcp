@@ -2424,6 +2424,59 @@ class REST_Controller {
 	// =========================================================================
 
 	/**
+	 * Execute a post-scoped write operation with the standard preamble.
+	 *
+	 * Absorbs the boilerplate shared by every post-scoped write handler:
+	 *
+	 *   1. Wrap everything in try/catch → handle_error() on any \Throwable.
+	 *   2. Extract post_id from $request['id'] (int cast).
+	 *   3. check_post_edit_permission() — return WP_Error on failure.
+	 *   4. check_if_match_for_post() — return WP_Error on stale ETag.
+	 *   5. Invoke $operation( $post_id, $request ) and wrap the result.
+	 *
+	 * The $operation callable receives ($post_id, $request) and must return
+	 * either the raw value to wrap in WP_REST_Response, or a WP_Error.
+	 * Any \Throwable thrown by the callable is caught and converted to a
+	 * 500 internal_error response via handle_error().
+	 *
+	 * @param \WP_REST_Request $request   Incoming request (used for param
+	 *                                    extraction and If-Match check).
+	 * @param callable         $operation Callable accepting (int $post_id,
+	 *                                    \WP_REST_Request $request) that
+	 *                                    returns the operation result or
+	 *                                    \WP_Error.
+	 * @param int              $status    HTTP status code for a successful
+	 *                                    response. Default 200; use 201 for
+	 *                                    resource-creation operations.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	private function with_post_edit_context( \WP_REST_Request $request, callable $operation, $status = 200 ) {
+		try {
+			$post_id    = (int) $request->get_param( 'id' );
+			$perm_check = $this->check_post_edit_permission( $post_id );
+			if ( is_wp_error( $perm_check ) ) {
+				return $perm_check;
+			}
+
+			$if_match = $this->check_if_match_for_post( $post_id, $request );
+			if ( is_wp_error( $if_match ) ) {
+				return $if_match;
+			}
+
+			$result = $operation( $post_id, $request );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, $status );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
 	 * Optimistic-concurrency precondition check.
 	 *
 	 * Reads the `If-Match` header (or the optional body field
