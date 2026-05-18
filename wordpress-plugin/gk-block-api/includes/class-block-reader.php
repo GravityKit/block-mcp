@@ -238,11 +238,20 @@ class Block_Reader {
 							$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 						}
 						if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
-							$this->crud->persist_ref_assignments( $post_id, $blocks );
-							// After persisting, re-warm the cache with the new content.
-							$this->invalidate( $post_id );
-							$new_content = (string) get_post_field( 'post_content', $post_id );
-							$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
+							$persisted = $this->crud->persist_ref_assignments( $post_id, $blocks );
+							if ( $persisted ) {
+								// Persist succeeded — re-warm cache from authoritative DB content.
+								$this->invalidate( $post_id );
+								$new_content = (string) get_post_field( 'post_content', $post_id );
+								$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
+							} else {
+								// Persist failed (read-only DB, replica lag, broken column). Refs
+								// exist only in $blocks, not on disk. Caching them would surface
+								// stable-looking refs in the response that the next write-by-ref
+								// would reject as ref_stale. Drop the cache for this post so the
+								// next read re-parses disk truth and tries again.
+								$this->invalidate( $post_id );
+							}
 						}
 					} finally {
 						wp_cache_delete( $lock_key, 'gk_block_api' );
