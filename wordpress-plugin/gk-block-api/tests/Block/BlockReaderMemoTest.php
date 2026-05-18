@@ -197,4 +197,41 @@ class BlockReaderMemoTest extends BlockApiTestCase {
 		$blocks_a_recheck = $this->reader->parse( $this->post_id );
 		$this->assertSame( 'core/paragraph', $blocks_a_recheck[0]['blockName'] ?? '' );
 	}
+
+	/**
+	 * Cache key shape must be canonical regardless of how the caller types $post_id.
+	 *
+	 * Block_Reader::parse() casts to int internally; pre-fix it built the
+	 * cache key from the raw uncast value, so parse("42abc") would store
+	 * under "42abc:hash" while invalidate(42) only swept entries with prefix
+	 * "42:". Net result: a write that should have busted the cache would
+	 * leave a stale entry behind. Now both methods agree on (int)$post_id.
+	 */
+	public function test_parse_cache_key_normalizes_post_id() {
+		$mixed_in = (string) $this->post_id . 'abc'; // e.g. "42abc"
+
+		// Populate cache via the "mixed" form. Internal cast means the int
+		// gets used for both get_post() AND the cache key, so a subsequent
+		// invalidate(42) MUST clear it.
+		$this->reader->parse( $mixed_in );
+
+		$reflection = new ReflectionProperty( $this->reader, 'parse_cache' );
+		$reflection->setAccessible( true );
+		$keys = array_keys( $reflection->getValue( $this->reader ) );
+
+		$this->assertNotEmpty( $keys, 'parse() must have stored at least one cache entry.' );
+		foreach ( $keys as $k ) {
+			$this->assertStringStartsWith(
+				$this->post_id . ':',
+				$k,
+				'Cache key must use int post_id prefix regardless of caller-supplied $post_id type.'
+			);
+		}
+
+		$this->reader->invalidate( $this->post_id );
+		$this->assertEmpty(
+			$reflection->getValue( $this->reader ),
+			'invalidate( int $post_id ) must clear entries created by parse( string $post_id ) — both code paths agree on the canonical key shape.'
+		);
+	}
 }

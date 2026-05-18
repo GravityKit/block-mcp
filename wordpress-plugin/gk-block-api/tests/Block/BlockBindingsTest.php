@@ -410,4 +410,74 @@ class BlockBindingsTest extends BlockApiTestCase {
 		$this->assertSame( $before[0]['bindings'], $after[0]['bindings'] );
 		$this->assertSame( $before[0]['bound_attributes'], $after[0]['bound_attributes'] );
 	}
+
+	/**
+	 * The bindings write-guard must fire on Block_Mutator's update-attrs op too.
+	 *
+	 * Pre-fix, only Block_Writer::update_block enforced the bound-attribute
+	 * guard. An agent could bypass the protection by switching from the
+	 * per-block PATCH route to edit_block_tree's update-attrs — the mutator
+	 * did a plain array_merge with no bindings check, so an attribute the
+	 * editor expected to be dynamically resolved would silently get
+	 * clobbered with a static value. Now the same guard applies (with the
+	 * allow_bound_writes:true escape hatch) so the contract is uniform
+	 * across write paths.
+	 */
+	public function test_mutate_update_attrs_rejects_bound_attribute_overwrite() {
+		$this->require_bindings_api();
+		$this->set_content( array(
+			$this->make_image_block_with_bindings(
+				array(
+					'url' => array( 'source' => 'core/post-meta', 'args' => array( 'key' => 'hero_url' ) ),
+				),
+				array(),
+				'blk_mut_guard'
+			),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-attrs',
+			array( 0 ),
+			array( 'attributes' => array( 'url' => 'https://attacker.example/clobber.png' ) )
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'bound_attribute', $result->get_error_code() );
+		$this->assertSame(
+			array( 'url' ),
+			$result->get_error_data()['bound_attributes'] ?? null,
+			'data.bound_attributes must list the attributes that were blocked.'
+		);
+	}
+
+	/**
+	 * The same mutate path with allow_bound_writes:true must succeed — the
+	 * escape hatch exists so an agent that knows what it's doing can still
+	 * force a write through. Matches the contract on Block_Writer.
+	 */
+	public function test_mutate_update_attrs_allow_bound_writes_bypasses_guard() {
+		$this->require_bindings_api();
+		$this->set_content( array(
+			$this->make_image_block_with_bindings(
+				array(
+					'url' => array( 'source' => 'core/post-meta', 'args' => array( 'key' => 'hero_url' ) ),
+				),
+				array(),
+				'blk_mut_force'
+			),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-attrs',
+			array( 0 ),
+			array(
+				'attributes'         => array( 'url' => 'https://example.test/forced.png' ),
+				'allow_bound_writes' => true,
+			)
+		);
+
+		$this->assertNotInstanceOf( \WP_Error::class, $result );
+	}
 }

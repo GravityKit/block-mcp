@@ -492,4 +492,61 @@ class YoastBridgeTest extends WP_UnitTestCase {
 		}
 		$this->assertTrue( $has_yoast, 'expected at least one yoast/* REST namespace to be registered' );
 	}
+
+	/**
+	 * Cornerstone-disable must delete the meta, not write the truthy string 'false'.
+	 *
+	 * Pre-fix, write_fields stored the literal string 'false' on disable.
+	 * PHP truthiness treats 'false' as a non-empty string → true, so
+	 * Yoast's own indexable / sitemap code read the meta as enabled
+	 * regardless of the agent's intent. Our reader normalised the round
+	 * trip ('1' === 'false' is false → bool false on read) which hid the
+	 * bug from us but not from Yoast itself.
+	 *
+	 * Contract pinned here: after `is_cornerstone: false`, the meta is
+	 * GONE from the database — not stored as any string, truthy or not.
+	 */
+	public function test_write_is_cornerstone_disable_removes_meta_entirely() {
+		$this->bridge->write_fields_public( $this->post_id, array( 'is_cornerstone' => true ) );
+		$this->assertSame( '1', get_post_meta( $this->post_id, '_yoast_wpseo_is_cornerstone', true ) );
+
+		$this->bridge->write_fields_public( $this->post_id, array( 'is_cornerstone' => false ) );
+
+		$this->assertFalse(
+			metadata_exists( 'post', $this->post_id, '_yoast_wpseo_is_cornerstone' ),
+			'is_cornerstone=false must delete the meta; the literal string "false" would be truthy to Yoast.'
+		);
+	}
+
+	/**
+	 * /yoast/bulk must reject batches larger than Block_CRUD::MAX_BATCH_SIZE.
+	 *
+	 * Pre-fix the route declared `posts` as an unbounded array. An
+	 * authenticated edit_posts user could send 10k entries and amplify
+	 * a cheap REST call into a long fan-out of DB queries + Yoast hooks.
+	 * Cap matches the per-block update_blocks_batch limit (50) so the
+	 * two batch APIs share a single resource ceiling.
+	 */
+	public function test_bulk_endpoint_rejects_oversized_batch() {
+		do_action( 'rest_api_init' );
+
+		$editor = self::factory()->user->create( array( 'role' => 'editor' ) );
+		wp_set_current_user( $editor );
+
+		$posts = array();
+		for ( $i = 0; $i < \GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE + 1; $i++ ) {
+			$posts[] = array( 'post_id' => $this->post_id, 'title' => 'x' );
+		}
+
+		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/yoast/bulk' );
+		$request->set_header( 'Content-Type', 'application/json' );
+		$request->set_body( wp_json_encode( array( 'posts' => $posts ) ) );
+
+		$response = rest_get_server()->dispatch( $request );
+		$this->assertSame( 400, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'batch_too_large', $data['code'] ?? null );
+
+		wp_set_current_user( 0 );
+	}
 }
