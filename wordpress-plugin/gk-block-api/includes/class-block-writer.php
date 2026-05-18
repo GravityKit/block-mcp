@@ -390,10 +390,20 @@ class Block_Writer {
 		$block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
 
 		if ( ! empty( $attributes ) ) {
-			$block['attrs'] = array_merge(
-				isset( $block['attrs'] ) ? $block['attrs'] : array(),
-				$attributes
-			);
+			$existing_attrs = isset( $block['attrs'] ) ? $block['attrs'] : array();
+
+			// Deep-merge the 'metadata' sub-key so that a partial metadata update
+			// (e.g. setting metadata.name) does not clobber existing sub-keys such
+			// as metadata.bindings or metadata.gk_ref. All other top-level attrs use
+			// a shallow merge (array_merge semantics), which matches prior behaviour.
+			if ( isset( $attributes['metadata'] ) && is_array( $attributes['metadata'] ) ) {
+				$existing_meta          = isset( $existing_attrs['metadata'] ) && is_array( $existing_attrs['metadata'] )
+					? $existing_attrs['metadata']
+					: array();
+				$attributes['metadata'] = array_merge( $existing_meta, $attributes['metadata'] );
+			}
+
+			$block['attrs'] = array_merge( $existing_attrs, $attributes );
 
 			$auto_transformed = $this->transformer->auto_transform_html(
 				$block_name,
@@ -600,10 +610,14 @@ class Block_Writer {
 	 * @param int   $index      Block index (0-based).
 	 * @param array $attributes Partial attributes to merge (optional).
 	 * @param mixed $inner_html New innerHTML content (optional, pass null to skip).
+	 * @param array $options    Optional flags. Recognised keys:
+	 *                          - allow_bound_writes (bool): when true, skip the
+	 *                            bound-attribute guard and allow overwrites even for
+	 *                            attributes listed in attrs.metadata.bindings.
 	 *
 	 * @return array|\WP_Error Updated block data with revision_id, or WP_Error.
 	 */
-	public function update_block( $post_id, $index, $attributes = array(), $inner_html = null ) {
+	public function update_block( $post_id, $index, $attributes = array(), $inner_html = null, $options = array() ) {
 		$rate_check = $this->check_rate_limit( $post_id, 'write' );
 		if ( is_wp_error( $rate_check ) ) {
 			return $rate_check;
@@ -646,6 +660,43 @@ class Block_Writer {
 			&& $this->crud->is_block_dual_storage( $block['blockName'] )
 		) {
 			return $this->crud->dual_storage_error( $block['blockName'] );
+		}
+
+		// WP 6.5+ Block Bindings guard: reject writes that attempt to overwrite
+		// a dynamically-bound attribute unless the caller explicitly opts in with
+		// allow_bound_writes:true. This prevents agents from silently clobbering
+		// a value that is resolved at render time from post-meta or another source.
+		$allow_bound_writes = ! empty( $options['allow_bound_writes'] );
+		if ( ! $allow_bound_writes && ! empty( $attributes ) ) {
+			$bindings = isset( $block['attrs']['metadata']['bindings'] ) && is_array( $block['attrs']['metadata']['bindings'] )
+				? $block['attrs']['metadata']['bindings']
+				: array();
+
+			if ( ! empty( $bindings ) ) {
+				$blocked = array();
+				foreach ( array_keys( (array) $attributes ) as $attr_key ) {
+					// 'metadata' writes are structural; only individual attribute
+					// keys within bindings are protected. A write to 'metadata'
+					// itself (e.g. updating metadata.name) is always allowed.
+					if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
+						$blocked[] = $attr_key;
+					}
+				}
+				if ( ! empty( $blocked ) ) {
+					return new \WP_Error(
+						'bound_attribute',
+						sprintf(
+							/* translators: 1: comma-separated list of bound attribute names */
+							__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-api' ),
+							implode( ', ', $blocked )
+						),
+						array(
+							'status'           => 400,
+							'bound_attributes' => $blocked,
+						)
+					);
+				}
+			}
 		}
 
 		// Apply attribute merge + auto-transform + innerHTML replacement.

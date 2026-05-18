@@ -341,6 +341,18 @@ class Block_Reader {
 				$data['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
 			}
 
+			// WP 6.5+ Block Bindings: surface bindings and bound_attributes so agents
+			// know which attributes are dynamically resolved at render time. We do NOT
+			// resolve the bound values here (that's render mode's job). Agents must not
+			// overwrite bound attributes without explicit allow_bound_writes:true.
+			if ( isset( $block['attrs']['metadata']['bindings'] ) && is_array( $block['attrs']['metadata']['bindings'] ) ) {
+				$bindings = $block['attrs']['metadata']['bindings'];
+				if ( ! empty( $bindings ) ) {
+					$data['bindings']         = $bindings;
+					$data['bound_attributes'] = array_keys( $bindings );
+				}
+			}
+
 			// Top-level counter: sequential position among non-empty top-level blocks only.
 			// This is the value consumed by `delete_block.block_index`,
 			// `insert_blocks.before`/`after`, and the new atomic `replace_blocks` op.

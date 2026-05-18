@@ -186,11 +186,12 @@ class Block_CRUD {
 	 * @param int   $index      Block index (0-based).
 	 * @param array $attributes Partial attributes to merge (optional).
 	 * @param mixed $inner_html New innerHTML content (optional, pass null to skip).
+	 * @param array $options    Optional flags (e.g. allow_bound_writes).
 	 *
 	 * @return array|\WP_Error Updated block data with revision_id, or WP_Error.
 	 */
-	public function update_block( $post_id, $index, $attributes = array(), $inner_html = null ) {
-		return $this->writer->update_block( $post_id, $index, $attributes, $inner_html );
+	public function update_block( $post_id, $index, $attributes = array(), $inner_html = null, $options = array() ) {
+		return $this->writer->update_block( $post_id, $index, $attributes, $inner_html, $options );
 	}
 
 	/**
