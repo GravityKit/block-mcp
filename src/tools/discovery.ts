@@ -223,13 +223,10 @@ export async function handleDiscoveryTool(
       ) {
         throw new Error('get_post_info requires one of: post_id, url, or slug');
       }
-      // Some MCP clients (and JSON without typed schema enforcement) send
-      // numeric IDs as strings. Coerce well-formed integer strings rather
-      // than silently dropping them — otherwise the call falls through to
-      // url/slug-only resolution, which probably isn't what was meant.
-      // The error message claims "positive integer", so the validation has
-      // to match: reject floats (Number.isFinite(1.5) is true and would
-      // otherwise pass through, contradicting the documented contract).
+      // Coerce well-formed integer strings (some MCP clients and untyped
+      // JSON send numeric IDs as strings) but reject everything else with
+      // the same "post_id must be a positive integer" error the schema
+      // documents. Floats are rejected because the contract is integer.
       let normalizedPostId: number | undefined;
       if (typeof postId === 'number' && Number.isInteger(postId) && postId > 0) {
         normalizedPostId = postId;

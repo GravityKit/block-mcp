@@ -227,11 +227,10 @@ class Block_Mutator {
 					}
 				}
 
-				// Merge attributes. Mirror Block_Writer::apply_block_update_in_place():
-				// the top-level merge is shallow, but `metadata` itself is deep-
-				// merged so a partial `metadata` payload (e.g. setting
-				// metadata.name) does not clobber sibling keys like gk_ref
-				// (ref stability) or bindings (write-guard inputs).
+				// Top-level merge is shallow; `metadata` itself is deep-merged
+				// so a partial metadata payload (e.g. {name: 'Hero'}) keeps
+				// existing keys like gk_ref (ref stability) and bindings
+				// (write-guard inputs) intact.
 				$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) && is_array( $parent[ $target_index ]['attrs'] )
 					? $parent[ $target_index ]['attrs']
 					: array();

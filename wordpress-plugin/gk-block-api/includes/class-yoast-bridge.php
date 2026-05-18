@@ -300,9 +300,8 @@ class Yoast_Bridge {
 	 * - noindex: "1" (noindex), "2" (explicit index), delete meta for default
 	 * - nofollow: "1" (nofollow), delete meta for follow
 	 * - is_cornerstone: "1" (true); meta is DELETED to disable. The literal
-	 *   string "false" would evaluate truthy in PHP, so storing it left
-	 *   cornerstone enabled in Yoast's view — see the is_cornerstone branch
-	 *   in write_fields() for the current behaviour.
+	 *   string "false" is truthy in PHP, so the disable path must remove
+	 *   the meta key rather than write any string value.
 	 *
 	 * @param int                  $post_id Post ID.
 	 * @param array<string, mixed> $fields  Field name => value pairs.

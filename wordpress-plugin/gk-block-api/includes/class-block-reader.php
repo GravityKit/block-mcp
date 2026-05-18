@@ -296,11 +296,11 @@ class Block_Reader {
 		} catch ( \Throwable $e ) {
 			$data = array( 'status' => 500 );
 
-			// Always log full exception details for operators. The user-facing
-			// message stays generic in production so internals (class names,
-			// file paths, type errors) don't leak through the REST response —
-			// mirrors vip-block-data-api's pattern. WP_DEBUG flips the message
-			// and the 'details' attachment back on for local debugging.
+			// Production responses carry only "Error parsing post ID N." so
+			// internals (class names, file paths, type errors) don't reach an
+			// unauthenticated REST caller. The full exception trace is written
+			// to error_log; WP_DEBUG also attaches the trace and the original
+			// message to the WP_Error data for local debugging.
 			if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) {
 				error_log( 'GK Block API parse error for post ' . (int) $post_id . ': ' . $e->__toString() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}

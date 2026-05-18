@@ -35,12 +35,9 @@ describe('get_post_info — validation', () => {
   });
 
   it('throws on float post_id and does NOT call the client', async () => {
-    // The handler's error message says "post_id must be a positive integer",
-    // so a 1.5 input must surface that error client-side. Previously the
-    // validation used Number.isFinite, which accepts floats — the contract
-    // string and the validation disagreed, so callers got a silent
-    // pass-through to the server. This test pins both halves: the throw
-    // AND that client.getPostInfo isn't reached.
+    // post_id is documented as a positive integer. A float input must
+    // throw the documented error AND short-circuit before reaching the
+    // client — otherwise validation drift would only surface server-side.
     await expect(
       handleDiscoveryTool('get_post_info', { post_id: 1.5 }, client as any)
     ).rejects.toThrow(/post_id must be a positive integer/);

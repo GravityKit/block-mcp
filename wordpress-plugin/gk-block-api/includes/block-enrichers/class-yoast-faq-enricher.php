@@ -69,10 +69,9 @@ class Yoast_Faq_Enricher {
 			$q_text = isset( $question['jsonQuestion'] ) ? (string) $question['jsonQuestion'] : '';
 			$a_text = isset( $question['jsonAnswer'] ) ? (string) $question['jsonAnswer'] : '';
 
-			// sanitize_text_field collapses internal whitespace and strips tags
-			// in one pass, matching the response-shape contract for plain-text
-			// summary fields. wp_strip_all_tags alone leaves embedded newlines
-			// and tabs that confuse line-based scanning by agents.
+			// sanitize_text_field strips tags AND collapses internal
+			// whitespace, matching the response-shape contract for plain-
+			// text summary fields that agents scan line-by-line.
 			$summary[] = array(
 				'question'       => sanitize_text_field( $q_text ),
 				'answer_excerpt' => self::excerpt( sanitize_text_field( $a_text ) ),
