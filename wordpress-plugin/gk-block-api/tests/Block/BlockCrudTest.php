@@ -1032,4 +1032,156 @@ class BlockCrudTest extends BlockApiTestCase {
 		$saved_post = get_post( $this->post_id );
 		$this->assertEquals( $new_content, $saved_post->post_content );
 	}
+
+	/**
+	 * tree_depth must early-exit so an over-deep input can't blow the PHP stack.
+	 *
+	 * Pre-fix, tree_depth recursed all the way to the bottom of the tree
+	 * before returning, so an adversarial 100k-deep input would stack-overflow
+	 * before validate_tree_depth could reject it. Now the recursive walker
+	 * threads $depth_so_far through and returns as soon as it exceeds
+	 * MAX_BLOCK_DEPTH; depth-of-input never exceeds MAX+1 frames on stack.
+	 */
+	public function test_tree_depth_early_exits_on_over_deep_input() {
+		// Build a 10k-deep nested tree by reference threading — would
+		// recurse 10k times pre-fix.
+		$leaf = array( 'innerBlocks' => array() );
+		for ( $i = 0; $i < 10000; $i++ ) {
+			$leaf = array( 'innerBlocks' => array( $leaf ) );
+		}
+
+		$depth = \GravityKit\BlockAPI\Block_CRUD::tree_depth( array( $leaf ) );
+		$this->assertGreaterThan(
+			\GravityKit\BlockAPI\Block_CRUD::MAX_BLOCK_DEPTH,
+			$depth,
+			'tree_depth must report a value over the cap so validate_tree_depth can reject it.'
+		);
+		// And critically: we got here without segfaulting / stack overflow.
+		$this->assertTrue( true, 'tree_depth must return cleanly for an over-deep tree.' );
+	}
+
+	/**
+	 * revert_to_revision must consume the per-post write rate-limit budget.
+	 *
+	 * Pre-fix, revert was the only write method that didn't call
+	 * check_rate_limit / record_rate_limit, so a caller could keep cycling
+	 * write -> revert -> write -> revert at unbounded frequency, effectively
+	 * unrate-limiting the post. Now revert checks + records on the same
+	 * writes bucket as the per-block writes.
+	 */
+	public function test_revert_to_revision_respects_rate_limit() {
+		// Pre-fill the writes bucket to the cap.
+		$now = time();
+		set_transient(
+			'gk_block_api_rate_' . $this->post_id,
+			array(
+				'writes' => array_fill( 0, \GravityKit\BlockAPI\Block_CRUD::RATE_LIMIT_WRITES, $now ),
+				'puts'   => array(),
+			),
+			120
+		);
+
+		$result = $this->crud->revert_to_revision( $this->post_id, 99999 );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame(
+			'rate_limit_exceeded',
+			$result->get_error_code(),
+			'revert_to_revision must be gated by the write rate-limit, not slip through it.'
+		);
+	}
+
+	/**
+	 * insert_pattern must refuse to inline / reference a non-published wp_block.
+	 *
+	 * Pre-fix, get_post() returned drafts / private / trash / password-protected
+	 * wp_block entries; insert_pattern checked only post_type. Inline mode
+	 * copied the gated content into the target post verbatim; synced mode
+	 * embedded a core/block ref that anonymous front-end visitors saw on
+	 * render. Both leaked content the caller may not have rights to see.
+	 * Routed through Block_CRUD::is_post_readable().
+	 */
+	public function test_insert_pattern_rejects_draft_pattern_for_subscriber() {
+		$draft_pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'draft',
+				'post_author'  => 1,
+				'post_title'   => 'Hidden draft pattern',
+				'post_content' => '<!-- wp:paragraph --><p>protected</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$subscriber = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $subscriber );
+
+		$result = $this->crud->insert_pattern( $this->post_id, $draft_pattern_id, 'end', true );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame(
+			'pattern_not_found',
+			$result->get_error_code(),
+			'Non-public wp_block CPT entries must surface pattern_not_found rather than leaking content via insert_pattern.'
+		);
+
+		wp_set_current_user( 0 );
+		wp_delete_post( $draft_pattern_id, true );
+	}
+
+	/**
+	 * is_post_readable must allow publish-no-password but not publish-with-password.
+	 *
+	 * Pre-fix, the visibility gate used `post_status === 'publish'` alone —
+	 * password-protected published posts (a valid WP state) passed through
+	 * as fully public. Subscribers could read their content via expanded
+	 * pattern_ref or insert it via insert_pattern. The gate now also checks
+	 * empty(post_password), so password-protected posts require an explicit
+	 * read_post cap.
+	 */
+	public function test_is_post_readable_respects_password_protection() {
+		$public_post     = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$pw_protected    = self::factory()->post->create(
+			array(
+				'post_status'   => 'publish',
+				'post_password' => 'secret',
+			)
+		);
+		$subscriber      = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $subscriber );
+
+		$this->assertTrue(
+			\GravityKit\BlockAPI\Block_CRUD::is_post_readable( get_post( $public_post ) ),
+			'A plainly-published post with no password must be readable by any caller.'
+		);
+		$this->assertFalse(
+			\GravityKit\BlockAPI\Block_CRUD::is_post_readable( get_post( $pw_protected ) ),
+			'A published-but-password-protected post must NOT be readable to a subscriber-level caller.'
+		);
+
+		wp_set_current_user( 0 );
+	}
+
+	/**
+	 * Literal "0" must be treated as a real password, not "no password".
+	 *
+	 * empty('0') is true in PHP — a classic foot-gun. Pre-fix, a post
+	 * with post_password === '0' would be classified as "no password set"
+	 * and treated as fully public. Strict '' !== check is the canonical
+	 * "is the password slot non-empty" gate.
+	 */
+	public function test_is_post_readable_treats_zero_string_password_as_real() {
+		$pw_zero    = self::factory()->post->create(
+			array(
+				'post_status'   => 'publish',
+				'post_password' => '0',
+			)
+		);
+		$subscriber = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $subscriber );
+
+		$this->assertFalse(
+			\GravityKit\BlockAPI\Block_CRUD::is_post_readable( get_post( $pw_zero ) ),
+			'post_password = "0" must be treated as a password (not as no-password) — empty("0") is true in PHP.'
+		);
+
+		wp_set_current_user( 0 );
+	}
 }

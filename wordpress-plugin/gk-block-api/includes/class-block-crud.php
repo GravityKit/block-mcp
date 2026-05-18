@@ -482,8 +482,32 @@ class Block_CRUD {
 		if ( ! $post instanceof \WP_Post ) {
 			return false;
 		}
-		$is_public = 'publish' === $post->post_status && empty( $post->post_password );
-		return $is_public || current_user_can( 'read_post', $post->ID );
+		// Publish + no password = universally readable.
+		// Strict empty-string check (not empty()) because empty('0') is true
+		// in PHP — a literal "0" is a valid post_password and we must NOT
+		// treat it as "no password set".
+		$has_password = '' !== (string) $post->post_password;
+		$is_public    = 'publish' === $post->post_status && ! $has_password;
+		if ( $is_public ) {
+			return true;
+		}
+		// Non-public-status path: WP's cap mapping for `read_post` handles
+		// draft / private / pending / trash, factoring in ownership and the
+		// read_private_<post_type> cap. This DOES NOT consider post_password —
+		// that's a runtime cookie check, not a cap.
+		if ( ! current_user_can( 'read_post', $post->ID ) ) {
+			return false;
+		}
+		// Password-protected posts: the password is enforced at output time
+		// via post_password_required(), which depends on a cookie we don't
+		// have in a REST / WP-CLI context. Cap-elevate password-protected
+		// access to `edit_post` so subscribers (who have the `read` cap, and
+		// therefore satisfy `read_post`) can't bypass the password by going
+		// through our API. Editors / authors of the post still pass.
+		if ( $has_password ) {
+			return current_user_can( 'edit_post', $post->ID );
+		}
+		return true;
 	}
 
 	/**

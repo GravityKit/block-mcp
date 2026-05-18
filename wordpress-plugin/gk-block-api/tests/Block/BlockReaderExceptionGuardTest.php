@@ -168,4 +168,51 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 			'Global $post must be restored to the pre-call value even when the read throws.'
 		);
 	}
+
+	/**
+	 * format_blocks_recursive must hard-stop at MAX_BLOCK_DEPTH on read.
+	 *
+	 * The write path enforces MAX_BLOCK_DEPTH (32) via validate_tree_depth.
+	 * But content that bypasses the write path — direct DB inserts,
+	 * imports, migrations from a pre-cap version — could land deeper.
+	 * Pre-fix the read path recursed all the way down and stack-overflowed
+	 * before returning. Now the inner-blocks recursion is gated on
+	 * count($current_path) < MAX_BLOCK_DEPTH; deeper subtrees are simply
+	 * truncated at the cap. The visible tree returns; the read never
+	 * fatals; the agent sees a clean drop at the boundary.
+	 */
+	public function test_get_blocks_does_not_stack_overflow_on_over_deep_tree() {
+		$depth = \GravityKit\BlockAPI\Block_CRUD::MAX_BLOCK_DEPTH + 5;
+
+		// Build a deep nested chain of core/group blocks by direct DB write so
+		// the read path is the ONLY layer being exercised. The write-side
+		// validate_tree_depth would otherwise reject this.
+		$leaf = array(
+			'blockName'    => 'core/paragraph',
+			'attrs'        => array(),
+			'innerHTML'    => '<p>deep</p>',
+			'innerContent' => array( '<p>deep</p>' ),
+			'innerBlocks'  => array(),
+		);
+		for ( $i = 0; $i < $depth; $i++ ) {
+			$leaf = array(
+				'blockName'    => 'core/group',
+				'attrs'        => array(),
+				'innerHTML'    => '<div class="wp-block-group">' . PHP_EOL . '</div>',
+				'innerContent' => array( '<div class="wp-block-group">', null, '</div>' ),
+				'innerBlocks'  => array( $leaf ),
+			);
+		}
+
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery -- bypass write-path depth check on purpose.
+		$wpdb->update( $wpdb->posts, array( 'post_content' => serialize_blocks( array( $leaf ) ) ), array( 'ID' => $this->post_id ) );
+		clean_post_cache( $this->post_id );
+
+		// Must return without stack-overflow. We don't assert depth here —
+		// the contract is "no fatal", not "exact depth N".
+		$result = $this->crud->get_blocks( $this->post_id );
+		$this->assertIsArray( $result );
+		$this->assertNotEmpty( $result );
+	}
 }
