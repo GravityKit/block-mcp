@@ -8,7 +8,15 @@ export default defineConfig({
       // New layered layout
       'src/__tests__/unit/**/*.test.ts',
       'src/__tests__/tools/**/*.test.ts',
-      'src/__tests__/integration/**/*.test.ts',
+    ],
+    // Integration tests live in src/__tests__/integration/ but are
+    // explicitly excluded from the default run.  Use `npm run test:integration`
+    // (vitest.integration.config.ts) to run them against a live WordPress
+    // instance. They skip cleanly via describe.skipIf(skipUnlessLive()) when
+    // env vars are absent, but keeping them out of this pattern avoids any
+    // accidental HTTP calls during the default offline test suite.
+    exclude: [
+      'src/__tests__/integration/**',
     ],
   },
 });

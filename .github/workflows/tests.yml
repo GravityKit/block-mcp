@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run live WordPress integration tests (requires secrets)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   php:
@@ -98,3 +104,36 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+  ts-integration:
+    name: TypeScript MCP server (integration — live WP)
+    runs-on: ubuntu-latest
+    # Run only when:
+    #   • workflow_dispatch with run_integration=true, OR
+    #   • commit message contains [integration], OR
+    #   • the WORDPRESS_URL secret is configured on this repo/fork
+    # The last condition gracefully skips on forks without secrets.
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') ||
+      contains(github.event.head_commit.message, '[integration]') ||
+      secrets.WORDPRESS_URL != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run integration tests
+        env:
+          WORDPRESS_URL: ${{ secrets.WORDPRESS_URL }}
+          WORDPRESS_USER: ${{ secrets.WORDPRESS_USER }}
+          WORDPRESS_APP_PASSWORD: ${{ secrets.WORDPRESS_APP_PASSWORD }}
+        run: npm run test:integration
+        # When secrets are absent every test skips via skipUnlessLive(), so
+        # the suite exits 0. The step will still appear green in the job log.
+        # To test against a real WP instance, configure the three secrets in
+        # repository Settings → Secrets and variables → Actions.
