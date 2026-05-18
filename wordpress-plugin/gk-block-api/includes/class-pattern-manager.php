@@ -69,7 +69,7 @@ class Pattern_Manager {
 
 		// Collect synced patterns (wp_block CPT).
 		if ( null === $args['synced'] || true === $args['synced'] ) {
-			$synced = $this->get_synced_patterns( $args );
+			$synced  = $this->get_synced_patterns( $args );
 			$results = array_merge( $results, $synced );
 		}
 
@@ -81,10 +81,13 @@ class Pattern_Manager {
 
 		// Filter by minimum score.
 		if ( null !== $args['min_score'] ) {
-			$min = (int) $args['min_score'];
-			$results = array_filter( $results, function ( $pattern ) use ( $min ) {
-				return $pattern['preference']['score'] >= $min;
-			} );
+			$min     = (int) $args['min_score'];
+			$results = array_filter(
+				$results,
+				function ( $pattern ) use ( $min ) {
+					return $pattern['preference']['score'] >= $min;
+				}
+			);
 			$results = array_values( $results );
 		}
 
@@ -217,10 +220,10 @@ class Pattern_Manager {
 			return array();
 		}
 
-		$registry   = \WP_Block_Patterns_Registry::get_instance();
-		$all        = $registry->get_all_registered();
-		$results    = array();
-		$search     = ! empty( $args['q'] ) ? strtolower( $args['q'] ) : '';
+		$registry = \WP_Block_Patterns_Registry::get_instance();
+		$all      = $registry->get_all_registered();
+		$results  = array();
+		$search   = ! empty( $args['q'] ) ? strtolower( $args['q'] ) : '';
 
 		foreach ( $all as $pattern ) {
 			// Search filter.
@@ -254,11 +257,11 @@ class Pattern_Manager {
 	 * @return array Formatted pattern data.
 	 */
 	private function format_synced_pattern( $post ) {
-		$content        = $post->post_content;
-		$blocks         = ! empty( $content ) ? parse_blocks( $content ) : array();
-		$block_names    = $this->extract_block_names( $blocks );
-		$legacy_blocks  = $this->find_legacy_blocks_in_list( $block_names );
-		$has_legacy     = ! empty( $legacy_blocks );
+		$content         = $post->post_content;
+		$blocks          = ! empty( $content ) ? parse_blocks( $content ) : array();
+		$block_names     = $this->extract_block_names( $blocks );
+		$legacy_blocks   = $this->find_legacy_blocks_in_list( $block_names );
+		$has_legacy      = ! empty( $legacy_blocks );
 		$reference_count = $this->count_pattern_references( $post->ID );
 
 		// Build scoring input.
@@ -279,14 +282,14 @@ class Pattern_Manager {
 		}
 
 		$data = array(
-			'id'              => $post->ID,
-			'name'            => $post->post_title,
-			'type'            => 'synced',
-			'created'         => gmdate( 'Y-m-d', strtotime( $post->post_date ) ),
-			'modified'        => gmdate( 'Y-m-d', strtotime( $post->post_modified ) ),
-			'reference_count' => $reference_count,
-			'preference'      => $preference,
-			'contains_blocks' => $block_names,
+			'id'                => $post->ID,
+			'name'              => $post->post_title,
+			'type'              => 'synced',
+			'created'           => gmdate( 'Y-m-d', strtotime( $post->post_date ) ),
+			'modified'          => gmdate( 'Y-m-d', strtotime( $post->post_modified ) ),
+			'reference_count'   => $reference_count,
+			'preference'        => $preference,
+			'contains_blocks'   => $block_names,
 			'has_legacy_blocks' => $has_legacy,
 		);
 
@@ -476,30 +479,33 @@ class Pattern_Manager {
 	 * @return array Sorted patterns.
 	 */
 	private function sort_patterns( $patterns, $order_by ) {
-		usort( $patterns, function ( $a, $b ) use ( $order_by ) {
-			switch ( $order_by ) {
-				case 'usage':
-					$a_refs = isset( $a['reference_count'] ) ? $a['reference_count'] : 0;
-					$b_refs = isset( $b['reference_count'] ) ? $b['reference_count'] : 0;
-					return $b_refs - $a_refs;
+		usort(
+			$patterns,
+			function ( $a, $b ) use ( $order_by ) {
+				switch ( $order_by ) {
+					case 'usage':
+						$a_refs = isset( $a['reference_count'] ) ? $a['reference_count'] : 0;
+						$b_refs = isset( $b['reference_count'] ) ? $b['reference_count'] : 0;
+						return $b_refs - $a_refs;
 
-				case 'date':
-					$a_date = isset( $a['modified'] ) ? strtotime( $a['modified'] ) : 0;
-					$b_date = isset( $b['modified'] ) ? strtotime( $b['modified'] ) : 0;
-					return $b_date - $a_date;
+					case 'date':
+						$a_date = isset( $a['modified'] ) ? strtotime( $a['modified'] ) : 0;
+						$b_date = isset( $b['modified'] ) ? strtotime( $b['modified'] ) : 0;
+						return $b_date - $a_date;
 
-				case 'name':
-					$a_name = isset( $a['name'] ) ? $a['name'] : '';
-					$b_name = isset( $b['name'] ) ? $b['name'] : '';
-					return strcasecmp( $a_name, $b_name );
+					case 'name':
+						$a_name = isset( $a['name'] ) ? $a['name'] : '';
+						$b_name = isset( $b['name'] ) ? $b['name'] : '';
+						return strcasecmp( $a_name, $b_name );
 
-				case 'score':
-				default:
-					$a_score = isset( $a['preference']['score'] ) ? $a['preference']['score'] : 0;
-					$b_score = isset( $b['preference']['score'] ) ? $b['preference']['score'] : 0;
-					return $b_score - $a_score;
+					case 'score':
+					default:
+						$a_score = isset( $a['preference']['score'] ) ? $a['preference']['score'] : 0;
+						$b_score = isset( $b['preference']['score'] ) ? $b['preference']['score'] : 0;
+						return $b_score - $a_score;
+				}
 			}
-		} );
+		);
 
 		return $patterns;
 	}

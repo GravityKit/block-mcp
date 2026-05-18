@@ -367,8 +367,10 @@ class Yoast_Bridge {
 
 		// Mirror Yoast's own metabox-save action so downstream listeners (sitemap
 		// rebuild, indexable update, etc.) fire as if the field changed in wp-admin.
+		// Yoast owns the `wpseo_` prefix; the unprefixed-hookname warning is
+		// expected and intentional.
 		if ( self::is_yoast_active() ) {
-			do_action( 'wpseo_saved_postdata' );
+			do_action( 'wpseo_saved_postdata' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Re-emitting Yoast's own hook on its behalf.
 		}
 
 		return true;

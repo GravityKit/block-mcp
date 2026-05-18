@@ -154,8 +154,8 @@ class Block_CRUD {
 			// response with refs that no longer match disk. wp_cache_add() is
 			// atomic on persistent object caches (Memcached/Redis), so use it
 			// as a short-lived per-post lock around the assign-and-persist.
-			$lock_key  = 'gk_block_api_ref_lock_' . (int) $post_id;
-			$got_lock  = wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
+			$lock_key = 'gk_block_api_ref_lock_' . (int) $post_id;
+			$got_lock = wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
 
 			if ( $got_lock ) {
 				try {
@@ -191,8 +191,8 @@ class Block_CRUD {
 		// access the current post (needed for product-specific shortcodes
 		// like [filter_edd_version_number], [filter_product_star_rating], etc.).
 		if ( $render ) {
-			$original_post    = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
-			$GLOBALS['post']  = $post;
+			$original_post   = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
+			$GLOBALS['post'] = $post;
 			setup_postdata( $post );
 		}
 
@@ -243,7 +243,7 @@ class Block_CRUD {
 		if ( ! is_array( $blocks ) ) {
 			$blocks = array();
 		}
-		$flat   = $this->flatten_blocks( $blocks );
+		$flat = $this->flatten_blocks( $blocks );
 
 		if ( $index < 0 || $index >= count( $flat ) ) {
 			return new \WP_Error(
@@ -371,7 +371,7 @@ class Block_CRUD {
 			if ( null !== $auto_transformed ) {
 				$block['innerHTML'] = $auto_transformed;
 				if ( ! empty( $block['innerContent'] ) ) {
-					$transformer = $this->transformer;
+					$transformer           = $this->transformer;
 					$block['innerContent'] = array_map(
 						function ( $piece ) use ( $transformer, $block_name, $attributes ) {
 							if ( null === $piece ) {
@@ -454,7 +454,10 @@ class Block_CRUD {
 					count( $updates ),
 					self::MAX_BATCH_SIZE
 				),
-				array( 'status' => 400, 'max_batch_size' => self::MAX_BATCH_SIZE )
+				array(
+					'status'         => 400,
+					'max_batch_size' => self::MAX_BATCH_SIZE,
+				)
 			);
 		}
 
@@ -477,9 +480,9 @@ class Block_CRUD {
 		// Phase 1: validate every item; collect resolved targets keyed by path
 		// so a `ref` item and a `flat_index` item that point to the SAME block
 		// are caught as duplicates (final state would be order-dependent).
-		$errors      = array();
-		$resolved    = array();
-		$seen_paths  = array();
+		$errors     = array();
+		$resolved   = array();
+		$seen_paths = array();
 		foreach ( $updates as $i => $item ) {
 			if ( ! is_array( $item ) ) {
 				$errors[] = array(
@@ -546,9 +549,9 @@ class Block_CRUD {
 			$path_key = implode( '.', array_map( 'intval', $path ) );
 			if ( isset( $seen_paths[ $path_key ] ) ) {
 				$errors[] = array(
-					'index'        => $i,
-					'code'         => 'duplicate_target',
-					'message'      => sprintf(
+					'index'         => $i,
+					'code'          => 'duplicate_target',
+					'message'       => sprintf(
 						/* translators: %d: index of the earlier item targeting the same block */
 						__( 'Duplicate target — same block already updated by item at index %d.', 'gk-block-api' ),
 						$seen_paths[ $path_key ]
@@ -605,7 +608,10 @@ class Block_CRUD {
 			return new \WP_Error(
 				'batch_validation_failed',
 				__( 'One or more items failed validation; no changes applied.', 'gk-block-api' ),
-				array( 'status' => 400, 'errors' => $errors )
+				array(
+					'status' => 400,
+					'errors' => $errors,
+				)
 			);
 		}
 
@@ -756,7 +762,7 @@ class Block_CRUD {
 		// raw indices (parse_blocks() may collapse adjacent whitespace differently than
 		// the in-memory $all_existing_blocks array). This guarantees the returned `path`
 		// is immediately usable by mutate_block_tree without an extra get_page_blocks call.
-		$inserted = array();
+		$inserted   = array();
 		$saved_post = get_post( $post_id );
 		if ( $saved_post ) {
 			$parsed_after = parse_blocks( $saved_post->post_content );
@@ -775,7 +781,7 @@ class Block_CRUD {
 				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
 					? $post_visible_to_raw[ $visible_index ]
 					: null;
-				$entry = array(
+				$entry         = array(
 					'index'             => $visible_index,
 					'top_level_counter' => $visible_index,
 					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
@@ -798,11 +804,11 @@ class Block_CRUD {
 		}
 
 		return array(
-			'success'              => true,
-			'inserted'             => $inserted,
-			'warnings'             => $warnings,
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			'success'            => true,
+			'inserted'           => $inserted,
+			'warnings'           => $warnings,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -896,12 +902,12 @@ class Block_CRUD {
 		$this->record_rate_limit( $post_id, 'write' );
 
 		return array(
-			'success'              => true,
-			'deleted_index'        => $index,
-			'deleted_count'        => $count,
-			'warnings'             => $warnings,
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			'success'            => true,
+			'deleted_index'      => $index,
+			'deleted_count'      => $count,
+			'warnings'           => $warnings,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -1012,7 +1018,7 @@ class Block_CRUD {
 			if ( $count === 0 ) {
 				$raw_splice_count = 0;
 			} else {
-				$last_raw_idx = ( $start + $count - 1 < $visible_count )
+				$last_raw_idx     = ( $start + $count - 1 < $visible_count )
 					? $visible_to_raw[ $start + $count - 1 ]
 					: $visible_to_raw[ $visible_count - 1 ];
 				$raw_splice_count = ( $last_raw_idx - $raw_splice_start ) + 1;
@@ -1023,8 +1029,8 @@ class Block_CRUD {
 		for ( $i = 0; $i < $raw_splice_count; $i++ ) {
 			$raw_idx = $raw_splice_start + $i;
 			if ( isset( $all_existing_blocks[ $raw_idx ] ) && 'core/block' === $all_existing_blocks[ $raw_idx ]['blockName'] ) {
-				$ref_id  = isset( $all_existing_blocks[ $raw_idx ]['attrs']['ref'] ) ? $all_existing_blocks[ $raw_idx ]['attrs']['ref'] : 0;
-				$pattern = $ref_id ? get_post( $ref_id ) : null;
+				$ref_id     = isset( $all_existing_blocks[ $raw_idx ]['attrs']['ref'] ) ? $all_existing_blocks[ $raw_idx ]['attrs']['ref'] : 0;
+				$pattern    = $ref_id ? get_post( $ref_id ) : null;
 				$warnings[] = array(
 					'message' => sprintf(
 						/* translators: %s: pattern name */
@@ -1048,7 +1054,7 @@ class Block_CRUD {
 
 		// Build inserted refs with the same shape insert_blocks returns
 		// (so callers can chain mutate_block_tree without an extra fetch).
-		$inserted = array();
+		$inserted   = array();
 		$saved_post = get_post( $post_id );
 		if ( $saved_post ) {
 			$parsed_after = parse_blocks( $saved_post->post_content );
@@ -1066,7 +1072,7 @@ class Block_CRUD {
 				$raw_idx       = isset( $post_visible_to_raw[ $visible_index ] )
 					? $post_visible_to_raw[ $visible_index ]
 					: null;
-				$entry = array(
+				$entry         = array(
 					'index'             => $visible_index,
 					'top_level_counter' => $visible_index,
 					'path'              => null === $raw_idx ? array( $visible_index ) : array( $raw_idx ),
@@ -1080,12 +1086,12 @@ class Block_CRUD {
 		}
 
 		return array(
-			'success'              => true,
-			'removed'              => $count,
-			'inserted'             => $inserted,
-			'warnings'             => $warnings,
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			'success'            => true,
+			'removed'            => $count,
+			'inserted'           => $inserted,
+			'warnings'           => $warnings,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -1150,11 +1156,11 @@ class Block_CRUD {
 		}
 
 		return array(
-			'success'              => true,
-			'blocks'               => $block_list,
-			'warnings'             => $warnings,
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			'success'            => true,
+			'blocks'             => $block_list,
+			'warnings'           => $warnings,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -1287,16 +1293,16 @@ class Block_CRUD {
 			$this->record_rate_limit( $post_id, 'write' );
 
 			return array(
-				'success'              => true,
-				'inserted'             => array(
+				'success'            => true,
+				'inserted'           => array(
 					'index'        => $insert_at,
 					'name'         => 'core/block',
 					'attributes'   => array( 'ref' => (int) $pattern_id ),
 					'pattern_name' => $pattern_name,
 					'synced'       => true,
 				),
-				'before_revision_id'   => $result['before_revision_id'],
-				'revision_id'          => $result['revision_id'],
+				'before_revision_id' => $result['before_revision_id'],
+				'revision_id'        => $result['revision_id'],
 			);
 		}
 
@@ -1315,9 +1321,14 @@ class Block_CRUD {
 		}
 
 		// Filter out empty/whitespace-only blocks.
-		$pattern_blocks = array_values( array_filter( $pattern_blocks, function ( $block ) {
-			return ! empty( $block['blockName'] );
-		} ) );
+		$pattern_blocks = array_values(
+			array_filter(
+				$pattern_blocks,
+				function ( $block ) {
+					return ! empty( $block['blockName'] );
+				}
+			)
+		);
 
 		if ( empty( $pattern_blocks ) ) {
 			return new \WP_Error(
@@ -1346,12 +1357,12 @@ class Block_CRUD {
 		}
 
 		return array(
-			'success'              => true,
-			'inserted'             => $inserted,
-			'pattern_name'         => $pattern_name,
-			'synced'               => false,
-			'before_revision_id'   => $result['before_revision_id'],
-			'revision_id'          => $result['revision_id'],
+			'success'            => true,
+			'inserted'           => $inserted,
+			'pattern_name'       => $pattern_name,
+			'synced'             => false,
+			'before_revision_id' => $result['before_revision_id'],
+			'revision_id'        => $result['revision_id'],
 		);
 	}
 
@@ -1366,11 +1377,14 @@ class Block_CRUD {
 	 * @return int Revision post ID (0 = no revisions yet).
 	 */
 	public function get_latest_revision_id( $post_id ) {
-		$revisions = wp_get_post_revisions( $post_id, array(
-			'posts_per_page' => 1,
-			'orderby'        => 'date',
-			'order'          => 'DESC',
-		) );
+		$revisions = wp_get_post_revisions(
+			$post_id,
+			array(
+				'posts_per_page' => 1,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+			)
+		);
 		return is_array( $revisions ) && ! empty( $revisions ) ? (int) key( $revisions ) : 0;
 	}
 
@@ -1419,7 +1433,7 @@ class Block_CRUD {
 				'stale_revision',
 				__( 'The post has changed since you fetched it. Re-fetch with get_page_blocks and retry.', 'gk-block-api' ),
 				array(
-					'status'           => 412,
+					'status'            => 412,
 					'expected_revision' => $expected,
 					'current_revision'  => $current,
 				)
@@ -1564,7 +1578,11 @@ class Block_CRUD {
 					self::MAX_BLOCK_DEPTH,
 					$depth
 				),
-				array( 'status' => 400, 'max_depth' => self::MAX_BLOCK_DEPTH, 'actual_depth' => $depth )
+				array(
+					'status'       => 400,
+					'max_depth'    => self::MAX_BLOCK_DEPTH,
+					'actual_depth' => $depth,
+				)
 			);
 		}
 		return true;
@@ -1654,7 +1672,10 @@ class Block_CRUD {
 					__( 'Ref "%s" not found. The block may have been deleted, or the ref is from an older snapshot. Re-fetch the page to get current refs.', 'gk-block-api' ),
 					$ref
 				),
-				array( 'status' => 404, 'ref' => $ref )
+				array(
+					'status' => 404,
+					'ref'    => $ref,
+				)
 			);
 		}
 
@@ -1702,7 +1723,10 @@ class Block_CRUD {
 				__( 'Ref "%s" not found.', 'gk-block-api' ),
 				$ref
 			),
-			array( 'status' => 404, 'ref' => $ref )
+			array(
+				'status' => 404,
+				'ref'    => $ref,
+			)
 		);
 	}
 
@@ -1799,7 +1823,11 @@ class Block_CRUD {
 			return new \WP_Error(
 				'ref_not_top_level',
 				__( 'Ref refers to a nested block; insert_blocks before/after_ref requires a top-level block.', 'gk-block-api' ),
-				array( 'status' => 400, 'ref' => $ref, 'path' => $path )
+				array(
+					'status' => 400,
+					'ref'    => $ref,
+					'path'   => $path,
+				)
 			);
 		}
 		// Top-level counter equals raw index for non-empty top-level blocks; need to map.
@@ -1820,7 +1848,7 @@ class Block_CRUD {
 			if ( $i === $path[0] ) {
 				return $counter;
 			}
-			$counter++;
+			++$counter;
 		}
 		return new \WP_Error( 'ref_stale', __( 'Ref position could not be resolved.', 'gk-block-api' ), array( 'status' => 404 ) );
 	}
@@ -1895,8 +1923,8 @@ class Block_CRUD {
 			if ( empty( $blocks[ $i ]['attrs']['metadata']['gk_ref'] ) ) {
 				$ref = self::generate_unique_ref( $in_use );
 				$blocks[ $i ]['attrs']['metadata']['gk_ref'] = $ref;
-				$in_use[ $ref ] = true;
-				$dirty          = true;
+				$in_use[ $ref ]                              = true;
+				$dirty                                       = true;
 			}
 			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
 				if ( $this->assign_missing_refs_walk( $blocks[ $i ]['innerBlocks'], $in_use ) ) {
@@ -1962,7 +1990,7 @@ class Block_CRUD {
 			}
 			$ref = self::generate_unique_ref( $in_use );
 			$blocks[ $i ]['attrs']['metadata']['gk_ref'] = $ref;
-			$in_use[ $ref ] = true;
+			$in_use[ $ref ]                              = true;
 			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
 				$this->assign_fresh_refs_walk( $blocks[ $i ]['innerBlocks'], $in_use );
 			}
@@ -2099,7 +2127,7 @@ class Block_CRUD {
 			// Only set on depth-0 blocks; inner blocks intentionally omit it.
 			if ( empty( $parent_path ) ) {
 				$data['top_level_counter'] = $top_level_counter;
-				$top_level_counter++;
+				++$top_level_counter;
 			}
 
 			// Surface section name from block metadata for easy scanning.
@@ -2140,18 +2168,18 @@ class Block_CRUD {
 			static $dynamic_cache = array();
 
 			if ( ! isset( $dynamic_cache[ $block['blockName'] ] ) ) {
-				$registry   = \WP_Block_Type_Registry::get_instance();
-				$block_type = $registry ? $registry->get_registered( $block['blockName'] ) : null;
+				$registry                             = \WP_Block_Type_Registry::get_instance();
+				$block_type                           = $registry ? $registry->get_registered( $block['blockName'] ) : null;
 				$dynamic_cache[ $block['blockName'] ] = $block_type ? $block_type->is_dynamic() : false;
 			}
-			$is_dynamic = $dynamic_cache[ $block['blockName'] ];
+			$is_dynamic      = $dynamic_cache[ $block['blockName'] ];
 			$data['dynamic'] = $is_dynamic;
 
 			// storage_mode disambiguates the existing `dynamic` flag for AI consumers:
-			//   - "static": innerHTML is the source of truth (most core/* blocks)
-			//   - "dynamic": attributes is the source of truth; innerHTML is regenerated on render
-			//   - "dual": both attributes AND innerHTML carry the same data and must be kept in sync
-			//             (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
+			// - "static": innerHTML is the source of truth (most core/* blocks)
+			// - "dynamic": attributes is the source of truth; innerHTML is regenerated on render
+			// - "dual": both attributes AND innerHTML carry the same data and must be kept in sync
+			// (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
 			$data['storage_mode'] = $this->inventory->resolve_storage_mode( $block['blockName'], $is_dynamic );
 
 			// Preference tier from the (admin-editable, filter-extensible) Preferences
@@ -2163,13 +2191,13 @@ class Block_CRUD {
 				$data['preference'] = array(
 					'tier' => $pref['tier'],
 				);
-				$replacement = $this->preferences->get_replacement( $block['blockName'] );
+				$replacement        = $this->preferences->get_replacement( $block['blockName'] );
 				if ( $replacement ) {
 					$data['preference']['suggested_replacement'] = $replacement;
 				}
 			}
 
-			$counter++;
+			++$counter;
 
 			if ( ! empty( $block['innerHTML'] ) ) {
 				$html = $block['innerHTML'];
@@ -2198,8 +2226,8 @@ class Block_CRUD {
 					if ( ! empty( $rendered ) ) {
 						// Strip to plain text for a concise summary, keep HTML in rendered_html.
 						$data['rendered_html'] = $rendered;
-						$text = wp_strip_all_tags( $rendered );
-						$text = preg_replace( '/\s+/', ' ', trim( $text ) );
+						$text                  = wp_strip_all_tags( $rendered );
+						$text                  = preg_replace( '/\s+/', ' ', trim( $text ) );
 						if ( ! empty( $text ) ) {
 							$data['rendered_text'] = mb_substr( $text, 0, 500 );
 						}
@@ -2208,8 +2236,8 @@ class Block_CRUD {
 					// Render failed — skip silently.
 					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 						if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-						error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-					}
+							error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+						}
 					}
 				}
 			}
@@ -2318,7 +2346,10 @@ class Block_CRUD {
 	 * @return array { error: \WP_Error|null, warnings: array }
 	 */
 	public function validate_block_def( $block_name ) {
-		$result = array( 'error' => null, 'warnings' => array() );
+		$result = array(
+			'error'    => null,
+			'warnings' => array(),
+		);
 
 		if ( empty( $block_name ) ) {
 			return $result;
@@ -2337,9 +2368,9 @@ class Block_CRUD {
 		$pref = $this->preferences->get_block_score( $block_name );
 
 		if ( 'legacy' === $pref['tier'] ) {
-			$replacement   = $this->preferences->get_replacement( $block_name );
-			$namespace     = $this->preferences->extract_namespace( $block_name );
-			$message_parts = array(
+			$replacement     = $this->preferences->get_replacement( $block_name );
+			$namespace       = $this->preferences->extract_namespace( $block_name );
+			$message_parts   = array(
 				sprintf(
 					/* translators: 1: legacy block name, 2: suggested replacement block name */
 					__( 'Block "%1$s" is legacy. Use "%2$s" instead.', 'gk-block-api' ),
@@ -2368,7 +2399,7 @@ class Block_CRUD {
 		}
 
 		if ( 'avoid' === $pref['tier'] ) {
-			$replacement = $this->preferences->get_replacement( $block_name );
+			$replacement          = $this->preferences->get_replacement( $block_name );
 			$result['warnings'][] = array(
 				'block'                 => $block_name,
 				'message'               => sprintf(
@@ -2389,8 +2420,8 @@ class Block_CRUD {
 	 * Each entry contains the block data and a 'path' array indicating how to
 	 * traverse the nested structure to reach it.
 	 *
-	 * @param array  $blocks Parsed blocks.
-	 * @param array  $path   Current path (for recursion).
+	 * @param array $blocks Parsed blocks.
+	 * @param array $path   Current path (for recursion).
 	 *
 	 * @return array Flat list of { block, path }.
 	 */
@@ -2420,7 +2451,7 @@ class Block_CRUD {
 	 * Get a reference to a block within a nested structure by path.
 	 *
 	 * @param array &$blocks Parsed blocks (passed by reference).
-	 * @param array  $path   Path array from flatten_blocks().
+	 * @param array $path   Path array from flatten_blocks().
 	 *
 	 * @return array Reference to the block array.
 	 */
@@ -2458,15 +2489,21 @@ class Block_CRUD {
 
 		// Clean old entries.
 		if ( isset( $data['writes'] ) ) {
-			$data['writes'] = array_filter( $data['writes'], function ( $ts ) use ( $window_start ) {
-				return $ts >= $window_start;
-			} );
+			$data['writes'] = array_filter(
+				$data['writes'],
+				function ( $ts ) use ( $window_start ) {
+					return $ts >= $window_start;
+				}
+			);
 		}
 
 		if ( isset( $data['puts'] ) ) {
-			$data['puts'] = array_filter( $data['puts'], function ( $ts ) use ( $window_start ) {
-				return $ts >= $window_start;
-			} );
+			$data['puts'] = array_filter(
+				$data['puts'],
+				function ( $ts ) use ( $window_start ) {
+					return $ts >= $window_start;
+				}
+			);
 		}
 
 		if ( 'put' === $type ) {

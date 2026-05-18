@@ -86,8 +86,12 @@ class REST_Controller {
 	private $media_manager;
 
 	/**
-	 * @var Preferences Used by the summary builder to classify blocks by tier
-	 *                  without hardcoded namespace lists.
+	 * Preferences instance for tier classification.
+	 *
+	 * Used by the summary builder to classify blocks by tier without hardcoded
+	 * namespace lists.
+	 *
+	 * @var Preferences
 	 */
 	private $preferences;
 
@@ -139,13 +143,34 @@ class REST_Controller {
 				'callback'            => array( $this, 'get_block_types' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'namespace'      => array( 'type' => 'string',  'sanitize_callback' => 'sanitize_text_field' ),
-					'category'       => array( 'type' => 'string',  'sanitize_callback' => 'sanitize_text_field' ),
-					'preferred_only' => array( 'type' => 'boolean', 'default' => false ),
-					'tier'           => array( 'type' => 'string',  'enum' => array( 'preferred', 'acceptable', 'avoid', 'legacy' ) ),
-					'storage_mode'   => array( 'type' => 'string',  'enum' => array( 'static', 'dynamic', 'dual' ) ),
-					'search'         => array( 'type' => 'string',  'sanitize_callback' => 'sanitize_text_field' ),
-					'usage_only'     => array( 'type' => 'boolean', 'default' => false ),
+					'namespace'      => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+					'category'       => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+					'preferred_only' => array(
+						'type'    => 'boolean',
+						'default' => false,
+					),
+					'tier'           => array(
+						'type' => 'string',
+						'enum' => array( 'preferred', 'acceptable', 'avoid', 'legacy' ),
+					),
+					'storage_mode'   => array(
+						'type' => 'string',
+						'enum' => array( 'static', 'dynamic', 'dual' ),
+					),
+					'search'         => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+					'usage_only'     => array(
+						'type'    => 'boolean',
+						'default' => false,
+					),
 				),
 			)
 		);
@@ -170,7 +195,7 @@ class REST_Controller {
 				'callback'            => array( $this, 'search_patterns' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'q' => array(
+					'q'     => array(
 						'type'              => 'string',
 						'required'          => true,
 						'sanitize_callback' => 'sanitize_text_field',
@@ -210,7 +235,8 @@ class REST_Controller {
 			array(
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $this, 'scan_storage_modes' ),
-				'permission_callback' => function () { return current_user_can( 'manage_options' ); },
+				'permission_callback' => function () {
+					return current_user_can( 'manage_options' ); },
 				'args'                => array(),
 			)
 		);
@@ -242,37 +268,37 @@ class REST_Controller {
 					'callback'            => array( $this, 'get_post_blocks' ),
 					'permission_callback' => array( $this, 'check_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'                   => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'fields' => array(
+						'fields'               => array(
 							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'description'       => 'Comma-separated list of fields to include (e.g. "path,name,attributes"). Omit for all fields.',
 						),
-						'search' => array(
+						'search'               => array(
 							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'description'       => 'Filter blocks by text content (searches innerHTML).',
 						),
-						'block_name' => array(
+						'block_name'           => array(
 							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'description'       => 'Filter blocks by block name (e.g. "core/button").',
 						),
-						'render' => array(
+						'render'               => array(
 							'type'        => 'boolean',
 							'default'     => false,
 							'description' => 'Include rendered output for dynamic blocks, expand shortcodes, resolve synced pattern content.',
 						),
-						'outline' => array(
+						'outline'              => array(
 							'type'        => 'boolean',
 							'default'     => false,
 							'description' => 'Return only headings and section markers as a flat outline for fast page structure scanning.',
 						),
-						'summary_only' => array(
+						'summary_only'         => array(
 							'type'        => 'boolean',
 							'default'     => false,
 							'description' => 'Return only the top-level summary object (no blocks array). Useful for quick page inspection.',
@@ -282,17 +308,17 @@ class REST_Controller {
 							'default'     => false,
 							'description' => 'Add summary.legacy_blocks.paths. Aggregate counts always included.',
 						),
-						'persist_refs' => array(
+						'persist_refs'         => array(
 							'type'        => 'boolean',
 							'default'     => true,
 							'description' => 'Assign and persist stable gk_ref UUIDs on blocks missing them. Default true. Set false for read-only callers that do not want write side effects (refs in response will not resolve later).',
 						),
-						'cursor' => array(
+						'cursor'               => array(
 							'type'              => 'string',
 							'sanitize_callback' => 'sanitize_text_field',
 							'description'       => 'Opaque cursor for paginating top-level blocks. Pass the previous response\'s pagination.next_cursor here. Omit on the first request.',
 						),
-						'limit' => array(
+						'limit'                => array(
 							'type'        => 'integer',
 							'minimum'     => 1,
 							'maximum'     => 100,
@@ -306,18 +332,18 @@ class REST_Controller {
 					'callback'            => array( $this, 'insert_blocks' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'         => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'after'  => array(
+						'after'      => array(
 							'type' => array( 'integer', 'string' ),
 						),
-						'before' => array(
+						'before'     => array(
 							'type' => 'integer',
 						),
-						'after_ref' => array(
+						'after_ref'  => array(
 							'type'        => 'string',
 							'description' => 'Insert after the top-level block with this gk_ref (alternative to "after").',
 						),
@@ -325,7 +351,7 @@ class REST_Controller {
 							'type'        => 'string',
 							'description' => 'Insert before the top-level block with this gk_ref (alternative to "before").',
 						),
-						'blocks' => array(
+						'blocks'     => array(
 							'type'     => 'array',
 							'required' => true,
 							'items'    => array(
@@ -340,7 +366,7 @@ class REST_Controller {
 					'callback'            => array( $this, 'replace_all_blocks' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'     => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
@@ -369,7 +395,7 @@ class REST_Controller {
 					'callback'            => array( $this, 'update_blocks_batch' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'      => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
@@ -411,12 +437,12 @@ class REST_Controller {
 					'callback'            => array( $this, 'get_block' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'         => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'ref' => array(
+						'ref'        => array(
 							'type'        => 'string',
 							'required'    => false,
 							'description' => 'Stable gk_ref. Provide this OR flat_index.',
@@ -441,17 +467,17 @@ class REST_Controller {
 					'callback'            => array( $this, 'replace_blocks_range' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'     => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'start' => array(
+						'start'  => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'count' => array(
+						'count'  => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
@@ -478,12 +504,12 @@ class REST_Controller {
 					'callback'            => array( $this, 'update_block' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'         => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'index' => array(
+						'index'      => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
@@ -491,7 +517,7 @@ class REST_Controller {
 						'attributes' => array(
 							'type' => 'object',
 						),
-						'innerHTML' => array(
+						'innerHTML'  => array(
 							'type' => 'string',
 						),
 					),
@@ -502,7 +528,7 @@ class REST_Controller {
 					'callback'            => array( $this, 'delete_block' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'    => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
@@ -534,12 +560,12 @@ class REST_Controller {
 					'callback'            => array( $this, 'update_block_by_ref' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'         => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'ref' => array(
+						'ref'        => array(
 							'type'              => 'string',
 							'required'          => true,
 							'sanitize_callback' => 'sanitize_text_field',
@@ -553,12 +579,12 @@ class REST_Controller {
 					'callback'            => array( $this, 'delete_block_by_ref' ),
 					'permission_callback' => array( $this, 'check_edit_permissions' ),
 					'args'                => array(
-						'id' => array(
+						'id'    => array(
 							'type'              => 'integer',
 							'required'          => true,
 							'sanitize_callback' => 'absint',
 						),
-						'ref' => array(
+						'ref'   => array(
 							'type'              => 'string',
 							'required'          => true,
 							'sanitize_callback' => 'sanitize_text_field',
@@ -582,7 +608,7 @@ class REST_Controller {
 				'callback'            => array( $this, 'insert_pattern' ),
 				'permission_callback' => array( $this, 'check_edit_permissions' ),
 				'args'                => array(
-					'id' => array(
+					'id'         => array(
 						'type'              => 'integer',
 						'required'          => true,
 						'sanitize_callback' => 'absint',
@@ -591,13 +617,13 @@ class REST_Controller {
 						'type'     => array( 'integer', 'string' ),
 						'required' => true,
 					),
-					'after'  => array(
+					'after'      => array(
 						'type' => array( 'integer', 'string' ),
 					),
-					'before' => array(
+					'before'     => array(
 						'type' => 'integer',
 					),
-					'synced' => array(
+					'synced'     => array(
 						'type'    => 'boolean',
 						'default' => true,
 					),
@@ -633,12 +659,12 @@ class REST_Controller {
 				'callback'            => array( $this, 'find_posts' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'search' => array(
+					'search'      => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'Free-text across title + content.',
 					),
-					'post_type' => array(
+					'post_type'   => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'Single or comma-separated. Default: public types.',
@@ -649,13 +675,13 @@ class REST_Controller {
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'publish | draft | private | any | comma-separated.',
 					),
-					'per_page' => array(
+					'per_page'    => array(
 						'type'              => 'integer',
 						'default'           => 20,
 						'sanitize_callback' => 'absint',
 						'description'       => 'Capped at 100.',
 					),
-					'page' => array(
+					'page'        => array(
 						'type'              => 'integer',
 						'default'           => 1,
 						'sanitize_callback' => 'absint',
@@ -673,17 +699,17 @@ class REST_Controller {
 				'callback'            => array( $this, 'post_info' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'post_id' => array(
+					'post_id'   => array(
 						'type'              => 'integer',
 						'sanitize_callback' => 'absint',
 						'description'       => 'One of post_id, url, or slug.',
 					),
-					'url' => array(
+					'url'       => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'Full URL or path. Resolved via url_to_postid.',
 					),
-					'slug' => array(
+					'slug'      => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 						'description'       => 'post_name. Combine with post_type for uniqueness.',
@@ -707,34 +733,41 @@ class REST_Controller {
 				'callback'            => array( $this, 'mutate_block_tree' ),
 				'permission_callback' => array( $this, 'check_edit_permissions' ),
 				'args'                => array(
-					'id' => array(
+					'id'              => array(
 						'type'              => 'integer',
 						'required'          => true,
 						'sanitize_callback' => 'absint',
 					),
-					'op' => array(
+					'op'              => array(
 						'type'     => 'string',
 						'required' => true,
 						'enum'     => array(
-							'update-attrs', 'update-html', 'replace-block', 'remove-block',
-							'wrap-in-group', 'unwrap-group', 'insert-child', 'duplicate', 'move',
+							'update-attrs',
+							'update-html',
+							'replace-block',
+							'remove-block',
+							'wrap-in-group',
+							'unwrap-group',
+							'insert-child',
+							'duplicate',
+							'move',
 						),
 					),
-					'path' => array(
+					'path'            => array(
 						'type'        => 'array',
 						'items'       => array( 'type' => 'integer' ),
 						'description' => 'Integer path to the target block. Provide this OR "ref".',
 					),
-					'ref' => array(
+					'ref'             => array(
 						'type'        => 'string',
 						'description' => 'Stable gk_ref of the target block (alternative to "path"). Survives sibling shifts.',
 					),
-					'attributes'  => array( 'type' => 'object' ),
-					'innerHTML'   => array( 'type' => 'string' ),
-					'block'       => array( 'type' => 'object' ),
-					'wrapper'     => array( 'type' => 'object' ),
-					'position'    => array( 'type' => array( 'integer', 'string' ) ),
-					'destination' => array(
+					'attributes'      => array( 'type' => 'object' ),
+					'innerHTML'       => array( 'type' => 'string' ),
+					'block'           => array( 'type' => 'object' ),
+					'wrapper'         => array( 'type' => 'object' ),
+					'position'        => array( 'type' => array( 'integer', 'string' ) ),
+					'destination'     => array(
 						'type'        => 'array',
 						'items'       => array( 'type' => 'integer' ),
 						'description' => 'Path the block(s) should land at after the move (move op).',
@@ -743,11 +776,11 @@ class REST_Controller {
 						'type'        => 'string',
 						'description' => 'Resolve destination from this ref instead of a path (move op).',
 					),
-					'count' => array(
+					'count'           => array(
 						'type'    => 'integer',
 						'default' => 1,
 					),
-					'dry_run' => array(
+					'dry_run'         => array(
 						'type'        => 'boolean',
 						'default'     => false,
 						'description' => 'Validate and simulate the mutation without saving. Returns what would happen.',
@@ -765,14 +798,14 @@ class REST_Controller {
 				'callback'            => array( $this, 'revert_to_revision' ),
 				'permission_callback' => array( $this, 'check_edit_permissions' ),
 				'args'                => array(
-					'id' => array(
+					'id'          => array(
 						'type'              => 'integer',
 						'required'          => true,
 						'sanitize_callback' => 'absint',
 					),
 					'revision_id' => array(
-						'type'     => 'integer',
-						'required' => true,
+						'type'              => 'integer',
+						'required'          => true,
 						'sanitize_callback' => 'absint',
 					),
 				),
@@ -818,16 +851,51 @@ class REST_Controller {
 				'callback'            => array( $this, 'list_terms' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'taxonomy'   => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_key', 'default' => 'category' ),
-					'search'     => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field' ),
-					'parent'     => array( 'type' => 'integer', 'sanitize_callback' => 'absint' ),
-					'hide_empty' => array( 'type' => 'boolean', 'default' => false ),
-					'per_page'   => array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'default' => 100 ),
-					'page'       => array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'default' => 1 ),
-					'orderby'    => array( 'type' => 'string', 'enum' => array( 'name', 'count', 'term_id', 'slug' ), 'default' => 'name' ),
-					'order'      => array( 'type' => 'string', 'enum' => array( 'asc', 'desc' ), 'default' => 'asc' ),
-					'include'    => array( 'type' => 'array', 'items' => array( 'type' => 'integer' ) ),
-					'slug'       => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_title' ),
+					'taxonomy'   => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+						'default'           => 'category',
+					),
+					'search'     => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+					'parent'     => array(
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
+					),
+					'hide_empty' => array(
+						'type'    => 'boolean',
+						'default' => false,
+					),
+					'per_page'   => array(
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
+						'default'           => 100,
+					),
+					'page'       => array(
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
+						'default'           => 1,
+					),
+					'orderby'    => array(
+						'type'    => 'string',
+						'enum'    => array( 'name', 'count', 'term_id', 'slug' ),
+						'default' => 'name',
+					),
+					'order'      => array(
+						'type'    => 'string',
+						'enum'    => array( 'asc', 'desc' ),
+						'default' => 'asc',
+					),
+					'include'    => array(
+						'type'  => 'array',
+						'items' => array( 'type' => 'integer' ),
+					),
+					'slug'       => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_title',
+					),
 				),
 			)
 		);
@@ -927,7 +995,7 @@ class REST_Controller {
 	 */
 	public function update_post( $request ) {
 		try {
-			$post_id = (int) $request['id'];
+			$post_id   = (int) $request['id'];
 			$cap_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $cap_check ) ) {
 				return $cap_check;
@@ -956,7 +1024,7 @@ class REST_Controller {
 	 */
 	public function list_terms( $request ) {
 		try {
-			$args = $request->get_query_params();
+			$args   = $request->get_query_params();
 			$result = $this->term_manager->list_terms( (array) $args );
 			if ( is_wp_error( $result ) ) {
 				return $result;
@@ -975,10 +1043,10 @@ class REST_Controller {
 	 */
 	public function upload_media( $request ) {
 		try {
-			$args = $request->get_params();
+			$args        = $request->get_params();
 			$file_params = $request->get_file_params();
 			if ( ! empty( $file_params ) ) {
-				$first = array_keys( $file_params )[0];
+				$first              = array_keys( $file_params )[0];
 				$args['file_field'] = (string) $first;
 			}
 			$result = $this->media_manager->upload( (array) $args );
@@ -1214,14 +1282,17 @@ class REST_Controller {
 
 			$post = get_post( $post_id );
 
-			return new \WP_REST_Response( array(
-				'post_id'   => $post_id,
-				'post_type' => $post->post_type,
-				'title'     => $post->post_title,
-				'status'    => $post->post_status,
-				'slug'      => $post->post_name,
-				'edit_url'  => get_edit_post_link( $post_id, 'raw' ),
-			), 200 );
+			return new \WP_REST_Response(
+				array(
+					'post_id'   => $post_id,
+					'post_type' => $post->post_type,
+					'title'     => $post->post_title,
+					'status'    => $post->post_status,
+					'slug'      => $post->post_name,
+					'edit_url'  => get_edit_post_link( $post_id, 'raw' ),
+				),
+				200
+			);
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
@@ -1247,8 +1318,8 @@ class REST_Controller {
 			$per_page    = (int) $request->get_param( 'per_page' );
 			$page        = (int) $request->get_param( 'page' );
 
-			$per_page = max( 1, min( 100, $per_page ?: 20 ) );
-			$page     = max( 1, $page ?: 1 );
+			$per_page = max( 1, min( 100, $per_page ? $per_page : 20 ) );
+			$page     = max( 1, $page ? $page : 1 );
 
 			$pt_param = $post_type
 				? array_filter( array_map( 'trim', explode( ',', $post_type ) ) )
@@ -1298,14 +1369,17 @@ class REST_Controller {
 				);
 			}
 
-			return new \WP_REST_Response( array(
-				'posts'       => $out,
-				'count'       => count( $out ),
-				'total'       => (int) $query->found_posts,
-				'total_pages' => (int) $query->max_num_pages,
-				'page'        => $page,
-				'per_page'    => $per_page,
-			), 200 );
+			return new \WP_REST_Response(
+				array(
+					'posts'       => $out,
+					'count'       => count( $out ),
+					'total'       => (int) $query->found_posts,
+					'total_pages' => (int) $query->max_num_pages,
+					'page'        => $page,
+					'per_page'    => $per_page,
+				),
+				200
+			);
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
@@ -1326,7 +1400,8 @@ class REST_Controller {
 			$post_id   = (int) $request->get_param( 'post_id' );
 			$url       = $request->get_param( 'url' );
 			$slug      = $request->get_param( 'slug' );
-			$post_type = $request->get_param( 'post_type' ) ?: 'any';
+			$post_type_raw = $request->get_param( 'post_type' );
+			$post_type     = $post_type_raw ? $post_type_raw : 'any';
 
 			$post = null;
 			if ( $post_id > 0 ) {
@@ -1338,13 +1413,15 @@ class REST_Controller {
 					$post = get_post( $resolved );
 				}
 			} elseif ( ! empty( $slug ) ) {
-				$found = get_posts( array(
-					'name'           => $slug,
-					'post_type'      => $post_type,
-					'post_status'    => array( 'publish', 'draft', 'private', 'pending', 'future' ),
-					'posts_per_page' => 1,
-					'no_found_rows'  => true,
-				) );
+				$found = get_posts(
+					array(
+						'name'           => $slug,
+						'post_type'      => $post_type,
+						'post_status'    => array( 'publish', 'draft', 'private', 'pending', 'future' ),
+						'posts_per_page' => 1,
+						'no_found_rows'  => true,
+					)
+				);
 				if ( ! empty( $found ) ) {
 					$post = $found[0];
 				}
@@ -1366,24 +1443,27 @@ class REST_Controller {
 
 			$author = get_userdata( (int) $post->post_author );
 
-			return new \WP_REST_Response( array(
-				'post_id'      => (int) $post->ID,
-				'title'        => $post->post_title,
-				'slug'         => $post->post_name,
-				'post_type'    => $post->post_type,
-				'post_status'  => $post->post_status,
-				'post_url'     => get_permalink( $post ),
-				'edit_url'     => get_edit_post_link( $post->ID, 'raw' ),
-				'modified'     => $post->post_modified_gmt . 'Z',
-				'created'      => $post->post_date_gmt . 'Z',
-				'parent_id'    => (int) $post->post_parent,
-				'author'       => array(
-					'id'           => (int) $post->post_author,
-					'display_name' => $author ? $author->display_name : '',
+			return new \WP_REST_Response(
+				array(
+					'post_id'       => (int) $post->ID,
+					'title'         => $post->post_title,
+					'slug'          => $post->post_name,
+					'post_type'     => $post->post_type,
+					'post_status'   => $post->post_status,
+					'post_url'      => get_permalink( $post ),
+					'edit_url'      => get_edit_post_link( $post->ID, 'raw' ),
+					'modified'      => $post->post_modified_gmt . 'Z',
+					'created'       => $post->post_date_gmt . 'Z',
+					'parent_id'     => (int) $post->post_parent,
+					'author'        => array(
+						'id'           => (int) $post->post_author,
+						'display_name' => $author ? $author->display_name : '',
+					),
+					'mime_type'     => $post->post_mime_type,
+					'comment_count' => (int) $post->comment_count,
 				),
-				'mime_type'    => $post->post_mime_type,
-				'comment_count' => (int) $post->comment_count,
-			), 200 );
+				200
+			);
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
@@ -1432,7 +1512,7 @@ class REST_Controller {
 			$is_search  = ! empty( $search ) || ! empty( $block_name );
 
 			if ( $is_search ) {
-				$blocks = $this->search_blocks( $blocks, $search ?: '', $block_name ?: '' );
+				$blocks = $this->search_blocks( $blocks, $search ? $search : '', $block_name ? $block_name : '' );
 			}
 
 			// Outline mode: flatten to just headings with section names.
@@ -1476,7 +1556,7 @@ class REST_Controller {
 
 				$blocks = array_slice( $blocks, $offset, $limit );
 
-				$next_offset = $offset + $limit;
+				$next_offset     = $offset + $limit;
 				$pagination_meta = array(
 					'limit'       => $limit,
 					'offset'      => $offset,
@@ -1577,7 +1657,8 @@ class REST_Controller {
 	 * named sections with their paths, and warning counts. Avoids the need
 	 * to walk the full tree manually for basic page inspection.
 	 *
-	 * @param array $blocks Formatted blocks (from get_blocks).
+	 * @param array $blocks               Formatted blocks (from get_blocks).
+	 * @param bool  $include_legacy_paths Whether to include per-block paths in legacy block data.
 	 *
 	 * @return array Summary data.
 	 */
@@ -1616,7 +1697,7 @@ class REST_Controller {
 			arsort( $summary['legacy_blocks']['by_block_name'] );
 			$summary['legacy_blocks']['by_block_name'] = array_map( 'intval', $summary['legacy_blocks']['by_block_name'] );
 			arsort( $summary['legacy_blocks']['by_namespace'] );
-			$summary['legacy_blocks']['by_namespace']  = array_map( 'intval', $summary['legacy_blocks']['by_namespace'] );
+			$summary['legacy_blocks']['by_namespace'] = array_map( 'intval', $summary['legacy_blocks']['by_namespace'] );
 		}
 
 		return $summary;
@@ -1625,13 +1706,14 @@ class REST_Controller {
 	/**
 	 * Recursive walker for build_blocks_summary.
 	 *
-	 * @param array $blocks  Blocks to walk.
-	 * @param array &$summary Summary accumulator (by reference).
-	 * @param int   $depth   Current depth for max_path_depth tracking.
+	 * @param array $blocks               Blocks to walk.
+	 * @param array $summary              Summary accumulator (by reference).
+	 * @param int   $depth                Current depth for max_path_depth tracking.
+	 * @param bool  $include_legacy_paths Whether to collect per-block paths for legacy blocks.
 	 */
 	private function walk_blocks_for_summary( $blocks, &$summary, $depth, $include_legacy_paths = false ) {
 		foreach ( $blocks as $block ) {
-			$summary['total_blocks']++;
+			++$summary['total_blocks'];
 			$summary['max_path_depth'] = max( $summary['max_path_depth'], $depth );
 
 			$name = isset( $block['name'] ) ? $block['name'] : '';
@@ -1639,7 +1721,7 @@ class REST_Controller {
 				if ( ! isset( $summary['block_types'][ $name ] ) ) {
 					$summary['block_types'][ $name ] = 0;
 				}
-				$summary['block_types'][ $name ]++;
+				++$summary['block_types'][ $name ];
 			}
 
 			// Track sections (group blocks with metadata.name).
@@ -1652,8 +1734,8 @@ class REST_Controller {
 
 			// Track headings.
 			if ( 'core/heading' === $name ) {
-				$level = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
-				$text  = isset( $block['text_preview'] ) ? $block['text_preview'] : '';
+				$level                 = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
+				$text                  = isset( $block['text_preview'] ) ? $block['text_preview'] : '';
 				$summary['headings'][] = array(
 					'path'  => isset( $block['path'] ) ? $block['path'] : array(),
 					'level' => $level,
@@ -1670,15 +1752,15 @@ class REST_Controller {
 				$tier = $this->preferences->get_block_score( $name );
 				if ( isset( $tier['tier'] ) && in_array( $tier['tier'], array( 'avoid', 'legacy' ), true ) ) {
 					$namespace = explode( '/', $name )[0];
-					$summary['legacy_blocks']['total']++;
+					++$summary['legacy_blocks']['total'];
 					if ( ! isset( $summary['legacy_blocks']['by_namespace'][ $namespace ] ) ) {
 						$summary['legacy_blocks']['by_namespace'][ $namespace ] = 0;
 					}
-					$summary['legacy_blocks']['by_namespace'][ $namespace ]++;
+					++$summary['legacy_blocks']['by_namespace'][ $namespace ];
 					if ( ! isset( $summary['legacy_blocks']['by_block_name'][ $name ] ) ) {
 						$summary['legacy_blocks']['by_block_name'][ $name ] = 0;
 					}
-					$summary['legacy_blocks']['by_block_name'][ $name ]++;
+					++$summary['legacy_blocks']['by_block_name'][ $name ];
 					if ( $include_legacy_paths ) {
 						$summary['legacy_blocks']['paths'][] = array(
 							'name' => $name,
@@ -1709,6 +1791,9 @@ class REST_Controller {
 
 	/**
 	 * Recursive walker for extract_outline.
+	 *
+	 * @param array $blocks  Formatted blocks to walk.
+	 * @param array $outline Outline accumulator (by reference).
 	 */
 	private function walk_blocks_for_outline( $blocks, &$outline ) {
 		foreach ( $blocks as $block ) {
@@ -1727,7 +1812,7 @@ class REST_Controller {
 
 			// Heading.
 			if ( 'core/heading' === $name ) {
-				$level = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
+				$level     = isset( $block['attributes']['level'] ) ? (int) $block['attributes']['level'] : 2;
 				$outline[] = array(
 					'type'  => 'heading',
 					'path'  => $path,
@@ -1754,7 +1839,7 @@ class REST_Controller {
 	 */
 	public function update_block_by_ref( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -1811,7 +1896,7 @@ class REST_Controller {
 	 */
 	public function delete_block_by_ref( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -1850,7 +1935,7 @@ class REST_Controller {
 	 */
 	public function update_block( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -1981,7 +2066,7 @@ class REST_Controller {
 	 */
 	public function insert_blocks( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2054,7 +2139,7 @@ class REST_Controller {
 	 */
 	public function replace_blocks_range( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2100,7 +2185,7 @@ class REST_Controller {
 	 */
 	public function delete_block( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2112,7 +2197,7 @@ class REST_Controller {
 			}
 
 			$index = (int) $request->get_param( 'index' );
-			$count   = (int) $request->get_param( 'count' );
+			$count = (int) $request->get_param( 'count' );
 
 			$result = $this->block_crud->delete_blocks( $post_id, $index, $count );
 
@@ -2135,7 +2220,7 @@ class REST_Controller {
 	 */
 	public function replace_all_blocks( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2180,7 +2265,7 @@ class REST_Controller {
 	 */
 	public function insert_pattern( $request ) {
 		try {
-			$post_id = (int) $request->get_param( 'id' );
+			$post_id    = (int) $request->get_param( 'id' );
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2346,8 +2431,8 @@ class REST_Controller {
 	 * delegates to Block_CRUD::check_if_match. No-op when neither is set,
 	 * so existing callers see no behavior change.
 	 *
-	 * @param int               $post_id Post being written.
-	 * @param \WP_REST_Request  $request Incoming request.
+	 * @param int              $post_id Post being written.
+	 * @param \WP_REST_Request $request Incoming request.
 	 *
 	 * @return null|\WP_Error null = proceed; WP_Error 412 = stale revision.
 	 */
@@ -2383,9 +2468,9 @@ class REST_Controller {
 			return true;
 		}
 
-		$post = get_post( $post_id );
-		$post_type_obj = $post ? get_post_type_object( $post->post_type ) : null;
-		$required_cap = $post_type_obj ? $post_type_obj->cap->edit_post : 'edit_post';
+		$post            = get_post( $post_id );
+		$post_type_obj   = $post ? get_post_type_object( $post->post_type ) : null;
+		$required_cap    = $post_type_obj ? $post_type_obj->cap->edit_post : 'edit_post';
 		$post_type_label = $post_type_obj ? $post_type_obj->labels->singular_name : 'post';
 
 		return new \WP_Error(
@@ -2459,7 +2544,7 @@ class REST_Controller {
 			// Always recurse into children.
 			if ( ! empty( $block['innerBlocks'] ) ) {
 				$child_results = $this->search_blocks( $block['innerBlocks'], $search, $block_name );
-				$results = array_merge( $results, $child_results );
+				$results       = array_merge( $results, $child_results );
 			}
 		}
 

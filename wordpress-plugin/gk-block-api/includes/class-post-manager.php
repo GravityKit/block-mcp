@@ -59,7 +59,7 @@ class Post_Manager {
 			);
 		}
 
-		$pt_object = get_post_type_object( $post_type );
+		$pt_object  = get_post_type_object( $post_type );
 		$create_cap = ( $pt_object && isset( $pt_object->cap->create_posts ) )
 			? $pt_object->cap->create_posts
 			: 'edit_posts';
@@ -291,8 +291,8 @@ class Post_Manager {
 			}
 		}
 
-		$pt_object        = get_post_type_object( $post->post_type );
-		$before_rev_id    = $this->latest_revision_id( $post_id );
+		$pt_object               = get_post_type_object( $post->post_type );
+		$before_rev_id           = $this->latest_revision_id( $post_id );
 		$transitioned_to_publish = false;
 		$untrashed               = false;
 		$status_to_set           = null;
@@ -319,7 +319,7 @@ class Post_Manager {
 				}
 			}
 			if ( 'future' === $new_status ) {
-				$future_date = array_key_exists( 'date', $args ) ? $args['date'] : $post->post_date;
+				$future_date  = array_key_exists( 'date', $args ) ? $args['date'] : $post->post_date;
 				$future_check = $this->validate_future_date( $future_date );
 				if ( is_wp_error( $future_check ) ) {
 					return $future_check;
@@ -491,8 +491,8 @@ class Post_Manager {
 	 * Returns a WP_Error on first hard rejection (legacy tier); accumulates
 	 * non-fatal warnings into the passed-by-reference array.
 	 *
-	 * @param array              $blocks   Block defs in API shape.
-	 * @param array<int, mixed>  $warnings Warning accumulator.
+	 * @param array             $blocks   Block defs in API shape.
+	 * @param array<int, mixed> $warnings Warning accumulator.
 	 *
 	 * @return null|\WP_Error
 	 */
@@ -531,7 +531,10 @@ class Post_Manager {
 			array( $this, 'normalize_block_def_for_insert' ),
 			$blocks
 		);
-		return array( 'blocks' => $normalized, 'warnings' => $warnings );
+		return array(
+			'blocks'   => $normalized,
+			'warnings' => $warnings,
+		);
 	}
 
 	/**

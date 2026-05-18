@@ -108,12 +108,13 @@ class Block_Mutator {
 		}
 
 		// Navigate to the parent array within $blocks by reference.
-		$parent = &$blocks;
-		for ( $i = 0; $i < count( $path ) - 1; $i++ ) {
+		$parent   = &$blocks;
+		$path_len = count( $path );
+		for ( $i = 0; $i < $path_len - 1; $i++ ) {
 			$segment = $path[ $i ];
 
 			if ( ! isset( $parent[ $segment ] ) ) {
-				$valid_range = count( $parent ) > 0 ? '[0..' . ( count( $parent ) - 1 ) . ']' : '(empty)';
+				$valid_range  = count( $parent ) > 0 ? '[0..' . ( count( $parent ) - 1 ) . ']' : '(empty)';
 				$partial_path = array_slice( $path, 0, $i );
 				return new \WP_Error(
 					'invalid_path',
@@ -203,13 +204,13 @@ class Block_Mutator {
 				);
 
 				if ( null !== $auto_transformed ) {
-					$block_type_name = $parent[ $target_index ]['blockName'];
+					$block_type_name                      = $parent[ $target_index ]['blockName'];
 					$parent[ $target_index ]['innerHTML'] = $auto_transformed;
 
 					// Update innerContent: apply the same transform to each string
 					// element while preserving null positions (innerBlock placeholders).
 					if ( ! empty( $parent[ $target_index ]['innerContent'] ) ) {
-						$transformer = $this->transformer;
+						$transformer                             = $this->transformer;
 						$parent[ $target_index ]['innerContent'] = array_map(
 							function ( $piece ) use ( $transformer, $block_type_name, $attributes ) {
 								if ( null === $piece ) {
@@ -230,7 +231,7 @@ class Block_Mutator {
 						array_keys( $attributes ),
 						false
 					);
-					$warnings = array_merge( $warnings, $safety_warnings );
+					$warnings        = array_merge( $warnings, $safety_warnings );
 				}
 
 				$result_block = array(
@@ -309,10 +310,11 @@ class Block_Mutator {
 
 				// Warn if removing a synced pattern reference.
 				if ( 'core/block' === $removed_block['blockName'] ) {
-					$ref_id  = isset( $removed_block['attrs']['ref'] ) ? $removed_block['attrs']['ref'] : 0;
-					$pattern = $ref_id ? get_post( $ref_id ) : null;
+					$ref_id     = isset( $removed_block['attrs']['ref'] ) ? $removed_block['attrs']['ref'] : 0;
+					$pattern    = $ref_id ? get_post( $ref_id ) : null;
 					$warnings[] = array(
 						'message' => sprintf(
+							/* translators: %s: pattern title or reference ID */
 							__( 'Removing synced pattern reference "%s". The pattern itself is not deleted.', 'gk-block-api' ),
 							$pattern ? $pattern->post_title : '#' . $ref_id
 						),
@@ -346,7 +348,7 @@ class Block_Mutator {
 									array_splice( $gp[ $pi ]['innerContent'], $ic_idx, 1 );
 									break;
 								}
-								$null_seen++;
+								++$null_seen;
 							}
 						}
 					}
@@ -362,17 +364,28 @@ class Block_Mutator {
 				// Validate wrapper block name.
 				$registry = \WP_Block_Type_Registry::get_instance();
 				if ( ! $registry->is_registered( $wrapper_name ) ) {
-					return new \WP_Error( 'invalid_block', sprintf( __( 'Wrapper block "%s" is not registered.', 'gk-block-api' ), $wrapper_name ), array( 'status' => 400 ) );
+					return new \WP_Error(
+						'invalid_block',
+						/* translators: %s: block type name */
+						sprintf( __( 'Wrapper block "%s" is not registered.', 'gk-block-api' ), $wrapper_name ),
+						array( 'status' => 400 )
+					);
 				}
 
 				// Check wrapper preferences.
 				$pref = $this->preferences->get_block_score( $wrapper_name );
 				if ( 'legacy' === $pref['tier'] ) {
-					return new \WP_Error( 'legacy_block', sprintf( __( 'Wrapper "%s" is legacy.', 'gk-block-api' ), $wrapper_name ), array( 'status' => 400 ) );
+					return new \WP_Error(
+						'legacy_block',
+						/* translators: %s: block type name */
+						sprintf( __( 'Wrapper "%s" is legacy.', 'gk-block-api' ), $wrapper_name ),
+						array( 'status' => 400 )
+					);
 				}
 				if ( 'avoid' === $pref['tier'] ) {
 					$warnings[] = array(
 						'block'                 => $wrapper_name,
+						/* translators: %s: block namespace prefix (e.g. "stackable/") */
 						'message'               => sprintf( __( '%s blocks are deprecated.', 'gk-block-api' ), $this->preferences->extract_namespace( $wrapper_name ) . '/' ),
 						'suggested_replacement' => $this->preferences->get_replacement( $wrapper_name ),
 					);
@@ -424,8 +437,8 @@ class Block_Mutator {
 					return new \WP_Error( 'no_inner_blocks', __( 'Block has no inner blocks to unwrap.', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
-				$children     = $container['innerBlocks'];
-				$child_count  = count( $children );
+				$children    = $container['innerBlocks'];
+				$child_count = count( $children );
 
 				$result_block = array(
 					'name'           => $container['blockName'],
@@ -450,19 +463,19 @@ class Block_Mutator {
 					if ( isset( $gp[ $parent_index ]['innerContent'] ) ) {
 						// Find the null that corresponds to the unwrapped container
 						// and replace it with $child_count nulls.
-						$null_seen    = 0;
-						$new_content  = array();
+						$null_seen   = 0;
+						$new_content = array();
 						foreach ( $gp[ $parent_index ]['innerContent'] as $piece ) {
 							if ( null === $piece && $null_seen === $target_index ) {
 								// Replace this null with N nulls.
 								for ( $ci = 0; $ci < $child_count; $ci++ ) {
 									$new_content[] = null;
 								}
-								$null_seen++;
+								++$null_seen;
 							} else {
 								$new_content[] = $piece;
 								if ( null === $piece ) {
-									$null_seen++;
+									++$null_seen;
 								}
 							}
 						}
@@ -545,7 +558,7 @@ class Block_Mutator {
 								$insert_pos_ic = $ic_idx;
 								break;
 							}
-							$null_count++;
+							++$null_count;
 						}
 					}
 					if ( null === $insert_pos_ic ) {
@@ -607,7 +620,7 @@ class Block_Mutator {
 									$insert_pos = $ic_idx + 1;
 									break;
 								}
-								$null_seen++;
+								++$null_seen;
 							}
 						}
 						array_splice( $gp[ $parent_index ]['innerContent'], $insert_pos, 0, array( null ) );
@@ -615,8 +628,8 @@ class Block_Mutator {
 				}
 
 				// Calculate the new path of the clone.
-				$clone_path                              = $path;
-				$clone_path[ count( $clone_path ) - 1 ]  = $target_index + 1;
+				$clone_path                             = $path;
+				$clone_path[ count( $clone_path ) - 1 ] = $target_index + 1;
 
 				$result_block = array(
 					'name'       => $clone['blockName'],
@@ -642,9 +655,11 @@ class Block_Mutator {
 				}
 
 				// Reject moving a block into itself or its own descendants.
-				if ( count( $destination ) > count( $path ) ) {
+				$dest_len = count( $destination );
+				$path_len = count( $path );
+				if ( $dest_len > $path_len ) {
 					$is_descendant = true;
-					for ( $ci = 0; $ci < count( $path ); $ci++ ) {
+					for ( $ci = 0; $ci < $path_len; $ci++ ) {
 						if ( $path[ $ci ] !== $destination[ $ci ] ) {
 							$is_descendant = false;
 							break;
@@ -693,7 +708,7 @@ class Block_Mutator {
 						if ( $shared && $adjusted_dest[ $src_depth ] > $target_index ) {
 							$adjusted_dest[ $src_depth ] -= $count;
 						}
-					} elseif ( $src_depth === count( $adjusted_dest ) - 1 ) {
+					} elseif ( count( $adjusted_dest ) - 1 === $src_depth ) {
 						$shared = true;
 						for ( $sp = 0; $sp < $src_depth; $sp++ ) {
 							if ( $sp < count( $adjusted_dest ) - 1 && $src_parent_path[ $sp ] !== $adjusted_dest[ $sp ] ) {
@@ -715,9 +730,9 @@ class Block_Mutator {
 
 				// Update source parent's innerContent: remove $count nulls at the source position.
 				if ( count( $path ) > 1 ) {
-					$src_gp_path  = array_slice( $path, 0, -2 );
-					$src_pi       = $path[ count( $path ) - 2 ];
-					$src_gp       = &$blocks;
+					$src_gp_path = array_slice( $path, 0, -2 );
+					$src_pi      = $path[ count( $path ) - 2 ];
+					$src_gp      = &$blocks;
 					foreach ( $src_gp_path as $seg ) {
 						$src_gp = &$src_gp[ $seg ]['innerBlocks'];
 					}
@@ -729,7 +744,7 @@ class Block_Mutator {
 								if ( $null_seen >= $target_index && $null_seen < $target_index + $count ) {
 									$to_remove[] = $ic_idx;
 								}
-								$null_seen++;
+								++$null_seen;
 							}
 						}
 						foreach ( array_reverse( $to_remove ) as $rm_idx ) {
@@ -743,8 +758,9 @@ class Block_Mutator {
 					$dest_index = max( 0, min( $dest_index, count( $blocks ) ) );
 					array_splice( $blocks, $dest_index, 0, $moved_blocks );
 				} else {
-					$dest_parent = &$blocks;
-					for ( $di = 0; $di < count( $dest_parent_path ); $di++ ) {
+					$dest_parent     = &$blocks;
+					$dest_parent_len = count( $dest_parent_path );
+					for ( $di = 0; $di < $dest_parent_len; $di++ ) {
 						$seg = $dest_parent_path[ $di ];
 						if ( ! isset( $dest_parent[ $seg ] ) ) {
 							return new \WP_Error( 'invalid_destination', __( 'Destination path is invalid.', 'gk-block-api' ), array( 'status' => 400 ) );
@@ -760,7 +776,7 @@ class Block_Mutator {
 					// Update destination parent's innerContent: insert $count nulls.
 					$dest_container_idx = end( $dest_parent_path );
 					$dest_gp            = &$blocks;
-					for ( $di = 0; $di < count( $dest_parent_path ) - 1; $di++ ) {
+					for ( $di = 0; $di < $dest_parent_len - 1; $di++ ) {
 						$dest_gp = &$dest_gp[ $dest_parent_path[ $di ] ]['innerBlocks'];
 					}
 					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
@@ -772,7 +788,7 @@ class Block_Mutator {
 									$ic_insert = $ic_idx;
 									break;
 								}
-								$null_seen++;
+								++$null_seen;
 							}
 						}
 						$nulls = array_fill( 0, $count, null );
@@ -780,7 +796,7 @@ class Block_Mutator {
 					}
 				}
 
-				$first = $moved_blocks[0];
+				$first        = $moved_blocks[0];
 				$result_block = array(
 					'name'        => $first['blockName'],
 					'attributes'  => isset( $first['attrs'] ) ? $first['attrs'] : array(),
@@ -792,6 +808,7 @@ class Block_Mutator {
 			default:
 				return new \WP_Error(
 					'invalid_op',
+					/* translators: %s: operation name */
 					sprintf( __( 'Unknown operation "%s".', 'gk-block-api' ), $op ),
 					array( 'status' => 400 )
 				);

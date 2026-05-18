@@ -87,7 +87,7 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );
  * MCP) into the canonical list. Lives at the top level so REST, admin,
  * WP-CLI, and cron requests all see the user's UI choices.
  *
- * @param string[] $defaults
+ * @param string[] $defaults Array of block names from filter pipeline.
  * @return string[]
  */
 function merge_manual_dual_storage_blocks( $defaults ) {
@@ -195,7 +195,7 @@ function init_cli() {
  */
 function on_activation() {
 	$installed = get_option( DB_VERSION_OPTION, '' );
-	if ( $installed !== CURRENT_DB_VERSION ) {
+	if ( CURRENT_DB_VERSION !== $installed ) {
 		// Schema changed (or first install) — drop caches that may have
 		// been written by an older version.
 		delete_transient( Block_Inventory::CACHE_KEY );

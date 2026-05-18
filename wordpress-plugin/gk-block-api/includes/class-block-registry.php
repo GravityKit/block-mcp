@@ -43,7 +43,7 @@ class Block_Registry {
 	 * @param Block_Inventory $block_inventory Site-wide block inventory.
 	 */
 	public function __construct( Preferences $preferences, Block_Inventory $block_inventory ) {
-		$this->preferences = $preferences;
+		$this->preferences     = $preferences;
 		$this->block_inventory = $block_inventory;
 	}
 
@@ -65,10 +65,10 @@ class Block_Registry {
 			'namespace'      => '',
 			'category'       => '',
 			'preferred_only' => false,
-			'tier'           => '',           // 'preferred' | 'acceptable' | 'avoid' | 'legacy'
-			'storage_mode'   => '',           // 'static' | 'dynamic' | 'dual'
-			'search'         => '',           // substring match against name + title
-			'usage_only'     => false,        // only blocks actually present on the site
+			'tier'           => '',           // One of: preferred, acceptable, avoid, legacy.
+			'storage_mode'   => '',           // One of: static, dynamic, dual.
+			'search'         => '',           // Substring match against name + title.
+			'usage_only'     => false,        // Only return blocks actually present on the site.
 		);
 
 		$args = wp_parse_args( $args, $defaults );
@@ -93,7 +93,7 @@ class Block_Registry {
 		}
 
 		// Cheap lowercase needle for search; '' falsy short-circuits below.
-		$needle = $args['search'] !== '' ? strtolower( (string) $args['search'] ) : '';
+		$needle = '' !== $args['search'] ? strtolower( (string) $args['search'] ) : '';
 
 		$results = array();
 
@@ -103,18 +103,18 @@ class Block_Registry {
 			// Filter by namespace.
 			if ( ! empty( $args['namespace'] ) ) {
 				$ns = $this->preferences->extract_namespace( $name );
-				if ( $ns !== $args['namespace'] ) {
+				if ( $args['namespace'] !== $ns ) {
 					continue;
 				}
 			}
 
 			// Filter by category.
-			if ( ! empty( $args['category'] ) && $block_type->category !== $args['category'] ) {
+			if ( ! empty( $args['category'] ) && $args['category'] !== $block_type->category ) {
 				continue;
 			}
 
 			// Substring search on name + title (case-insensitive).
-			if ( $needle !== '' ) {
+			if ( '' !== $needle ) {
 				$title = (string) ( $block_type->title ?? '' );
 				if ( false === strpos( strtolower( $name ), $needle )
 					&& false === strpos( strtolower( $title ), $needle ) ) {
@@ -138,8 +138,8 @@ class Block_Registry {
 			// storage_mode + usage_only require the inventory; resolve once.
 			$is_dynamic = null;
 			if ( ! empty( $args['storage_mode'] ) ) {
-				$is_dynamic   = $this->block_inventory->is_block_dynamic( $name );
-				$mode         = $this->block_inventory->resolve_storage_mode( $name, $is_dynamic );
+				$is_dynamic = $this->block_inventory->is_block_dynamic( $name );
+				$mode       = $this->block_inventory->resolve_storage_mode( $name, $is_dynamic );
 				if ( $mode !== $args['storage_mode'] ) {
 					continue;
 				}
@@ -163,10 +163,13 @@ class Block_Registry {
 		}
 
 		// Sort by preference score descending, then alphabetically.
-		usort( $results, function ( $a, $b ) {
-			return $b['preference']['score'] <=> $a['preference']['score']
-				?: strcmp( $a['name'], $b['name'] );
-		} );
+		usort(
+			$results,
+			function ( $a, $b ) {
+				$cmp = $b['preference']['score'] <=> $a['preference']['score'];
+				return $cmp ? $cmp : strcmp( $a['name'], $b['name'] );
+			}
+		);
 
 		return $results;
 	}

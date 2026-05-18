@@ -45,9 +45,9 @@ function gk_block_api_uninstall_blog() {
 }
 
 if ( is_multisite() ) {
-	$blog_ids = get_sites( array( 'fields' => 'ids' ) );
+	$blog_ids = get_sites( array( 'fields' => 'ids' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- local to uninstall script, not a global.
 	foreach ( $blog_ids as $blog_id ) {
-		switch_to_blog( $blog_id );
+		switch_to_blog( $blog_id ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- $blog_id is the loop var passed to switch_to_blog(); intentional per WP multisite pattern.
 		gk_block_api_uninstall_blog();
 		restore_current_blog();
 	}

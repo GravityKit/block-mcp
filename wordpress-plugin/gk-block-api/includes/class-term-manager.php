@@ -23,6 +23,8 @@ class Term_Manager {
 	const MAX_PER_PAGE = 200;
 
 	/**
+	 * List taxonomy terms with pagination and filtering.
+	 *
 	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.3.
 	 * @return array|\WP_Error
 	 */
@@ -45,7 +47,7 @@ class Term_Manager {
 		$orderby         = isset( $args['orderby'] ) && in_array( $args['orderby'], $orderby_allowed, true )
 			? $args['orderby']
 			: 'name';
-		$order = isset( $args['order'] ) && 'desc' === strtolower( (string) $args['order'] ) ? 'DESC' : 'ASC';
+		$order           = isset( $args['order'] ) && 'desc' === strtolower( (string) $args['order'] ) ? 'DESC' : 'ASC';
 
 		$query_args = array(
 			'taxonomy'   => $taxonomy,
@@ -89,6 +91,8 @@ class Term_Manager {
 	}
 
 	/**
+	 * Format a WP_Term object into a response array.
+	 *
 	 * @param object $term WP_Term-shaped object.
 	 * @return array
 	 */
@@ -104,7 +108,25 @@ class Term_Manager {
 			// get_term_link() returns WP_Error for invalid terms / taxonomies;
 			// casting that to string would inject "Object of class WP_Error..."
 			// into the response. Resolve once and downgrade errors to ''.
-			'link'        => ( $link = get_term_link( $term ) ) && ! is_wp_error( $link ) ? (string) $link : '',
+			'link'        => $this->get_term_link_safe( $term ),
 		);
+	}
+
+	/**
+	 * Resolve a term's permalink, returning an empty string on failure.
+	 *
+	 * Returns an empty string on failure because get_term_link() returns WP_Error
+	 * for invalid terms / taxonomies, and casting that to string would inject
+	 * "Object of class WP_Error..." into the response.
+	 *
+	 * @param object $term WP_Term-shaped object.
+	 * @return string Permalink URL or empty string.
+	 */
+	private function get_term_link_safe( $term ) {
+		$link = get_term_link( $term );
+		if ( is_wp_error( $link ) ) {
+			return '';
+		}
+		return (string) $link;
 	}
 }
