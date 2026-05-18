@@ -34,18 +34,18 @@ define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
  * static-analysis tools can trace registrations. Maps
  * `GravityKit\BlockAPI\Some_Class` → `includes/class-some-class.php`.
  *
- * @param string $class Fully-qualified class name being requested.
+ * @param string $class_name Fully-qualified class name being requested.
  */
-function autoload( $class ) {
+function autoload( $class_name ) {
 	$prefix   = 'GravityKit\\BlockAPI\\';
 	$base_dir = GK_BLOCK_API_PLUGIN_DIR . 'includes/';
 
 	$len = strlen( $prefix );
-	if ( strncmp( $prefix, $class, $len ) !== 0 ) {
+	if ( strncmp( $prefix, $class_name, $len ) !== 0 ) {
 		return;
 	}
 
-	$relative_class = substr( $class, $len );
+	$relative_class = substr( $class_name, $len );
 	$file           = $base_dir . 'class-' . strtolower( str_replace( '_', '-', $relative_class ) ) . '.php';
 
 	if ( file_exists( $file ) ) {

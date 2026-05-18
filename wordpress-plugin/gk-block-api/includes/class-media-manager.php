@@ -175,7 +175,7 @@ class Media_Manager {
 		$err_code = isset( $file['error'] ) ? (int) $file['error'] : UPLOAD_ERR_NO_FILE;
 		if ( UPLOAD_ERR_OK !== $err_code ) {
 			if ( ! empty( $file['tmp_name'] ) ) {
-				@unlink( $file['tmp_name'] );
+				wp_delete_file( $file['tmp_name'] );
 			}
 			return new \WP_Error(
 				'upload_error',
@@ -191,7 +191,7 @@ class Media_Manager {
 		// will also enforce, but failing fast keeps us out of the WP error path.
 		$max = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
 		if ( $max > 0 && isset( $file['size'] ) && (int) $file['size'] > $max ) {
-			@unlink( $file['tmp_name'] );
+			wp_delete_file( $file['tmp_name'] );
 			return new \WP_Error(
 				'file_too_large',
 				__( 'Uploaded file exceeds the site upload limit.', 'gk-block-api' ),
@@ -203,7 +203,7 @@ class Media_Manager {
 		// disallowed types early so the temp file isn't moved into uploads.
 		$mime = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $file['tmp_name'] );
+			wp_delete_file( $file['tmp_name'] );
 			return new \WP_Error(
 				'disallowed_mime',
 				sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), sanitize_file_name( $file['name'] ) ),
@@ -260,8 +260,10 @@ class Media_Manager {
 	}
 
 	/**
-	 * @param array $args
-	 * @return int|\WP_Error
+	 * Handle a URL sideload upload.
+	 *
+	 * @param array $args Upload arguments including url and optional post_id.
+	 * @return int|\WP_Error Attachment ID or WP_Error.
 	 */
 	private function handle_url( array $args ) {
 		$url = esc_url_raw( $args['url'] );
@@ -285,7 +287,7 @@ class Media_Manager {
 		}
 
 		if ( filesize( $tmp ) > self::URL_DOWNLOAD_MAX_BYTES ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'file_too_large', __( 'Downloaded file exceeds size cap.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
@@ -297,7 +299,7 @@ class Media_Manager {
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
@@ -308,15 +310,17 @@ class Media_Manager {
 		);
 		$attachment_id = media_handle_sideload( $file, $post_parent );
 		if ( is_wp_error( $attachment_id ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', $attachment_id->get_error_message(), array( 'status' => 500 ) );
 		}
 		return $attachment_id;
 	}
 
 	/**
-	 * @param array $args
-	 * @return int|\WP_Error
+	 * Handle a base64-encoded file upload.
+	 *
+	 * @param array $args Upload arguments including data_base64, filename, and optional post_id.
+	 * @return int|\WP_Error Attachment ID or WP_Error.
 	 */
 	private function handle_base64( array $args ) {
 		if ( empty( $args['filename'] ) ) {
@@ -335,7 +339,7 @@ class Media_Manager {
 			);
 		}
 
-		$decoded = base64_decode( $args['data_base64'], true );
+		$decoded = base64_decode( $args['data_base64'], true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
 		if ( false === $decoded || '' === $decoded ) {
 			return new \WP_Error( 'invalid_base64', __( 'data_base64 is not valid base64.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
@@ -353,15 +357,15 @@ class Media_Manager {
 		if ( ! $tmp ) {
 			return new \WP_Error( 'sideload_failed', __( 'Could not create temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
-		$bytes_written = file_put_contents( $tmp, $decoded );
+		$bytes_written = file_put_contents( $tmp, $decoded ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Temp file written before media_handle_sideload moves it to the upload dir.
 		if ( false === $bytes_written ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', __( 'Could not write temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
@@ -372,15 +376,17 @@ class Media_Manager {
 		);
 		$attachment_id = media_handle_sideload( $file, $post_parent );
 		if ( is_wp_error( $attachment_id ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', $attachment_id->get_error_message(), array( 'status' => 500 ) );
 		}
 		return $attachment_id;
 	}
 
 	/**
-	 * @param int   $attachment_id
-	 * @param array $args
+	 * Apply title, caption, description, and alt text metadata to an attachment.
+	 *
+	 * @param int   $attachment_id Attachment post ID.
+	 * @param array $args          Upload arguments potentially containing title, caption, description, and alt_text.
 	 */
 	private function apply_metadata( $attachment_id, array $args ) {
 		$updates = array( 'ID' => $attachment_id );
@@ -402,7 +408,9 @@ class Media_Manager {
 	}
 
 	/**
-	 * @param int $attachment_id
+	 * Build the response array for a newly uploaded attachment.
+	 *
+	 * @param int $attachment_id Attachment post ID.
 	 * @return array|\WP_Error
 	 */
 	private function format_attachment( $attachment_id ) {
@@ -472,7 +480,7 @@ class Media_Manager {
 	 * `gk_block_api_url_sideload_blocked_ranges` filter (returns array of
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
-	 * @param string $url
+	 * @param string $url URL to validate against reserved IP ranges.
 	 * @return true|\WP_Error
 	 */
 	private function guard_ssrf( $url ) {
@@ -651,6 +659,11 @@ class Media_Manager {
 		return ( $ip_packed & $mask ) === ( $net_packed & $mask );
 	}
 
+	/**
+	 * Require WordPress admin includes needed for media upload functions.
+	 *
+	 * @return void
+	 */
 	private function require_admin_includes() {
 		if ( defined( 'ABSPATH' ) && is_dir( ABSPATH . 'wp-admin' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';

@@ -1397,9 +1397,9 @@ class REST_Controller {
 	 */
 	public function post_info( $request ) {
 		try {
-			$post_id   = (int) $request->get_param( 'post_id' );
-			$url       = $request->get_param( 'url' );
-			$slug      = $request->get_param( 'slug' );
+			$post_id       = (int) $request->get_param( 'post_id' );
+			$url           = $request->get_param( 'url' );
+			$slug          = $request->get_param( 'slug' );
 			$post_type_raw = $request->get_param( 'post_type' );
 			$post_type     = $post_type_raw ? $post_type_raw : 'any';
 
@@ -2522,7 +2522,7 @@ class REST_Controller {
 			$matches = true;
 
 			if ( ! empty( $search ) ) {
-				$text = isset( $block['innerHTML'] ) ? strip_tags( $block['innerHTML'] ) : '';
+				$text = isset( $block['innerHTML'] ) ? wp_strip_all_tags( $block['innerHTML'] ) : '';
 				if ( false === stripos( $text, $search ) ) {
 					$matches = false;
 				}

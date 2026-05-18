@@ -585,8 +585,11 @@ class Block_Mutator {
 			case 'duplicate':
 				$original = $parent[ $target_index ];
 
-				// Deep clone via serialize/unserialize.
-				$clone = unserialize( serialize( $original ) );
+				// Deep clone via JSON round-trip. Block trees are JSON-shaped
+				// (associative arrays, scalars, null) so this preserves the
+				// innerContent null placeholders that serialize_blocks() depends
+				// on, without invoking the discouraged serialize()/unserialize().
+				$clone = json_decode( wp_json_encode( $original ), true );
 
 				// Strip & replace refs on the clone — every block in the clone tree
 				// must have a fresh ref so the duplicate doesn't share identity with

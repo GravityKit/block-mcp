@@ -296,6 +296,7 @@ class Settings_Page {
 		delete_option( 'gk_block_api_preferences' );
 		delete_option( 'gk_block_api_post_types_allowlist' );
 		delete_option( self::DUAL_MANUAL_OPTION );
+		delete_option( Media_Manager::UPLOADS_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
 		delete_transient( Block_Inventory::CACHE_KEY );
 

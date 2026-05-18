@@ -115,7 +115,9 @@ class Block_CRUD {
 	 *
 	 * Always uses parse_blocks() to ensure index consistency with write operations.
 	 *
-	 * @param int $post_id Post ID.
+	 * @param int  $post_id      Post ID.
+	 * @param bool $render       Whether to render dynamic blocks and expand shortcodes.
+	 * @param bool $persist_refs Whether to persist gk_ref assignments to post_content.
 	 *
 	 * @return array|\WP_Error Array of block data or WP_Error.
 	 */
@@ -192,7 +194,7 @@ class Block_CRUD {
 		// like [filter_edd_version_number], [filter_product_star_rating], etc.).
 		if ( $render ) {
 			$original_post   = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
-			$GLOBALS['post'] = $post;
+			$GLOBALS['post'] = $post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- intentional: sets post context for render_block() and do_shortcode(); restored after format.
 			setup_postdata( $post );
 		}
 
@@ -200,7 +202,7 @@ class Block_CRUD {
 
 		// Restore original post context.
 		if ( $render ) {
-			$GLOBALS['post'] = $original_post;
+			$GLOBALS['post'] = $original_post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring original post context after render pass.
 			if ( $original_post ) {
 				setup_postdata( $original_post );
 			} else {
@@ -681,6 +683,13 @@ class Block_CRUD {
 			return $rate_check;
 		}
 
+		// Fail fast on over-deep input so the recursive builders below
+		// don't walk an adversarial tree before save_blocks() catches it.
+		$depth_check = self::validate_tree_depth( is_array( $blocks ) ? $blocks : array() );
+		if ( is_wp_error( $depth_check ) ) {
+			return $depth_check;
+		}
+
 		$post = get_post( $post_id );
 		if ( ! $post ) {
 			return new \WP_Error(
@@ -1015,7 +1024,7 @@ class Block_CRUD {
 			$raw_splice_count = 0;
 		} else {
 			$raw_splice_start = $visible_to_raw[ $start ];
-			if ( $count === 0 ) {
+			if ( 0 === $count ) {
 				$raw_splice_count = 0;
 			} else {
 				$last_raw_idx     = ( $start + $count - 1 < $visible_count )
@@ -1107,6 +1116,13 @@ class Block_CRUD {
 		$rate_check = $this->check_rate_limit( $post_id, 'put' );
 		if ( is_wp_error( $rate_check ) ) {
 			return $rate_check;
+		}
+
+		// Fail fast on over-deep input so the recursive builders below
+		// don't walk an adversarial tree before save_blocks() catches it.
+		$depth_check = self::validate_tree_depth( is_array( $blocks ) ? $blocks : array() );
+		if ( is_wp_error( $depth_check ) ) {
+			return $depth_check;
 		}
 
 		$post = get_post( $post_id );
@@ -1225,6 +1241,7 @@ class Block_CRUD {
 			if ( ! $registry->is_registered( $pattern_id ) ) {
 				return new \WP_Error(
 					'pattern_not_found',
+					/* translators: %s: pattern name or slug */
 					sprintf( __( 'Pattern "%s" not found in registry.', 'gk-block-api' ), $pattern_id ),
 					array( 'status' => 404 )
 				);
@@ -1463,8 +1480,8 @@ class Block_CRUD {
 	 * the depth guard, so always prefer this entry point for any block-
 	 * shape input.
 	 *
-	 * @param int   $post_id
-	 * @param array $blocks Block tree in WP-internal shape.
+	 * @param int   $post_id Post ID.
+	 * @param array $blocks  Block tree in WP-internal shape.
 	 *
 	 * @return array|\WP_Error
 	 */
@@ -1476,6 +1493,13 @@ class Block_CRUD {
 		return $this->save_post_content( $post_id, serialize_blocks( $blocks ) );
 	}
 
+	/**
+	 * Save serialized block content to a post, tracking before/after revision IDs.
+	 *
+	 * @param int    $post_id     Post ID.
+	 * @param string $new_content Serialized block markup to save.
+	 * @return array|\WP_Error
+	 */
 	public function save_post_content( $post_id, $new_content ) {
 		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
 		// correctly escapes newlines as \n in block comment JSON. Some
@@ -1483,7 +1507,7 @@ class Block_CRUD {
 		// strip those backslashes, corrupting \n → n. Stash and remove all
 		// content_save_pre callbacks for the duration of the save; block content
 		// needs no further content processing after serialize_blocks().
-		global $wp_filter;
+		global $wp_filter; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- intentional: stashing and removing content_save_pre to prevent filter corruption of serialized blocks; restored after save.
 		$saved_content_save_pre = isset( $wp_filter['content_save_pre'] ) ? $wp_filter['content_save_pre'] : null;
 		if ( $saved_content_save_pre ) {
 			remove_all_filters( 'content_save_pre' );
@@ -1506,7 +1530,7 @@ class Block_CRUD {
 
 		// Restore content_save_pre so subsequent saves in the same request are unaffected.
 		if ( $saved_content_save_pre ) {
-			$wp_filter['content_save_pre'] = $saved_content_save_pre;
+			$wp_filter['content_save_pre'] = $saved_content_save_pre; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring previously stashed filter callbacks after save.
 		}
 
 		if ( is_wp_error( $result ) ) {
@@ -1563,7 +1587,7 @@ class Block_CRUD {
 	/**
 	 * Validate that a block tree does not exceed `MAX_BLOCK_DEPTH`.
 	 *
-	 * @param array $blocks
+	 * @param array $blocks Block tree to validate.
 	 *
 	 * @return true|\WP_Error true if within bound, WP_Error otherwise.
 	 */
@@ -1902,6 +1926,8 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Walk a block tree assigning gk_ref to any block that lacks one.
+	 *
 	 * @param array               $blocks Blocks (passed by reference).
 	 * @param array<string, true> $in_use Refs already in use within this tree;
 	 *                                    written to as new refs are assigned.
@@ -1938,7 +1964,7 @@ class Block_CRUD {
 	/**
 	 * Walk a block tree and return the set of gk_refs already assigned.
 	 *
-	 * @param array $blocks
+	 * @param array $blocks Block tree to scan.
 	 * @return array<string, true>
 	 */
 	private function collect_refs( array $blocks ): array {
@@ -1972,7 +1998,9 @@ class Block_CRUD {
 	}
 
 	/**
-	 * @param array               $blocks
+	 * Walk a block tree and overwrite gk_ref on every block with a fresh value.
+	 *
+	 * @param array               $blocks Block tree (passed by reference).
 	 * @param array<string, true> $in_use Refs already minted in this pass.
 	 * @return void
 	 */
@@ -2042,6 +2070,7 @@ class Block_CRUD {
 	 * and `path` (array of raw indices for the mutation tool).
 	 *
 	 * @param array $blocks Parsed blocks from parse_blocks().
+	 * @param bool  $render Whether to render dynamic blocks and expand shortcodes.
 	 *
 	 * @return array Formatted block data.
 	 */
@@ -2176,10 +2205,10 @@ class Block_CRUD {
 			$data['dynamic'] = $is_dynamic;
 
 			// storage_mode disambiguates the existing `dynamic` flag for AI consumers:
-			// - "static": innerHTML is the source of truth (most core/* blocks)
-			// - "dynamic": attributes is the source of truth; innerHTML is regenerated on render
-			// - "dual": both attributes AND innerHTML carry the same data and must be kept in sync
-			// (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions)
+			// - "static": innerHTML is the source of truth (most core/* blocks).
+			// - "dynamic": attributes is the source of truth; innerHTML is regenerated on render.
+			// - "dual": both attributes AND innerHTML carry the same data and must be kept in sync.
+			// (e.g., yoast/faq-block — sending innerHTML alone corrupts attributes.questions).
 			$data['storage_mode'] = $this->inventory->resolve_storage_mode( $block['blockName'], $is_dynamic );
 
 			// Preference tier from the (admin-editable, filter-extensible) Preferences
@@ -2359,6 +2388,7 @@ class Block_CRUD {
 		if ( $registry && ! $registry->is_registered( $block_name ) ) {
 			$result['error'] = new \WP_Error(
 				'invalid_block',
+				/* translators: %s: block type name (e.g., core/paragraph) */
 				sprintf( __( 'Block type "%s" is not registered.', 'gk-block-api' ), $block_name ),
 				array( 'status' => 400 )
 			);
@@ -2403,6 +2433,7 @@ class Block_CRUD {
 			$result['warnings'][] = array(
 				'block'                 => $block_name,
 				'message'               => sprintf(
+					/* translators: %s: block namespace prefix (e.g., stackable/) */
 					__( '%s blocks are deprecated on this site.', 'gk-block-api' ),
 					$this->preferences->extract_namespace( $block_name ) . '/'
 				),

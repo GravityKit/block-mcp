@@ -27,10 +27,17 @@ class Post_Manager {
 	const POST_TYPES_ALLOWLIST_OPTION = 'gk_block_api_post_types_allowlist';
 
 	/**
+	 * Block CRUD service instance.
+	 *
 	 * @var Block_CRUD
 	 */
 	private $block_crud;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param Block_CRUD $block_crud Block CRUD service.
+	 */
 	public function __construct( Block_CRUD $block_crud ) {
 		$this->block_crud = $block_crud;
 	}
@@ -166,7 +173,7 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			if ( $author_id !== get_current_user_id() ) {
+			if ( get_current_user_id() !== $author_id ) {
 				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
 					? $pt_object->cap->edit_others_posts
 					: 'edit_others_posts';
@@ -248,8 +255,8 @@ class Post_Manager {
 	/**
 	 * Update post metadata, status, or terms.
 	 *
-	 * @param int   $post_id
-	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.2.
+	 * @param int   $post_id Post ID.
+	 * @param array $args    See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.2.
 	 * @return array|\WP_Error
 	 */
 	public function update_post( $post_id, array $args ) {
@@ -416,7 +423,7 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			if ( $author_id !== get_current_user_id() ) {
+			if ( get_current_user_id() !== $author_id ) {
 				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
 					? $pt_object->cap->edit_others_posts
 					: 'edit_others_posts';
@@ -519,6 +526,12 @@ class Post_Manager {
 		return null;
 	}
 
+	/**
+	 * Validate and normalize a block array before insertion.
+	 *
+	 * @param array $blocks API-shaped block definitions.
+	 * @return array|\WP_Error Normalized block array with warnings, or WP_Error on failure.
+	 */
 	private function validate_blocks_for_insert( array $blocks ) {
 		$warnings = array();
 		// Walk the full tree so nested blocks hit the same tier policy as top-level ones.
@@ -542,7 +555,7 @@ class Post_Manager {
 	 * innerHTML / innerBlocks) into the WP internal shape (blockName / attrs /
 	 * innerHTML / innerContent / innerBlocks) that serialize_blocks() expects.
 	 *
-	 * innerContent is derived from innerHTML: for leaf blocks it becomes
+	 * InnerContent is derived from innerHTML: for leaf blocks it becomes
 	 * array( $innerHTML ); for container blocks the wrapper HTML is split into
 	 * an opening fragment, one null placeholder per child, and a closing fragment.
 	 *
@@ -629,7 +642,7 @@ class Post_Manager {
 	/**
 	 * Verify an attachment ID points at an image.
 	 *
-	 * @param int $attachment_id
+	 * @param int $attachment_id Attachment post ID.
 	 * @return bool
 	 */
 	private function is_valid_image_attachment( $attachment_id ) {
@@ -646,7 +659,7 @@ class Post_Manager {
 	 * to 500 — even for validation errors. Wrap with the supplied status and
 	 * preserve any existing data fields.
 	 *
-	 * @param \WP_Error $error
+	 * @param \WP_Error $error    WP_Error from core to wrap.
 	 * @param int       $status   HTTP status to apply.
 	 * @param string    $fallback Code to use if $error has none.
 	 * @return \WP_Error
@@ -665,9 +678,11 @@ class Post_Manager {
 	}
 
 	/**
-	 * @param int    $parent_id
-	 * @param string $post_type
-	 * @param int    $self_id  Set to the post's own ID on update; 0 on create.
+	 * Validate a parent post ID for a given post type.
+	 *
+	 * @param int    $parent_id Parent post ID to validate.
+	 * @param string $post_type Post type slug.
+	 * @param int    $self_id   Set to the post's own ID on update; 0 on create.
 	 * @return true|\WP_Error
 	 */
 	private function validate_parent( $parent_id, $post_type, $self_id ) {
@@ -701,9 +716,9 @@ class Post_Manager {
 	 * term exists in its taxonomy and the taxonomy is registered for the
 	 * post type.
 	 *
-	 * @param int    $post_id
-	 * @param string $post_type
-	 * @param array  $args
+	 * @param int    $post_id   Post ID to assign terms to.
+	 * @param string $post_type Post type slug.
+	 * @param array  $args      Request arguments containing categories, tags, and terms.
 	 * @return true|\WP_Error
 	 */
 	private function assign_terms( $post_id, $post_type, array $args ) {
@@ -759,7 +774,9 @@ class Post_Manager {
 	}
 
 	/**
-	 * @param int $post_id
+	 * Get the most recent revision ID for a post.
+	 *
+	 * @param int $post_id Post ID.
 	 * @return int|null
 	 */
 	private function latest_revision_id( $post_id ) {
