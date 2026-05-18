@@ -9,6 +9,7 @@
     "require-dev": {
         "composer/installers": "^2.2",
         "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "doctrine/instantiator": "^1.5",
         "phpcompatibility/phpcompatibility-wp": "^2.1",
         "phpunit/phpunit": "^9.6",
         "roots/wordpress": "^6.7",

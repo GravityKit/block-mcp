@@ -227,8 +227,11 @@ export async function handleDiscoveryTool(
       // numeric IDs as strings. Coerce well-formed integer strings rather
       // than silently dropping them — otherwise the call falls through to
       // url/slug-only resolution, which probably isn't what was meant.
+      // The error message claims "positive integer", so the validation has
+      // to match: reject floats (Number.isFinite(1.5) is true and would
+      // otherwise pass through, contradicting the documented contract).
       let normalizedPostId: number | undefined;
-      if (typeof postId === 'number' && Number.isFinite(postId)) {
+      if (typeof postId === 'number' && Number.isInteger(postId) && postId > 0) {
         normalizedPostId = postId;
       } else if (typeof postId === 'string' && /^[0-9]+$/.test(postId)) {
         normalizedPostId = parseInt(postId, 10);

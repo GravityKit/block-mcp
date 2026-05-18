@@ -34,11 +34,22 @@ describe('get_post_info — validation', () => {
     ).rejects.toThrow(/post_id must be a positive integer/);
   });
 
-  it('passes finite numeric post_id through without coercion (incl. floats)', async () => {
-    // Number.isFinite(1.5) is true — the float passes through without throwing.
-    // Server-side coercion is responsible for narrowing to an integer.
-    await handleDiscoveryTool('get_post_info', { post_id: 1.5 }, client as any);
-    expect(client.getPostInfo).toHaveBeenCalledWith(expect.objectContaining({ post_id: 1.5 }));
+  it('throws on float post_id and does NOT call the client', async () => {
+    // The handler's error message says "post_id must be a positive integer",
+    // so a 1.5 input must surface that error client-side. Previously the
+    // validation used Number.isFinite, which accepts floats — the contract
+    // string and the validation disagreed, so callers got a silent
+    // pass-through to the server. This test pins both halves: the throw
+    // AND that client.getPostInfo isn't reached.
+    await expect(
+      handleDiscoveryTool('get_post_info', { post_id: 1.5 }, client as any)
+    ).rejects.toThrow(/post_id must be a positive integer/);
+    expect(client.getPostInfo).not.toHaveBeenCalled();
+  });
+
+  it('accepts a positive integer post_id and forwards it', async () => {
+    await handleDiscoveryTool('get_post_info', { post_id: 1 }, client as any);
+    expect(client.getPostInfo).toHaveBeenCalledWith(expect.objectContaining({ post_id: 1 }));
   });
 
   it('throws on object post_id', async () => {
