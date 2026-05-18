@@ -1350,6 +1350,14 @@ class REST_Controller {
 				'ignore_sticky_posts' => true,
 				'no_found_rows'       => false,
 				'suppress_filters'    => false,
+				// `perm: readable` pushes the user-cap filter into WP_Query's
+				// SQL via posts_where_paged (built-in WP behaviour). Without
+				// this, requests for post_status=draft / private / pending
+				// would return every matching post regardless of caller —
+				// Author-level users could see each other's drafts. Filtering
+				// in the query (not the result loop) also keeps found_posts
+				// and pagination counts honest.
+				'perm'                => 'readable',
 			);
 			if ( ! empty( $search ) ) {
 				$args['s'] = $search;
@@ -1434,6 +1442,20 @@ class REST_Controller {
 			}
 
 			if ( ! $post ) {
+				return new \WP_Error(
+					'not_found',
+					__( 'No post matched the lookup.', 'gk-block-api' ),
+					array( 'status' => 404 )
+				);
+			}
+
+			// Visibility gate. post_info hands back title, author, parent,
+			// timestamps, and status for whatever post resolves — direct id
+			// lookup did NO cap check at all, and slug-based lookup includes
+			// draft / private / pending statuses unconditionally. Force the
+			// caller through the standard read-post gate so Author-level
+			// users can't read each other's drafts.
+			if ( ! \GravityKit\BlockAPI\Block_CRUD::is_post_readable( $post ) ) {
 				return new \WP_Error(
 					'not_found',
 					__( 'No post matched the lookup.', 'gk-block-api' ),
