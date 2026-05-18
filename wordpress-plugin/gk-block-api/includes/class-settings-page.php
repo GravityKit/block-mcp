@@ -550,7 +550,23 @@ class Settings_Page {
 						</label>
 					<?php endfor; ?>
 				</fieldset>
-				<style>.gk-block-api-allowlist label { margin-right: 16px; }</style>
+				<style>
+					.gk-block-api-allowlist {
+						display: grid;
+						grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+						gap: 8px 16px;
+						max-width: 1000px;
+						margin-top: 8px;
+					}
+					.gk-block-api-allowlist label {
+						display: flex;
+						align-items: center;
+						gap: 6px;
+						white-space: nowrap;
+						overflow: hidden;
+						text-overflow: ellipsis;
+					}
+				</style>
 
 				<h2><?php esc_html_e( 'Media uploads', 'gk-block-api' ); ?></h2>
 				<p class="description">
