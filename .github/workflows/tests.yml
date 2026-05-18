@@ -13,7 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php-version: ['8.2', '8.3', '8.4']
+        # 7.4 is the documented floor (`Requires PHP: 7.4` in the plugin
+        # header); the modern versions are what the typical agent host
+        # actually runs. Both rails must stay green to ship.
+        php-version: ['7.4', '8.2', '8.3', '8.4']
     defaults:
       run:
         working-directory: wordpress-plugin/gk-block-api
@@ -66,6 +69,12 @@ jobs:
       - name: Run PHPUnit
         run: vendor/bin/phpunit -c tests/phpunit.xml --colors=never
 
+      # phpcs gate. We carry zero errors AND zero warnings on the includes/
+      # tree (see phpcs.xml.dist); CI enforces that contract so the next PR
+      # can't regress it silently.
+      - name: Run PHPCS
+        run: composer lint
+
   ts:
     name: TypeScript MCP server (Vitest)
     runs-on: ubuntu-latest
@@ -78,6 +87,13 @@ jobs:
           cache: 'npm'
 
       - run: npm ci
+
+      # esbuild bundles without type-checking and Vitest runs without
+      # surfacing type errors either; tsc --noEmit against tsconfig.build.json
+      # (which excludes src/__tests__) is the only gate that catches TS
+      # regressions in shipped code before they reach a build.
+      - name: Type check (production code)
+        run: npx tsc --noEmit -p tsconfig.build.json
 
       - run: npm test
 

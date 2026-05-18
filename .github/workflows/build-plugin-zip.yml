@@ -19,30 +19,19 @@ jobs:
       - name: Build ZIP
         run: |
           set -euo pipefail
-          cd wordpress-plugin
-          # Exclude dev / test files via .distignore — same pattern WP-CLI's
-          # `dist-archive` follows. zip's -x patterns are glob, not regex.
-          zip -rq ../gk-block-api.zip gk-block-api \
-            -x 'gk-block-api/.git*' \
-            -x 'gk-block-api/.distignore' \
-            -x 'gk-block-api/.editorconfig' \
-            -x 'gk-block-api/.phpcs.xml' \
-            -x 'gk-block-api/.phpunit.cache/*' \
-            -x 'gk-block-api/.phpunit.result.cache' \
-            -x 'gk-block-api/node_modules/*' \
-            -x 'gk-block-api/tests/*' \
-            -x 'gk-block-api/phpunit.xml' \
-            -x 'gk-block-api/phpunit.xml.dist' \
-            -x 'gk-block-api/composer.json' \
-            -x 'gk-block-api/composer.lock' \
-            -x 'gk-block-api/package.json' \
-            -x 'gk-block-api/package-lock.json' \
-            -x 'gk-block-api/README.md' \
-            -x 'gk-block-api/CHANGELOG.md' \
-            -x 'gk-block-api/**/.DS_Store' \
-            -x 'gk-block-api/.DS_Store' \
-            -x 'gk-block-api/Thumbs.db'
-          unzip -l ../gk-block-api.zip | tail -5
+          # Stage the plugin into a temp directory using rsync with the
+          # plugin's own .distignore as the exclude list — single source of
+          # truth, no drift between this workflow and what `wp dist-archive`
+          # produces locally. rsync reads .distignore as gitignore-style
+          # patterns so it matches both top-level files and nested
+          # occurrences (e.g. .DS_Store anywhere in the tree).
+          stage="$(mktemp -d)"
+          mkdir -p "$stage/gk-block-api"
+          rsync -a \
+            --exclude-from='wordpress-plugin/gk-block-api/.distignore' \
+            wordpress-plugin/gk-block-api/ "$stage/gk-block-api/"
+          (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-api.zip" gk-block-api)
+          unzip -l gk-block-api.zip | tail -5
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4

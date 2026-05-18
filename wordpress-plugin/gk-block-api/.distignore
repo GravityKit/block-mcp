@@ -1,5 +1,8 @@
 # Files and directories excluded from the WP.org plugin zip.
-# Used by `wp dist-archive` and similar build tooling.
+# Single source of truth — read by both `wp dist-archive` and the
+# build-plugin-zip.yml GitHub Actions workflow (via rsync --exclude-from).
+# Keep gitignore-style: bare names match anywhere in the tree, trailing
+# slashes match directories only.
 
 .git
 .github
@@ -12,6 +15,7 @@
 .phpunit.result.cache
 node_modules
 tests
+vendor
 phpunit.xml
 phpunit.xml.dist
 composer.json
@@ -24,3 +28,6 @@ CHANGELOG.md
 *.lock
 .DS_Store
 Thumbs.db
+.vscode
+.idea
+*.log
