@@ -1741,6 +1741,15 @@ class Block_Writer {
 	 * @return array|\WP_Error Result with new revision ID.
 	 */
 	public function revert_to_revision( $post_id, $revision_id ) {
+		// Counts as a write — without the rate-limit gate, a caller could
+		// bypass the 10-writes-per-minute budget by routing every mutation
+		// through revert (rebuild → write → revert → write → revert …)
+		// and effectively unrate-limit the post.
+		$rate_check = $this->check_rate_limit( $post_id, 'write' );
+		if ( is_wp_error( $rate_check ) ) {
+			return $rate_check;
+		}
+
 		$post = get_post( $post_id );
 		if ( ! $post ) {
 			return new \WP_Error( 'post_not_found', __( 'Post not found.', 'gk-block-api' ), array( 'status' => 404 ) );
@@ -1761,6 +1770,8 @@ class Block_Writer {
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
+
+		$this->record_rate_limit( $post_id, 'write' );
 
 		return array(
 			'success'              => true,
