@@ -2131,40 +2131,25 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function insert_pattern( $request ) {
-		try {
-			$post_id    = (int) $request->get_param( 'id' );
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
-			}
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$pattern_id = $req->get_param( 'pattern_id' );
+				$synced     = (bool) $req->get_param( 'synced' );
 
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
+				// Determine position.
+				$position = null;
+				if ( null !== $req->get_param( 'after' ) ) {
+					$position = $req->get_param( 'after' );
+				} elseif ( null !== $req->get_param( 'before' ) ) {
+					$before   = (int) $req->get_param( 'before' );
+					$position = $before > 0 ? $before - 1 : 'start';
+				}
 
-			$pattern_id = $request->get_param( 'pattern_id' );
-			$synced     = (bool) $request->get_param( 'synced' );
-
-			// Determine position.
-			$position = null;
-			if ( null !== $request->get_param( 'after' ) ) {
-				$position = $request->get_param( 'after' );
-			} elseif ( null !== $request->get_param( 'before' ) ) {
-				$before   = (int) $request->get_param( 'before' );
-				$position = $before > 0 ? $before - 1 : 'start';
-			}
-
-			$result = $this->block_crud->insert_pattern( $post_id, $pattern_id, $position, $synced );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 201 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+				return $this->block_crud->insert_pattern( $post_id, $pattern_id, $position, $synced );
+			},
+			201
+		);
 	}
 
 	/**
