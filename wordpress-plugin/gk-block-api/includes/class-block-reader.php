@@ -180,47 +180,79 @@ class Block_Reader {
 			return array();
 		}
 
-		// Work on the cached entry directly via reference so that
-		// assign_missing_refs_recursive() writes its in-memory ref assignments
-		// back into the cache. Any subsequent parse() call within the same request
-		// will then return the already-assigned tree instead of a fresh copy
-		// with no refs, ensuring ref stability across multiple reads without
-		// requiring a DB write.
-		$cache_key = $post_id . ':' . md5( $content );
-		if ( ! isset( $this->parse_cache[ $cache_key ] ) ) {
-			$parsed                          = parse_blocks( $content );
-			$this->parse_cache[ $cache_key ] = is_array( $parsed ) ? $parsed : array();
-		}
-		$blocks = &$this->parse_cache[ $cache_key ];
+		// Track render-mode post-context so we can restore it in the finally block
+		// even if a downstream collaborator (filter callback, ref-assigner, formatter)
+		// throws. Without try/finally a thrown read would leave $GLOBALS['post']
+		// pointing at the wrong post for the rest of the request.
+		$original_post = null;
+		$context_set   = false;
 
-		if ( ! is_array( $blocks ) ) {
-			$blocks = array();
-		}
+		try {
+			// Work on the cached entry directly via reference so that
+			// assign_missing_refs_recursive() writes its in-memory ref assignments
+			// back into the cache. Any subsequent parse() call within the same request
+			// will then return the already-assigned tree instead of a fresh copy
+			// with no refs, ensuring ref stability across multiple reads without
+			// requiring a DB write.
+			$cache_key = $post_id . ':' . md5( $content );
+			if ( ! isset( $this->parse_cache[ $cache_key ] ) ) {
+				$parsed                          = parse_blocks( $content );
+				$this->parse_cache[ $cache_key ] = is_array( $parsed ) ? $parsed : array();
+			}
+			$blocks = &$this->parse_cache[ $cache_key ];
 
-		// Lazy-assign block refs. When $persist_refs is true (default), any blocks
-		// missing attrs.metadata.gk_ref get a fresh one and the post is updated
-		// silently (no revision) so the refs survive across reads/writes.
-		// When false, refs are still surfaced in-memory via the cache reference above
-		// so a second read in the same request sees the same ephemeral refs.
-		$dirty = $this->crud->assign_missing_refs_recursive( $blocks );
-		if ( $dirty && $persist_refs ) {
-			// Concurrency guard. Two readers landing on a fresh post could both
-			// generate random refs and both call persist_ref_assignments(); the
-			// second writer would silently win, leaving the first reader's
-			// response with refs that no longer match disk. wp_cache_add() is
-			// atomic on persistent object caches (Memcached/Redis), so use it
-			// as a short-lived per-post lock around the assign-and-persist.
-			$lock_key = 'gk_block_api_ref_lock_' . (int) $post_id;
-			$got_lock = wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
+			if ( ! is_array( $blocks ) ) {
+				$blocks = array();
+			}
 
-			if ( $got_lock ) {
-				try {
-					// Re-parse current content under the lock — another writer
-					// may have raced in between our parse() call above and our
-					// lock acquisition. If they did, their refs are now on disk;
-					// assign_missing_refs_recursive() will be a no-op and we
-					// won't double-write. Bypass the memo here so we read the
-					// authoritative post_content directly from the DB.
+			// Lazy-assign block refs. When $persist_refs is true (default), any blocks
+			// missing attrs.metadata.gk_ref get a fresh one and the post is updated
+			// silently (no revision) so the refs survive across reads/writes.
+			// When false, refs are still surfaced in-memory via the cache reference above
+			// so a second read in the same request sees the same ephemeral refs.
+			$dirty = $this->crud->assign_missing_refs_recursive( $blocks );
+			if ( $dirty && $persist_refs ) {
+				// Concurrency guard. Two readers landing on a fresh post could both
+				// generate random refs and both call persist_ref_assignments(); the
+				// second writer would silently win, leaving the first reader's
+				// response with refs that no longer match disk. wp_cache_add() is
+				// atomic on persistent object caches (Memcached/Redis), so use it
+				// as a short-lived per-post lock around the assign-and-persist.
+				$lock_key = 'gk_block_api_ref_lock_' . (int) $post_id;
+				$got_lock = wp_cache_add( $lock_key, 1, 'gk_block_api', 5 );
+
+				if ( $got_lock ) {
+					try {
+						// Re-parse current content under the lock — another writer
+						// may have raced in between our parse() call above and our
+						// lock acquisition. If they did, their refs are now on disk;
+						// assign_missing_refs_recursive() will be a no-op and we
+						// won't double-write. Bypass the memo here so we read the
+						// authoritative post_content directly from the DB.
+						$fresh_content = (string) get_post_field( 'post_content', $post_id );
+						$fresh         = parse_blocks( $fresh_content );
+						if ( is_array( $fresh ) && ! empty( $fresh ) ) {
+							$blocks = $fresh;
+							// Update the cache with the direct-from-DB content.
+							$this->invalidate( $post_id );
+							$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
+						}
+						if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
+							$this->crud->persist_ref_assignments( $post_id, $blocks );
+							// After persisting, re-warm the cache with the new content.
+							$this->invalidate( $post_id );
+							$new_content = (string) get_post_field( 'post_content', $post_id );
+							$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
+						}
+					} finally {
+						wp_cache_delete( $lock_key, 'gk_block_api' );
+					}
+				} else {
+					// Another worker is mid-assignment. Briefly wait for them to
+					// finish, then re-parse so we surface whatever they persist
+					// instead of our locally-generated random refs (which would
+					// be stale by the time the response leaves this server).
+					usleep( 50000 ); // 50 ms.
 					$fresh_content = (string) get_post_field( 'post_content', $post_id );
 					$fresh         = parse_blocks( $fresh_content );
 					if ( is_array( $fresh ) && ! empty( $fresh ) ) {
@@ -229,55 +261,51 @@ class Block_Reader {
 						$this->invalidate( $post_id );
 						$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 					}
-					if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
-						$this->crud->persist_ref_assignments( $post_id, $blocks );
-						// After persisting, re-warm the cache with the new content.
-						$this->invalidate( $post_id );
-						$new_content = (string) get_post_field( 'post_content', $post_id );
-						$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
-					}
-				} finally {
-					wp_cache_delete( $lock_key, 'gk_block_api' );
 				}
-			} else {
-				// Another worker is mid-assignment. Briefly wait for them to
-				// finish, then re-parse so we surface whatever they persist
-				// instead of our locally-generated random refs (which would
-				// be stale by the time the response leaves this server).
-				usleep( 50000 ); // 50 ms.
-				$fresh_content = (string) get_post_field( 'post_content', $post_id );
-				$fresh         = parse_blocks( $fresh_content );
-				if ( is_array( $fresh ) && ! empty( $fresh ) ) {
-					$blocks = $fresh;
-					// Update the cache with the direct-from-DB content.
-					$this->invalidate( $post_id );
-					$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
+			}
+
+			// Set up post context so shortcodes and render_block() can
+			// access the current post (needed for product-specific shortcodes
+			// like [filter_edd_version_number], [filter_product_star_rating], etc.).
+			if ( $render ) {
+				$original_post   = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
+				$GLOBALS['post'] = $post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- intentional: sets post context for render_block() and do_shortcode(); restored in the finally block below.
+				setup_postdata( $post );
+				$context_set = true;
+			}
+
+			return $this->crud->format_blocks( $blocks, $render );
+		} catch ( \Throwable $e ) {
+			$data = array( 'status' => 500 );
+
+			// Only leak the full exception trace when WP_DEBUG is on — mirrors
+			// vip-block-data-api's pattern. In production this stays out of the
+			// REST response so we don't expose internals to anonymous clients.
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				$data['details'] = $e->__toString();
+			}
+
+			return new \WP_Error(
+				'parse_error',
+				sprintf(
+					/* translators: %1$d: post ID, %2$s: exception message. */
+					__( 'Error parsing post ID %1$d: %2$s', 'gk-block-api' ),
+					(int) $post_id,
+					$e->getMessage()
+				),
+				$data
+			);
+		} finally {
+			// Restore render-mode post context whether the body returned or threw.
+			if ( $context_set ) {
+				$GLOBALS['post'] = $original_post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring original post context after render pass.
+				if ( $original_post ) {
+					setup_postdata( $original_post );
+				} else {
+					wp_reset_postdata();
 				}
 			}
 		}
-
-		// Set up post context so shortcodes and render_block() can
-		// access the current post (needed for product-specific shortcodes
-		// like [filter_edd_version_number], [filter_product_star_rating], etc.).
-		if ( $render ) {
-			$original_post   = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
-			$GLOBALS['post'] = $post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- intentional: sets post context for render_block() and do_shortcode(); restored after format.
-			setup_postdata( $post );
-		}
-
-		$result = $this->crud->format_blocks( $blocks, $render );
-
-		// Restore original post context.
-		if ( $render ) {
-			$GLOBALS['post'] = $original_post; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring original post context after render pass.
-			if ( $original_post ) {
-				setup_postdata( $original_post );
-			} else {
-				wp_reset_postdata();
-			}
-		}
-
-		return $result;
 	}
 
 	/**
