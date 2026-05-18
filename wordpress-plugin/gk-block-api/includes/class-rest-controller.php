@@ -1858,11 +1858,17 @@ class REST_Controller {
 					);
 				}
 
+				$allow_bound_writes = filter_var(
+					$req->get_param( 'allow_bound_writes' ),
+					FILTER_VALIDATE_BOOLEAN
+				);
+
 				return $this->block_crud->update_block(
 					$post_id,
 					$index,
 					is_array( $attributes ) ? $attributes : array(),
-					$inner_html
+					$inner_html,
+					array( 'allow_bound_writes' => $allow_bound_writes )
 				);
 			}
 		);
@@ -1916,11 +1922,21 @@ class REST_Controller {
 					);
 				}
 
+				// Forward the Block Bindings override flag so the REST surface
+				// actually exposes the feature added in the bindings task —
+				// without this, the underlying $options['allow_bound_writes']
+				// path is dead code reachable only from internal PHP callers.
+				$allow_bound_writes = filter_var(
+					$req->get_param( 'allow_bound_writes' ),
+					FILTER_VALIDATE_BOOLEAN
+				);
+
 				return $this->block_crud->update_block(
 					$post_id,
 					$index,
 					is_array( $attributes ) ? $attributes : array(),
-					$inner_html
+					$inner_html,
+					array( 'allow_bound_writes' => $allow_bound_writes )
 				);
 			}
 		);

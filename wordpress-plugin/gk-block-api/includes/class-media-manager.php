@@ -400,7 +400,14 @@ class Media_Manager {
 			$updates['post_content'] = wp_kses_post( (string) $args['description'] );
 		}
 		if ( count( $updates ) > 1 ) {
-			wp_update_post( $updates );
+			// wp_update_post() runs wp_unslash() on string fields (expects
+			// $_POST-shaped slashed input). Our sanitized values are
+			// already unslashed, so wp_slash them first — without this
+			// every backslash-escape (\n in caption, \" in description,
+			// `<a href=\"…\">` in kses-allowed markup) would be stripped
+			// of its leading backslash. Matches save_post_content's
+			// handling of block markup in Block_Writer.
+			wp_update_post( wp_slash( $updates ) );
 		}
 		if ( isset( $args['alt_text'] ) ) {
 			update_post_meta( $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( (string) $args['alt_text'] ) );
