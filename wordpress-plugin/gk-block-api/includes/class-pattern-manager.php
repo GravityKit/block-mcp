@@ -116,6 +116,14 @@ class Pattern_Manager {
 			$post = get_post( (int) $id );
 
 			if ( $post && 'wp_block' === $post->post_type ) {
+				// Visibility gate. The list endpoint (get_synced_patterns)
+				// filters to post_status='publish'. The single-pattern lookup
+				// did NOT, so a draft / private / password-protected wp_block
+				// could be fetched by ID by any edit_posts caller. Shared
+				// readability contract — see Block_CRUD::is_post_readable().
+				if ( ! Block_CRUD::is_post_readable( $post ) ) {
+					return null;
+				}
 				return $this->format_synced_pattern( $post );
 			}
 		}

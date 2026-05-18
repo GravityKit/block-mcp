@@ -149,7 +149,20 @@ class Post_Manager {
 			$postarr['post_parent'] = (int) $args['parent'];
 		}
 		if ( isset( $args['date'] ) && is_string( $args['date'] ) ) {
-			$postarr['post_date'] = sanitize_text_field( $args['date'] );
+			// Same parse-and-normalize gate update_post enforces — without
+			// this, sanitize_text_field accepts arbitrary strings and wp_insert_post
+			// stores them verbatim, corrupting admin sort order and date queries.
+			$date_raw = sanitize_text_field( $args['date'] );
+			$ts       = strtotime( $date_raw );
+			if ( false === $ts ) {
+				return new \WP_Error(
+					'invalid_date',
+					__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+			$postarr['post_date']     = gmdate( 'Y-m-d H:i:s', $ts );
+			$postarr['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
 		}
 		if ( isset( $args['menu_order'] ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];
