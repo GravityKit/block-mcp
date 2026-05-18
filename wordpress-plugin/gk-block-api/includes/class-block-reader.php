@@ -112,7 +112,13 @@ class Block_Reader {
 	 *               posts or non-string post_content.
 	 */
 	public function parse( $post_id ) {
-		$post = get_post( (int) $post_id );
+		// Normalize once. The cache key MUST match what invalidate() builds
+		// (always `(int)$post_id . ':'`) and what get_blocks() uses below —
+		// otherwise a caller passing "42abc" would create a stale entry
+		// keyed on "42abc:" that invalidate(42) never reaches, and the next
+		// write would not bust it.
+		$post_id = (int) $post_id;
+		$post    = get_post( $post_id );
 		if ( ! $post ) {
 			return array();
 		}
@@ -144,7 +150,10 @@ class Block_Reader {
 	 * @return void
 	 */
 	public function invalidate( $post_id ) {
-		$prefix = $post_id . ':';
+		// Normalize to int to match the cache key built by parse() and
+		// get_blocks() — passing a non-int $post_id here would otherwise
+		// build a prefix that doesn't match the actual entries.
+		$prefix = (int) $post_id . ':';
 		foreach ( array_keys( $this->parse_cache ) as $key ) {
 			if ( 0 === strpos( $key, $prefix ) ) {
 				unset( $this->parse_cache[ $key ] );

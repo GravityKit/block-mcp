@@ -424,14 +424,27 @@ class Post_Manager {
 			$postarr['menu_order'] = (int) $args['menu_order'];
 		}
 		if ( array_key_exists( 'comment_status', $args ) ) {
-			$postarr['comment_status'] = in_array( $args['comment_status'], array( 'open', 'closed' ), true )
-				? $args['comment_status']
-				: 'closed';
+			// Reject unknown values explicitly instead of silently coercing to
+			// 'closed' — a typo like 'opn' shouldn't quietly disable comments
+			// while reporting success to the caller.
+			if ( ! in_array( $args['comment_status'], array( 'open', 'closed' ), true ) ) {
+				return new \WP_Error(
+					'invalid_status',
+					__( 'comment_status must be "open" or "closed".', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+			$postarr['comment_status'] = $args['comment_status'];
 		}
 		if ( array_key_exists( 'ping_status', $args ) ) {
-			$postarr['ping_status'] = in_array( $args['ping_status'], array( 'open', 'closed' ), true )
-				? $args['ping_status']
-				: 'closed';
+			if ( ! in_array( $args['ping_status'], array( 'open', 'closed' ), true ) ) {
+				return new \WP_Error(
+					'invalid_status',
+					__( 'ping_status must be "open" or "closed".', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+			$postarr['ping_status'] = $args['ping_status'];
 		}
 		if ( array_key_exists( 'parent', $args ) ) {
 			$parent_check = $this->validate_parent( (int) $args['parent'], $post->post_type, $post_id );

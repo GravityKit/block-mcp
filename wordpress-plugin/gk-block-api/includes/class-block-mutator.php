@@ -190,6 +190,43 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_attributes', __( 'update-attrs requires an "attributes" object.', 'gk-block-api' ), array( 'status' => 400 ) );
 				}
 
+				// Block Bindings write-guard. Block_Writer::update_block enforces
+				// this for the per-block PATCH route, but the mutate endpoint had
+				// no such check — an agent could bypass the guard by switching
+				// from update_block to edit_block_tree's update-attrs. Mirror
+				// the contract here so the protection is uniform across write
+				// paths. Caller opts in to the bypass via allow_bound_writes:true.
+				$allow_bound_writes = ! empty( $params['allow_bound_writes'] );
+				if ( ! $allow_bound_writes ) {
+					$bindings = isset( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
+						&& is_array( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
+							? $parent[ $target_index ]['attrs']['metadata']['bindings']
+							: array();
+					if ( ! empty( $bindings ) ) {
+						$blocked = array();
+						foreach ( array_keys( $attributes ) as $attr_key ) {
+							// `metadata` writes are structural; only individual bound attrs are protected.
+							if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
+								$blocked[] = $attr_key;
+							}
+						}
+						if ( ! empty( $blocked ) ) {
+							return new \WP_Error(
+								'bound_attribute',
+								sprintf(
+									/* translators: 1: comma-separated bound attribute names */
+									__( 'Cannot overwrite bound attribute(s): %s. Pass allow_bound_writes:true to force.', 'gk-block-api' ),
+									implode( ', ', $blocked )
+								),
+								array(
+									'status'           => 400,
+									'bound_attributes' => $blocked,
+								)
+							);
+						}
+					}
+				}
+
 				// Merge attributes.
 				$parent[ $target_index ]['attrs'] = array_merge(
 					isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : array(),
