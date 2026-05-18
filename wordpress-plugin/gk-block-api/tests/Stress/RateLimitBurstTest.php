@@ -17,31 +17,25 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class RateLimitBurstTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
+class RateLimitBurstTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
+		$this->post_id = $this->make_block_post(
+			array(
+				array(
+					'blockName'    => 'core/paragraph',
+					'attrs'        => array(),
+					'innerHTML'    => '<p>seed</p>',
+					'innerContent' => array( '<p>seed</p>' ),
+					'innerBlocks'  => array(),
+				),
+			)
 		);
-		$this->post_id = self::factory()->post->create( array(
-			'post_status'  => 'publish',
-			'post_content' => '<!-- wp:paragraph --><p>seed</p><!-- /wp:paragraph -->',
-		) );
 	}
 
 	public function test_burst_writes_capped_at_rate_limit() {

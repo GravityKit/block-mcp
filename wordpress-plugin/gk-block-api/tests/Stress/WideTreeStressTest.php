@@ -17,25 +17,8 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class WideTreeStressTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
-
-	public function set_up(): void {
-		parent::set_up();
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
-		);
-	}
+class WideTreeStressTest extends BlockApiTestCase {
 
 	private function wide_post( int $count ): int {
 		$blocks = array();

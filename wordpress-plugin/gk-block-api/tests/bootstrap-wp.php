@@ -39,3 +39,7 @@ tests_add_filter(
 );
 
 require $_tests_dir . '/includes/bootstrap.php';
+
+// Shared test-base class. Loaded AFTER wp-phpunit's bootstrap so
+// WP_UnitTestCase is defined and BlockApiTestCase can extend it.
+require __DIR__ . '/BlockApiTestCase.php';

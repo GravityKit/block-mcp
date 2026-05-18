@@ -16,31 +16,15 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Mutator;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class MaxBlockDepthTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
-
-	/** @var Block_Mutator */
-	private $mutator;
+class MaxBlockDepthTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
 	public function set_up(): void {
 		parent::set_up();
-		$preferences  = new Preferences();
-		$safety       = new Block_Safety();
-		$transformer  = new HTML_Transformer();
-		$this->crud   = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
-		$this->mutator = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
-		$this->post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$this->post_id = $this->make_block_post();
 	}
 
 	/**

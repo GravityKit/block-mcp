@@ -25,29 +25,15 @@
 
 declare( strict_types=1 );
 
-use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
 use GravityKit\BlockAPI\Post_Manager;
-use GravityKit\BlockAPI\Preferences;
 
-class IdorTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
+class IdorTest extends BlockApiTestCase {
 
 	/** @var Post_Manager */
 	private $pm;
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
-		);
 		$this->pm = new Post_Manager( $this->crud );
 
 		// Default actor: editor (can edit any post).

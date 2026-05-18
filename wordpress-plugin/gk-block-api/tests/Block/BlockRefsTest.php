@@ -21,54 +21,15 @@
  */
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Mutator;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class BlockRefsTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
-
-	/** @var Block_Mutator */
-	private $mutator;
+class BlockRefsTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
 	public function set_up(): void {
 		parent::set_up();
-		$registry = \WP_Block_Type_Registry::get_instance();
-		foreach ( array(
-			'core/paragraph',
-			'core/heading',
-			'core/group',
-			'core/list',
-			'core/list-item',
-			'core/columns',
-			'core/column',
-		) as $name ) {
-			if ( ! $registry->get_registered( $name ) ) {
-				$registry->register( $name );
-			}
-		}
-
-		$preferences = new Preferences();
-		$safety      = new Block_Safety();
-		$transformer = new HTML_Transformer();
-		$inventory   = new Block_Inventory();
-
-		$this->crud    = new Block_CRUD( $preferences, $safety, $transformer, $inventory );
-		$this->mutator = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
-
-		$this->post_id = self::factory()->post->create( array(
-			'post_type'    => 'page',
-			'post_status'  => 'publish',
-			'post_title'   => 'Refs Test',
-			'post_content' => '',
-		) );
+		$this->post_id = $this->make_block_post( array(), array( 'post_title' => 'Refs Test' ) );
 	}
 
 	// ── Fixtures ───────────────────────────────────────────────────────

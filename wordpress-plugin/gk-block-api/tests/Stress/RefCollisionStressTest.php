@@ -20,25 +20,8 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class RefCollisionStressTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
-
-	public function set_up(): void {
-		parent::set_up();
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
-		);
-	}
+class RefCollisionStressTest extends BlockApiTestCase {
 
 	/**
 	 * 2000 sibling blocks — well above any plausible page, well within

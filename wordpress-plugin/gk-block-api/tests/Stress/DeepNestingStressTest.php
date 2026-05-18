@@ -17,30 +17,7 @@
 
 declare( strict_types=1 );
 
-use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Mutator;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
-
-class DeepNestingStressTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
-
-	/** @var Block_Mutator */
-	private $mutator;
-
-	public function set_up(): void {
-		parent::set_up();
-		$preferences  = new Preferences();
-		$safety       = new Block_Safety();
-		$transformer  = new HTML_Transformer();
-		$inventory    = new Block_Inventory();
-		$this->crud   = new Block_CRUD( $preferences, $safety, $transformer, $inventory );
-		$this->mutator = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
-	}
+class DeepNestingStressTest extends BlockApiTestCase {
 
 	/**
 	 * Build a tree N levels deep: outermost is wrapper[0], innermost is

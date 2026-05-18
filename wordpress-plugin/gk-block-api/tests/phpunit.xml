@@ -1,5 +1,9 @@
 <?xml version="1.0"?>
 <phpunit bootstrap="bootstrap-wp.php" colors="true">
+    <php>
+        <!-- BlockApiTestCase is the shared abstract base for every block-aware test. -->
+        <const name="GK_BLOCK_API_TEST_BASE_PATH" value="BlockApiTestCase.php"/>
+    </php>
     <testsuites>
         <testsuite name="GK Block API">
             <directory>Block</directory>

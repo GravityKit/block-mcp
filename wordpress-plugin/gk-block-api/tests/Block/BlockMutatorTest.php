@@ -8,63 +8,23 @@
  * @package GravityKit\BlockAPI\Tests
  */
 
-use GravityKit\BlockAPI\Block_Mutator;
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Preferences;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
 
-class BlockMutatorTest extends WP_UnitTestCase {
-
-	/** @var Block_Mutator */
-	private $mutator;
-
-	/** @var Block_CRUD */
-	private $crud;
+class BlockMutatorTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
+	protected function block_types_to_register(): array {
+		return array_merge(
+			parent::block_types_to_register(),
+			array( 'core/separator', 'core/quote', 'core/buttons', 'core/button' )
+		);
+	}
+
 	public function set_up(): void {
 		parent::set_up();
-		// Register core blocks used in tests.
-		$registry = \WP_Block_Type_Registry::get_instance();
-		foreach ( array(
-			'core/paragraph',
-			'core/heading',
-			'core/group',
-			'core/list',
-			'core/list-item',
-			'core/image',
-			'core/columns',
-			'core/column',
-			'core/block',
-			'core/separator',
-			'core/quote',
-			'core/buttons',
-			'core/button',
-			// Non-core blocks for preference-tier tests.
-			'stackable/heading',   // avoid tier (score 10)
-			'ugb/text',            // legacy tier (score 0)
-		) as $name ) {
-			if ( ! $registry->get_registered( $name ) ) {
-				$registry->register( $name );
-			}
-		}
-
-		$preferences       = new Preferences();
-		$safety            = new Block_Safety();
-		$transformer       = new HTML_Transformer();
-		$this->crud        = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
-		$this->mutator     = new Block_Mutator( $this->crud, $preferences, $safety, $transformer );
-
-		$this->post_id = self::factory()->post->create( array(
-			'post_type'    => 'page',
-			'post_status'  => 'publish',
-			'post_title'   => 'Test Post',
-			'post_content' => '',
-		) );
+		$this->post_id = $this->make_block_post();
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────

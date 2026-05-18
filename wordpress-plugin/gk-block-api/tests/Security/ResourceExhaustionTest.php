@@ -20,28 +20,15 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
-use GravityKit\BlockAPI\Preferences;
 
-class ResourceExhaustionTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
+class ResourceExhaustionTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
-		);
-		$this->post_id = self::factory()->post->create( array( 'post_status' => 'publish', 'post_content' => '' ) );
+		$this->post_id = $this->make_block_post();
 	}
 
 	/**

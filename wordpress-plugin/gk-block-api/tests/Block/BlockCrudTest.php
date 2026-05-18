@@ -10,54 +10,15 @@
  */
 
 use GravityKit\BlockAPI\Block_CRUD;
-use GravityKit\BlockAPI\Block_Inventory;
-use GravityKit\BlockAPI\Preferences;
-use GravityKit\BlockAPI\Block_Safety;
-use GravityKit\BlockAPI\HTML_Transformer;
 
-class BlockCrudTest extends WP_UnitTestCase {
-
-	/** @var Block_CRUD */
-	private $crud;
+class BlockCrudTest extends BlockApiTestCase {
 
 	/** @var int */
 	private $post_id;
 
 	public function set_up(): void {
 		parent::set_up();
-		// Register blocks used in tests.
-		$registry = \WP_Block_Type_Registry::get_instance();
-		foreach ( array(
-			'core/paragraph',
-			'core/heading',
-			'core/group',
-			'core/list',
-			'core/list-item',
-			'core/columns',
-			'core/column',
-			'core/image',
-			'core/block',
-			'stackable/heading',
-			'ugb/text',
-		) as $name ) {
-			if ( ! $registry->get_registered( $name ) ) {
-				$registry->register( $name );
-			}
-		}
-
-		$this->crud = new Block_CRUD(
-			new Preferences(),
-			new Block_Safety(),
-			new HTML_Transformer(),
-			new Block_Inventory()
-		);
-
-		$this->post_id = self::factory()->post->create( array(
-			'post_type'    => 'page',
-			'post_status'  => 'publish',
-			'post_title'   => 'Test Post',
-			'post_content' => '',
-		) );
+		$this->post_id = $this->make_block_post();
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────
