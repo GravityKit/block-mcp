@@ -44,7 +44,7 @@ class Preferences {
 	 */
 	public static function get_defaults() {
 		return array(
-			'namespace_scores'  => array(
+			'namespace_scores' => array(
 				'filter'             => 100, // Theme blocks — always preferred.
 				'core'               => 90,  // WordPress native.
 				'gravityforms'       => 80,  // GravityKit ecosystem.
@@ -57,17 +57,17 @@ class Preferences {
 				'ugb'                => 0,   // Legacy — never use.
 				'jetpack'            => 0,   // Never use.
 			),
-			'pattern_scoring'   => array(
-				'recency_bonus'          => array(
+			'pattern_scoring'  => array(
+				'recency_bonus'        => array(
 					2026 => 50,
 					2025 => 30,
 					2024 => 10,
 				),
-				'reference_multiplier'   => 5,
-				'no_legacy_bonus'        => 20,
-				'has_legacy_penalty'     => -100,
+				'reference_multiplier' => 5,
+				'no_legacy_bonus'      => 20,
+				'has_legacy_penalty'   => -100,
 			),
-			'replacement_map'   => array(
+			'replacement_map'  => array(
 				'stackable/heading'      => 'core/heading',
 				'stackable/text'         => 'core/paragraph',
 				'stackable/button'       => 'core/button',
@@ -101,8 +101,8 @@ class Preferences {
 	 */
 	public function get_preferences() {
 		if ( null === $this->preferences ) {
-			$stored           = get_option( self::OPTION_KEY, array() );
-			$defaults         = self::get_defaults();
+			$stored            = get_option( self::OPTION_KEY, array() );
+			$defaults          = self::get_defaults();
 			$this->preferences = wp_parse_args( $stored, $defaults );
 
 			// Deep-merge sub-arrays.
@@ -185,6 +185,8 @@ class Preferences {
 	 * Get the preference score for a pattern.
 	 *
 	 * @param array $pattern {
+	 *     Pattern data array.
+	 *
 	 *     @type int    $reference_count Number of pages referencing this pattern.
 	 *     @type string $created         Creation date (Y-m-d or similar parseable format).
 	 *     @type bool   $has_legacy      Whether the pattern contains legacy blocks.

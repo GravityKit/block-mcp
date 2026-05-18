@@ -11,6 +11,7 @@
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "eval": "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
     "prepare": "npm run build"

@@ -20,6 +20,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Class Media_Manager
+ *
+ * Handles media uploads via multipart, URL sideload, and base64 with SSRF defense.
+ */
 class Media_Manager {
 
 	/** Default size cap for URL sideloads (25 MB). */
@@ -32,27 +37,84 @@ class Media_Manager {
 	 * via the `gk_block_api_url_sideload_blocked_ranges` filter.
 	 */
 	const SSRF_BLOCKED_IPV4_RANGES = array(
-		array( '0.0.0.0',     '0.255.255.255' ),       // "this network"
-		array( '10.0.0.0',    '10.255.255.255' ),      // RFC1918
-		array( '127.0.0.0',   '127.255.255.255' ),     // loopback
-		array( '169.254.0.0', '169.254.255.255' ),     // link-local (AWS/GCP/Azure metadata)
-		array( '172.16.0.0',  '172.31.255.255' ),      // RFC1918
-		array( '192.0.0.0',   '192.0.0.255' ),         // IETF reserved
-		array( '192.168.0.0', '192.168.255.255' ),     // RFC1918
-		array( '198.18.0.0',  '198.19.255.255' ),      // benchmark
-		array( '224.0.0.0',   '255.255.255.255' ),     // multicast + reserved
+		array( '0.0.0.0', '0.255.255.255' ),       // "This network."
+		array( '10.0.0.0', '10.255.255.255' ),      // RFC1918.
+		array( '127.0.0.0', '127.255.255.255' ),    // Loopback.
+		array( '169.254.0.0', '169.254.255.255' ),  // Link-local (AWS/GCP/Azure metadata).
+		array( '172.16.0.0', '172.31.255.255' ),    // RFC1918.
+		array( '192.0.0.0', '192.0.0.255' ),        // IETF reserved.
+		array( '192.168.0.0', '192.168.255.255' ),  // RFC1918.
+		array( '198.18.0.0', '198.19.255.255' ),    // Benchmark.
+		array( '224.0.0.0', '255.255.255.255' ),    // Multicast + reserved.
 	);
 
 	/**
+	 * Option key for the global uploads kill-switch.
+	 *
+	 * When the option is set to a falsy value, the plugin refuses every
+	 * upload mode (multipart, URL sideload, base64) with HTTP 403
+	 * `uploads_disabled` before any file I/O or DNS resolution happens.
+	 */
+	const UPLOADS_OPTION = 'gk_block_api_uploads_enabled';
+
+	/**
+	 * Whether MCP-driven media uploads are permitted on this site.
+	 *
+	 * Default: true (uploads allowed). Site owners can flip this to a
+	 * read-only block surface in two ways:
+	 *
+	 *   1. Programmatic: `update_option( 'gk_block_api_uploads_enabled', false );`
+	 *   2. Filter:       `add_filter( 'gk_block_api_uploads_enabled', '__return_false' );`
+	 *
+	 * The filter wins over the option so emergencies (e.g., a
+	 * compromised API token) can be patched without writing to the DB.
+	 *
+	 * @return bool
+	 */
+	public static function uploads_enabled(): bool {
+		// Stored as the string '0' or '1' (not a PHP bool) — update_option()
+		// silently no-ops when storing boolean false against a missing key
+		// because get_option() returns false as both the missing-default and
+		// the actual value, and update_option's equality check short-circuits
+		// before any DB write. The string form avoids that ambiguity.
+		$raw     = get_option( self::UPLOADS_OPTION, '1' );
+		$enabled = ( '0' !== (string) $raw && false !== $raw );
+		/**
+		 * Filter: gk_block_api_uploads_enabled.
+		 *
+		 * Last-mile override for the per-site uploads kill-switch. Return
+		 * false here to refuse every MCP upload regardless of the option.
+		 *
+		 * @param bool $enabled Current option value.
+		 */
+		return (bool) apply_filters( 'gk_block_api_uploads_enabled', $enabled );
+	}
+
+	/**
+	 * Upload media to the WordPress media library.
+	 *
 	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.4.
 	 * @return array|\WP_Error
 	 */
 	public function upload( array $args ) {
+		// Hard kill-switch. Site owners can disable every MCP-driven upload
+		// path (multipart / URL sideload / base64) with a single setting —
+		// useful when an integrator wants the plugin's block-editing surface
+		// but doesn't trust agents to write to the media library.
+		if ( ! self::uploads_enabled() ) {
+			return new \WP_Error(
+				'uploads_disabled',
+				__( 'Media uploads via the block API are disabled on this site.', 'gk-block-api' ),
+				array( 'status' => 403 )
+			);
+		}
+
 		$this->require_admin_includes();
 
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- REST endpoint is authenticated via Application Password; no nonce expected.
 		$has_multipart = ! empty( $args['file_field'] )
-			&& isset( $_FILES[ $args['file_field'] ] )
-			&& ! empty( $_FILES[ $args['file_field'] ] );
+			&& isset( $_FILES[ $args['file_field'] ] )    // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			&& ! empty( $_FILES[ $args['file_field'] ] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		$has_url       = ! empty( $args['url'] ) && is_string( $args['url'] );
 		$has_base64    = ! empty( $args['data_base64'] ) && is_string( $args['data_base64'] );
 
@@ -90,13 +152,16 @@ class Media_Manager {
 	}
 
 	/**
-	 * @param array $args
-	 * @return int|\WP_Error
+	 * Handle a multipart file upload from $_FILES.
+	 *
+	 * @param array $args Upload arguments including file_field and optional post_id.
+	 * @return int|\WP_Error Attachment ID or WP_Error.
 	 */
 	private function handle_multipart( array $args ) {
 		$field       = $args['file_field'];
 		$post_parent = isset( $args['post_id'] ) ? absint( $args['post_id'] ) : 0;
 
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- REST endpoint authenticated via Application Password; no nonce expected.
 		if ( ! isset( $_FILES[ $field ] ) ) {
 			return new \WP_Error( 'no_file', __( 'No file uploaded.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
@@ -110,12 +175,15 @@ class Media_Manager {
 		$err_code = isset( $file['error'] ) ? (int) $file['error'] : UPLOAD_ERR_NO_FILE;
 		if ( UPLOAD_ERR_OK !== $err_code ) {
 			if ( ! empty( $file['tmp_name'] ) ) {
-				@unlink( $file['tmp_name'] );
+				wp_delete_file( $file['tmp_name'] );
 			}
 			return new \WP_Error(
 				'upload_error',
 				sprintf( /* translators: %d: PHP UPLOAD_ERR_* code */ __( 'File upload failed (PHP code %d).', 'gk-block-api' ), $err_code ),
-				array( 'status' => 400, 'php_upload_error' => $err_code )
+				array(
+					'status'           => 400,
+					'php_upload_error' => $err_code,
+				)
 			);
 		}
 
@@ -123,7 +191,7 @@ class Media_Manager {
 		// will also enforce, but failing fast keeps us out of the WP error path.
 		$max = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
 		if ( $max > 0 && isset( $file['size'] ) && (int) $file['size'] > $max ) {
-			@unlink( $file['tmp_name'] );
+			wp_delete_file( $file['tmp_name'] );
 			return new \WP_Error(
 				'file_too_large',
 				__( 'Uploaded file exceeds the site upload limit.', 'gk-block-api' ),
@@ -135,7 +203,7 @@ class Media_Manager {
 		// disallowed types early so the temp file isn't moved into uploads.
 		$mime = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $file['tmp_name'] );
+			wp_delete_file( $file['tmp_name'] );
 			return new \WP_Error(
 				'disallowed_mime',
 				sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), sanitize_file_name( $file['name'] ) ),
@@ -143,12 +211,59 @@ class Media_Manager {
 			);
 		}
 
-		return media_handle_upload( $field, $post_parent );
+		$default_overrides = array( 'test_form' => false );
+
+		/**
+		 * Filters the `wp_handle_upload()` overrides for the multipart
+		 * upload path on `POST /media`.
+		 *
+		 * The overrides array is forwarded verbatim as the fourth
+		 * argument to `media_handle_upload()`, which passes it to
+		 * `wp_handle_upload()`, which finally hands it to
+		 * `_wp_handle_upload()`. Site administrators can use this filter
+		 * to relax the upload checks (e.g., disable `test_form`) or to
+		 * swap the action so `_wp_handle_upload()` uses
+		 * `is_readable()` instead of `is_uploaded_file()`.
+		 *
+		 * The PHPUnit suite uses this filter to set
+		 * `'action' => 'wp_handle_sideload'`, allowing test fixtures —
+		 * which were never `$_FILES['…']` HTTP-POSTed — to reach the
+		 * rest of the upload pipeline.
+		 *
+		 * Production callers should leave this filter alone; the
+		 * default `array( 'test_form' => false )` matches what every
+		 * site-side caller of `media_handle_upload()` receives.
+		 *
+		 * A non-array return value is treated as a misbehaving filter
+		 * and falls back to the default array — `media_handle_upload()`
+		 * iterates the overrides directly, so a non-array would crash
+		 * the upload path.
+		 *
+		 * @since 1.5.2
+		 *
+		 * @param array  $default_overrides Default overrides; always
+		 *                                  `array( 'test_form' => false )`.
+		 * @param string $field             The `$_FILES` key whose
+		 *                                  upload is being processed.
+		 */
+		$overrides = apply_filters(
+			'gk_block_api_media_upload_overrides',
+			$default_overrides,
+			$field
+		);
+
+		if ( ! is_array( $overrides ) ) {
+			$overrides = $default_overrides;
+		}
+
+		return media_handle_upload( $field, $post_parent, array(), $overrides );
 	}
 
 	/**
-	 * @param array $args
-	 * @return int|\WP_Error
+	 * Handle a URL sideload upload.
+	 *
+	 * @param array $args Upload arguments including url and optional post_id.
+	 * @return int|\WP_Error Attachment ID or WP_Error.
 	 */
 	private function handle_url( array $args ) {
 		$url = esc_url_raw( $args['url'] );
@@ -172,7 +287,7 @@ class Media_Manager {
 		}
 
 		if ( filesize( $tmp ) > self::URL_DOWNLOAD_MAX_BYTES ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'file_too_large', __( 'Downloaded file exceeds size cap.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
@@ -184,23 +299,28 @@ class Media_Manager {
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
-		$post_parent = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
-		$file        = array( 'name' => $filename, 'tmp_name' => $tmp );
+		$post_parent   = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
+		$file          = array(
+			'name'     => $filename,
+			'tmp_name' => $tmp,
+		);
 		$attachment_id = media_handle_sideload( $file, $post_parent );
 		if ( is_wp_error( $attachment_id ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', $attachment_id->get_error_message(), array( 'status' => 500 ) );
 		}
 		return $attachment_id;
 	}
 
 	/**
-	 * @param array $args
-	 * @return int|\WP_Error
+	 * Handle a base64-encoded file upload.
+	 *
+	 * @param array $args Upload arguments including data_base64, filename, and optional post_id.
+	 * @return int|\WP_Error Attachment ID or WP_Error.
 	 */
 	private function handle_base64( array $args ) {
 		if ( empty( $args['filename'] ) ) {
@@ -219,15 +339,15 @@ class Media_Manager {
 			);
 		}
 
-		$decoded = base64_decode( $args['data_base64'], true );
+		$decoded = base64_decode( $args['data_base64'], true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
 		if ( false === $decoded || '' === $decoded ) {
 			return new \WP_Error( 'invalid_base64', __( 'data_base64 is not valid base64.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		// Enforce both the URL-mode cap and the site upload limit on the decoded
 		// payload before any disk write.
-		$max     = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
-		$cap     = $max > 0 ? min( $max, self::URL_DOWNLOAD_MAX_BYTES ) : self::URL_DOWNLOAD_MAX_BYTES;
+		$max = function_exists( 'wp_max_upload_size' ) ? (int) wp_max_upload_size() : 0;
+		$cap = $max > 0 ? min( $max, self::URL_DOWNLOAD_MAX_BYTES ) : self::URL_DOWNLOAD_MAX_BYTES;
 		if ( strlen( $decoded ) > $cap ) {
 			return new \WP_Error( 'file_too_large', __( 'Decoded data exceeds size cap.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
@@ -237,31 +357,36 @@ class Media_Manager {
 		if ( ! $tmp ) {
 			return new \WP_Error( 'sideload_failed', __( 'Could not create temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
-		$bytes_written = file_put_contents( $tmp, $decoded );
+		$bytes_written = file_put_contents( $tmp, $decoded ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Temp file written before media_handle_sideload moves it to the upload dir.
 		if ( false === $bytes_written ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', __( 'Could not write temp file.', 'gk-block-api' ), array( 'status' => 500 ) );
 		}
 
 		$mime = wp_check_filetype_and_ext( $tmp, $filename );
 		if ( empty( $mime['type'] ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'disallowed_mime', sprintf( /* translators: %s: filename */ __( 'Disallowed file type for "%s".', 'gk-block-api' ), $filename ), array( 'status' => 400 ) );
 		}
 
 		$post_parent   = isset( $args['post_id'] ) ? (int) $args['post_id'] : 0;
-		$file          = array( 'name' => $filename, 'tmp_name' => $tmp );
+		$file          = array(
+			'name'     => $filename,
+			'tmp_name' => $tmp,
+		);
 		$attachment_id = media_handle_sideload( $file, $post_parent );
 		if ( is_wp_error( $attachment_id ) ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'sideload_failed', $attachment_id->get_error_message(), array( 'status' => 500 ) );
 		}
 		return $attachment_id;
 	}
 
 	/**
-	 * @param int   $attachment_id
-	 * @param array $args
+	 * Apply title, caption, description, and alt text metadata to an attachment.
+	 *
+	 * @param int   $attachment_id Attachment post ID.
+	 * @param array $args          Upload arguments potentially containing title, caption, description, and alt_text.
 	 */
 	private function apply_metadata( $attachment_id, array $args ) {
 		$updates = array( 'ID' => $attachment_id );
@@ -275,7 +400,14 @@ class Media_Manager {
 			$updates['post_content'] = wp_kses_post( (string) $args['description'] );
 		}
 		if ( count( $updates ) > 1 ) {
-			wp_update_post( $updates );
+			// wp_update_post() runs wp_unslash() on string fields (expects
+			// $_POST-shaped slashed input). Our sanitized values are
+			// already unslashed, so wp_slash them first — without this
+			// every backslash-escape (\n in caption, \" in description,
+			// `<a href=\"…\">` in kses-allowed markup) would be stripped
+			// of its leading backslash. Matches save_post_content's
+			// handling of block markup in Block_Writer.
+			wp_update_post( wp_slash( $updates ) );
 		}
 		if ( isset( $args['alt_text'] ) ) {
 			update_post_meta( $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( (string) $args['alt_text'] ) );
@@ -283,7 +415,9 @@ class Media_Manager {
 	}
 
 	/**
-	 * @param int $attachment_id
+	 * Build the response array for a newly uploaded attachment.
+	 *
+	 * @param int $attachment_id Attachment post ID.
 	 * @return array|\WP_Error
 	 */
 	private function format_attachment( $attachment_id ) {
@@ -353,7 +487,7 @@ class Media_Manager {
 	 * `gk_block_api_url_sideload_blocked_ranges` filter (returns array of
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
-	 * @param string $url
+	 * @param string $url URL to validate against reserved IP ranges.
 	 * @return true|\WP_Error
 	 */
 	private function guard_ssrf( $url ) {
@@ -446,14 +580,14 @@ class Media_Manager {
 		}
 
 		// IPv6 reserved-range check. CIDRs cover the same classes as IPv4:
-		//   ::/128             unspecified
-		//   ::1/128            loopback
-		//   fc00::/7           unique-local (private)
-		//   fe80::/10          link-local
-		//   ::ffff:0:0/96      IPv4-mapped (catch the IPv4 ranges via wrapper too)
-		//   100::/64           discard-only
-		//   2001::/23          IETF protocol assignments
-		//   ff00::/8           multicast
+		// ::/128             unspecified
+		// ::1/128            loopback
+		// fc00::/7           unique-local (private)
+		// fe80::/10          link-local
+		// ::ffff:0:0/96      IPv4-mapped (catch the IPv4 ranges via wrapper too)
+		// 100::/64           discard-only
+		// 2001::/23          IETF protocol assignments
+		// ff00::/8           multicast
 		// Filterable via `gk_block_api_url_sideload_blocked_ipv6_cidrs`.
 		$v6_cidrs = array(
 			'::/128',
@@ -532,6 +666,11 @@ class Media_Manager {
 		return ( $ip_packed & $mask ) === ( $net_packed & $mask );
 	}
 
+	/**
+	 * Require WordPress admin includes needed for media upload functions.
+	 *
+	 * @return void
+	 */
 	private function require_admin_includes() {
 		if ( defined( 'ABSPATH' ) && is_dir( ABSPATH . 'wp-admin' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';

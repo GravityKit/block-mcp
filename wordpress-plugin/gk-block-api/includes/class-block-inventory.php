@@ -72,6 +72,16 @@ class Block_Inventory {
 	/** Minimum interval between full storage-mode scans (seconds). */
 	const STORAGE_SCAN_MIN_INTERVAL = HOUR_IN_SECONDS;
 
+	/**
+	 * Minimum interval between manual get_stats(refresh=true) calls.
+	 * Matches CACHE_TTL so a refresh can never run more often than the
+	 * cache would naturally expire — every refresh is bounded amplification.
+	 */
+	const REFRESH_MIN_INTERVAL = HOUR_IN_SECONDS;
+
+	/** Option key tracking the last get_stats refresh timestamp. */
+	const REFRESH_LAST_RUN_OPTION = 'gk_block_api_stats_refresh_last';
+
 	// ──────────────────────────────────────────────────────────────────
 	// Storage-mode classification.
 	//
@@ -140,7 +150,7 @@ class Block_Inventory {
 					'yoast/how-to-block',
 				)
 			);
-			$cache = array_flip( $dual_blocks );
+			$cache       = array_flip( $dual_blocks );
 		}
 		return isset( $cache[ $block_name ] );
 	}
@@ -167,6 +177,8 @@ class Block_Inventory {
 	 *     @type int   $dynamic_count  How many blocks were classified as dynamic.
 	 *     @type int   $static_count   How many blocks were classified as static.
 	 * }
+	 *
+	 * @param bool $force Skip the rate-limit check and run immediately.
 	 */
 	public function scan_storage_modes( $force = false ) {
 		// Rate limit: the optional content sweep is unbounded across post count.
@@ -182,7 +194,10 @@ class Block_Inventory {
 					__( 'Storage-mode scan ran recently. Try again in %d seconds.', 'gk-block-api' ),
 					$retry_after
 				),
-				array( 'status' => 429, 'retry_after' => $retry_after )
+				array(
+					'status'      => 429,
+					'retry_after' => $retry_after,
+				)
 			);
 		}
 
@@ -216,19 +231,19 @@ class Block_Inventory {
 
 		// ── Pass 2: evidence sweep — single content walk that does TWO jobs.
 		//
-		//   (a) Upgrade dynamic candidates → dual when we see a stored
-		//       instance with non-empty innerHTML (custom JS save() pattern,
-		//       e.g., yoast/faq-block).
+		// (a) Upgrade dynamic candidates → dual when we see a stored
+		// instance with non-empty innerHTML (custom JS save() pattern,
+		// e.g., yoast/faq-block).
 		//
-		//   (b) Discover orphan blocks — names present in post_content but
-		//       NOT in the live registry. These come from deactivated /
-		//       uninstalled plugins. Without a registration we can't run
-		//       `is_dynamic()`, so we classify by the only signal we have:
-		//         - any stored instance with non-empty innerHTML → static
-		//           (innerHTML is the only thing surviving; an AI can edit
-		//           it as text)
-		//         - all stored instances empty → dynamic (was server-
-		//           rendered, now renders nothing — broken)
+		// (b) Discover orphan blocks — names present in post_content but
+		// NOT in the live registry. These come from deactivated /
+		// uninstalled plugins. Without a registration we can't run
+		// `is_dynamic()`, so we classify by the only signal we have:
+		// - any stored instance with non-empty innerHTML → static
+		// (innerHTML is the only thing surviving; an AI can edit
+		// it as text)
+		// - all stored instances empty → dynamic (was server-
+		// rendered, now renders nothing — broken)
 		//
 		// Skip the walk entirely if there are no dynamic candidates AND we
 		// already classified every live block — we still walk in that case
@@ -236,12 +251,14 @@ class Block_Inventory {
 		// agents reading pages. The walk short-circuits via remaining-set
 		// checks once everything is confirmed.
 		$scanned_posts = 0;
-		$orphan_state  = array(); // orphan_name => array( 'mode' => static|dynamic, 'has_inner' => bool )
-		$post_types    = array_values( get_post_types( array( 'public' => true ), 'names' ) );
-		$paged         = 1;
-		$remaining     = $dynamic_candidates;
+		// Keyed by block name: mode (static|dynamic) and whether it had innerHTML.
+		$orphan_state = array();
+		$post_types   = array_values( get_post_types( array( 'public' => true ), 'names' ) );
+		$paged        = 1;
+		$remaining    = $dynamic_candidates;
+		$batch_size   = 0;
 		do {
-			$batch = get_posts(
+			$batch      = get_posts(
 				array(
 					'post_type'           => $post_types,
 					'post_status'         => 'publish',
@@ -254,12 +271,13 @@ class Block_Inventory {
 					'ignore_sticky_posts' => true,
 				)
 			);
+			$batch_size = count( $batch );
 			foreach ( $batch as $post_id ) {
 				$content = get_post_field( 'post_content', $post_id, 'raw' );
 				if ( empty( $content ) ) {
 					continue;
 				}
-				$scanned_posts++;
+				++$scanned_posts;
 				$blocks = parse_blocks( $content );
 				if ( is_array( $blocks ) ) {
 					$this->scan_evidence_recursive( $blocks, $remaining, $classification, $orphan_state );
@@ -268,8 +286,8 @@ class Block_Inventory {
 			if ( function_exists( 'wp_cache_flush_runtime' ) ) {
 				wp_cache_flush_runtime();
 			}
-			$paged++;
-		} while ( count( $batch ) === self::SCAN_BATCH_SIZE );
+			++$paged;
+		} while ( self::SCAN_BATCH_SIZE === $batch_size );
 
 		// Promote orphan_state into classification with a final mode decision.
 		foreach ( $orphan_state as $name => $state ) {
@@ -284,7 +302,7 @@ class Block_Inventory {
 		);
 		foreach ( $classification as $mode ) {
 			if ( isset( $counts[ $mode ] ) ) {
-				$counts[ $mode ]++;
+				++$counts[ $mode ];
 			}
 		}
 
@@ -306,7 +324,7 @@ class Block_Inventory {
 	 * `source` that pulls from innerHTML — the structural signal of a
 	 * block whose attributes mirror its rendered HTML.
 	 *
-	 * @param \WP_Block_Type $block_type
+	 * @param \WP_Block_Type $block_type Registered block type to inspect.
 	 * @return bool
 	 */
 	private function block_reads_innerhtml_via_attributes( $block_type ) {
@@ -314,7 +332,15 @@ class Block_Inventory {
 			return false;
 		}
 		// Sources that read from the saved markup (per Block API spec).
-		static $inner_sources = array( 'html' => 1, 'attribute' => 1, 'children' => 1, 'node' => 1, 'rich-text' => 1, 'tag' => 1, 'text' => 1 );
+		static $inner_sources = array(
+			'html'      => 1,
+			'attribute' => 1,
+			'children'  => 1,
+			'node'      => 1,
+			'rich-text' => 1,
+			'tag'       => 1,
+			'text'      => 1,
+		);
 		foreach ( $block_type->attributes as $attr ) {
 			if ( is_array( $attr ) && isset( $attr['source'] ) && isset( $inner_sources[ $attr['source'] ] ) ) {
 				return true;
@@ -385,8 +411,8 @@ class Block_Inventory {
 	public function is_block_dynamic( $block_name ) {
 		static $cache = array();
 		if ( ! isset( $cache[ $block_name ] ) ) {
-			$registry        = \WP_Block_Type_Registry::get_instance();
-			$type            = $registry ? $registry->get_registered( $block_name ) : null;
+			$registry             = \WP_Block_Type_Registry::get_instance();
+			$type                 = $registry ? $registry->get_registered( $block_name ) : null;
 			$cache[ $block_name ] = $type ? $type->is_dynamic() : false;
 		}
 		return $cache[ $block_name ];
@@ -416,6 +442,24 @@ class Block_Inventory {
 			}
 		}
 
+		// Refresh rate-limit. build_stats() runs a chunked WP_Query across every
+		// published post of every public post type, parse_blocks()-ing each one.
+		// On a 10k-post site that's 10k+ DB fetches + parses — a cheap REST call
+		// (/site-usage?refresh=true) amplifies into expensive backend work.
+		// Cap manual refreshes at one per CACHE_TTL even when refresh=true; when
+		// the budget is exhausted, fall back to the cached result instead of
+		// erroring (the cache might be stale but is still useful).
+		if ( $refresh ) {
+			$last_refresh = (int) get_option( self::REFRESH_LAST_RUN_OPTION, 0 );
+			if ( $last_refresh && ( time() - $last_refresh ) < self::REFRESH_MIN_INTERVAL ) {
+				$cached = get_transient( self::CACHE_KEY );
+				if ( false !== $cached ) {
+					return $cached;
+				}
+				// No cache yet either — fall through and accept the cost.
+			}
+		}
+
 		try {
 			$stats = $this->build_stats();
 		} catch ( \Throwable $e ) {
@@ -431,6 +475,12 @@ class Block_Inventory {
 		}
 
 		set_transient( self::CACHE_KEY, $stats, self::CACHE_TTL );
+
+		// Record the refresh stamp only on a successful build + cache write
+		// so a failed rebuild doesn't consume the throttle budget.
+		if ( $refresh ) {
+			update_option( self::REFRESH_LAST_RUN_OPTION, time(), false );
+		}
 
 		return $stats;
 	}
@@ -470,8 +520,9 @@ class Block_Inventory {
 		// ceiling, no full-table scan in a single shot.
 		$post_types = array_values( get_post_types( array( 'public' => true ), 'names' ) );
 		$paged      = 1;
+		$batch_size = 0;
 		do {
-			$batch = get_posts(
+			$batch      = get_posts(
 				array(
 					'post_type'           => $post_types,
 					'post_status'         => 'publish',
@@ -484,6 +535,7 @@ class Block_Inventory {
 					'ignore_sticky_posts' => true,
 				)
 			);
+			$batch_size = count( $batch );
 			foreach ( $batch as $post_id ) {
 				$content = get_post_field( 'post_content', $post_id, 'raw' );
 				if ( empty( $content ) || ! has_blocks( $content ) ) {
@@ -498,8 +550,8 @@ class Block_Inventory {
 			if ( function_exists( 'wp_cache_flush_runtime' ) ) {
 				wp_cache_flush_runtime();
 			}
-			$paged++;
-		} while ( count( $batch ) === self::SCAN_BATCH_SIZE );
+			++$paged;
+		} while ( self::SCAN_BATCH_SIZE === $batch_size );
 
 		// Merge post_count into block_usage.
 		foreach ( $block_usage as $name => &$data ) {
@@ -510,9 +562,12 @@ class Block_Inventory {
 		unset( $data );
 
 		// Sort block_usage by count descending.
-		uasort( $block_usage, function ( $a, $b ) {
-			return $b['count'] - $a['count'];
-		} );
+		uasort(
+			$block_usage,
+			function ( $a, $b ) {
+				return $b['count'] - $a['count'];
+			}
+		);
 
 		// Sort namespace totals descending.
 		arsort( $namespace_totals );
@@ -552,7 +607,7 @@ class Block_Inventory {
 			if ( ! isset( $block_usage[ $name ] ) ) {
 				$block_usage[ $name ] = array( 'count' => 0 );
 			}
-			$block_usage[ $name ]['count']++;
+			++$block_usage[ $name ]['count'];
 
 			// Track which posts use this block.
 			if ( ! isset( $posts_per_block[ $name ] ) ) {
@@ -566,7 +621,7 @@ class Block_Inventory {
 			if ( ! isset( $namespace_totals[ $ns ] ) ) {
 				$namespace_totals[ $ns ] = 0;
 			}
-			$namespace_totals[ $ns ]++;
+			++$namespace_totals[ $ns ];
 
 			// Track synced pattern references (core/block with ref attribute).
 			if ( 'core/block' === $name && ! empty( $block['attrs']['ref'] ) ) {
@@ -574,7 +629,7 @@ class Block_Inventory {
 				if ( ! isset( $pattern_refs[ $ref_id ] ) ) {
 					$pattern_refs[ $ref_id ] = 0;
 				}
-				$pattern_refs[ $ref_id ]++;
+				++$pattern_refs[ $ref_id ];
 			}
 
 			// Recurse into inner blocks.
@@ -611,9 +666,12 @@ class Block_Inventory {
 		}
 
 		// Sort by refs descending.
-		uasort( $resolved, function ( $a, $b ) {
-			return $b['refs'] - $a['refs'];
-		} );
+		uasort(
+			$resolved,
+			function ( $a, $b ) {
+				return $b['refs'] - $a['refs'];
+			}
+		);
 
 		return $resolved;
 	}
@@ -632,15 +690,17 @@ class Block_Inventory {
 		// Synced patterns are user-created — typically dozens, occasionally
 		// hundreds. Hard-cap at 500 to keep memory bounded; sites with more
 		// can extend via the `gk_block_api_legacy_patterns_scan_limit` filter.
-		$patterns = get_posts( array(
-			'post_type'           => 'wp_block',
-			'post_status'         => 'publish',
-			'posts_per_page'      => (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 ),
-			'no_found_rows'       => true,
-			'orderby'             => 'ID',
-			'order'               => 'ASC',
-			'ignore_sticky_posts' => true,
-		) );
+		$patterns = get_posts(
+			array(
+				'post_type'           => 'wp_block',
+				'post_status'         => 'publish',
+				'posts_per_page'      => (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 ),
+				'no_found_rows'       => true,
+				'orderby'             => 'ID',
+				'order'               => 'ASC',
+				'ignore_sticky_posts' => true,
+			)
+		);
 
 		foreach ( $patterns as $pattern ) {
 			if ( empty( $pattern->post_content ) || ! has_blocks( $pattern->post_content ) ) {

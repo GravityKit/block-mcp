@@ -32,21 +32,35 @@ define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
  *
  * Named function (rather than a closure) so WP.org Plugin Check and
  * static-analysis tools can trace registrations. Maps
- * `GravityKit\BlockAPI\Some_Class` → `includes/class-some-class.php`.
+ * `GravityKit\BlockAPI\Some_Class`               → `includes/class-some-class.php`
+ * `GravityKit\BlockAPI\Block_Enrichers\Core_Foo` → `includes/block-enrichers/class-core-foo.php`
  *
- * @param string $class Fully-qualified class name being requested.
+ * Each sub-namespace segment becomes a directory under `includes/`, with
+ * underscores converted to hyphens (mirrors the file-naming convention WP
+ * coding standards expect). The final segment is the class file itself,
+ * prefixed `class-`.
+ *
+ * @param string $class_name Fully-qualified class name being requested.
  */
-function autoload( $class ) {
+function autoload( $class_name ) {
 	$prefix   = 'GravityKit\\BlockAPI\\';
 	$base_dir = GK_BLOCK_API_PLUGIN_DIR . 'includes/';
 
 	$len = strlen( $prefix );
-	if ( strncmp( $prefix, $class, $len ) !== 0 ) {
+	if ( strncmp( $prefix, $class_name, $len ) !== 0 ) {
 		return;
 	}
 
-	$relative_class = substr( $class, $len );
-	$file           = $base_dir . 'class-' . strtolower( str_replace( '_', '-', $relative_class ) ) . '.php';
+	$relative_class = substr( $class_name, $len );
+	$parts          = explode( '\\', $relative_class );
+	$class_basename = array_pop( $parts );
+
+	$sub_path = '';
+	if ( ! empty( $parts ) ) {
+		$sub_path = strtolower( str_replace( '_', '-', implode( '/', $parts ) ) ) . '/';
+	}
+
+	$file = $base_dir . $sub_path . 'class-' . strtolower( str_replace( '_', '-', $class_basename ) ) . '.php';
 
 	if ( file_exists( $file ) ) {
 		require_once $file;
@@ -76,8 +90,19 @@ function register_global_filters() {
 	add_filter( 'gk_block_api_dual_storage_blocks', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
 
 	// Block-type integrations — each file registers its own gk_block_api_* filters.
-	foreach ( glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
+	// (array) cast guards against glob() returning false on permission errors or
+	// a missing directory — PHP 8+ fatals on `foreach (false)` (TypeError),
+	// taking down `plugins_loaded` for every request on the site.
+	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/integrations/*.php' ) as $integration ) {
 		require_once $integration;
+	}
+
+	// Block-type enrichers — one class per block-name namespace, each calling
+	// add_filter on gk_block_api_format_block. Pattern modeled on Automattic's
+	// vip-block-data-api block-additions/ directory. Each file ends with
+	// `Foo_Enricher::init();` to self-register the filter.
+	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
+		require_once $enricher;
 	}
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );
@@ -87,7 +112,7 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );
  * MCP) into the canonical list. Lives at the top level so REST, admin,
  * WP-CLI, and cron requests all see the user's UI choices.
  *
- * @param string[] $defaults
+ * @param string[] $defaults Array of block names from filter pipeline.
  * @return string[]
  */
 function merge_manual_dual_storage_blocks( $defaults ) {
@@ -195,7 +220,7 @@ function init_cli() {
  */
 function on_activation() {
 	$installed = get_option( DB_VERSION_OPTION, '' );
-	if ( $installed !== CURRENT_DB_VERSION ) {
+	if ( CURRENT_DB_VERSION !== $installed ) {
 		// Schema changed (or first install) — drop caches that may have
 		// been written by an older version.
 		delete_transient( Block_Inventory::CACHE_KEY );

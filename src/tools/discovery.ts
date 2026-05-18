@@ -223,12 +223,12 @@ export async function handleDiscoveryTool(
       ) {
         throw new Error('get_post_info requires one of: post_id, url, or slug');
       }
-      // Some MCP clients (and JSON without typed schema enforcement) send
-      // numeric IDs as strings. Coerce well-formed integer strings rather
-      // than silently dropping them — otherwise the call falls through to
-      // url/slug-only resolution, which probably isn't what was meant.
+      // Coerce well-formed integer strings (some MCP clients and untyped
+      // JSON send numeric IDs as strings) but reject everything else with
+      // the same "post_id must be a positive integer" error the schema
+      // documents. Floats are rejected because the contract is integer.
       let normalizedPostId: number | undefined;
-      if (typeof postId === 'number' && Number.isFinite(postId)) {
+      if (typeof postId === 'number' && Number.isInteger(postId) && postId > 0) {
         normalizedPostId = postId;
       } else if (typeof postId === 'string' && /^[0-9]+$/.test(postId)) {
         normalizedPostId = parseInt(postId, 10);

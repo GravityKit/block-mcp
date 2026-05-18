@@ -23,12 +23,59 @@ class Term_Manager {
 	const MAX_PER_PAGE = 200;
 
 	/**
+	 * List taxonomy terms with pagination and filtering.
+	 *
 	 * @param array $args See docs/specs/2026-04-27-docs-lifecycle-tools.md §3.3.
 	 * @return array|\WP_Error
 	 */
 	public function list_terms( array $args ) {
 		$taxonomy = isset( $args['taxonomy'] ) ? sanitize_key( $args['taxonomy'] ) : 'category';
 		if ( ! taxonomy_exists( $taxonomy ) ) {
+			return new \WP_Error(
+				'invalid_taxonomy',
+				sprintf( /* translators: %s: taxonomy slug */ __( 'Taxonomy "%s" does not exist.', 'gk-block-api' ), $taxonomy ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Only surface taxonomies the site has opted into REST exposure.
+		// Plugins commonly register internal-state taxonomies with
+		// `public: false` and `show_in_rest: false` for their own
+		// bookkeeping (workflow state, license keys, etc.). Without this
+		// gate, /terms?taxonomy=<that_internal_slug> would list every term
+		// in that taxonomy to any edit_posts caller. Matches the
+		// invariant WordPress's own /wp/v2/taxonomies endpoint enforces.
+		//
+		// Override via the `gk_block_api_allow_taxonomy_in_terms` filter:
+		// agents editing a CPT with a deliberately-private taxonomy
+		// (workflow state, internal department) still need to discover
+		// term IDs to assign them — site admins can grant per-taxonomy
+		// access by returning true from the filter without globally
+		// flipping show_in_rest.
+		$tax_object  = get_taxonomy( $taxonomy );
+		$rest_listed = $tax_object && ! empty( $tax_object->show_in_rest );
+
+		/**
+		 * Filter whether a taxonomy is listable via /terms.
+		 *
+		 * Default: true iff the taxonomy's `show_in_rest` is true. Override
+		 * to permit a deliberately-internal taxonomy (one with show_in_rest
+		 * false) for the agent-editing use case without exposing it through
+		 * the rest of WordPress's REST surface. Return false to deny a
+		 * normally-listable taxonomy.
+		 *
+		 * @param bool                   $allow      Default decision.
+		 * @param string                 $taxonomy   Sanitized taxonomy slug.
+		 * @param \WP_Taxonomy|null|false $tax_object Taxonomy object (null/false if not registered).
+		 */
+		$allow = apply_filters(
+			'gk_block_api_allow_taxonomy_in_terms',
+			$rest_listed,
+			$taxonomy,
+			$tax_object
+		);
+
+		if ( ! $tax_object || ! $allow ) {
 			return new \WP_Error(
 				'invalid_taxonomy',
 				sprintf( /* translators: %s: taxonomy slug */ __( 'Taxonomy "%s" does not exist.', 'gk-block-api' ), $taxonomy ),
@@ -45,7 +92,7 @@ class Term_Manager {
 		$orderby         = isset( $args['orderby'] ) && in_array( $args['orderby'], $orderby_allowed, true )
 			? $args['orderby']
 			: 'name';
-		$order = isset( $args['order'] ) && 'desc' === strtolower( (string) $args['order'] ) ? 'DESC' : 'ASC';
+		$order           = isset( $args['order'] ) && 'desc' === strtolower( (string) $args['order'] ) ? 'DESC' : 'ASC';
 
 		$query_args = array(
 			'taxonomy'   => $taxonomy,
@@ -89,6 +136,8 @@ class Term_Manager {
 	}
 
 	/**
+	 * Format a WP_Term object into a response array.
+	 *
 	 * @param object $term WP_Term-shaped object.
 	 * @return array
 	 */
@@ -104,7 +153,25 @@ class Term_Manager {
 			// get_term_link() returns WP_Error for invalid terms / taxonomies;
 			// casting that to string would inject "Object of class WP_Error..."
 			// into the response. Resolve once and downgrade errors to ''.
-			'link'        => ( $link = get_term_link( $term ) ) && ! is_wp_error( $link ) ? (string) $link : '',
+			'link'        => $this->get_term_link_safe( $term ),
 		);
+	}
+
+	/**
+	 * Resolve a term's permalink, returning an empty string on failure.
+	 *
+	 * Returns an empty string on failure because get_term_link() returns WP_Error
+	 * for invalid terms / taxonomies, and casting that to string would inject
+	 * "Object of class WP_Error..." into the response.
+	 *
+	 * @param object $term WP_Term-shaped object.
+	 * @return string Permalink URL or empty string.
+	 */
+	private function get_term_link_safe( $term ) {
+		$link = get_term_link( $term );
+		if ( is_wp_error( $link ) ) {
+			return '';
+		}
+		return (string) $link;
 	}
 }

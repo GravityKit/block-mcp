@@ -155,10 +155,34 @@ class Yoast_Bridge {
 	 *
 	 * @param \WP_REST_Request $request Incoming request.
 	 *
-	 * @return \WP_REST_Response
+	 * @return \WP_REST_Response|\WP_Error WP_Error returned when the batch
+	 *                                    exceeds MAX_BATCH_SIZE; otherwise the
+	 *                                    per-post results envelope.
 	 */
 	public function bulk_update_seo( \WP_REST_Request $request ) {
-		$posts   = (array) $request->get_param( 'posts' );
+		$posts = (array) $request->get_param( 'posts' );
+
+		// Cap batch size. An authenticated `edit_posts` user without per-post
+		// permission would still be allowed to send an unbounded `posts` array
+		// (each entry generates DB queries via write_fields + read_fields and
+		// fires Yoast hooks), enabling cheap resource amplification. Match
+		// Block_CRUD::MAX_BATCH_SIZE for parity with batch-update.
+		if ( count( $posts ) > \GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE ) {
+			return new \WP_Error(
+				'batch_too_large',
+				sprintf(
+					/* translators: 1: actual batch size, 2: maximum batch size */
+					__( 'Bulk SEO batch contains %1$d items; maximum is %2$d.', 'gk-block-api' ),
+					count( $posts ),
+					\GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE
+				),
+				array(
+					'status'         => 400,
+					'max_batch_size' => \GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE,
+				)
+			);
+		}
+
 		$results = array();
 
 		foreach ( $posts as $entry ) {
@@ -275,7 +299,9 @@ class Yoast_Bridge {
 	 * Storage formats match Yoast's own conventions:
 	 * - noindex: "1" (noindex), "2" (explicit index), delete meta for default
 	 * - nofollow: "1" (nofollow), delete meta for follow
-	 * - is_cornerstone: "1" (true), "false" string for not cornerstone
+	 * - is_cornerstone: "1" (true); meta is DELETED to disable. The literal
+	 *   string "false" is truthy in PHP, so the disable path must remove
+	 *   the meta key rather than write any string value.
 	 *
 	 * @param int                  $post_id Post ID.
 	 * @param array<string, mixed> $fields  Field name => value pairs.
@@ -340,7 +366,17 @@ class Yoast_Bridge {
 			}
 
 			if ( 'is_cornerstone' === $field ) {
-				update_post_meta( $post_id, $meta_key, $value ? '1' : 'false' );
+				// Yoast convention: meta = '1' to enable, MISSING (or empty)
+				// to disable. The previous code stored the literal string
+				// 'false' on disable, which PHP treats as truthy — so
+				// toggling cornerstone off via this API silently left it
+				// enabled in Yoast's view. Match the same pattern nofollow
+				// uses above: write '1' to enable, delete to disable.
+				if ( $value ) {
+					update_post_meta( $post_id, $meta_key, '1' );
+				} else {
+					delete_post_meta( $post_id, $meta_key );
+				}
 				continue;
 			}
 
@@ -367,8 +403,10 @@ class Yoast_Bridge {
 
 		// Mirror Yoast's own metabox-save action so downstream listeners (sitemap
 		// rebuild, indexable update, etc.) fire as if the field changed in wp-admin.
+		// Yoast owns the `wpseo_` prefix; the unprefixed-hookname warning is
+		// expected and intentional.
 		if ( self::is_yoast_active() ) {
-			do_action( 'wpseo_saved_postdata' );
+			do_action( 'wpseo_saved_postdata' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Re-emitting Yoast's own hook on its behalf.
 		}
 
 		return true;

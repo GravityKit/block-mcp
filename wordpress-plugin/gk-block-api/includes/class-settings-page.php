@@ -36,10 +36,16 @@ class Settings_Page {
 	/** Option backing the manual "force-treat as dual-storage" list (UI-editable). */
 	const DUAL_MANUAL_OPTION = 'gk_block_api_dual_storage_blocks_manual';
 
-	/** @var Block_Inventory */
+	/**
+	 * Block inventory instance.
+	 *
+	 * @var Block_Inventory
+	 */
 	private $inventory;
 
 	/**
+	 * Constructor.
+	 *
 	 * @param Block_Inventory $inventory Used by the "Re-scan storage modes" button.
 	 *                                   Defaults are read directly via `Preferences::get_defaults()`
 	 *                                   in the renderer — no Preferences instance needed here.
@@ -77,7 +83,7 @@ class Settings_Page {
 	 */
 	public function register_settings() {
 		// 1. Preferences (tier scores + replacement map). Stored as a single
-		//    associative array; we sanitize sub-keys in the callback.
+		// associative array; we sanitize sub-keys in the callback.
 		register_setting(
 			self::OPTION_GROUP,
 			'gk_block_api_preferences',
@@ -107,6 +113,27 @@ class Settings_Page {
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_block_name_list' ),
 				'default'           => array(),
+			)
+		);
+
+		// 4. Global media-uploads kill-switch. Stored as the string '0' or
+		// '1' rather than a PHP bool because update_option() can't
+		// reliably persist boolean false when the option is missing
+		// (the equality check against the "doesn't exist → false" default
+		// short-circuits the write).
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => static function ( $value ) {
+					if ( is_bool( $value ) ) {
+						return $value ? '1' : '0';
+					}
+					$truthy = in_array( strtolower( (string) $value ), array( '1', 'on', 'true', 'yes' ), true );
+					return $truthy ? '1' : '0';
+				},
+				'default'           => '1',
 			)
 		);
 	}
@@ -144,7 +171,7 @@ class Settings_Page {
 				if ( '' === $ns ) {
 					continue;
 				}
-				$score = isset( $row['score'] ) ? (int) $row['score'] : 0;
+				$score                          = isset( $row['score'] ) ? (int) $row['score'] : 0;
 				$out['namespace_scores'][ $ns ] = max( 0, min( 100, $score ) );
 			}
 		}
@@ -194,7 +221,7 @@ class Settings_Page {
 	/**
 	 * Sanitize a list of fully-qualified block names (one per line in the textarea).
 	 *
-	 * @param mixed $input
+	 * @param mixed $input Raw POST value — string (textarea) or array.
 	 * @return string[]
 	 */
 	public function sanitize_block_name_list( $input ) {
@@ -218,7 +245,7 @@ class Settings_Page {
 	 * Sanitize a single block name. Allows lowercased letters, digits, dashes,
 	 * underscores, and a single forward slash separator.
 	 *
-	 * @param string $name
+	 * @param string $name Raw block name to sanitize.
 	 * @return string Empty string if invalid.
 	 */
 	private function sanitize_block_name( $name ) {
@@ -269,6 +296,7 @@ class Settings_Page {
 		delete_option( 'gk_block_api_preferences' );
 		delete_option( 'gk_block_api_post_types_allowlist' );
 		delete_option( self::DUAL_MANUAL_OPTION );
+		delete_option( Media_Manager::UPLOADS_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
 		delete_transient( Block_Inventory::CACHE_KEY );
 
@@ -313,6 +341,8 @@ class Settings_Page {
 		$post_type_allow  = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
 		$manual_dual      = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
 		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
+		$uploads_enabled  = \GravityKit\BlockAPI\Media_Manager::uploads_enabled();
+		$uploads_option   = \GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -331,17 +361,18 @@ class Settings_Page {
 
 		// Notices from action handlers. All inputs unslashed and clamped via
 		// absint before composition; the message itself never contains user data.
-		$scanned       = isset( $_GET['scanned'] ) ? absint( wp_unslash( $_GET['scanned'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag from our own redirect.
-		$unique_count  = isset( $_GET['unique'] )  ? absint( wp_unslash( $_GET['unique'] ) )  : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$dual_count    = isset( $_GET['dual'] )    ? absint( wp_unslash( $_GET['dual'] ) )    : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$reset_flag    = isset( $_GET['reset'] )   ? absint( wp_unslash( $_GET['reset'] ) )   : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$scanned      = isset( $_GET['scanned'] ) ? absint( wp_unslash( $_GET['scanned'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag from our own redirect.
+		$unique_count = isset( $_GET['unique'] ) ? absint( wp_unslash( $_GET['unique'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$dual_count   = isset( $_GET['dual'] ) ? absint( wp_unslash( $_GET['dual'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$reset_flag   = isset( $_GET['reset'] ) ? absint( wp_unslash( $_GET['reset'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 
 			<?php if ( $scanned ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php
+				<div class="notice notice-success is-dismissible"><p>
+				<?php
 					echo esc_html(
 						sprintf(
 							/* translators: 1: total unique blocks, 2: dual-storage count */
@@ -350,7 +381,8 @@ class Settings_Page {
 							$dual_count
 						)
 					);
-				?></p></div>
+				?>
+				</p></div>
 			<?php endif; ?>
 			<?php if ( $reset_flag ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings reset to defaults.', 'gk-block-api' ); ?></p></div>
@@ -360,7 +392,7 @@ class Settings_Page {
 
 			<style>
 				/* Keep the Remove checkbox + label on a single line — the 80px
-				   column width was wrapping the label below the checkbox. */
+					column width was wrapping the label below the checkbox. */
 				.gk-block-api-remove-label {
 					white-space: nowrap;
 					display: inline-flex;
@@ -372,9 +404,13 @@ class Settings_Page {
 				}
 			</style>
 
-			<?php /* Live region for screen-reader announcements when the auto-grow
-			       JS appends a new blank row. Visually hidden via WP's standard
-			       .screen-reader-text class. */ ?>
+			<?php
+			/*
+			 * Live region for screen-reader announcements when the auto-grow
+			 * JS appends a new blank row. Visually hidden via WP's standard
+			 * .screen-reader-text class.
+			 */
+			?>
 			<div id="gk-block-api-live" class="screen-reader-text" role="status" aria-live="polite" aria-atomic="true"></div>
 
 			<datalist id="gk-block-names">
@@ -514,7 +550,67 @@ class Settings_Page {
 						</label>
 					<?php endfor; ?>
 				</fieldset>
-				<style>.gk-block-api-allowlist label { margin-right: 16px; }</style>
+				<style>
+					.gk-block-api-allowlist {
+						display: grid;
+						grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+						gap: 8px 16px;
+						max-width: 1000px;
+						margin-top: 8px;
+					}
+					.gk-block-api-allowlist label {
+						display: flex;
+						align-items: center;
+						gap: 6px;
+						white-space: nowrap;
+						overflow: hidden;
+						text-overflow: ellipsis;
+					}
+				</style>
+
+				<h2><?php esc_html_e( 'Media uploads', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Master kill-switch for every MCP-driven upload path: multipart, URL sideload, base64. When disabled, the plugin refuses every upload with HTTP 403 before any disk I/O, DNS lookup, or HTTP fetch — useful if you want agents to edit blocks but not write to the media library.', 'gk-block-api' ); ?>
+				</p>
+				<?php
+				// Belt-and-braces: emit '0' even when the box is unchecked so
+				// update_option() reliably stores false. PHP omits unchecked
+				// checkboxes entirely from $_POST, and the setting's
+				// sanitize_callback would then receive nothing.
+				?>
+				<input type="hidden" name="<?php echo esc_attr( $uploads_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $uploads_option ); ?>"
+						value="1"
+						<?php checked( $uploads_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Allow MCP agents to upload media', 'gk-block-api' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so admins aren't confused
+				// by a checked box that the API still rejects.
+				$option_raw = get_option( $uploads_option, '1' );
+				$filtered   = (bool) apply_filters(
+					'gk_block_api_uploads_enabled',
+					( '0' !== (string) $option_raw && false !== $option_raw )
+				);
+				if ( ( '0' !== (string) $option_raw && false !== $option_raw ) !== $filtered ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-api' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-api' ),
+							'<code>gk_block_api_uploads_enabled</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
 
 				<?php submit_button(); ?>
 			</form>
@@ -524,7 +620,8 @@ class Settings_Page {
 			<h2><?php esc_html_e( 'Storage-mode scan', 'gk-block-api' ); ?></h2>
 			<p class="description"><?php esc_html_e( 'Walks every published post and classifies each distinct block name as static / dynamic / dual. After running, get_page_blocks annotations and dual-storage enforcement use the live classification instead of the filter defaults. Slow on large sites.', 'gk-block-api' ); ?></p>
 			<?php if ( ! empty( $scan_results ) ) : ?>
-				<p><strong><?php
+				<p><strong>
+				<?php
 					echo esc_html(
 						sprintf(
 							/* translators: %d: number of distinct block names persisted */
@@ -532,7 +629,8 @@ class Settings_Page {
 							count( $scan_results )
 						)
 					);
-				?></strong></p>
+				?>
+				</strong></p>
 			<?php endif; ?>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action" value="gk_block_api_scan_storage_modes" />

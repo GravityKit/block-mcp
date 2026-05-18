@@ -247,6 +247,47 @@ The server also exposes a **resource** (`block-mcp://block-preferences`) contain
 - **Error format**: `{ error: true, message, statusCode, tool }` with `isError: true` in MCP response
 - **Type safety**: Strict mode, all API responses fully typed in `types.ts`
 
+### Comments and docblocks
+
+Code comments, docblocks, and commit messages are **public artifacts**. They must read as standalone documentation of what the code does today — never as a journal of how it got there.
+
+#### Internal-process references
+
+Don't reference internal plans, specs, tickets, or review processes from inside source files:
+
+- No CodeRabbit / review-tool attributions ("review found", "as flagged by …"). Apply the fix; write the comment from the perspective of the code's current behaviour.
+- No `docs/specs/…` path pointers as the load-bearing reason a piece of code exists. The code is the source of truth — if a comment only makes sense once you've opened an off-tree spec, the comment is wrong. (It's fine to *cite* a spec for the curious; it's not fine to require it for comprehension.)
+- No Linear / GitHub-issue numbers in source (`# fixes ABC-123`). Belong in PR descriptions and commit trailers, not in source.
+- No "TODO(<initiative>-followup)" tags referencing internal initiative names. Plain `TODO:` is fine when the gap itself is described concretely; an initiative-name-only TODO is noise.
+- No "future SaaS revision will…" or "when X lands we'll switch on…" speculation. File a ticket; don't seed a code comment that rots into a stale promise.
+
+| Avoid | Prefer |
+|---|---|
+| `// Pre-fix, find_posts ran without perm:'readable' …` | `// perm:'readable' pushes the cap filter into posts_where_paged.` |
+| `// Per spec section 3.3 — only assign refs when persist_refs=true` | `// Only persist refs when persist_refs=true; otherwise refs live in-memory only.` |
+| `// TODO(planB-followup): test harness fix needed` | `// TODO: form posts from about:blank end up at wp-login.php; need a different submit path.` |
+| `// CodeRabbit flagged: secrets in job-level if invalid` | *(delete; the workflow file's structure is the documentation)* |
+
+#### Engineering planning, scale, and architecture speculation
+
+Source files are not the place for capacity planning or future-architecture suggestions:
+
+- **Internal scale assumptions.** No "≤ a few hundred posts per site", "we expect <50 blocks per page", "typical install has fewer than 10 patterns". Load-bearing numbers belong in benchmarks or capacity-planning docs; non-load-bearing ones don't belong anywhere.
+- **Future-architecture suggestions.** No "promote pattern_refs to a custom table later", "switch the inventory transient to options when sites scale", "v2 should do X". File a ticket; plans evolve cleanly there and rot in source.
+- **Speculative thresholds.** "If we ever exceed N…", "when this becomes a bottleneck…" — same problem. Measure and act, or file a ticket.
+
+#### What to write instead
+
+1. **Describe behaviour in the present tense.** "Coalesces same-block writes inside a single revision," not "we used to write a revision per call but now we batch."
+2. **Document hard contracts callers MUST honor.** "Each block name must be registered with `WP_Block_Type_Registry::is_registered` before insertion." "innerContent null positions must be preserved across mutations." "Not atomic — last write wins on the per-post rate-limit transient."
+3. **Document non-obvious WHY when behaviour is surprising.** If `is_post_readable` cap-elevates password-protected posts to `edit_post`, the one-line "passwords are cookie-checked, not cap-checked, so we require a stronger cap for that branch" earns its keep. The reader's question is "why does this look stronger than needed?"; the comment answers it without requiring an off-tree doc.
+
+Three quick tests before writing any comment or docblock — if any answer is yes, rewrite or move it:
+
+- Would this be a sentence in a Linear ticket / PR description / postmortem? Put it there instead.
+- Does it describe history ("pre-fix", "we used to") or speculate about future architecture ("if we ever", "promote to X later")? Git blame handles history; the issue tracker handles plans.
+- Does it require the reader to know about an internal artifact (a spec path, a review tool's flag, an initiative codename) to make sense? Rewrite from the code's standpoint.
+
 ## Key Concepts
 
 ### Block Paths

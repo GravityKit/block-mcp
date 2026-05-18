@@ -22,6 +22,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
 	delete_option( 'gk_block_api_post_types_allowlist' );
+	delete_option( 'gk_block_api_uploads_enabled' );
 	delete_option( 'gk_block_api_dual_storage_blocks_manual' );
 	delete_option( 'gk_block_api_storage_modes' );
 	delete_option( 'gk_block_api_storage_modes_last_run' );
@@ -44,8 +45,8 @@ function gk_block_api_uninstall_blog() {
 }
 
 if ( is_multisite() ) {
-	$blog_ids = get_sites( array( 'fields' => 'ids' ) );
-	foreach ( $blog_ids as $blog_id ) {
+	$blog_ids = get_sites( array( 'fields' => 'ids' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- local to uninstall script, not a global.
+	foreach ( $blog_ids as $blog_id ) { // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- $blog_id is the multisite loop variable passed to switch_to_blog(); intentional WP multisite pattern.
 		switch_to_blog( $blog_id );
 		gk_block_api_uninstall_blog();
 		restore_current_blog();
