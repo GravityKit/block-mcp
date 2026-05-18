@@ -70,6 +70,16 @@ class Core_Block_Enricher {
 			return $data;
 		}
 
+		// Visibility gate. wp_block CPT entries can be in draft / pending /
+		// private / trash. get_post() returns them all regardless. Without this
+		// check, an editor who can read the embedding post but not the
+		// referenced pattern would see its title and (with render) its full
+		// block tree — a quiet information disclosure.
+		$is_public = 'publish' === $ref_post->post_status;
+		if ( ! $is_public && ! current_user_can( 'read_post', $ref_post->ID ) ) {
+			return $data;
+		}
+
 		$pattern_ref = array(
 			'id'   => $ref,
 			'name' => $ref_post->post_title,
@@ -79,14 +89,29 @@ class Core_Block_Enricher {
 		$reader = isset( $context['reader'] ) ? $context['reader'] : null;
 
 		if ( $render && $reader && ! empty( $ref_post->post_content ) ) {
-			$pattern_blocks = parse_blocks( $ref_post->post_content );
-			if ( is_array( $pattern_blocks ) ) {
-				// Re-enter the formatter for the pattern's own block tree.
-				// Reader::format_blocks runs the same filter graph against
-				// each block, so enrichers fire transitively. Cycle protection
-				// (a pattern referencing itself or a sibling that loops) is
-				// not enforced here — defer to a future task if observed.
-				$pattern_ref['blocks'] = $reader->format_blocks( $pattern_blocks, true );
+			// Cycle protection. A wp_block that references itself (or any
+			// ancestor in the expansion chain) would recurse until the PHP
+			// stack overflows. Track the set of refs we're currently expanding
+			// via a static visited set, scoped to the request. Adding the
+			// current ref BEFORE recursion and removing AFTER — try/finally
+			// keeps the set clean even when format_blocks throws.
+			static $expanding = array();
+			if ( isset( $expanding[ $ref ] ) ) {
+				$pattern_ref['cycle_detected'] = true;
+			} else {
+				$pattern_blocks = parse_blocks( $ref_post->post_content );
+				if ( is_array( $pattern_blocks ) ) {
+					$expanding[ $ref ] = true;
+					try {
+						// Re-enter the formatter for the pattern's own block tree.
+						// Reader::format_blocks runs the same filter graph against
+						// each block, so enrichers fire transitively. The static
+						// visited set above prevents cycles from blowing the stack.
+						$pattern_ref['blocks'] = $reader->format_blocks( $pattern_blocks, true );
+					} finally {
+						unset( $expanding[ $ref ] );
+					}
+				}
 			}
 		}
 

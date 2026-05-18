@@ -140,6 +140,86 @@ class CoreBlockEnricherTest extends BlockApiTestCase {
 		$this->assertArrayNotHasKey( 'pattern_ref', $result );
 	}
 
+	// ── visibility gate: non-published patterns blocked for non-readers ───
+
+	public function test_enrich_skips_draft_pattern_when_user_cannot_read() {
+		$draft_pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_title'   => 'Hidden draft',
+				'post_status'  => 'draft',
+				'post_author'  => 1,
+				'post_content' => '<!-- wp:paragraph --><p>secret</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		// Subscriber-level user has no read_post on a draft they don't own.
+		$other_user = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $other_user );
+
+		$data    = array(
+			'name'       => 'core/block',
+			'attributes' => array( 'ref' => $draft_pattern_id ),
+		);
+		$context = array(
+			'parsed_block' => array( 'blockName' => 'core/block', 'attrs' => array( 'ref' => $draft_pattern_id ) ),
+			'render'       => false,
+		);
+
+		$result = Core_Block_Enricher::enrich( $data, 'core/block', $context );
+
+		$this->assertArrayNotHasKey(
+			'pattern_ref',
+			$result,
+			'Non-public wp_block must not leak title or content to a caller who cannot read it.'
+		);
+
+		wp_set_current_user( 0 );
+		wp_delete_post( $draft_pattern_id, true );
+	}
+
+	// ── cycle protection: self-referencing pattern doesn't infinite-recurse ─
+
+	public function test_enrich_self_referencing_pattern_does_not_recurse() {
+		// Pattern A references itself in its content.
+		$cyclic_id = self::factory()->post->create(
+			array(
+				'post_type'   => 'wp_block',
+				'post_title'  => 'Cyclic Pattern',
+				'post_status' => 'publish',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'           => $cyclic_id,
+				'post_content' => '<!-- wp:block {"ref":' . $cyclic_id . '} /-->',
+			)
+		);
+
+		$reader_reflection = new ReflectionProperty( Block_CRUD::class, 'reader' );
+		$reader_reflection->setAccessible( true );
+		$reader = $reader_reflection->getValue( $this->crud );
+
+		$data    = array(
+			'name'       => 'core/block',
+			'attributes' => array( 'ref' => $cyclic_id ),
+		);
+		$context = array(
+			'parsed_block' => array( 'blockName' => 'core/block', 'attrs' => array( 'ref' => $cyclic_id ) ),
+			'render'       => true,
+			'reader'       => $reader,
+		);
+
+		// Pre-fix this would PHP-fatal on stack overflow / max_nesting_level.
+		// Post-fix it returns a structured marker that we hit a cycle.
+		$result = Core_Block_Enricher::enrich( $data, 'core/block', $context );
+
+		$this->assertArrayHasKey( 'pattern_ref', $result );
+		$this->assertSame( $cyclic_id, $result['pattern_ref']['id'] );
+
+		wp_delete_post( $cyclic_id, true );
+	}
+
 	// ── integration: end-to-end through get_blocks with render mode ───────
 
 	public function test_filter_fires_via_get_blocks_render_mode() {
