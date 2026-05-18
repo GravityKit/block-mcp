@@ -2511,7 +2511,7 @@ class REST_Controller {
 			),
 			'min_score' => array(
 				'type'              => 'integer',
-				'sanitize_callback' => 'intval',
+				'sanitize_callback' => 'absint',
 			),
 			'category'  => array(
 				'type'              => 'string',
