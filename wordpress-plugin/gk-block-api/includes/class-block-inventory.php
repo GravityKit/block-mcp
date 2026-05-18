@@ -458,7 +458,6 @@ class Block_Inventory {
 				}
 				// No cache yet either — fall through and accept the cost.
 			}
-			update_option( self::REFRESH_LAST_RUN_OPTION, time(), false );
 		}
 
 		try {
@@ -476,6 +475,14 @@ class Block_Inventory {
 		}
 
 		set_transient( self::CACHE_KEY, $stats, self::CACHE_TTL );
+
+		// Record the refresh stamp AFTER a successful build + cache write.
+		// Doing this before build_stats() means a failed rebuild still burns
+		// the refresh budget — the next operator-triggered refresh would be
+		// rate-limited away even though no fresh data was produced.
+		if ( $refresh ) {
+			update_option( self::REFRESH_LAST_RUN_OPTION, time(), false );
+		}
 
 		return $stats;
 	}

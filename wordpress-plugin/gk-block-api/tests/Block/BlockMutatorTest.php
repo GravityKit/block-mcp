@@ -201,6 +201,59 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertEquals( 'center', $result['block']['attributes']['align'] );
 	}
 
+	/**
+	 * update-attrs deep-merges metadata; partial writes must preserve siblings.
+	 *
+	 * Pre-fix, the mutator merged attrs with a single array_merge() — so
+	 * passing `{ metadata: { name: 'Hero' } }` would replace the entire
+	 * metadata object, wiping out attrs.metadata.gk_ref (ref stability) and
+	 * attrs.metadata.bindings (write-guard inputs). Block_Writer's
+	 * apply_block_update_in_place already deep-merges metadata; this test
+	 * pins the same contract on the mutate endpoint so the two write paths
+	 * stay symmetric.
+	 */
+	public function test_update_attrs_preserves_metadata_siblings() {
+		$this->make_post( array(
+			array(
+				'blockName'    => 'core/paragraph',
+				'attrs'        => array(
+					'metadata' => array(
+						'gk_ref'   => 'preexisting-ref-xyz',
+						'bindings' => array(
+							'content' => array( 'source' => 'core/post-meta', 'args' => array( 'key' => 'subtitle' ) ),
+						),
+					),
+				),
+				'innerHTML'    => '<p>Hi</p>',
+				'innerContent' => array( '<p>Hi</p>' ),
+				'innerBlocks'  => array(),
+			),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-attrs',
+			array( 0 ),
+			array( 'attributes' => array( 'metadata' => array( 'name' => 'Hero' ) ) )
+		);
+
+		$this->assertTrue( $result['success'] );
+		$saved   = $this->current_blocks();
+		$meta    = $saved[0]['attrs']['metadata'];
+		$this->assertSame( 'Hero', $meta['name'] );
+		$this->assertSame(
+			'preexisting-ref-xyz',
+			$meta['gk_ref'],
+			'metadata.gk_ref must survive a partial metadata update — otherwise refs become unstable across writes.'
+		);
+		$this->assertArrayHasKey(
+			'bindings',
+			$meta,
+			'metadata.bindings must survive a partial metadata update — wiping them disables the write-guard contract.'
+		);
+		$this->assertSame( 'core/post-meta', $meta['bindings']['content']['source'] );
+	}
+
 	// ── update-html ────────────────────────────────────────────────
 
 	public function test_update_html_replaces_inner_html() {

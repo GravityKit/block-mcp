@@ -27,7 +27,7 @@
  *   - Response body has a `message` string (non-empty)
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import axios from 'axios';
 import { makeLiveClient, skipUnlessLive, withTestPost, LIVE_ENV, hasRoute } from './setup.js';
 
@@ -175,8 +175,13 @@ describe.skipIf(skip)('real REST error envelopes (integration)', () => {
     expect(result.message).toBeTruthy();
   });
 
-  it('cleanup: trash the shared error-envelopes post', async () => {
-    if (!livePostId) return;
+  // Move cleanup to afterAll so the shared post is trashed even if any of
+  // the assertions above fail. As a regular `it()` it would skip on failure
+  // and leak the test post into the live site, polluting later runs.
+  afterAll(async () => {
+    if (!livePostId) {
+      return;
+    }
     const client = makeLiveClient();
     const result = await client.updatePost(livePostId, { status: 'trash' });
     expect(result.success).toBe(true);

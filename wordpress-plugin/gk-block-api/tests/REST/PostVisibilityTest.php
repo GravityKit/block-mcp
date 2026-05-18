@@ -97,6 +97,64 @@ class PostVisibilityTest extends WP_UnitTestCase {
 	// ── /find-posts ───────────────────────────────────────────────────────
 
 	/**
+	 * GET /find-posts pagination must reflect the post-filter, not the raw query.
+	 *
+	 * Pre-fix, `total` and `total_pages` came from $query->found_posts /
+	 * $query->max_num_pages — which only honor the SQL-level `perm:'readable'`
+	 * filter, NOT the post-loop is_post_readable() check that catches
+	 * publish-with-password posts. A caller could see "there are 5 matching
+	 * posts" while only 1 was actually returned, leaking the existence of
+	 * password-protected publish posts they can't read. The fix derives both
+	 * metrics from the visible `$out` set so the metadata matches the body.
+	 */
+	public function test_find_posts_pagination_reflects_visible_results_only() {
+		// Two publish posts; one is password-protected. An Author who is not
+		// the protected post's author has no `read_post` cap on it, so
+		// is_post_readable filters it out of $out, and `total` must follow.
+		$visible = self::factory()->post->create(
+			array(
+				'post_status' => 'publish',
+				'post_author' => $this->other_user_id,
+				'post_title'  => 'visible-publish',
+			)
+		);
+		$hidden  = self::factory()->post->create(
+			array(
+				'post_status'   => 'publish',
+				'post_author'   => $this->other_user_id,
+				'post_title'    => 'hidden-publish',
+				'post_password' => 'sekret',
+			)
+		);
+
+		wp_set_current_user( $this->author_id );
+
+		$request = new \WP_REST_Request( 'GET', '/gk-block-api/v1/find-posts' );
+		$request->set_param( 'post_status', 'publish' );
+		$request->set_param( 'per_page', 100 );
+		// Constrain the search so only our two test posts are candidates.
+		$request->set_param( 's', '-publish' );
+		$response = rest_get_server()->dispatch( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$ids  = array_map( static fn( $p ) => $p['post_id'], $data['posts'] ?? array() );
+		$this->assertContains( $visible, $ids );
+		$this->assertNotContains( $hidden, $ids, 'password-protected post must be filtered out of /find-posts.' );
+
+		$this->assertSame(
+			count( $data['posts'] ),
+			(int) $data['total'],
+			'/find-posts total must equal the visible count, not the raw WP_Query found_posts.'
+		);
+		$this->assertSame(
+			count( $data['posts'] ),
+			(int) $data['count'],
+			'count and total must agree once metadata reflects $out instead of $query->found_posts.'
+		);
+	}
+
+	/**
 	 * GET /find-posts?post_status=draft must NOT return another user's drafts.
 	 *
 	 * Pre-fix, WP_Query ran without `perm` set — so SQL returned every

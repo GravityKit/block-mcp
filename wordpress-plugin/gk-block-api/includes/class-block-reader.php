@@ -203,7 +203,7 @@ class Block_Reader {
 			// will then return the already-assigned tree instead of a fresh copy
 			// with no refs, ensuring ref stability across multiple reads without
 			// requiring a DB write.
-			$cache_key = $post_id . ':' . md5( $content );
+			$cache_key = (int) $post_id . ':' . md5( $content );
 			if ( ! isset( $this->parse_cache[ $cache_key ] ) ) {
 				$parsed                          = parse_blocks( $content );
 				$this->parse_cache[ $cache_key ] = is_array( $parsed ) ? $parsed : array();
@@ -296,21 +296,34 @@ class Block_Reader {
 		} catch ( \Throwable $e ) {
 			$data = array( 'status' => 500 );
 
-			// Only leak the full exception trace when WP_DEBUG is on — mirrors
-			// vip-block-data-api's pattern. In production this stays out of the
-			// REST response so we don't expose internals to anonymous clients.
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				$data['details'] = $e->__toString();
+			// Always log full exception details for operators. The user-facing
+			// message stays generic in production so internals (class names,
+			// file paths, type errors) don't leak through the REST response —
+			// mirrors vip-block-data-api's pattern. WP_DEBUG flips the message
+			// and the 'details' attachment back on for local debugging.
+			if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) {
+				error_log( 'GK Block API parse error for post ' . (int) $post_id . ': ' . $e->__toString() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 
-			return new \WP_Error(
-				'parse_error',
-				sprintf(
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				$data['details'] = $e->__toString();
+				$message         = sprintf(
 					/* translators: %1$d: post ID, %2$s: exception message. */
 					__( 'Error parsing post ID %1$d: %2$s', 'gk-block-api' ),
 					(int) $post_id,
 					$e->getMessage()
-				),
+				);
+			} else {
+				$message = sprintf(
+					/* translators: %d: post ID. */
+					__( 'Error parsing post ID %d.', 'gk-block-api' ),
+					(int) $post_id
+				);
+			}
+
+			return new \WP_Error(
+				'parse_error',
+				$message,
 				$data
 			);
 		} finally {

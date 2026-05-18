@@ -103,12 +103,16 @@ describe.skipIf(skip)('dual-storage enforcement (integration)', () => {
         expect(body.code).toBe('dual_storage_requires_both');
         expect(body.message).toBeTruthy();
       } else if (response.status === 200) {
-        // Storage-mode scan has not been run on this site, or the block is
-        // not classified as dual yet. The plugin can't enforce what it hasn't
-        // been told to enforce. Log and continue.
-        console.log(
+        // The plugin returned a 200 because the storage-mode scan classifying
+        // this block as `dual` had not been run on this site. Silently
+        // logging-and-continuing turns the test green even though the
+        // enforcement path was never exercised — the same outcome a real
+        // regression that broke enforcement would produce. Fail loudly so
+        // CI surfaces the missing precondition instead of papering over it.
+        throw new Error(
           `[integration] dual-storage not enforced for ${dualBlockName} ` +
-          '— run scan_storage_modes to classify blocks as dual, then retry'
+            '— call scan_storage_modes to classify the block as dual, then re-run this suite. ' +
+            'The 200 response means the precondition for this test is not met, not that the test passed.'
         );
       } else {
         // Any other status is unexpected.

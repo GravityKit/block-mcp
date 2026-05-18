@@ -1667,10 +1667,15 @@ class Block_Writer {
 
 			$this->record_rate_limit( $post_id, 'write' );
 
+			// Return the VISIBLE index (the position among non-whitespace blocks)
+			// so the caller can address the new block via the same flat-index
+			// vocabulary insert_blocks() and update_block() use. $insert_at is
+			// a raw-array index that counts whitespace blocks and would be
+			// off-by-N when whitespace surrounds the insertion site.
 			return array(
 				'success'            => true,
 				'inserted'           => array(
-					'index'        => $insert_at,
+					'index'        => $visible_insert,
 					'name'         => 'core/block',
 					'attributes'   => array( 'ref' => (int) $pattern_id ),
 					'pattern_name' => $pattern_name,
@@ -1713,6 +1718,13 @@ class Block_Writer {
 			);
 		}
 
+		// Mint fresh metadata.gk_ref values for every block in the inlined
+		// tree. Pattern source blocks may carry the gk_ref values they were
+		// last read under; inlining them as-is would create duplicates with
+		// any pre-existing block of the same ref on this (or any other) post,
+		// causing write-by-ref calls to land on the wrong block.
+		$this->crud->assign_fresh_refs_recursive( $pattern_blocks );
+
 		array_splice( $existing_blocks, $insert_at, 0, $pattern_blocks );
 
 		$result = $this->save_blocks( $post_id, $existing_blocks );
@@ -1723,12 +1735,20 @@ class Block_Writer {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
+		// Visible index mapping mirrors the synced branch above — return
+		// indices in the same flat-index vocabulary the rest of the write
+		// surface uses, plus the freshly-minted refs so the caller can write
+		// back to specific inlined blocks without a round-trip read.
 		$inserted = array();
 		foreach ( $pattern_blocks as $i => $block ) {
-			$inserted[] = array(
-				'index' => $insert_at + $i,
+			$entry = array(
+				'index' => $visible_insert + $i,
 				'name'  => $block['blockName'],
 			);
+			if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
+				$entry['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+			}
+			$inserted[] = $entry;
 		}
 
 		return array(

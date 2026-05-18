@@ -1024,8 +1024,13 @@ class REST_Controller {
 	 */
 	public function list_terms( $request ) {
 		try {
-			$args   = $request->get_query_params();
-			$result = $this->term_manager->list_terms( (array) $args );
+			// get_params() merges route schema defaults (taxonomy, per_page,
+			// page, orderby, order, hide_empty) and sanitized values into the
+			// returned array. get_query_params() returns ONLY the raw query
+			// string, which means the route's defaults and sanitize_callback
+			// pipeline are bypassed for any missing key.
+			$args   = (array) $request->get_params();
+			$result = $this->term_manager->list_terms( $args );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 			}
@@ -1398,14 +1403,23 @@ class REST_Controller {
 				);
 			}
 
+			// $query->found_posts reflects the SQL `perm:'readable'` filter but
+			// NOT the post-loop password gate above — so reporting it as `total`
+			// can leak the existence of password-protected publish posts the
+			// caller cannot see. Derive both `total` and `total_pages` from the
+			// visible `$out` instead so the metadata mirrors what the caller
+			// actually receives.
+			$visible_total = count( $out );
+			$total_pages   = $per_page > 0 ? (int) ceil( $visible_total / max( 1, (int) $per_page ) ) : 0;
+
 			return new \WP_REST_Response(
 				array(
 					'posts'       => $out,
-					'count'       => count( $out ),
-					'total'       => (int) $query->found_posts,
-					'total_pages' => (int) $query->max_num_pages,
-					'page'        => $page,
-					'per_page'    => $per_page,
+					'count'       => $visible_total,
+					'total'       => $visible_total,
+					'total_pages' => $total_pages,
+					'page'        => (int) $page,
+					'per_page'    => (int) $per_page,
 				),
 				200
 			);

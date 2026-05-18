@@ -161,8 +161,15 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			$postarr['post_date']     = gmdate( 'Y-m-d H:i:s', $ts );
-			$postarr['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
+			$gmt_datetime             = gmdate( 'Y-m-d H:i:s', $ts );
+			$postarr['post_date_gmt'] = $gmt_datetime;
+			// post_date is the site-local clock in WordPress; post_date_gmt is the
+			// timezone-invariant counterpart. Storing the GMT string in both
+			// fields silently shifts every wp_insert_post / wp_update_post date
+			// off by the site offset (and breaks admin sort + date queries that
+			// read post_date directly). get_date_from_gmt() converts using the
+			// site's configured timezone in one call.
+			$postarr['post_date'] = get_date_from_gmt( $gmt_datetime );
 		}
 		if ( isset( $args['menu_order'] ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];
@@ -427,8 +434,9 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			$postarr['post_date']     = gmdate( 'Y-m-d H:i:s', $ts );
-			$postarr['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
+			$gmt_datetime             = gmdate( 'Y-m-d H:i:s', $ts );
+			$postarr['post_date_gmt'] = $gmt_datetime;
+			$postarr['post_date']     = get_date_from_gmt( $gmt_datetime );
 		}
 		if ( array_key_exists( 'menu_order', $args ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];

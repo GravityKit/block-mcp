@@ -231,7 +231,7 @@ class Pattern_Manager {
 		$registry = \WP_Block_Patterns_Registry::get_instance();
 		$all      = $registry->get_all_registered();
 		$results  = array();
-		$search   = ! empty( $args['q'] ) ? strtolower( $args['q'] ) : '';
+		$search   = ! empty( $args['q'] ) ? strtolower( sanitize_text_field( (string) $args['q'] ) ) : '';
 
 		foreach ( $all as $pattern ) {
 			// Search filter.

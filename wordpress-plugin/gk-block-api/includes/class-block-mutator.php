@@ -227,11 +227,21 @@ class Block_Mutator {
 					}
 				}
 
-				// Merge attributes.
-				$parent[ $target_index ]['attrs'] = array_merge(
-					isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : array(),
-					$attributes
-				);
+				// Merge attributes. Mirror Block_Writer::apply_block_update_in_place():
+				// the top-level merge is shallow, but `metadata` itself is deep-
+				// merged so a partial `metadata` payload (e.g. setting
+				// metadata.name) does not clobber sibling keys like gk_ref
+				// (ref stability) or bindings (write-guard inputs).
+				$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) && is_array( $parent[ $target_index ]['attrs'] )
+					? $parent[ $target_index ]['attrs']
+					: array();
+				if ( isset( $attributes['metadata'] ) && is_array( $attributes['metadata'] ) ) {
+					$existing_meta          = isset( $existing_attrs['metadata'] ) && is_array( $existing_attrs['metadata'] )
+						? $existing_attrs['metadata']
+						: array();
+					$attributes['metadata'] = array_merge( $existing_meta, $attributes['metadata'] );
+				}
+				$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $attributes );
 
 				// Auto-transform innerHTML for known attribute-to-HTML mappings.
 				$auto_transformed = $this->transformer->auto_transform_html(

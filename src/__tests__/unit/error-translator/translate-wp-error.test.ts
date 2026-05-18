@@ -238,8 +238,12 @@ describe('translateWpError — full error-code coverage matrix', () => {
       // Every translated message should be non-empty and end without extra whitespace
       expect((result as string).trim().length).toBeGreaterThan(10);
     } else {
-      // Undocumented / not yet translated — must return null, not throw
-      expect(() => translateWpError(code, data)).not.toThrow();
+      // Undocumented / not yet translated — must return null, not throw.
+      // Asserting the return value (not just the absence of a throw) catches
+      // the case where a future change adds a fallback that returns a
+      // generic string for unknown codes — silently translating unknowns is
+      // worse than letting them surface raw.
+      expect(result, `Expected null for untranslated code "${code}"`).toBeNull();
     }
   });
 });

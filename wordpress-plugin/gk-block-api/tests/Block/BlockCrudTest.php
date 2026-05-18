@@ -1184,4 +1184,85 @@ class BlockCrudTest extends BlockApiTestCase {
 
 		wp_set_current_user( 0 );
 	}
+
+	/**
+	 * insert_pattern must mint fresh metadata.gk_ref for every inlined block.
+	 *
+	 * Pre-fix, inline patterns were spliced as-is, preserving the gk_ref
+	 * values they carried in the source wp_block CPT. The same pattern
+	 * inlined twice (or on a post that already used those refs) would
+	 * produce duplicate refs, so subsequent write-by-ref calls would land
+	 * on the wrong block — silently corrupting unrelated content. Fix
+	 * runs assign_fresh_refs_recursive() over the parsed pattern tree
+	 * before array_splice.
+	 */
+	public function test_insert_pattern_inline_mints_fresh_refs() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Hero',
+				// Carries a hand-written gk_ref so we can prove it was replaced.
+				'post_content' => '<!-- wp:paragraph {"metadata":{"gk_ref":"prePATTERN_REF000000"}} --><p>X</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$result = $this->crud->insert_pattern( $this->post_id, $pattern_id, 'end', false );
+		$this->assertIsArray( $result );
+		$this->assertNotEmpty( $result['inserted'] );
+
+		$blocks = $this->current_blocks();
+		$first  = $blocks[0];
+		$this->assertSame( 'core/paragraph', $first['blockName'] );
+
+		$persisted_ref = $first['attrs']['metadata']['gk_ref'] ?? '';
+		$this->assertNotSame(
+			'prePATTERN_REF000000',
+			$persisted_ref,
+			'insert_pattern must overwrite source pattern gk_ref to keep refs globally unique.'
+		);
+		$this->assertNotEmpty( $persisted_ref, 'inlined block must end up with a fresh, non-empty gk_ref.' );
+
+		wp_delete_post( $pattern_id, true );
+	}
+
+	/**
+	 * insert_pattern response index is the VISIBLE index, not the raw position.
+	 *
+	 * Pre-fix, the returned `inserted.index` was $insert_at — the raw array
+	 * index that counts whitespace blocks. A caller using that index against
+	 * the flat-index vocabulary used by insert_blocks / update_block would
+	 * land off-by-N whenever the post contained whitespace between blocks.
+	 * This test seeds whitespace-only blocks around the insertion site to
+	 * make the divergence observable.
+	 */
+	public function test_insert_pattern_returns_visible_index() {
+		// Whitespace BEFORE a paragraph forces visible_count < raw_count.
+		$content = "\n\n<!-- wp:paragraph --><p>before</p><!-- /wp:paragraph -->\n\n";
+		wp_update_post( array(
+			'ID'           => $this->post_id,
+			'post_content' => $content,
+		) );
+
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Footer',
+				'post_content' => '<!-- wp:paragraph --><p>P</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		// Append at end. Visible insert position must equal 1 (after the
+		// single existing visible paragraph); raw position would be ≥ 2.
+		$result = $this->crud->insert_pattern( $this->post_id, $pattern_id, 'end', true );
+		$this->assertIsArray( $result );
+		$this->assertSame(
+			1,
+			(int) $result['inserted']['index'],
+			'insert_pattern must report the visible index, not the raw-array index.'
+		);
+
+		wp_delete_post( $pattern_id, true );
+	}
 }

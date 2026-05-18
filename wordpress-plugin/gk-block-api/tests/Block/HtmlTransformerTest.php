@@ -119,6 +119,57 @@ class HtmlTransformerTest extends WP_UnitTestCase {
 		$this->assertNull( $result );
 	}
 
+	/**
+	 * core/group must reject void tags as a `tagName`.
+	 *
+	 * Pre-fix, core/group and core/separator shared one allowlist that
+	 * included 'hr'. Asking for `core/group` with `tagName: 'hr'` would
+	 * rewrite `<div class="wp-block-group">…</div>` to `<hr>…</hr>` — a
+	 * void element holding inner content, which is invalid HTML and parses
+	 * unpredictably across browsers. The fix splits the allowlist so void
+	 * tags stay off the container path entirely.
+	 */
+	public function test_group_tagname_rejects_void_tag() {
+		$t      = $this->get_transformer();
+		$html   = "\n<div class=\"wp-block-group\">inner</div>\n";
+		$result = $t->auto_transform_html( 'core/group', array( 'tagName' => 'hr' ), $html );
+		$this->assertNull( $result, 'core/group must not rewrite to a void element such as <hr>.' );
+	}
+
+	/**
+	 * core/separator's tagName only swaps among void tags and emits self-closing form.
+	 *
+	 * Pre-fix, the shared core/group + core/separator branch would happily
+	 * rewrite `<hr>` to `<div>` (or any container tag), producing
+	 * `<div>…</div>` for a separator — at best meaningless markup, at worst
+	 * a layout-breaking wrapper. The fix limits core/separator's allowed
+	 * tags to the void set (currently just `hr`) and normalizes the
+	 * resulting tag to the self-closing form so serialization stays
+	 * deterministic.
+	 */
+	public function test_separator_tagname_normalizes_void_form() {
+		$t      = $this->get_transformer();
+		$html   = '<hr class="wp-block-separator">';
+		$result = $t->auto_transform_html( 'core/separator', array( 'tagName' => 'hr' ), $html );
+		// hr → hr with `/>` is the only normalization; the test pins the
+		// self-closing form so serialize_blocks output stays stable.
+		$this->assertSame(
+			'<hr class="wp-block-separator" />',
+			$result,
+			'core/separator must emit <hr ... /> self-closing form.'
+		);
+	}
+
+	public function test_separator_tagname_rejects_container_tag() {
+		$t      = $this->get_transformer();
+		$html   = '<hr class="wp-block-separator">';
+		$result = $t->auto_transform_html( 'core/separator', array( 'tagName' => 'div' ), $html );
+		$this->assertNull(
+			$result,
+			'core/separator must reject container tags — emitting <div></div> for a separator is silently destructive.'
+		);
+	}
+
 	// ── HTML attribute transforms (require WP_HTML_Tag_Processor) ──
 
 	public function test_spacer_height() {

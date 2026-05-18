@@ -37,11 +37,13 @@ export default defineConfig({
     // Long integration timeouts — network round-trips to WP can be slow.
     testTimeout: 60_000,
     hookTimeout: 30_000,
-    // Sweep leaked posts at the end of the run.
-    globalSetup: [],
-    // globalTeardown can be a path relative to project root.
-    globalTeardown: [
-      path.resolve(__dirname, 'src/__tests__/integration/global-teardown.ts'),
+    // Sweep leaked posts at the end of the run. Vitest does NOT support a
+    // `globalTeardown` config key — the teardown is returned from globalSetup
+    // and Vitest runs it after the last test. The setup module lives at
+    // src/__tests__/integration/global-setup.ts and returns the teardown
+    // function from its default export.
+    globalSetup: [
+      path.resolve(__dirname, 'src/__tests__/integration/global-setup.ts'),
     ],
   },
   resolve: {

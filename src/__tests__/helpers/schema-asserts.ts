@@ -25,6 +25,11 @@ export function assertHasKeys<T extends object>(
   keys: (keyof T)[],
   label = 'object'
 ): asserts value is T {
+  // toBeDefined() only fails on undefined; null passes silently AND
+  // `typeof null === 'object'` so the type check below would also pass,
+  // letting downstream code read keys off null and crash with a
+  // less-informative message. Reject null explicitly first.
+  expect(value, `${label} must not be null/undefined`).not.toBeNull();
   expect(value, `${label} must not be null/undefined`).toBeDefined();
   expect(typeof value, `${label} must be an object`).toBe('object');
   const obj = value as unknown as Record<string, unknown>;

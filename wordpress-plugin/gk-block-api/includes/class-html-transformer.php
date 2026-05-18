@@ -72,21 +72,39 @@ class HTML_Transformer {
 				}
 			}
 
-			// core/group, core/separator: `tagName` changes the wrapper element.
-			if ( in_array( $block_name, array( 'core/group', 'core/separator' ), true )
-			&& array_key_exists( 'tagName', $changed_attrs )
-			) {
-				$allowed_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article', 'hr' );
-				$new_tag      = sanitize_key( $changed_attrs['tagName'] );
-				if ( in_array( $new_tag, $allowed_tags, true ) ) {
+			// core/group: `tagName` swaps the wrapper element among
+			// container (non-void) tags. We rewrite both opening and closing
+			// tags so the block stays a well-formed container.
+			if ( 'core/group' === $block_name && array_key_exists( 'tagName', $changed_attrs ) ) {
+				$container_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$new_tag        = sanitize_key( $changed_attrs['tagName'] );
+				if ( in_array( $new_tag, $container_tags, true ) ) {
 					$html = preg_replace(
-						'/^(\s*)<(div|section|aside|main|header|footer|article|hr)(\s|>)/i',
+						'/^(\s*)<(div|section|aside|main|header|footer|article)(\s|>)/i',
 						'$1<' . $new_tag . '$3',
 						$html
 					);
 					$html = preg_replace(
-						'/<\/(div|section|aside|main|header|footer|article|hr)>(\s*)$/i',
+						'/<\/(div|section|aside|main|header|footer|article)>(\s*)$/i',
 						'</' . $new_tag . '>$2',
+						$html
+					);
+				}
+			}
+
+			// core/separator: `tagName` only meaningfully picks among void
+			// elements (the editor exposes <hr> today). Keep the rewrite to
+			// void tags so we never emit `<hr>…</hr>` (invalid HTML) or
+			// `</hr>` (browsers parse it as a stray end tag).
+			if ( 'core/separator' === $block_name && array_key_exists( 'tagName', $changed_attrs ) ) {
+				$void_tags = array( 'hr' );
+				$new_tag   = sanitize_key( $changed_attrs['tagName'] );
+				if ( in_array( $new_tag, $void_tags, true ) ) {
+					// Normalize to self-closing form so serialization stays
+					// deterministic regardless of how the source was authored.
+					$html = preg_replace(
+						'#^(\s*)<hr\b([^/>]*)/?>(\s*)$#i',
+						'$1<' . $new_tag . '$2 />$3',
 						$html
 					);
 				}
