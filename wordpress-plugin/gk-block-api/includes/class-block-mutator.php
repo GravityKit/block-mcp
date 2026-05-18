@@ -395,9 +395,20 @@ class Block_Mutator {
 				$target_block = $parent[ $target_index ];
 
 				// Build wrapper HTML tag. Default to <div> for core/group.
-				$wrapper_tag = 'div';
+				// Tag is constrained to a small allowlist that matches what
+				// `core/group` officially supports — without this guard
+				// `wrapper.attributes.tagName` could inject arbitrary tags
+				// like <script> or <iframe> into the wrapper's raw innerHTML
+				// (the wrapper HTML is built by string concatenation, not
+				// wp_kses_post, since it's never user-facing markup until
+				// serialize_blocks() round-trips it).
+				$allowed_wrapper_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$wrapper_tag          = 'div';
 				if ( isset( $wrapper_attrs['tagName'] ) ) {
-					$wrapper_tag = sanitize_key( $wrapper_attrs['tagName'] );
+					$candidate = sanitize_key( $wrapper_attrs['tagName'] );
+					if ( in_array( $candidate, $allowed_wrapper_tags, true ) ) {
+						$wrapper_tag = $candidate;
+					}
 				}
 
 				// Build class attribute from wrapper name.

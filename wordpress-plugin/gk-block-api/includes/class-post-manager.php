@@ -392,7 +392,20 @@ class Post_Manager {
 			$postarr['post_excerpt'] = sanitize_text_field( (string) $args['excerpt'] );
 		}
 		if ( array_key_exists( 'date', $args ) ) {
-			$postarr['post_date'] = sanitize_text_field( (string) $args['date'] );
+			// Reject malformed dates BEFORE wp_update_post() — WP stores whatever
+			// post_date string is given and a garbage value renders posts unsortable
+			// in admin lists. Validate as a real ISO 8601 / MySQL datetime.
+			$date_raw = sanitize_text_field( (string) $args['date'] );
+			$ts       = strtotime( $date_raw );
+			if ( false === $ts ) {
+				return new \WP_Error(
+					'invalid_date',
+					__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-api' ),
+					array( 'status' => 400 )
+				);
+			}
+			$postarr['post_date']     = gmdate( 'Y-m-d H:i:s', $ts );
+			$postarr['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', $ts );
 		}
 		if ( array_key_exists( 'menu_order', $args ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];
