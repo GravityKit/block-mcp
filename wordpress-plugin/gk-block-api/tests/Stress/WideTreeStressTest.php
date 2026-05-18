@@ -87,7 +87,13 @@ class WideTreeStressTest extends BlockApiTestCase {
 		// or a 500.
 		$this->assertLessThan( 10.0, $elapsed, "batch on $count-wide tree took $elapsed s" );
 		if ( is_wp_error( $result ) ) {
-			$this->assertNotEmpty( $result->get_error_code() );
+			// Only batch_validation_failed is an acceptable failure here —
+			// the test feeds a deterministic, all-unique target spread, so
+			// the only thing batch validation can legitimately reject is a
+			// per-item content failure. Any other code (rate_limit_exceeded,
+			// post_not_found, batch_too_large, …) indicates a regression
+			// elsewhere worth surfacing.
+			$this->assertSame( 'batch_validation_failed', $result->get_error_code() );
 		} else {
 			$this->assertIsArray( $result );
 		}

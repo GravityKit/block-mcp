@@ -420,6 +420,14 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	public function test_create_post_with_custom_taxonomy() {
+		// Belt-and-braces: wp-phpunit::reset_taxonomies() already
+		// _unregister_taxonomy()'s every non-built-in tax in set_up,
+		// but if that ever stops running, the unregister here keeps
+		// register_taxonomy() a clean-slate operation instead of one
+		// that merges object_types via add_object_type().
+		if ( taxonomy_exists( 'doc_section' ) ) {
+			unregister_taxonomy( 'doc_section' );
+		}
 		register_taxonomy( 'doc_section', 'post', array( 'hierarchical' => true ) );
 		$term = self::factory()->term->create_and_get( array( 'taxonomy' => 'doc_section', 'name' => 'Setup' ) );
 		$result = $this->pm->create_post( array(
@@ -434,6 +442,9 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	public function test_create_post_rejects_taxonomy_not_registered_for_type() {
+		if ( taxonomy_exists( 'doc_section' ) ) {
+			unregister_taxonomy( 'doc_section' );
+		}
 		register_taxonomy( 'doc_section', 'page', array( 'hierarchical' => true ) );
 		$term = self::factory()->term->create_and_get( array( 'taxonomy' => 'doc_section', 'name' => 'Setup' ) );
 		$result = $this->pm->create_post( array(
