@@ -1999,65 +1999,49 @@ class REST_Controller {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function insert_blocks( $request ) {
-		try {
-			$post_id    = (int) $request->get_param( 'id' );
-			$perm_check = $this->check_post_edit_permission( $post_id );
-			if ( is_wp_error( $perm_check ) ) {
-				return $perm_check;
-			}
+		return $this->with_post_edit_context(
+			$request,
+			function ( $post_id, $req ) {
+				$blocks = $req->get_param( 'blocks' );
 
-			$if_match = $this->check_if_match_for_post( $post_id, $request );
-			if ( is_wp_error( $if_match ) ) {
-				return $if_match;
-			}
-
-			$blocks = $request->get_param( 'blocks' );
-
-			// Determine position. after_ref/before_ref take precedence over after/before
-			// when both are supplied (the ref is the more stable identifier).
-			$after_ref  = $request->get_param( 'after_ref' );
-			$before_ref = $request->get_param( 'before_ref' );
-			$position   = null;
-			if ( is_string( $after_ref ) && '' !== $after_ref ) {
-				$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $after_ref );
-				if ( is_wp_error( $resolved ) ) {
-					return $resolved;
+				// Determine position. after_ref/before_ref take precedence over after/before
+				// when both are supplied (the ref is the more stable identifier).
+				$after_ref  = $req->get_param( 'after_ref' );
+				$before_ref = $req->get_param( 'before_ref' );
+				$position   = null;
+				if ( is_string( $after_ref ) && '' !== $after_ref ) {
+					$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $after_ref );
+					if ( is_wp_error( $resolved ) ) {
+						return $resolved;
+					}
+					$position = $resolved;
+				} elseif ( is_string( $before_ref ) && '' !== $before_ref ) {
+					$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $before_ref );
+					if ( is_wp_error( $resolved ) ) {
+						return $resolved;
+					}
+					$position = $resolved > 0 ? $resolved - 1 : 'start';
+				} elseif ( null !== $req->get_param( 'after' ) ) {
+					$position = $req->get_param( 'after' );
+				} elseif ( null !== $req->get_param( 'before' ) ) {
+					// "before" index N = "after" index N-1.
+					$before   = (int) $req->get_param( 'before' );
+					$position = $before > 0 ? $before - 1 : 'start';
 				}
-				$position = $resolved;
-			} elseif ( is_string( $before_ref ) && '' !== $before_ref ) {
-				$resolved = $this->block_crud->resolve_ref_to_top_level( $post_id, $before_ref );
-				if ( is_wp_error( $resolved ) ) {
-					return $resolved;
+
+				if ( empty( $blocks ) || ! is_array( $blocks ) ) {
+					return new \WP_Error(
+						'missing_blocks',
+						__( 'The "blocks" parameter is required and must be a non-empty array.', 'gk-block-api' ),
+						array( 'status' => 400 )
+					);
 				}
-				$position = $resolved > 0 ? $resolved - 1 : 'start';
-			} elseif ( null !== $request->get_param( 'after' ) ) {
-				$position = $request->get_param( 'after' );
-			} elseif ( null !== $request->get_param( 'before' ) ) {
-				// "before" index N = "after" index N-1.
-				$before   = (int) $request->get_param( 'before' );
-				$position = $before > 0 ? $before - 1 : 'start';
-			}
 
-			if ( empty( $blocks ) || ! is_array( $blocks ) ) {
-				return new \WP_Error(
-					'missing_blocks',
-					__( 'The "blocks" parameter is required and must be a non-empty array.', 'gk-block-api' ),
-					array( 'status' => 400 )
-				);
-			}
-
-			$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
-
-			$result = $this->block_crud->insert_blocks( $post_id, $position, $sanitized_blocks );
-
-			if ( is_wp_error( $result ) ) {
-				return $result;
-			}
-
-			return new \WP_REST_Response( $result, 201 );
-		} catch ( \Throwable $e ) {
-			return $this->handle_error( $e );
-		}
+				$sanitized_blocks = array_map( array( $this, 'sanitize_block_def' ), $blocks );
+				return $this->block_crud->insert_blocks( $post_id, $position, $sanitized_blocks );
+			},
+			201
+		);
 	}
 
 	/**
