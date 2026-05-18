@@ -66,8 +66,8 @@ class YoastBridgeTest extends WP_UnitTestCase {
 	 */
 	protected $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->bridge  = new Yoast_Bridge_Testable();
 		$this->post_id = self::factory()->post->create( array(
 			'post_type'    => 'post',
@@ -226,7 +226,18 @@ class YoastBridgeTest extends WP_UnitTestCase {
 		$this->assertSame( '1', get_post_meta( $this->post_id, '_yoast_wpseo_is_cornerstone', true ) );
 
 		$this->bridge->write_fields_public( $this->post_id, array( 'is_cornerstone' => false ) );
-		$this->assertSame( 'false', get_post_meta( $this->post_id, '_yoast_wpseo_is_cornerstone', true ) );
+		// Real Yoast's `sanitize_post_meta` callbacks intercept this key
+		// and normalize the literal string "false" to "" (its on-disk
+		// representation of "explicitly not cornerstone"). The bridge
+		// passes "false" through to update_post_meta as the WP plugin
+		// contract intends; what we assert is the property-level
+		// invariant — after a falsy write, the read-back is falsy.
+		$stored = get_post_meta( $this->post_id, '_yoast_wpseo_is_cornerstone', true );
+		$this->assertContains( $stored, array( '', 'false' ), 'cornerstone=false must persist as either Yoast-sanitized "" or literal "false"' );
+		// Round-trip via the bridge's own reader, which is what consumers
+		// actually call. Read-side normalization gives a clean false.
+		$read = $this->bridge->read_fields_public( $this->post_id );
+		$this->assertFalse( $read['is_cornerstone'] );
 	}
 
 	/**
@@ -453,11 +464,32 @@ class YoastBridgeTest extends WP_UnitTestCase {
 	/**
 	 * `is_yoast_active()` is purely a `defined('WPSEO_FILE')` check.
 	 *
-	 * The test bootstrap doesn't define WPSEO_FILE so the bridge must
-	 * report Yoast as inactive — which is what makes register_routes() a
-	 * no-op on sites without Yoast installed.
+	 * The bootstrap activates the real Yoast SEO plugin (from WPackagist),
+	 * so WPSEO_FILE IS defined and the bridge reports Yoast as active.
+	 * register_routes() registers the Yoast routes when this returns true.
 	 */
 	public function test_is_yoast_active_reflects_wpseo_file_constant() {
-		$this->assertFalse( Yoast_Bridge::is_yoast_active() );
+		$this->assertTrue( defined( 'WPSEO_FILE' ), 'real Yoast plugin must load in the test harness' );
+		$this->assertTrue( Yoast_Bridge::is_yoast_active() );
+	}
+
+	/**
+	 * Sanity: when Yoast is active its REST namespace is registered too —
+	 * proves the WPackagist install actually booted, not just defined the
+	 * constant.
+	 */
+	public function test_real_yoast_rest_namespace_present() {
+		// Force REST init so namespaces get populated.
+		do_action( 'rest_api_init' );
+		$server     = rest_get_server();
+		$namespaces = $server->get_namespaces();
+		$has_yoast  = false;
+		foreach ( $namespaces as $ns ) {
+			if ( 0 === strpos( (string) $ns, 'yoast/' ) ) {
+				$has_yoast = true;
+				break;
+			}
+		}
+		$this->assertTrue( $has_yoast, 'expected at least one yoast/* REST namespace to be registered' );
 	}
 }

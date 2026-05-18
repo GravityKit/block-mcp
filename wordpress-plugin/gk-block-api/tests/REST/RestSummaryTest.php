@@ -33,7 +33,7 @@ class RestSummaryTest extends WP_UnitTestCase {
 	/** @var REST_Controller */
 	private $controller;
 
-	protected function setUp(): void {
+	public function set_up(): void {
 		$preferences     = new Preferences();
 		$safety          = new Block_Safety();
 		$transformer     = new HTML_Transformer();

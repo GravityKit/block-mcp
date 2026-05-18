@@ -20,16 +20,16 @@ class UploadsDisabledTest extends WP_UnitTestCase {
 	/** @var Media_Manager */
 	private $mm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->mm = new Media_Manager();
-		$_FILES = array();
+		$_FILES   = array();
 	}
 
-	protected function tearDown(): void {
+	public function tear_down(): void {
 		$_FILES = array();
 		delete_option( Media_Manager::UPLOADS_OPTION );
-		parent::tearDown();
+		parent::tear_down();
 	}
 
 	public function test_default_is_enabled() {
@@ -82,11 +82,13 @@ class UploadsDisabledTest extends WP_UnitTestCase {
 		$this->assertSame( 'uploads_disabled', $result->get_error_code() );
 	}
 
+	/**
+	 * Set up a fake `$_FILES` entry to prove the handler never reached
+	 * the disk-touching code: if it had, we'd see "Specified file
+	 * failed upload test" instead of `uploads_disabled`.
+	 */
 	public function test_disabled_blocks_multipart_path_without_touching_files_array() {
 		update_option( Media_Manager::UPLOADS_OPTION, '0' );
-		// Set up a fake $_FILES entry to prove the handler never reached
-		// the disk-touching code: if it had, we'd see "Specified file
-		// failed upload test" instead of uploads_disabled.
 		$_FILES['file'] = array(
 			'name'     => 'x.png',
 			'type'     => 'image/png',
@@ -99,10 +101,12 @@ class UploadsDisabledTest extends WP_UnitTestCase {
 		$this->assertSame( 'uploads_disabled', $result->get_error_code() );
 	}
 
+	/**
+	 * Empty args would normally produce `missing_file` — but the
+	 * kill-switch outranks input validation so an attacker can't
+	 * fingerprint whether uploads exist on the site.
+	 */
 	public function test_disabled_short_circuits_before_input_mode_validation() {
-		// Empty args would normally produce 'missing_file' — but the
-		// kill-switch outranks input validation so an attacker can't
-		// fingerprint whether uploads exist on the site.
 		update_option( Media_Manager::UPLOADS_OPTION, '0' );
 		$result = $this->mm->upload( array() );
 		$this->assertInstanceOf( \WP_Error::class, $result );

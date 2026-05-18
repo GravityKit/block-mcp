@@ -26,8 +26,8 @@ class BlockMutatorTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		// Register core blocks used in tests.
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( array(
@@ -94,11 +94,11 @@ class BlockMutatorTest extends WP_UnitTestCase {
 			// Container — build innerContent with null placeholders between wrapper strings.
 			$opening = $html !== '' ? $html : '<div>';
 			$closing = '</div>';
-			$content = array( $opening );
-			foreach ( $children as $_ ) {
-				$content[] = null;
-			}
-			$content[] = $closing;
+			$content = array_merge(
+				array( $opening ),
+				array_fill( 0, count( $children ), null ),
+				array( $closing )
+			);
 			return array(
 				'blockName'    => $name,
 				'attrs'        => $attrs,

@@ -33,8 +33,8 @@ class ResourceExhaustionTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),
@@ -68,18 +68,19 @@ class ResourceExhaustionTest extends WP_UnitTestCase {
 
 	// ── Deep nesting ──────────────────────────────────────────────
 
+	/**
+	 * 28 wrapper groups → tree depth 29, comfortably under
+	 * `MAX_BLOCK_DEPTH` (32) and well within PHP recursion bounds.
+	 */
 	public function test_moderate_nesting_round_trips() {
-		// 32 deep — well within PHP's default pcre.recursion_limit and
-		// the WP block parser's stack depth.
-		$tree   = $this->deep_group_tree( 32 );
+		$tree   = $this->deep_group_tree( 28 );
 		$result = $this->crud->replace_all_blocks( $this->post_id, array( $tree ) );
 		$this->assertNotInstanceOf( \WP_Error::class, $result );
 
-		// Walk down 32 levels and confirm the leaf is intact.
 		$blocks  = parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
 		$visible = array_values( array_filter( $blocks, static fn( $b ) => null !== $b['blockName'] ) );
 		$node    = $visible[0];
-		for ( $i = 0; $i < 32; $i++ ) {
+		for ( $i = 0; $i < 28; $i++ ) {
 			$this->assertSame( 'core/group', $node['blockName'], "depth $i must be group" );
 			$this->assertArrayHasKey( 0, $node['innerBlocks'], "depth $i must have a child" );
 			$node = $node['innerBlocks'][0];
@@ -88,32 +89,22 @@ class ResourceExhaustionTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<p>leaf</p>', $node['innerHTML'] );
 	}
 
-	public function test_deep_nesting_64_round_trips_or_cleanly_errors() {
-		// 64 deep — exploratory. We don't know the exact bound yet.
-		// Whatever happens, NO fatal.
+	/**
+	 * 64 wrapper groups → tree depth 65, well past `MAX_BLOCK_DEPTH`
+	 * (32). Must NOT throw; must return a clean `block_depth_exceeded`
+	 * error.
+	 */
+	public function test_excessive_nesting_rejected_with_clean_error() {
 		$tree = $this->deep_group_tree( 64 );
 		try {
 			$result = $this->crud->replace_all_blocks( $this->post_id, array( $tree ) );
 		} catch ( \Throwable $e ) {
-			$this->fail( 'PHP threw at depth 64 (must be a clean WP_Error instead): ' . $e->getMessage() );
+			$this->fail( 'PHP threw at depth 65 (must be a clean WP_Error): ' . $e->getMessage() );
 		}
-		// Acceptable: success OR clean WP_Error. Not acceptable: silent
-		// truncation that we'd only detect by walking the tree.
-		if ( is_wp_error( $result ) ) {
-			$this->assertNotEmpty( $result->get_error_code(), '64-deep rejection must have an error code' );
-			return;
-		}
-		// If accepted, the tree must round-trip with no missing levels.
-		$blocks  = parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
-		$visible = array_values( array_filter( $blocks, static fn( $b ) => null !== $b['blockName'] ) );
-		$node    = $visible[0];
-		$depth   = 0;
-		while ( ! empty( $node['innerBlocks'] ) && 'core/group' === $node['blockName'] ) {
-			$node = $node['innerBlocks'][0];
-			$depth++;
-		}
-		$this->assertSame( 64, $depth, "tree must round-trip with exactly 64 levels (got $depth)" );
-		$this->assertSame( 'core/paragraph', $node['blockName'] );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'block_depth_exceeded', $result->get_error_code() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
+		$this->assertSame( Block_CRUD::MAX_BLOCK_DEPTH, $result->get_error_data()['max_depth'] );
 	}
 
 	// ── Wide trees ────────────────────────────────────────────────
@@ -197,10 +188,12 @@ class ResourceExhaustionTest extends WP_UnitTestCase {
 		$this->assertSame( $big, $visible[0]['attrs']['data'] );
 	}
 
+	/**
+	 * Build attrs with a 20-deep nested object. JSON parsers have
+	 * recursion limits; verify ours is generous enough for any
+	 * reasonable block attr.
+	 */
 	public function test_deeply_nested_attrs_object_round_trips() {
-		// Build attrs with a 20-deep nested object. JSON parsers have
-		// recursion limits; verify ours is generous enough for any
-		// reasonable block attr.
 		$attrs = 'inner';
 		for ( $i = 0; $i < 20; $i++ ) {
 			$attrs = array( 'level_' . $i => $attrs );
@@ -226,9 +219,11 @@ class ResourceExhaustionTest extends WP_UnitTestCase {
 
 	// ── Batch-size cap ─────────────────────────────────────────────
 
+	/**
+	 * `MAX_BATCH_SIZE` = 50 — anything above must hard-reject, not
+	 * silently process a subset or fall over.
+	 */
 	public function test_batch_update_above_max_size_is_rejected() {
-		// MAX_BATCH_SIZE = 50 — anything above must hard-reject, not
-		// silently process a subset or fall over.
 		$updates = array();
 		for ( $i = 0; $i < Block_CRUD::MAX_BATCH_SIZE + 5; $i++ ) {
 			$updates[] = array(

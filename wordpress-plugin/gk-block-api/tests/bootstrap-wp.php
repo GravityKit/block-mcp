@@ -23,9 +23,17 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 
 // Load the plugin once muplugins_loaded fires, ahead of WP's normal plugin
 // boot — at this point all WP APIs are available but tests haven't started.
+//
+// Yoast SEO is loaded BEFORE gk-block-api so the bridge's REST routes
+// register correctly and Yoast's meta-key contracts are in place when
+// Yoast_Bridge writes to them in tests/Integrations/YoastBridgeTest.
 tests_add_filter(
 	'muplugins_loaded',
-	static function (): void {
+	static function () use ( $plugin_root ): void {
+		$yoast = $plugin_root . '/vendor/wordpress/wordpress/wp-content/plugins/wordpress-seo/wp-seo.php';
+		if ( is_file( $yoast ) ) {
+			require $yoast;
+		}
 		require dirname( __DIR__ ) . '/gk-block-api.php';
 	}
 );

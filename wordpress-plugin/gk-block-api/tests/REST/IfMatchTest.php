@@ -29,8 +29,8 @@ class IfMatchTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),

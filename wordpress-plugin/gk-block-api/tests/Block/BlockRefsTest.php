@@ -38,8 +38,8 @@ class BlockRefsTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( array(
 			'core/paragraph',
@@ -84,9 +84,11 @@ class BlockRefsTest extends WP_UnitTestCase {
 		if ( ! empty( $children ) ) {
 			$opening = $html !== '' ? $html : '<div>';
 			$closing = '</div>';
-			$content = array( $opening );
-			foreach ( $children as $_ ) { $content[] = null; }
-			$content[] = $closing;
+			$content = array_merge(
+				array( $opening ),
+				array_fill( 0, count( $children ), null ),
+				array( $closing )
+			);
 			return array(
 				'blockName'    => $name,
 				'attrs'        => $attrs,
@@ -386,7 +388,7 @@ class BlockRefsTest extends WP_UnitTestCase {
 
 	public function test_insert_blocks_assigns_refs_to_inner_blocks() {
 		$this->make_post( array() );
-		$result = $this->crud->insert_blocks( $this->post_id, null, array(
+		$this->crud->insert_blocks( $this->post_id, null, array(
 			array(
 				'name'        => 'core/group',
 				'innerHTML'   => '<div></div>',

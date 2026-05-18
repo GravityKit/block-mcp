@@ -816,9 +816,8 @@ class Block_Mutator {
 			return $response;
 		}
 
-		// Serialize and save.
-		$new_content = serialize_blocks( $blocks );
-		$result      = $this->crud->save_post_content( $post_id, $new_content );
+		// Serialize and save (depth-checked).
+		$result = $this->crud->save_blocks( $post_id, $blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;

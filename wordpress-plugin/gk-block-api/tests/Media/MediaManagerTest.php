@@ -17,16 +17,15 @@ class MediaManagerTest extends WP_UnitTestCase {
 	/** @var Media_Manager */
 	private $mm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->mm = new Media_Manager();
-		// Reset $_FILES between tests so cross-talk between cases can't happen.
-		$_FILES = array();
+		$_FILES   = array();
 	}
 
-	protected function tearDown(): void {
+	public function tear_down(): void {
 		$_FILES = array();
-		parent::tearDown();
+		parent::tear_down();
 	}
 
 	public function test_requires_one_input_mode() {

@@ -37,8 +37,8 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),
@@ -53,10 +53,12 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 
 	// ── attrs containing comment-syntax literals ──────────────────
 
+	/**
+	 * `-->` inside a quoted JSON string. WP's `serialize_block_attributes`
+	 * escapes `--` to `--` specifically so the substring can't break out
+	 * of the comment.
+	 */
 	public function test_attrs_with_close_comment_delim_dont_inject_phantom_block() {
-		// "-->" inside a quoted JSON string. WP's serialize_block_attributes
-		// escapes "--" to "--" specifically so the substring can't
-		// break out of the comment.
 		$result = $this->crud->insert_blocks( $this->post_id, null, array(
 			array(
 				'name'       => 'core/paragraph',
@@ -103,10 +105,12 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 
 	// ── innerHTML containing comment-syntax ───────────────────────
 
+	/**
+	 * `-->` inside innerHTML — `wp_kses_post` strips HTML comments
+	 * entirely from post content, so the substring is removed before it
+	 * can reach `serialize_blocks()`.
+	 */
 	public function test_innerhtml_with_close_comment_is_sanitized() {
-		// `-->` inside innerHTML — wp_kses_post strips HTML comments
-		// entirely from post content, so the substring is removed before
-		// it can reach serialize_blocks().
 		$result = $this->crud->insert_blocks( $this->post_id, null, array(
 			array(
 				'name'      => 'core/paragraph',
@@ -130,11 +134,13 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 
 	// ── round-trip stability under hostile attrs ──────────────────
 
+	/**
+	 * Save a tree containing hostile attrs, then save it again with the
+	 * just-read shape, and verify the document doesn't grow extra blocks
+	 * (which would indicate the parser is misinterpreting embedded
+	 * comment-syntax as block boundaries).
+	 */
 	public function test_replace_all_blocks_with_hostile_attrs_idempotent() {
-		// Save a tree containing hostile attrs, then save it again with
-		// the just-read shape, and verify the document doesn't grow extra
-		// blocks (which would indicate the parser is misinterpreting
-		// embedded comment-syntax as block boundaries).
 		$blocks = array(
 			array(
 				'name'       => 'core/paragraph',
@@ -164,9 +170,11 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 
 	// ── attrs JSON parser robustness ──────────────────────────────
 
+	/**
+	 * Hostile JSON-in-string: a literal `}` inside a quoted string must
+	 * not terminate the attrs object early.
+	 */
 	public function test_attrs_with_nested_quoted_braces_round_trip() {
-		// Hostile JSON-in-string: a literal "}" inside a quoted string
-		// must not terminate the attrs object early.
 		$result = $this->crud->insert_blocks( $this->post_id, null, array(
 			array(
 				'name'       => 'core/paragraph',
@@ -183,10 +191,12 @@ class BlockCommentInjectionTest extends WP_UnitTestCase {
 		$this->assertSame( '{"k":"}--><!-- wp:bad --><"}', $visible[0]['attrs']['json'] );
 	}
 
+	/**
+	 * WP serializes attrs with `JSON_UNESCAPED_UNICODE` since WP 5.0 —
+	 * confirm non-ASCII chars survive intact and don't introduce
+	 * surrogate-pair smuggling vectors.
+	 */
 	public function test_unicode_attrs_round_trip_through_save() {
-		// WP serializes attrs with JSON_UNESCAPED_UNICODE since WP 5.0 —
-		// confirm non-ASCII chars survive intact and don't introduce
-		// surrogate-pair smuggling vectors.
 		$payload = "héllo — 日本語 🎉 RTL\xE2\x80\xAEevil";
 		$result  = $this->crud->insert_blocks( $this->post_id, null, array(
 			array(

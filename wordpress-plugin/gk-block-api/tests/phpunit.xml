@@ -9,6 +9,7 @@
             <directory>Preferences</directory>
             <directory>Integrations</directory>
             <directory>Security</directory>
+            <directory>Stress</directory>
         </testsuite>
     </testsuites>
 </phpunit>

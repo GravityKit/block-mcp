@@ -334,6 +334,8 @@ class Settings_Page {
 		$post_type_allow  = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
 		$manual_dual      = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
 		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
+		$uploads_enabled  = \GravityKit\BlockAPI\Media_Manager::uploads_enabled();
+		$uploads_option   = \GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -536,6 +538,50 @@ class Settings_Page {
 					<?php endfor; ?>
 				</fieldset>
 				<style>.gk-block-api-allowlist label { margin-right: 16px; }</style>
+
+				<h2><?php esc_html_e( 'Media uploads', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Master kill-switch for every MCP-driven upload path: multipart, URL sideload, base64. When disabled, the plugin refuses every upload with HTTP 403 before any disk I/O, DNS lookup, or HTTP fetch — useful if you want agents to edit blocks but not write to the media library.', 'gk-block-api' ); ?>
+				</p>
+				<?php
+				// Belt-and-braces: emit '0' even when the box is unchecked so
+				// update_option() reliably stores false. (PHP omits unchecked
+				// checkboxes entirely from $_POST, and the setting's
+				// sanitize_callback would then receive nothing.)
+				?>
+				<input type="hidden" name="<?php echo esc_attr( $uploads_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $uploads_option ); ?>"
+						value="1"
+						<?php checked( $uploads_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Allow MCP agents to upload media', 'gk-block-api' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so admins aren't confused
+				// by a checked box that the API still rejects.
+				$option_raw = get_option( $uploads_option, '1' );
+				$filtered   = (bool) apply_filters(
+					'gk_block_api_uploads_enabled',
+					( '0' !== (string) $option_raw && false !== $option_raw )
+				);
+				if ( $filtered !== ( '0' !== (string) $option_raw && false !== $option_raw ) ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-api' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-api' ),
+							'<code>gk_block_api_uploads_enabled</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
 
 				<?php submit_button(); ?>
 			</form>

@@ -47,6 +47,27 @@ class Block_CRUD {
 	const MAX_BATCH_SIZE = 50;
 
 	/**
+	 * Maximum nesting depth for any block tree the plugin will write.
+	 *
+	 * Real-world Gutenberg layouts rarely exceed 5–8 levels. 32 is generous
+	 * for valid use and prevents both accidental and adversarial deep trees
+	 * that would risk:
+	 *
+	 *   - stack overflow in WP's `parse_blocks()` / `serialize_blocks()`,
+	 *   - quadratic walks in `format_blocks_recursive()` /
+	 *     `assign_missing_refs_recursive()` / Block_Mutator path traversal,
+	 *   - unboundedly large response payloads on read.
+	 *
+	 * Enforced in every write path (`insert_blocks`, `replace_all_blocks`,
+	 * `update_block`, `update_blocks_batch`, `mutate_block_tree`) by
+	 * `tree_depth()` before the write commits. Rejection error code is
+	 * `block_depth_exceeded` (HTTP 400).
+	 *
+	 * @var int
+	 */
+	const MAX_BLOCK_DEPTH = 32;
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
@@ -251,9 +272,8 @@ class Block_CRUD {
 		// Apply attribute merge + auto-transform + innerHTML replacement.
 		$this->apply_block_update_in_place( $block, (array) $attributes, $inner_html );
 
-		// Serialize and save.
-		$new_content = serialize_blocks( $blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		// Serialize and save (depth-checked).
+		$result = $this->save_blocks( $post_id, $blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -624,8 +644,7 @@ class Block_CRUD {
 		}
 
 		// Phase 3: serialize and save. ONE wp_update_post call → ONE revision.
-		$new_content = serialize_blocks( $blocks );
-		$save_result = $this->save_post_content( $post_id, $new_content );
+		$save_result = $this->save_blocks( $post_id, $blocks );
 		if ( is_wp_error( $save_result ) ) {
 			return $save_result;
 		}
@@ -723,9 +742,8 @@ class Block_CRUD {
 		// Splice into the FULL array (preserving whitespace blocks).
 		array_splice( $all_existing_blocks, $raw_insert, 0, $new_blocks );
 
-		// Serialize and save.
-		$new_content = serialize_blocks( $all_existing_blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		// Serialize and save (depth-checked).
+		$result = $this->save_blocks( $post_id, $all_existing_blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -868,9 +886,8 @@ class Block_CRUD {
 			array_splice( $all_blocks, $rm_idx, 1 );
 		}
 
-		// Serialize and save.
-		$new_content = serialize_blocks( $all_blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		// Serialize and save (depth-checked).
+		$result = $this->save_blocks( $post_id, $all_blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1021,8 +1038,7 @@ class Block_CRUD {
 		// Atomic splice — one operation, one save, one revision.
 		array_splice( $all_existing_blocks, $raw_splice_start, $raw_splice_count, $new_blocks );
 
-		$new_content = serialize_blocks( $all_existing_blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		$result = $this->save_blocks( $post_id, $all_existing_blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1110,9 +1126,8 @@ class Block_CRUD {
 		// Stable refs for the new block tree (all depths).
 		$this->assign_missing_refs_recursive( $new_blocks );
 
-		// Serialize and save.
-		$new_content = serialize_blocks( $new_blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		// Serialize and save (depth-checked).
+		$result = $this->save_blocks( $post_id, $new_blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1263,8 +1278,7 @@ class Block_CRUD {
 
 			array_splice( $existing_blocks, $insert_at, 0, array( $ref_block ) );
 
-			$new_content = serialize_blocks( $existing_blocks );
-			$result      = $this->save_post_content( $post_id, $new_content );
+			$result = $this->save_blocks( $post_id, $existing_blocks );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;
@@ -1315,8 +1329,7 @@ class Block_CRUD {
 
 		array_splice( $existing_blocks, $insert_at, 0, $pattern_blocks );
 
-		$new_content = serialize_blocks( $existing_blocks );
-		$result      = $this->save_post_content( $post_id, $new_content );
+		$result = $this->save_blocks( $post_id, $existing_blocks );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1427,6 +1440,28 @@ class Block_CRUD {
 	 *
 	 * @return array|\WP_Error Array with before_revision_id and revision_id on success, or WP_Error.
 	 */
+	/**
+	 * Validate, serialize, and save a block tree as the new post_content.
+	 *
+	 * Single chokepoint for every write that comes from a structured block
+	 * array (insert / update / replace / mutate / pattern insert). Calling
+	 * `save_post_content()` directly with pre-serialized content bypasses
+	 * the depth guard, so always prefer this entry point for any block-
+	 * shape input.
+	 *
+	 * @param int   $post_id
+	 * @param array $blocks Block tree in WP-internal shape.
+	 *
+	 * @return array|\WP_Error
+	 */
+	public function save_blocks( $post_id, array $blocks ) {
+		$depth_check = self::validate_tree_depth( $blocks );
+		if ( is_wp_error( $depth_check ) ) {
+			return $depth_check;
+		}
+		return $this->save_post_content( $post_id, serialize_blocks( $blocks ) );
+	}
+
 	public function save_post_content( $post_id, $new_content ) {
 		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
 		// correctly escapes newlines as \n in block comment JSON. Some
@@ -1484,6 +1519,58 @@ class Block_CRUD {
 	const REF_PREFIX = 'blk_';
 
 	/**
+	 * Compute the maximum nesting depth of a block tree. A flat array
+	 * (no innerBlocks anywhere) is depth 1. Empty input is depth 0.
+	 *
+	 * @param array $blocks Block tree in either WP-internal shape
+	 *                      (`innerBlocks`) or API shape (`innerBlocks`).
+	 *                      Both arrays of arrays.
+	 *
+	 * @return int
+	 */
+	public static function tree_depth( array $blocks ): int {
+		if ( empty( $blocks ) ) {
+			return 0;
+		}
+		$max = 0;
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+			$child_depth = 0;
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$child_depth = self::tree_depth( $block['innerBlocks'] );
+			}
+			$max = max( $max, 1 + $child_depth );
+		}
+		return $max;
+	}
+
+	/**
+	 * Validate that a block tree does not exceed `MAX_BLOCK_DEPTH`.
+	 *
+	 * @param array $blocks
+	 *
+	 * @return true|\WP_Error true if within bound, WP_Error otherwise.
+	 */
+	public static function validate_tree_depth( array $blocks ) {
+		$depth = self::tree_depth( $blocks );
+		if ( $depth > self::MAX_BLOCK_DEPTH ) {
+			return new \WP_Error(
+				'block_depth_exceeded',
+				sprintf(
+					/* translators: 1: max depth; 2: actual depth */
+					__( 'Block tree exceeds the maximum nesting depth (%1$d levels, got %2$d).', 'gk-block-api' ),
+					self::MAX_BLOCK_DEPTH,
+					$depth
+				),
+				array( 'status' => 400, 'max_depth' => self::MAX_BLOCK_DEPTH, 'actual_depth' => $depth )
+			);
+		}
+		return true;
+	}
+
+	/**
 	 * Generate a fresh block ref.
 	 *
 	 * Uses wp_hash (HMAC keyed on the site secret) over a unique seed instead
@@ -1493,13 +1580,46 @@ class Block_CRUD {
 	 * deterministic given an input, so feeding it a guaranteed-unique input
 	 * (uniqid + wp_rand + microtime) produces a stable, collision-resistant ref.
 	 *
-	 * @return string A new ref like "blk_a3f2c1q9".
+	 * Truncated to 9 hex chars (36 bits). Birthday-paradox collisions appear
+	 * around sqrt(2^36 / 2) ≈ 185k generated refs — comfortably past any
+	 * realistic per-post scale. The recursive ref assigners
+	 * (`assign_missing_refs_recursive` / `assign_fresh_refs_recursive`) track
+	 * already-emitted refs in the current tree and re-roll on duplicate via
+	 * `generate_unique_ref()` so the per-post uniqueness invariant is
+	 * deterministic, not probabilistic.
+	 *
+	 * @return string A new ref like "blk_a3f2c1q9d".
 	 */
 	public static function generate_ref() {
 		$seed = uniqid( 'gk_block_ref_', true ) . '|' . wp_rand() . '|' . microtime( true );
 		// Use the 'auth' scheme (stable, long-lived). The 'nonce' scheme is
 		// intended for time-bounded values that rotate; refs persist with the post.
-		return self::REF_PREFIX . substr( wp_hash( $seed, 'auth' ), 0, 8 );
+		return self::REF_PREFIX . substr( wp_hash( $seed, 'auth' ), 0, 9 );
+	}
+
+	/**
+	 * Generate a fresh ref that's guaranteed unique against a set of refs
+	 * already in use. Used by the recursive ref assigners so within a
+	 * single post / single assignment pass, the ref set has no duplicates
+	 * regardless of how the 32-bit hash space happens to land.
+	 *
+	 * Re-rolls up to 8 times. Birthday math says the chance of needing
+	 * even one re-roll at 1000 in-use refs is ~1 in 4M; the 8-iteration
+	 * cap is paranoia, not need.
+	 *
+	 * @param array<string, true> $in_use Set of refs already assigned.
+	 * @return string
+	 */
+	public static function generate_unique_ref( array $in_use ) {
+		for ( $i = 0; $i < 8; $i++ ) {
+			$ref = self::generate_ref();
+			if ( ! isset( $in_use[ $ref ] ) ) {
+				return $ref;
+			}
+		}
+		// Pathological — every re-roll collided. Fall back to a
+		// uniqid-suffixed variant so we always return something unique.
+		return self::REF_PREFIX . substr( wp_hash( uniqid( 'gk_ref_fallback_', true ) . wp_rand(), 'auth' ), 0, 12 );
 	}
 
 	/**
@@ -1745,6 +1865,21 @@ class Block_CRUD {
 	 * @return bool True if any block got a new ref.
 	 */
 	public function assign_missing_refs_recursive( &$blocks ) {
+		// Collect every ref already present in the tree first so any
+		// freshly-generated ref is guaranteed unique against them. Without
+		// this pre-pass the recursive walker could mint a hash that
+		// happens to collide with a deeper block's existing ref.
+		$in_use = $this->collect_refs( $blocks );
+		return $this->assign_missing_refs_walk( $blocks, $in_use );
+	}
+
+	/**
+	 * @param array               $blocks Blocks (passed by reference).
+	 * @param array<string, true> $in_use Refs already in use within this tree;
+	 *                                    written to as new refs are assigned.
+	 * @return bool True if any block got a new ref.
+	 */
+	private function assign_missing_refs_walk( &$blocks, array &$in_use ) {
 		$dirty = false;
 		$count = count( $blocks );
 		for ( $i = 0; $i < $count; $i++ ) {
@@ -1758,16 +1893,41 @@ class Block_CRUD {
 				$blocks[ $i ]['attrs']['metadata'] = array();
 			}
 			if ( empty( $blocks[ $i ]['attrs']['metadata']['gk_ref'] ) ) {
-				$blocks[ $i ]['attrs']['metadata']['gk_ref'] = self::generate_ref();
-				$dirty = true;
+				$ref = self::generate_unique_ref( $in_use );
+				$blocks[ $i ]['attrs']['metadata']['gk_ref'] = $ref;
+				$in_use[ $ref ] = true;
+				$dirty          = true;
 			}
 			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
-				if ( $this->assign_missing_refs_recursive( $blocks[ $i ]['innerBlocks'] ) ) {
+				if ( $this->assign_missing_refs_walk( $blocks[ $i ]['innerBlocks'], $in_use ) ) {
 					$dirty = true;
 				}
 			}
 		}
 		return $dirty;
+	}
+
+	/**
+	 * Walk a block tree and return the set of gk_refs already assigned.
+	 *
+	 * @param array $blocks
+	 * @return array<string, true>
+	 */
+	private function collect_refs( array $blocks ): array {
+		$out = array();
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) || empty( $block['blockName'] ) ) {
+				continue;
+			}
+			$ref = $block['attrs']['metadata']['gk_ref'] ?? null;
+			if ( is_string( $ref ) && '' !== $ref ) {
+				$out[ $ref ] = true;
+			}
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$out += $this->collect_refs( $block['innerBlocks'] );
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -1779,6 +1939,16 @@ class Block_CRUD {
 	 * @return void
 	 */
 	public function assign_fresh_refs_recursive( &$blocks ) {
+		$in_use = array();
+		$this->assign_fresh_refs_walk( $blocks, $in_use );
+	}
+
+	/**
+	 * @param array               $blocks
+	 * @param array<string, true> $in_use Refs already minted in this pass.
+	 * @return void
+	 */
+	private function assign_fresh_refs_walk( &$blocks, array &$in_use ) {
 		$count = count( $blocks );
 		for ( $i = 0; $i < $count; $i++ ) {
 			if ( ! is_array( $blocks[ $i ] ) || empty( $blocks[ $i ]['blockName'] ) ) {
@@ -1790,9 +1960,11 @@ class Block_CRUD {
 			if ( ! isset( $blocks[ $i ]['attrs']['metadata'] ) || ! is_array( $blocks[ $i ]['attrs']['metadata'] ) ) {
 				$blocks[ $i ]['attrs']['metadata'] = array();
 			}
-			$blocks[ $i ]['attrs']['metadata']['gk_ref'] = self::generate_ref();
+			$ref = self::generate_unique_ref( $in_use );
+			$blocks[ $i ]['attrs']['metadata']['gk_ref'] = $ref;
+			$in_use[ $ref ] = true;
 			if ( ! empty( $blocks[ $i ]['innerBlocks'] ) && is_array( $blocks[ $i ]['innerBlocks'] ) ) {
-				$this->assign_fresh_refs_recursive( $blocks[ $i ]['innerBlocks'] );
+				$this->assign_fresh_refs_walk( $blocks[ $i ]['innerBlocks'], $in_use );
 			}
 		}
 	}

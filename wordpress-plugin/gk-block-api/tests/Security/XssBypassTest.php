@@ -44,8 +44,8 @@ class XssBypassTest extends WP_UnitTestCase {
 	/** @var int */
 	private $post_id;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),
@@ -100,16 +100,20 @@ class XssBypassTest extends WP_UnitTestCase {
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'mixed-case <ScRiPt>' );
 	}
 
+	/**
+	 * Browsers parse `<scr<script>ipt>` as `<script>` after kses strips
+	 * the inner tag — verify the outer survives kses stripping too.
+	 */
 	public function test_strips_nested_broken_script() {
-		// Browsers parse <scr<script>ipt> as <script> after kses strips
-		// the inner tag — verify the outer survives kses stripping too.
 		$saved = $this->save_and_get_saved( '<p>x</p><scr<script>ipt>alert(1)</scr</script>ipt>' );
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'nested-broken <script>' );
 	}
 
+	/**
+	 * HTML parsers sometimes accept Unicode whitespace where ASCII
+	 * whitespace is expected.
+	 */
 	public function test_strips_script_with_unicode_whitespace() {
-		// HTML parsers sometimes accept Unicode whitespace where ASCII
-		// whitespace is expected.
 		$saved = $this->save_and_get_saved( "<p>x</p><script\xC2\xA0type=text/javascript>alert(1)</script>" );
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'NBSP-separated <script>' );
 	}
@@ -171,9 +175,11 @@ class XssBypassTest extends WP_UnitTestCase {
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'javascript: href' );
 	}
 
+	/**
+	 * `javasc&#x72;ipt:` decodes to `javascript:` — kses should
+	 * normalize and strip.
+	 */
 	public function test_strips_javascript_href_with_entity_encoding() {
-		// "javasc&#x72;ipt:" decodes to "javascript:" — kses should
-		// normalize and strip.
 		$saved = $this->save_and_get_saved( '<a href="javasc&#x72;ipt:alert(1)">x</a>' );
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'entity-encoded javascript: href' );
 	}
@@ -201,9 +207,11 @@ class XssBypassTest extends WP_UnitTestCase {
 
 	// ── SVG / iframe vectors ──────────────────────────────────────
 
+	/**
+	 * SVG can carry `<script>`. `wp_kses_post` strips `<svg>` entirely
+	 * from post content by default, so anything inside is also gone.
+	 */
 	public function test_strips_svg_with_inline_script() {
-		// SVG can carry <script>. wp_kses_post strips <svg> entirely
-		// from post content by default, so anything inside is also gone.
 		$saved = $this->save_and_get_saved( '<svg><script>alert(1)</script></svg>' );
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, '<svg><script>' );
 		$this->assertStringNotContainsStringIgnoringCase( '<svg', $saved, '<svg> itself must not survive in post body' );
@@ -221,9 +229,11 @@ class XssBypassTest extends WP_UnitTestCase {
 
 	// ── Attribute breakout ────────────────────────────────────────
 
+	/**
+	 * Classic attribute-context escape: a stray `">` inside an attr
+	 * value. kses parses the attribute boundaries and won't be fooled.
+	 */
 	public function test_quote_breakout_in_title_attribute() {
-		// Classic attribute-context escape: a stray `">` inside an attr
-		// value. kses parses the attribute boundaries and won't be fooled.
 		$saved = $this->save_and_get_saved( '<a title="hi"><img src=x onerror=alert(1)>" href="#">x</a>' );
 		$this->assertNoScriptOrHandlersOrBadUrls( $saved, 'attribute breakout via stray quote' );
 	}

@@ -23,8 +23,8 @@ class PostManagerTest extends WP_UnitTestCase {
 	/** @var Post_Manager */
 	private $pm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		// Default test actor: an editor (has edit_posts + publish_posts).
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
 

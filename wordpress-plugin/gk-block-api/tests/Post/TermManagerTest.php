@@ -18,8 +18,8 @@ class TermManagerTest extends WP_UnitTestCase {
 	/** @var Term_Manager */
 	private $tm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		// Pretty permalinks so term links carry the slug.
 		update_option( 'permalink_structure', '/%postname%/' );
 		$this->tm = new Term_Manager();

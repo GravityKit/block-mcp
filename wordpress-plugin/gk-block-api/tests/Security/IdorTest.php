@@ -40,8 +40,8 @@ class IdorTest extends WP_UnitTestCase {
 	/** @var Post_Manager */
 	private $pm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->crud = new Block_CRUD(
 			new Preferences(),
 			new Block_Safety(),
@@ -56,9 +56,11 @@ class IdorTest extends WP_UnitTestCase {
 
 	// ── refs are post-scoped ──────────────────────────────────────
 
+	/**
+	 * Two posts, each gets refs assigned. A ref that exists on post A
+	 * must NOT resolve to anything on post B.
+	 */
 	public function test_ref_from_post_a_does_not_resolve_against_post_b() {
-		// Two posts, each gets refs assigned. A ref that exists on post A
-		// must NOT resolve to anything on post B.
 		$post_a = self::factory()->post->create( array(
 			'post_status'  => 'publish',
 			'post_content' => serialize_blocks( array(
@@ -156,10 +158,12 @@ class IdorTest extends WP_UnitTestCase {
 
 	// ── parent / attachment cross-references ───────────────────────
 
+	/**
+	 * Setting `parent=99999` — a post ID that doesn't exist. Must not
+	 * silently coerce to 0; that would create an orphan that escaped
+	 * the validator's intent.
+	 */
 	public function test_create_post_with_nonexistent_parent_is_rejected() {
-		// Setting parent=99999 — a post ID that doesn't exist. Must not
-		// silently coerce to 0; that would create an orphan that escaped
-		// the validator's intent.
 		$result = $this->pm->create_post( array(
 			'title'     => 'X',
 			'post_type' => 'page',
@@ -169,11 +173,13 @@ class IdorTest extends WP_UnitTestCase {
 		$this->assertSame( 'invalid_parent', $result->get_error_code() );
 	}
 
+	/**
+	 * An attachment owned by anyone — the check is mime-based, not
+	 * ownership-based. We're verifying the mime gate works;
+	 * image-ownership is a deliberate non-constraint (WP doesn't
+	 * enforce attachment authorship for featured-image use anyway).
+	 */
 	public function test_create_post_with_non_image_featured_media_rejected() {
-		// An attachment owned by anyone — the check is mime-based, not
-		// ownership-based. We're verifying the mime gate works; image-
-		// ownership is a deliberate non-constraint (WP doesn't enforce
-		// attachment authorship for featured-image use anyway).
 		$pdf_id = self::factory()->post->create( array(
 			'post_type'      => 'attachment',
 			'post_mime_type' => 'application/pdf',
@@ -188,9 +194,11 @@ class IdorTest extends WP_UnitTestCase {
 
 	// ── update across posts isn't possible via the API ─────────────
 
+	/**
+	 * Two posts seeded with identical content. `update_block` against A
+	 * must modify A only, never B.
+	 */
 	public function test_update_block_targets_only_the_named_post() {
-		// Two posts seeded with identical content. update_block against A
-		// must modify A only, never B.
 		$content = serialize_blocks( array(
 			array(
 				'blockName'    => 'core/paragraph',

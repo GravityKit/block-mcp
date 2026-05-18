@@ -21,17 +21,17 @@ class SsrfTest extends WP_UnitTestCase {
 	/** @var Media_Manager */
 	private $mm;
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->mm = new Media_Manager();
 		// Make sure uploads are enabled — these tests assert the SSRF guard,
 		// not the kill-switch.
 		update_option( Media_Manager::UPLOADS_OPTION, '1' );
 	}
 
-	protected function tearDown(): void {
+	public function tear_down(): void {
 		remove_all_filters( 'pre_http_request' );
-		parent::tearDown();
+		parent::tear_down();
 	}
 
 	private function assertRejected( $result, string $hint = '' ): void {
@@ -58,9 +58,11 @@ class SsrfTest extends WP_UnitTestCase {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://127.10.20.30/' ) ), '127.10.20.30' );
 	}
 
+	/**
+	 * `0.0.0.0` — on Linux this aliases to localhost; on some systems
+	 * it hits `127.0.0.1`. Must reject either way.
+	 */
 	public function test_blocks_zero_dot_zero() {
-		// 0.0.0.0 — on Linux this aliases to localhost; on some systems it
-		// hits 127.0.0.1. Must reject either way.
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://0.0.0.0/' ) ), '0.0.0.0' );
 	}
 
@@ -145,18 +147,22 @@ class SsrfTest extends WP_UnitTestCase {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://127.0.0.1:8080/' ) ), '127.0.0.1:8080' );
 	}
 
+	/**
+	 * `http://attacker:password@127.0.0.1/x` — userinfo doesn't change
+	 * the host. The guard must still see `127.0.0.1` as the host.
+	 */
 	public function test_blocks_userinfo_on_loopback() {
-		// http://attacker:password@127.0.0.1/x — userinfo doesn't change
-		// the host. The guard must still see 127.0.0.1 as the host.
 		$this->assertRejected(
 			$this->mm->upload( array( 'url' => 'http://attacker:pwd@127.0.0.1/' ) ),
 			'userinfo-prefixed loopback'
 		);
 	}
 
+	/**
+	 * `http://user@evil:bad@127.0.0.1/x` — naive parsers can misread
+	 * the `@` inside the userinfo and treat `evil` as host.
+	 */
 	public function test_blocks_userinfo_with_at_in_password() {
-		// http://user@evil:bad@127.0.0.1/x — naive parsers can misread
-		// the "@" inside the userinfo and treat "evil" as host.
 		$this->assertRejected(
 			$this->mm->upload( array( 'url' => 'http://user@evil:bad@127.0.0.1/' ) ),
 			'userinfo with @ in password'
@@ -187,9 +193,11 @@ class SsrfTest extends WP_UnitTestCase {
 		$this->assertSame( 'invalid_url', $result->get_error_code() );
 	}
 
+	/**
+	 * A host that can't be DNS-resolved is rejected too — paranoid
+	 * default rather than letting `download_url()` try.
+	 */
 	public function test_blocks_unresolvable_host() {
-		// A host that can't be DNS-resolved is rejected too — paranoid
-		// default rather than letting download_url() try.
 		$result = $this->mm->upload(
 			array( 'url' => 'http://this-host-definitely-does-not-exist.invalid.gk-block-api-test/' )
 		);
@@ -219,5 +227,62 @@ class SsrfTest extends WP_UnitTestCase {
 			$this->mm->upload( array( 'url' => 'http://[2001:db8::1]/' ) ),
 			'admin filter adds 2001:db8::/32 to blocklist'
 		);
+	}
+
+	// ── HTTP-redirect bypass ───────────────────────────────────────
+
+	/**
+	 * Scenario: an attacker provides a URL whose initial host passes
+	 * the SSRF guard (public IP) but the response is a 302 to a private
+	 * IP. WP's `download_url` follows redirects by default; if the
+	 * guard runs only once on the initial URL, the attacker reads
+	 * internal resources.
+	 *
+	 * The plugin must NOT let the redirect to a reserved IP succeed.
+	 * Two acceptable outcomes:
+	 *
+	 *  (A) redirect-following is disabled for this fetch (no follow
+	 *      → no internal read);
+	 *  (B) the post-redirect URL is re-validated before storage.
+	 *
+	 * The test pre-empts `wp_safe_remote_get` to fail any private-IP
+	 * fetch: if WP would have followed to `169.254.169.254`, the
+	 * `pre_http_request` hook trips the assertion.
+	 */
+	public function test_no_redirect_following_into_private_ip() {
+		$private_url = 'http://169.254.169.254/latest/meta-data/iam';
+		add_filter( 'pre_http_request', function ( $preempt, $args, $url ) use ( $private_url ) {
+			unset( $args ); // Positional placeholder — signature requires it for $url.
+			$this->assertNotSame(
+				$private_url,
+				$url,
+				'plugin must NOT follow a redirect to a private/link-local IP'
+			);
+			return $preempt;
+		}, 10, 3 );
+
+		// Simulate the 302-to-private response on the initial public URL.
+		$public_url = 'https://203.0.113.5/redirect.png';
+		add_filter( 'pre_http_request', function ( $preempt, $args, $url ) use ( $public_url, $private_url ) {
+			if ( $url !== $public_url ) {
+				return $preempt;
+			}
+			// Return a Location redirect to the private IP. download_url
+			// uses wp_safe_remote_get which follows redirects up to 5
+			// hops by default — if it follows, the assertion above fires.
+			return array(
+				'headers'  => array( 'location' => $private_url ),
+				'body'     => '',
+				'response' => array( 'code' => 302, 'message' => 'Found' ),
+				'cookies'  => array(),
+				'filename' => $args['filename'] ?? null,
+			);
+		}, 10, 3 );
+
+		$result = $this->mm->upload( array( 'url' => $public_url ) );
+		// The download attempt fails (either rejected by SSRF re-check,
+		// or the response 302 wasn't followed) — either way the upload
+		// returns an error, not a successful attachment.
+		$this->assertInstanceOf( \WP_Error::class, $result );
 	}
 }
