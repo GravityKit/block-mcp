@@ -158,7 +158,29 @@ class Yoast_Bridge {
 	 * @return \WP_REST_Response
 	 */
 	public function bulk_update_seo( \WP_REST_Request $request ) {
-		$posts   = (array) $request->get_param( 'posts' );
+		$posts = (array) $request->get_param( 'posts' );
+
+		// Cap batch size. An authenticated `edit_posts` user without per-post
+		// permission would still be allowed to send an unbounded `posts` array
+		// (each entry generates DB queries via write_fields + read_fields and
+		// fires Yoast hooks), enabling cheap resource amplification. Match
+		// Block_CRUD::MAX_BATCH_SIZE for parity with batch-update.
+		if ( count( $posts ) > \GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE ) {
+			return new \WP_Error(
+				'batch_too_large',
+				sprintf(
+					/* translators: 1: actual batch size, 2: maximum batch size */
+					__( 'Bulk SEO batch contains %1$d items; maximum is %2$d.', 'gk-block-api' ),
+					count( $posts ),
+					\GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE
+				),
+				array(
+					'status'         => 400,
+					'max_batch_size' => \GravityKit\BlockAPI\Block_CRUD::MAX_BATCH_SIZE,
+				)
+			);
+		}
+
 		$results = array();
 
 		foreach ( $posts as $entry ) {

@@ -307,21 +307,26 @@ class Block_Writer {
 		// Get the current latest revision as the "before" snapshot.
 		$before_revision_id = $this->get_latest_revision_id( $post_id );
 
-		// wp_update_post() runs wp_unslash() on post_content (it expects $_POST-shaped
-		// input). serialize_blocks() output is unslashed JSON, so without wp_slash()
-		// every \n, ", and the -- that serialize_block_attributes()
-		// uses to escape `--` would be stripped of their leading backslash.
-		$result = wp_update_post(
-			array(
-				'ID'           => $post_id,
-				'post_content' => wp_slash( $new_content ),
-			),
-			true
-		);
-
-		// Restore content_save_pre so subsequent saves in the same request are unaffected.
-		if ( $saved_content_save_pre ) {
-			$wp_filter['content_save_pre'] = $saved_content_save_pre; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring previously stashed filter callbacks after save.
+		try {
+			// wp_update_post() runs wp_unslash() on post_content (it expects $_POST-shaped
+			// input). serialize_blocks() output is unslashed JSON, so without wp_slash()
+			// every \n, ", and the -- that serialize_block_attributes()
+			// uses to escape `--` would be stripped of their leading backslash.
+			$result = wp_update_post(
+				array(
+					'ID'           => $post_id,
+					'post_content' => wp_slash( $new_content ),
+				),
+				true
+			);
+		} finally {
+			// Restore content_save_pre via finally so a downstream throw inside
+			// wp_update_post (e.g. a save_post hook handler that errors) doesn't
+			// leave the filter stripped for every subsequent save in this
+			// request — that would silently corrupt content from other plugins.
+			if ( $saved_content_save_pre ) {
+				$wp_filter['content_save_pre'] = $saved_content_save_pre; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring previously stashed filter callbacks after save.
+			}
 		}
 
 		if ( is_wp_error( $result ) ) {

@@ -71,17 +71,19 @@ class Core_Block_Enricher {
 		}
 
 		// Visibility gate. wp_block CPT entries can be in draft / pending /
-		// private / trash. get_post() returns them all regardless. Without
-		// this check, an editor who can read the embedding post but not the
-		// referenced pattern would see its title and (with render) its full
-		// block tree — a quiet information disclosure.
+		// private / trash, or — even when post_status='publish' — gated
+		// behind a post_password. get_post() returns them all regardless.
+		// Without this check, an editor who can read the embedding post but
+		// not the referenced pattern would see its title and (with render)
+		// its full block tree — a quiet information disclosure.
 		//
-		// AND, not OR: published patterns are public content and should
-		// always expand, even for callers without a read_post cap (e.g.
-		// anonymous-ish test contexts). Skip ONLY when both conditions hold:
-		// the pattern is non-public AND the caller lacks the read cap.
-		// Switching to OR would over-block public material.
-		$is_public = 'publish' === $ref_post->post_status;
+		// Treat publish-without-password as "public" (always expandable).
+		// Anything else (draft / pending / private / trash / password-protected)
+		// requires the caller to pass current_user_can('read_post'), which
+		// WP's cap-mapping resolves against post status, ownership, and the
+		// `read_private_posts` cap. AND, not OR — published-no-password is
+		// public content and must expand even for low-privilege auth contexts.
+		$is_public = 'publish' === $ref_post->post_status && empty( $ref_post->post_password );
 		if ( ! $is_public && ! current_user_can( 'read_post', $ref_post->ID ) ) {
 			return $data;
 		}

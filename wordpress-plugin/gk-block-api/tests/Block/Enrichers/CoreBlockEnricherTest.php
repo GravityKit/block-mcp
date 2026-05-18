@@ -178,6 +178,43 @@ class CoreBlockEnricherTest extends BlockApiTestCase {
 		wp_delete_post( $draft_pattern_id, true );
 	}
 
+	// ── password-protected publish: only readable by users with read cap ──
+
+	public function test_enrich_skips_password_protected_pattern_for_subscriber() {
+		$protected_id = self::factory()->post->create(
+			array(
+				'post_type'     => 'wp_block',
+				'post_title'    => 'Locked',
+				'post_status'   => 'publish',
+				'post_password' => 'secret123',
+				'post_content'  => '<!-- wp:paragraph --><p>members only</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$subscriber = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $subscriber );
+
+		$data    = array(
+			'name'       => 'core/block',
+			'attributes' => array( 'ref' => $protected_id ),
+		);
+		$context = array(
+			'parsed_block' => array( 'blockName' => 'core/block', 'attrs' => array( 'ref' => $protected_id ) ),
+			'render'       => false,
+		);
+
+		$result = Core_Block_Enricher::enrich( $data, 'core/block', $context );
+
+		$this->assertArrayNotHasKey(
+			'pattern_ref',
+			$result,
+			'Password-protected wp_block must not leak title/content to a subscriber-level caller.'
+		);
+
+		wp_set_current_user( 0 );
+		wp_delete_post( $protected_id, true );
+	}
+
 	// ── cycle protection: self-referencing pattern doesn't infinite-recurse ─
 
 	public function test_enrich_self_referencing_pattern_does_not_recurse() {
