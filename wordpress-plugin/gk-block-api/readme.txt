@@ -97,7 +97,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 == Upgrade Notice ==
 
 = 1.6.0 =
-Master kill-switch for media uploads (Settings → Block MCP → "Allow MCP agents to upload media") with REST 403 enforcement before any disk I/O, DNS lookup, or HTTP fetch. New `gk_block_api_allow_taxonomy_in_terms` filter lets admins opt internal-state taxonomies (workflow status, etc.) back into `/terms` without flipping `show_in_rest`. Visibility leaks fixed on `/post-info`, `/find-posts`, `/resolve`, `/terms`, `/patterns/{id}`, and synced-pattern (`core/block`) expansion — drafts, password-protected posts, and non-REST taxonomies now stay invisible to callers without the appropriate cap. `insert_pattern` mints fresh `gk_ref` values on inlined blocks and returns the visible (flat) index. `update-attrs` deep-merges metadata so partial writes preserve `gk_ref` and `bindings`. Post-types allowlist UI re-laid as a 3-column grid. Plugin works on PHP 7.4 through 8.4.
+Adds a master kill-switch for media uploads with an admin checkbox, restricts the `create_post` tool to a configurable post-type allowlist, and closes several visibility leaks where drafts and password-protected posts could appear in search and lookup results.
 
 = 1.5.1 =
 Write responses now echo a canonical `saved` snapshot (inner_html + attributes) so agents can verify edits without a follow-up read. New `get_block` endpoint mirrors the same shape for single-block re-reads. New `verbose` request param on batch-update (default false). All changes are additive — existing consumers continue to work unchanged.
@@ -122,56 +122,45 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 
 == Changelog ==
 
-= 1.6.0 =
-* New: Master kill-switch for media uploads. Settings → Block MCP → "Allow MCP agents to upload media" toggles `gk_block_api_uploads_enabled`. When disabled, every upload path (multipart, URL sideload, base64) returns HTTP 403 `uploads_disabled` before any disk I/O, DNS lookup, or HTTP fetch. Also overridable via the `gk_block_api_uploads_enabled` filter.
-* New: `gk_block_api_allow_taxonomy_in_terms` filter — opt deliberately-private taxonomies (workflow status, internal department) back into the `/terms` endpoint for the agent-editing use case, without flipping `show_in_rest` for the rest of WordPress's REST surface.
-* New: `gk_block_api_url_sideload_blocked_ranges` filter — admin-extensible IPv4 block list for the SSRF guard. The default already covers RFC1918, link-local (cloud metadata), loopback, IETF reserved, benchmark, multicast, and "this network" ranges; the filter is for sites that want to add additional ranges.
-* New: `gk_block_api_post_types_allowlist` option exposed in the settings UI as a 3-column checkbox grid ("Post types AI agents can create"). Default (no checkboxes) allows any post type with `show_in_rest: true`; checking specific types restricts `create_post` to that set.
-* New: `gk_block_api_legacy_patterns_scan_limit` filter (default 500) caps the synced-pattern scan that drives `/site-usage` legacy-pattern detection.
-* New: `gk_block_api_synced_patterns_query_limit` filter (default 500) caps the synced-pattern query backing `/patterns`.
-* Fixed: Visibility leak on `GET /post-info` — direct id and slug lookups returned title / status / author / parent / timestamps for any post the caller could not actually read. Now routed through `Block_CRUD::is_post_readable()` and falls back to 404 to avoid signalling the post's existence.
-* Fixed: Visibility leak on `GET /find-posts` — the underlying `WP_Query` ran without `perm` set, so SQL returned every matching post regardless of user cap. Now passes `perm: 'readable'` plus a per-result `is_post_readable()` check that also catches publish-with-password posts. Response `total` / `total_pages` are derived from the visible result set, so password-protected counts don't leak through pagination metadata either.
-* Fixed: Visibility leak on `GET /resolve` — `url_to_postid()` resolves drafts when the caller is logged in, so the endpoint handed back metadata for any URL that resolved including drafts of other users. Gated by `is_post_readable()`.
-* Fixed: Visibility leak on `GET /terms` — taxonomies with `show_in_rest: false` were enumerable by any `edit_posts` caller. Now gated to taxonomies that opt into REST exposure (with the new override filter above for the agent-editing case).
-* Fixed: Visibility leak on `GET /patterns/{id}` — single-pattern lookup did not check `is_post_readable()`, so drafts / private / password-protected `wp_block` entries could be fetched by id.
-* Fixed: Visibility leak in render-mode block tree — `core/block` (synced pattern) expansion handed back title and full block tree for the referenced `wp_block` regardless of the caller's cap on it. Now gated.
-* Fixed: `insert_pattern` inline mode preserved the source pattern's `metadata.gk_ref` values, so re-inserting or chaining mutations targeted the wrong blocks. Now mints fresh refs across the inlined tree via `assign_fresh_refs_recursive()`.
-* Fixed: `insert_pattern` returned the raw-array `$insert_at` index in the response, which counts whitespace blocks and is off-by-N from the flat-index vocabulary the rest of the write surface uses. Now returns the visible index.
-* Fixed: `Block_Mutator` `update-attrs` op merged attrs via a single `array_merge`, so a partial `{ metadata: { name: 'Hero' } }` write clobbered sibling keys including `gk_ref` (ref stability) and `bindings` (write-guard inputs). Now deep-merges `metadata` to match `Block_Writer::apply_block_update_in_place()`.
-* Fixed: `HTML_Transformer` `tagName` swap previously shared one allowlist for `core/group` and `core/separator` that included `hr`. The combined path could emit `<hr>…</hr>` (invalid HTML for a void element) or rewrite `<hr>` to `<div></div>` (silently destructive). Split into separate code paths — container tags for `core/group`, void tags for `core/separator` — and normalised separator output to the self-closing `<hr ... />` form.
-* Fixed: `Block_Inventory::get_stats(refresh=true)` updated the throttle stamp before calling `build_stats()`, so a failed rebuild still burned the refresh budget. The stamp is now recorded only after a successful build + cache write.
-* Fixed: `Block_Reader` parse-error responses leaked the raw exception message (class names, file paths, type errors) to unauthenticated REST callers. Production responses now carry a generic message; the full trace is written to `error_log`; `WP_DEBUG` re-enables the message + attachment for local debugging.
-* Fixed: `Block_Reader::get_blocks()` cache key is now cast to `int` to match `parse()` / `invalidate()` so non-canonical numeric `$post_id` inputs produce keys that invalidation finds.
-* Fixed: `Block_Reader::format_blocks_recursive` is depth-guarded by `MAX_BLOCK_DEPTH` so a pathological deeply-nested document can't blow the stack during formatting.
-* Fixed: `Post_Manager::create_post` and `update_post` stored the GMT timestamp in both `post_date` and `post_date_gmt`. WordPress reads `post_date` directly for admin sort and date queries, so the column has to hold site-local time — now converted via `get_date_from_gmt()`.
-* Fixed: `Post_Manager` `comment_status` / `ping_status` writes now reject any value other than `open` / `closed` instead of silently storing whatever the client sent.
-* Fixed: `Post_Manager::create_post` validates `date` with `strtotime` before passing to `wp_insert_post`; garbage values previously rendered posts unsortable in admin lists.
-* Fixed: `Pattern_Manager::get_patterns` search input is sanitised with `sanitize_text_field` before the `strpos` comparison.
-* Fixed: `Yoast_Bridge::write_fields` `is_cornerstone` disable path stored the literal string `"false"`, which PHP treats as truthy — so toggling cornerstone off via the API silently left it enabled in Yoast's view. Disable now deletes the meta key, matching Yoast's own convention.
-* Fixed: `Yoast_Bridge::bulk_update_seo` rejects batches over `Block_CRUD::MAX_BATCH_SIZE` (50) with HTTP 400 — closes a cheap resource-amplification path where an authenticated `edit_posts` user without per-post permission could send an unbounded `posts` array.
-* Fixed: `Media_Manager::apply_metadata` wraps `$updates` in `wp_slash()` before `wp_update_post`, so apostrophes / backslashes in title / caption / description survive WordPress's automatic unslash on string fields.
-* Fixed: `Block_Writer::revert_to_revision` now calls `check_rate_limit` / `record_rate_limit` so it counts against the per-post write budget — closes the bypass where an attacker could route every mutation through revert.
-* Fixed: `Block_Writer::save_post_content` wraps the `content_save_pre` filter removal in a `try/finally` so a thrown save leaves the filter graph clean.
-* Fixed: `Block_Writer::insert_pattern` honours `Block_CRUD::is_post_readable()` for synced-pattern references so an `edit_posts` user can't insert a `wp_block` they shouldn't be able to read.
-* Fixed: `validate_block_def()` rejects empty block names with `block_name_required` instead of silently writing an empty block.
-* Fixed: `Block_Mutator::wrap-in-group` rejects unknown wrapper tag names with `disallowed_tag` instead of silently falling back to `<div>` (closes a markup-smuggling vector when an attacker controlled the `wrapper` payload).
-* Fixed: `Block_Mutator::duplicate` round-trips the cloned block through JSON encode/decode so deep clones can never share references with the source.
-* Fixed: `HTML_Transformer` boolean-attribute path uses `filter_var(FILTER_VALIDATE_BOOLEAN)` so string truthiness (`"true"`, `"on"`) is handled consistently with the editor's serialisation.
-* Fixed: `HTML_Transformer` text-content transforms use `preg_replace_callback` so `$N` sequences inside user-controlled replacement strings can't inject backreferences.
-* Fixed: `Yoast_Faq_Enricher` excerpt uses `mb_substr` / `mb_strlen` so multibyte UTF-8 truncation respects codepoint boundaries.
-* Fixed: `Core_Block_Enricher` (synced-pattern expansion) tracks a per-request visited set so a `wp_block` that references itself (or any ancestor in the chain) yields a `cycle_detected` flag instead of blowing the stack.
-* Fixed: MCP server `get_post_info` validation tightened to `Number.isInteger(post_id) && > 0`. Floats are now rejected client-side with the same "post_id must be a positive integer" error the schema documents.
-* Fixed: MCP server `assertHasKeys` test helper rejects `null` explicitly before the `typeof === 'object'` check (since `typeof null === 'object'`).
-* Improved: Post-types allowlist UI laid out as a 3-column CSS grid (auto-fill min 240px) instead of a single inline-wrapped row.
-* Improved: Settings page exposes the kill-switch alongside the existing tier/replacement/post-type controls.
-* Improved: `Pattern_Manager::get_pattern` rejects non-published `wp_block` posts the caller cannot read.
-* Tests: PHPUnit suite migrated off custom mocks onto the real WordPress test harness (`wp-phpunit` + `roots/wordpress` + `sqlite-database-integration`). 606 tests / 7412 assertions on a PHP 7.4 / 8.2 / 8.3 / 8.4 matrix.
-* Tests: New `tests/Stress/` (rate-limit burst, ref collisions, pattern recursion, wide trees, unicode pathologies) and `tests/Security/` (XSS bypass, SSRF, uploads-disabled kill-switch) suites.
-* Tests: Regression test added for every bug fix above — `tests/Block/BlockCrudTest.php` covers the visibility gate, ref-mint, and visible-index contracts; `tests/Block/BlockMutatorTest.php` covers the metadata deep-merge; `tests/Block/HtmlTransformerTest.php` covers the separator/group split; `tests/REST/PostVisibilityTest.php` covers the `/post-info` / `/find-posts` / `/resolve` gates and the pagination-metadata fix; `tests/Post/TermManagerTest.php` covers the taxonomy gate and override filter.
-* Tests: TypeScript MCP server gains 469 Vitest tests covering tool wiring, error translation, schema assertions, and integration patterns. Live-WP integration suite runs against a real site when configured.
-* Tests: CI matrix now runs PHP 7.4 / 8.2 / 8.3 / 8.4 plus TypeScript Vitest. Workflow rejects on `secrets.X` in job-level `if` resolved by gating the integration job on `workflow_dispatch` or `[integration]` commit-message marker only.
-* Tests: `composer lint` (PHPCS WordPress + PHPCompatibility) gated in CI with zero errors and zero warnings on `includes/`.
-* Doc: AGENTS.md gains a "Comments and docblocks" section (no internal-process references in source, no scale or future-architecture speculation, present-tense behaviour description, three-question self-test) plus a tests-folder convention (docblocks not inline narrative on every test method).
+= 1.6.0 on May 19, 2026 =
+
+This release adds a master kill-switch for media uploads with an admin checkbox, restricts the `create_post` tool to a configurable post-type allowlist, and closes several visibility leaks where drafts and password-protected posts could appear in search and lookup results.
+
+#### 🚀 Added
+
+* Adds a master kill-switch for media uploads. Toggle "Allow MCP agents to upload media" under Settings → Block MCP to refuse every upload path (multipart, URL sideload, base64) with HTTP 403 before any download or disk write happens.
+* Adds a "Post types AI agents can create" allowlist in the settings page. Check the post types you want exposed to `create_post`; leave everything unchecked to allow any public post type with REST support (the default).
+* Adds an override filter so deliberately-private taxonomies (workflow status, internal department, etc.) can opt back into the `/terms` endpoint for the agent-editing use case without affecting the rest of WordPress's REST surface.
+
+#### ✨ Improved
+
+* Lays out the post-types allowlist as a 3-column grid in the settings page instead of a single inline-wrapped row.
+* Hides drafts, private posts, and password-protected posts from `/find-posts`, `/post-info`, `/resolve`, `/terms`, and `/patterns/{id}` for callers without read access. Pagination metadata follows the visible result set, so password-protected counts no longer leak through `total` / `total_pages`.
+* Renders separator blocks to valid HTML when `tagName` changes. The shared allowlist with `core/group` could produce `<hr>...</hr>` or rewrite separators to `<div>...</div>`; the two paths are now independent and separators always emit a self-closing `<hr />`.
+* Mints fresh block refs when inserting a pattern inline. Repeated inserts of the same pattern no longer share refs with the original, and the response's `index` matches the flat-index vocabulary used by every other write tool.
+* Preserves `metadata.gk_ref` and `metadata.bindings` when only updating other metadata fields like `metadata.name`. Partial writes via `edit_block_tree` no longer wipe sibling keys.
+* Stores post dates in the site's local timezone for admin sort and date queries (previously stored as GMT in both date columns).
+
+#### 🐛 Fixed
+
+* Toggling Yoast's "Cornerstone Content" off via `yoast_update_seo` actually disables it. The storage previously wrote the literal string `"false"`, which PHP treats as truthy — the API said off and Yoast saw on.
+* `yoast_bulk_update_seo` now caps batches at 50 posts per call, matching the per-block batch tools.
+* `update_post` rejects `comment_status` / `ping_status` values other than `open` / `closed` instead of silently storing whatever the client sent.
+* `create_post` validates the `date` field before passing it to WordPress. Garbage values previously rendered posts unsortable in admin lists.
+* Reverting to a previous revision now counts against the per-post write rate limit. Previously revert could be used to bypass the budget.
+* Media metadata writes (title, caption, alt-text, description) preserve apostrophes and backslashes through WordPress's slash handling.
+* Synced patterns that reference themselves (directly or via an ancestor) surface a `cycle_detected` flag in the response instead of crashing under deep recursion.
+* MCP server `get_post_info` rejects floating-point `post_id` values client-side with the documented "post_id must be a positive integer" error.
+* REST `parse_error` responses no longer expose internal class names, file paths, or PHP type-error details in production. Full traces are written to the error log; `WP_DEBUG` re-enables them in the response for local debugging.
+
+#### 💻 Developer Updates
+
+* New filter `gk_block_api_uploads_enabled` — return `false` to disable every upload path; runs before any I/O or DNS lookup.
+* New filter `gk_block_api_allow_taxonomy_in_terms` — return `true` for a private taxonomy slug to expose it through `/terms` without flipping `show_in_rest`.
+* New filter `gk_block_api_url_sideload_blocked_ranges` — admin-extensible IPv4 block list for the SSRF guard on URL sideloads.
+* New filters `gk_block_api_legacy_patterns_scan_limit` and `gk_block_api_synced_patterns_query_limit` (both default 500) cap the synced-pattern scans backing `/site-usage` and `/patterns`.
+* New option `gk_block_api_post_types_allowlist` (array of post-type slugs) restricts `create_post`. Cleaned up on uninstall.
+* New public helper `Block_CRUD::is_post_readable( $post )` — used by every visibility gate above and available to integrators that need the same logic.
 
 = 1.5.1 =
 * New: `update_block` and `update_blocks_batch` responses now include a canonical `saved` snapshot — `{ flat_index, block_name, attributes, inner_html, is_dynamic, ref? }`. Single update_block always echoes; batch echoes per-result only when called with `verbose: true` (default false).
