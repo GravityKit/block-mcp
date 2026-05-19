@@ -143,7 +143,7 @@ This release adds a master kill-switch for media uploads with an admin checkbox,
 
 #### 🐛 Fixed
 
-* Preserves `innerHTML` and `innerBlocks` when creating posts via `create_post` and when rewriting all blocks via `rewrite_post_blocks`. Block content previously landed in the database with only the block name, so the editor surfaced "Block contains unexpected or invalid content" on every saved block. Thanks to [Jake Jackson](https://github.com/jakejackson1) for the fix in [#13](https://github.com/GravityKit/block-mcp/pull/13).
+* Preserves `innerHTML` and `innerBlocks` when creating posts via `create_post` and when rewriting all blocks via `rewrite_post_blocks`, so structured block payloads round-trip through the database without dropping nested content. Thanks to [Jake Jackson](https://github.com/jakejackson1) for the fix in [#13](https://github.com/GravityKit/block-mcp/pull/13).
 * Toggling Yoast's "Cornerstone Content" off via `yoast_update_seo` actually disables it. The storage previously wrote the literal string `"false"`, which PHP treats as truthy — the API said off and Yoast saw on.
 * `yoast_bulk_update_seo` now caps batches at 50 posts per call, matching the per-block batch tools.
 * `update_post` rejects `comment_status` / `ping_status` values other than `open` / `closed` instead of silently storing whatever the client sent.
