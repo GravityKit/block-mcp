@@ -39771,7 +39771,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "1.5.1",
+  version: "1.6.0",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   type: "module",
@@ -39782,6 +39782,7 @@ var package_default = {
     inspect: "npx @modelcontextprotocol/inspector node dist/index.cjs",
     test: "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     eval: "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
     prepare: "npm run build"
@@ -44758,7 +44759,7 @@ async function handleDiscoveryTool(toolName, args, client2) {
         throw new Error("get_post_info requires one of: post_id, url, or slug");
       }
       let normalizedPostId;
-      if (typeof postId === "number" && Number.isFinite(postId)) {
+      if (typeof postId === "number" && Number.isInteger(postId) && postId > 0) {
         normalizedPostId = postId;
       } else if (typeof postId === "string" && /^[0-9]+$/.test(postId)) {
         normalizedPostId = parseInt(postId, 10);
