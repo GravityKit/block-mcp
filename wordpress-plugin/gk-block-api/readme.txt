@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.6.0
+Stable tag: 1.6.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.6.1 =
+Fixes a 30-second timeout on `/patterns` for sites with many synced patterns: the per-pattern LIKE scan that ran twice per pattern is now a single chunked aggregate scan cached for an hour. `?refresh=true` on `/patterns` now requires `manage_options`, and orphaned refs from copy-pasted content no longer pollute the cache.
+
 = 1.6.0 =
 Adds a master kill-switch for media uploads with an admin checkbox, restricts the `create_post` tool to a configurable post-type allowlist, and closes several visibility leaks where drafts and password-protected posts could appear in search and lookup results.
 
@@ -121,6 +124,36 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.6.1 on May 20, 2026 =
+
+`/patterns` no longer times out on sites with many synced patterns. The per-pattern reference-count query that previously ran 2N LIKE scans against `wp_posts` is now a single chunked aggregate scan cached for an hour. Includes a permission gate on cache refresh, an orphan-ref filter, and a memory-bounded chunked loop.
+
+#### 🐛 Fixed
+
+* `/patterns` no longer times out at the 30-second client ceiling on sites with many synced patterns. The previous per-pattern reference counter ran two `post_content LIKE '%"ref":N%'` scans per pattern (2N scans per listing); the new aggregate runs one chunked scan, tallies references in PHP, and caches the result in a one-hour transient.
+* Cold-cache rebuilds no longer risk `Allowed memory size exhausted`. The aggregate scan pages through `wp_posts` in batches (default 200 rows / chunk) so peak resident memory stays bounded regardless of how many posts contain pattern references.
+* Orphaned pattern refs (numeric IDs in `post_content` that don't resolve to a real published `wp_block` on this site — typically from copy-pasted content across installs) are dropped from the cached map instead of growing the transient with bogus keys.
+
+#### ✨ Improved
+
+* `?refresh=true` on `/patterns` now requires `manage_options`. Editors can no longer loop the refresh param to force repeated full-table scans; the base read path remains at `edit_posts`. Editors hitting refresh receive `rest_forbidden_refresh` with the standard authorization-required status.
+* The orphan-filter allow-list and the synced-pattern listing query now share a single capacity limit (`gk_block_api_synced_patterns_query_limit`, default 500). Previously the allow-list had no cap and could outgrow the list it was gating on large sites.
+* Per-request instance memoization on the reference-count lookup eliminates ~N-1 redundant `get_transient()` calls when formatting a full pattern listing.
+* Three `apply_filters` calls (`gk_block_api_synced_patterns_query_limit`, `gk_block_api_legacy_patterns_scan_limit`, `gk_block_api_pattern_ref_scan_batch_size`) now have proper docblocks with parameter types and defaults so WordPress hook documentation tooling can extract them.
+
+#### 💻 Developer Updates
+
+* New filter `gk_block_api_pattern_ref_scan_batch_size` (default 200) — rows pulled per chunk when scanning `post_content` for pattern references. Lower for very-large-content sites; raise for very-small sites.
+* New `refresh` query parameter on `GET /patterns` and the `list_patterns` MCP tool — busts the one-hour reference-count cache on demand. Requires `manage_options`.
+* New uninstall sweep: `gk_block_api_pattern_ref_counts` transient is removed alongside the other plugin caches.
+
+#### 🧪 Tests
+
+* New `RestControllerTestCase` base wires the nine-collaborator REST controller once for shared use across REST integration tests.
+* New `PatternReferenceCountsTest` covers the aggregate scan contract: distinct-post counting, per-post de-duplication, numeric-prefix safety, non-published exclusion, transient persistence, orphan-ID filtering, and chunked-scan correctness across batch boundaries.
+* New `PatternsRefreshAuthTest` covers the `manage_options` gate on `/patterns?refresh=true` (editor blocked, admin allowed, refresh check doesn't leak into the base read path).
+* New `@group stress` test inserts 2,000 patterns plus 2,000 referencing posts at the production batch size to validate chunked-scan correctness under realistic load.
 
 = 1.6.0 on May 19, 2026 =
 
