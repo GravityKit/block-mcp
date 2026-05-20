@@ -1141,6 +1141,7 @@ class REST_Controller {
 				'category'  => $request->get_param( 'category' ),
 				'limit'     => $request->get_param( 'limit' ),
 				'order_by'  => $request->get_param( 'order_by' ),
+				'refresh'   => $request->get_param( 'refresh' ),
 			);
 
 			// Normalize synced param: "true"/"false" strings to booleans, null if not set.
@@ -2556,6 +2557,11 @@ class REST_Controller {
 				'default'           => 'score',
 				'enum'              => array( 'score', 'usage', 'date', 'name' ),
 				'sanitize_callback' => 'sanitize_text_field',
+			),
+			'refresh'   => array(
+				'type'        => 'boolean',
+				'default'     => false,
+				'description' => 'Bust the cached pattern-reference counts before listing.',
 			),
 		);
 	}

@@ -23,6 +23,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Pattern_Manager {
 
 	/**
+	 * Transient key for the synced-pattern reference-count map.
+	 *
+	 * Keyed `wp_block` post ID → count of distinct published posts that contain
+	 * a `<!-- wp:block {"ref":ID} /-->` reference. One transient, not one per
+	 * pattern, so listing all patterns is a single cached lookup instead of N
+	 * post_content LIKE scans.
+	 */
+	const REF_COUNT_CACHE_KEY = 'gk_block_api_pattern_ref_counts';
+
+	/**
+	 * TTL for the reference-count cache (1 hour).
+	 *
+	 * Matches `Block_Inventory`'s cache TTL. Counts are an informational scoring
+	 * input, not a correctness invariant — a one-hour lag on reference totals
+	 * is acceptable. Callers needing fresh data pass `refresh=true`.
+	 */
+	const REF_COUNT_CACHE_TTL = HOUR_IN_SECONDS;
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
@@ -62,9 +81,17 @@ class Pattern_Manager {
 			'category'  => '',
 			'limit'     => 20,
 			'order_by'  => 'score',
+			'refresh'   => false,
 		);
 
-		$args    = wp_parse_args( $args, $defaults );
+		$args = wp_parse_args( $args, $defaults );
+
+		// Bust the reference-count cache before per-pattern enrichment runs so
+		// every formatted pattern in this response reads from the rebuilt map.
+		if ( ! empty( $args['refresh'] ) ) {
+			delete_transient( self::REF_COUNT_CACHE_KEY );
+		}
+
 		$results = array();
 
 		// Collect synced patterns (wp_block CPT).
@@ -406,11 +433,13 @@ class Pattern_Manager {
 	/**
 	 * Count references to a synced pattern across published content.
 	 *
-	 * Uses a simple meta/content search for the pattern's ref attribute.
+	 * Looks up the pattern ID in the aggregate reference-count map. The map
+	 * is built and cached by `get_all_pattern_reference_counts()`; this method
+	 * is a thin accessor so callers see a stable per-pattern API.
 	 *
 	 * @param int $pattern_id Pattern post ID.
 	 *
-	 * @return int Number of pages/posts referencing this pattern.
+	 * @return int Number of distinct published posts referencing this pattern.
 	 */
 	private function count_pattern_references( $pattern_id ) {
 		$pattern_id = (int) $pattern_id;
@@ -418,38 +447,69 @@ class Pattern_Manager {
 			return 0;
 		}
 
-		// Per-request memoization. `format_synced_pattern()` calls this once
-		// per pattern in a list; without memoization an /patterns response
-		// of N items triggers N table scans.
-		static $cache = array();
-		if ( isset( $cache[ $pattern_id ] ) ) {
-			return $cache[ $pattern_id ];
+		$counts = $this->get_all_pattern_reference_counts();
+
+		return isset( $counts[ $pattern_id ] ) ? (int) $counts[ $pattern_id ] : 0;
+	}
+
+	/**
+	 * Build (or read from cache) a map of `pattern_id => reference_count`
+	 * spanning every published post on the site.
+	 *
+	 * Uses a single LIKE query to collect post_content rows that contain
+	 * `"ref":` substrings, then regex-extracts the IDs in PHP and de-duplicates
+	 * per post. The old per-pattern implementation ran two LIKE scans of
+	 * `wp_posts` per pattern, so a /patterns response of N synced patterns
+	 * cost 2N full-table scans (e.g. 60 on gravitykit.com). This collapses
+	 * the work into one scan plus an in-memory tally and caches the result.
+	 *
+	 * @return array<int,int> Map of pattern ID → count.
+	 */
+	public function get_all_pattern_reference_counts() {
+		$cached = get_transient( self::REF_COUNT_CACHE_KEY );
+		if ( is_array( $cached ) ) {
+			return $cached;
 		}
 
 		global $wpdb;
 
-		// Match `"ref":<id>` followed by either `}` (closing the JSON object)
-		// or `,` (next attribute). Without a trailing boundary, "ref":123
-		// would also match "ref":1234, "ref":12345, etc. and inflate the
-		// count for low-numbered patterns. `esc_like` neutralizes `%`/`_`
-		// if a future ID format ever contains them. Direct query because
-		// there's no WP API for content full-text search.
-		$prefix       = '"ref":' . $pattern_id;
-		$needle_close = '%' . $wpdb->esc_like( $prefix . '}' ) . '%';
-		$needle_next  = '%' . $wpdb->esc_like( $prefix . ',' ) . '%';
+		// One scan, not N. Pull `post_content` for every published post that
+		// contains a `"ref":` substring — a coarse filter cheap enough to
+		// run once, after which all per-pattern work happens in PHP.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT( DISTINCT ID ) FROM {$wpdb->posts}
+		$rows = $wpdb->get_col(
+			"SELECT post_content FROM {$wpdb->posts}
 				WHERE post_status = 'publish'
-				AND ( post_content LIKE %s OR post_content LIKE %s )",
-				$needle_close,
-				$needle_next
-			)
+				AND post_content LIKE '%\"ref\":%'"
 		);
 
-		$cache[ $pattern_id ] = (int) $count;
-		return $cache[ $pattern_id ];
+		$counts = array();
+		foreach ( (array) $rows as $content ) {
+			if ( ! is_string( $content ) || '' === $content ) {
+				continue;
+			}
+
+			// `"ref":<digits>` followed by `,` or `}` — same trailing-boundary
+			// guard the old per-pattern method used, so `"ref":12` and
+			// `"ref":123` never collide.
+			if ( ! preg_match_all( '/"ref":(\d+)\s*[,}]/', $content, $matches ) ) {
+				continue;
+			}
+
+			// De-duplicate per post so a post that references the same pattern
+			// twice counts once — matches the old COUNT(DISTINCT ID) semantic.
+			$unique_ids = array_unique( array_map( 'intval', $matches[1] ) );
+			foreach ( $unique_ids as $id ) {
+				if ( $id <= 0 ) {
+					continue;
+				}
+				$counts[ $id ] = isset( $counts[ $id ] ) ? $counts[ $id ] + 1 : 1;
+			}
+		}
+
+		set_transient( self::REF_COUNT_CACHE_KEY, $counts, self::REF_COUNT_CACHE_TTL );
+
+		return $counts;
 	}
 
 	/**

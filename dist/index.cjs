@@ -43915,6 +43915,7 @@ var WordPressBlockClient = class {
     if (params?.category) queryParams.category = params.category;
     if (params?.limit !== void 0) queryParams.limit = String(params.limit);
     if (params?.order_by) queryParams.order_by = params.order_by;
+    if (params?.refresh) queryParams.refresh = "true";
     const response = await this.client.get("/patterns", {
       params: queryParams
     });
@@ -44597,7 +44598,7 @@ var DISCOVERY_TOOLS = [
   },
   {
     name: "list_patterns",
-    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side.",
+    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour \u2014 pass `refresh:true` to rebuild.",
     annotations: { ...READ_ANNOT, title: "List patterns" },
     inputSchema: {
       type: "object",
@@ -44606,7 +44607,8 @@ var DISCOVERY_TOOLS = [
         synced: { type: "boolean", description: "true = synced only, false = registered only, omit = all." },
         min_score: { type: "number", description: "Min preference score; 0 excludes legacy." },
         limit: { type: "number", description: "Max results. Default 20." },
-        offset: { type: "number", description: "Skip this many results. Default 0." }
+        offset: { type: "number", description: "Skip this many results. Default 0." },
+        refresh: { type: "boolean", description: "Bust the 1-hour reference-count cache before listing." }
       }
     }
   },
@@ -44715,7 +44717,8 @@ async function handleDiscoveryTool(toolName, args, client2) {
         synced: args.synced,
         min_score: args.min_score,
         // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit
+        limit: offset + limit,
+        refresh: args.refresh
       });
       const enriched = enrichPatternList(response.patterns);
       const total = enriched.patterns.length;

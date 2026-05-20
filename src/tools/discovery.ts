@@ -45,7 +45,7 @@ export const DISCOVERY_TOOLS = [
   },
   {
     name: 'list_patterns',
-    description: 'Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side.',
+    description: 'Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild.',
     annotations: { ...READ_ANNOT, title: 'List patterns' },
     inputSchema: {
       type: 'object' as const,
@@ -55,6 +55,7 @@ export const DISCOVERY_TOOLS = [
         min_score: { type: 'number',  description: 'Min preference score; 0 excludes legacy.' },
         limit:     { type: 'number',  description: 'Max results. Default 20.' },
         offset:    { type: 'number',  description: 'Skip this many results. Default 0.' },
+        refresh:   { type: 'boolean', description: 'Bust the 1-hour reference-count cache before listing.' },
       },
     },
   },
@@ -171,6 +172,7 @@ export async function handleDiscoveryTool(
         min_score: args.min_score as number | undefined,
         // Fetch enough to honor offset+limit. Server caps respond too.
         limit: offset + limit,
+        refresh: args.refresh as boolean | undefined,
       });
       const enriched = enrichPatternList(response.patterns);
       const total = enriched.patterns.length;
