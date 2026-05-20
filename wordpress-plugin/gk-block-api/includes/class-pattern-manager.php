@@ -43,15 +43,8 @@ class Pattern_Manager {
 
 	/**
 	 * Rows pulled per chunk when scanning post_content for pattern references.
-	 *
-	 * The aggregate loads `post_content` into PHP for every published post that
-	 * matches `LIKE '%"ref":%'`. Without chunking, a site with thousands of
-	 * matching rows (or a handful of multi-megabyte pillar pages) can exhaust
-	 * `memory_limit` mid-rebuild. Streaming in batches keeps peak resident
-	 * memory bounded to one batch worth of content regardless of corpus size.
-	 *
-	 * Tests override this via the `gk_block_api_pattern_ref_scan_batch_size`
-	 * filter so the chunked path can be exercised with small fixtures.
+	 * Peak memory scales with batch_size × matching post_content size.
+	 * Override via the `gk_block_api_pattern_ref_scan_batch_size` filter.
 	 */
 	const SCAN_BATCH_SIZE = 200;
 
@@ -61,6 +54,19 @@ class Pattern_Manager {
 	 * @var Preferences
 	 */
 	private $preferences;
+
+	/**
+	 * Per-request memo of the pattern reference-count map.
+	 *
+	 * `format_synced_pattern()` resolves each pattern's count through this
+	 * class once per pattern in a list response; without an instance-level
+	 * memo each call would re-enter `get_transient()`. Null until the first
+	 * lookup; cleared naturally with the Pattern_Manager instance at end
+	 * of request.
+	 *
+	 * @var array<int,int>|null
+	 */
+	private $ref_counts_memo;
 
 	/**
 	 * Constructor.
@@ -102,8 +108,11 @@ class Pattern_Manager {
 
 		// Bust the reference-count cache before per-pattern enrichment runs so
 		// every formatted pattern in this response reads from the rebuilt map.
+		// The instance memo must drop too — otherwise a refresh call inside
+		// the same request would still see the pre-bust map.
 		if ( ! empty( $args['refresh'] ) ) {
 			delete_transient( self::REF_COUNT_CACHE_KEY );
+			$this->ref_counts_memo = null;
 		}
 
 		$results = array();
@@ -219,24 +228,10 @@ class Pattern_Manager {
 	 * @return array Formatted pattern data.
 	 */
 	private function get_synced_patterns( $args ) {
-		/**
-		 * Filters the maximum number of synced patterns fetched in one query.
-		 *
-		 * Synced patterns are user-created `wp_block` posts. The default cap
-		 * bounds memory on edge-case sites with thousands of entries; the
-		 * pattern list is also fully loaded into PHP for scoring + enrichment
-		 * downstream, so the value isn't purely an SQL concern. Raise only
-		 * when a known site exceeds the default and the full set is needed
-		 * in a single response.
-		 *
-		 * @param int $limit Maximum synced patterns to fetch. Default 500.
-		 */
-		$synced_patterns_limit = (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 );
-
 		$query_args = array(
 			'post_type'           => 'wp_block',
 			'post_status'         => 'publish',
-			'posts_per_page'      => $synced_patterns_limit,
+			'posts_per_page'      => $this->synced_patterns_query_limit(),
 			'no_found_rows'       => true,
 			'orderby'             => 'modified',
 			'order'               => 'DESC',
@@ -322,7 +317,8 @@ class Pattern_Manager {
 		$block_names     = $this->extract_block_names( $blocks );
 		$legacy_blocks   = $this->find_legacy_blocks_in_list( $block_names );
 		$has_legacy      = ! empty( $legacy_blocks );
-		$reference_count = $this->count_pattern_references( $post->ID );
+		$ref_counts      = $this->get_all_pattern_reference_counts();
+		$reference_count = isset( $ref_counts[ $post->ID ] ) ? (int) $ref_counts[ $post->ID ] : 0;
 
 		// Build scoring input.
 		$scoring_input = array(
@@ -456,25 +452,25 @@ class Pattern_Manager {
 	}
 
 	/**
-	 * Count references to a synced pattern across published content.
+	 * Maximum number of synced patterns acknowledged per query.
 	 *
-	 * Looks up the pattern ID in the aggregate reference-count map. The map
-	 * is built and cached by `get_all_pattern_reference_counts()`; this method
-	 * is a thin accessor so callers see a stable per-pattern API.
+	 * Shared by `get_synced_patterns()` (the listing query) and
+	 * `get_all_pattern_reference_counts()` (the orphan-filter allow-list),
+	 * so both call sites agree on which patterns exist. Without a shared
+	 * cap, the allow-list could outgrow the list it gates.
 	 *
-	 * @param int $pattern_id Pattern post ID.
-	 *
-	 * @return int Number of distinct published posts referencing this pattern.
+	 * @return int
 	 */
-	private function count_pattern_references( $pattern_id ) {
-		$pattern_id = (int) $pattern_id;
-		if ( $pattern_id <= 0 ) {
-			return 0;
-		}
-
-		$counts = $this->get_all_pattern_reference_counts();
-
-		return isset( $counts[ $pattern_id ] ) ? (int) $counts[ $pattern_id ] : 0;
+	private function synced_patterns_query_limit() {
+		/**
+		 * Filters the maximum number of synced patterns acknowledged per query.
+		 *
+		 * Applies to the listing query and the orphan-filter allow-list so
+		 * both call sites use the same set. Raising the cap affects both.
+		 *
+		 * @param int $limit Maximum synced patterns acknowledged. Default 500.
+		 */
+		return (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 );
 	}
 
 	/**
@@ -491,46 +487,50 @@ class Pattern_Manager {
 	 * @return array<int,int> Map of pattern ID → count.
 	 */
 	public function get_all_pattern_reference_counts() {
-		$cached = get_transient( self::REF_COUNT_CACHE_KEY );
-		if ( is_array( $cached ) ) {
-			return $cached;
+		if ( null !== $this->ref_counts_memo ) {
+			return $this->ref_counts_memo;
 		}
 
-		global $wpdb;
+		$cached = get_transient( self::REF_COUNT_CACHE_KEY );
+		if ( is_array( $cached ) ) {
+			$this->ref_counts_memo = $cached;
+			return $this->ref_counts_memo;
+		}
 
 		// Allow-list of real published synced patterns. Extracted refs that
 		// don't appear here (orphaned IDs, leftover copy-pastes from other
 		// installs) are dropped so the cache stays bounded to actual patterns.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$valid_ids = $wpdb->get_col(
-			"SELECT ID FROM {$wpdb->posts}
-				WHERE post_type = 'wp_block' AND post_status = 'publish'"
+		// Shares the same cap as the listing query so both call sites agree
+		// on which patterns exist.
+		$valid_ids = get_posts(
+			array(
+				'post_type'           => 'wp_block',
+				'post_status'         => 'publish',
+				'posts_per_page'      => $this->synced_patterns_query_limit(),
+				'fields'              => 'ids',
+				'no_found_rows'       => true,
+				'orderby'             => 'ID',
+				'order'               => 'ASC',
+				'ignore_sticky_posts' => true,
+			)
 		);
 
 		// Empty allow-list → no patterns to count. Persist the empty map so
 		// repeated cold reads on a site with zero patterns don't keep scanning.
 		if ( empty( $valid_ids ) ) {
 			set_transient( self::REF_COUNT_CACHE_KEY, array(), self::REF_COUNT_CACHE_TTL );
-			return array();
+			$this->ref_counts_memo = array();
+			return $this->ref_counts_memo;
 		}
 
 		$valid_lookup = array_flip( array_map( 'intval', $valid_ids ) );
 
-		// LIKE-prefilter, then page through results so peak memory stays
-		// bounded to one batch worth of post_content regardless of how many
-		// rows match. Sites with hundreds of pages × 200KB content each
-		// otherwise risk OOM mid-rebuild.
+		global $wpdb;
 		$like_pattern = '%' . $wpdb->esc_like( '"ref":' ) . '%';
 
 		/**
 		 * Filters the batch size used when paging through post_content rows
-		 * to tally synced-pattern references.
-		 *
-		 * Each batch is loaded into PHP whole (one row per post that contains
-		 * a `"ref":` substring), so peak memory is roughly batch_size ×
-		 * average matching post_content size. Lower the value on sites with
-		 * very large pages; raise it on small sites to cut round-trips.
-		 * Values < 1 are clamped to 1.
+		 * to tally synced-pattern references. Values < 1 are clamped to 1.
 		 *
 		 * @param int $batch_size Rows pulled per chunk. Default 200.
 		 */
@@ -542,7 +542,7 @@ class Pattern_Manager {
 
 		do {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$rows = $wpdb->get_col(
+			$rows = (array) $wpdb->get_col(
 				$wpdb->prepare(
 					"SELECT post_content FROM {$wpdb->posts}
 						WHERE post_status = 'publish'
@@ -555,7 +555,7 @@ class Pattern_Manager {
 				)
 			);
 
-			foreach ( (array) $rows as $content ) {
+			foreach ( $rows as $content ) {
 				if ( ! is_string( $content ) || '' === $content ) {
 					continue;
 				}
@@ -579,13 +579,14 @@ class Pattern_Manager {
 				}
 			}
 
-			$rows_returned = count( (array) $rows );
+			$rows_returned = count( $rows );
 			$offset       += $rows_returned;
 		} while ( $rows_returned === $batch_size );
 
 		set_transient( self::REF_COUNT_CACHE_KEY, $counts, self::REF_COUNT_CACHE_TTL );
 
-		return $counts;
+		$this->ref_counts_memo = $counts;
+		return $this->ref_counts_memo;
 	}
 
 	/**
