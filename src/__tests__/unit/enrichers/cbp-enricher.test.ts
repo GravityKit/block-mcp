@@ -96,13 +96,60 @@ describe('enrichBlock — Code Block Pro', () => {
     expect(result.attributes?.highestLineNumber).toBe(1);
   });
 
-  it('leaves innerHTML undefined when block has no innerHTML', async () => {
+  /**
+   * Fresh CBP blocks created via the API (e.g. edit_block_tree replace-block)
+   * arrive with no innerHTML. Pre-fix, the enricher only updated codeHTML and
+   * left innerHTML empty, which made the block render as a blank gap on the
+   * front-end. The enricher must build a minimal wrapper so the block is
+   * actually visible after save.
+   */
+  it('builds wrapper innerHTML when block has none', async () => {
     const block: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',
       attributes: { code: 'const a = 1;', language: 'javascript' },
     };
     const result = await enrichBlock(block);
-    expect(result.innerHTML).toBeUndefined();
+    expect(typeof result.innerHTML).toBe('string');
+    expect(result.innerHTML).toContain('wp-block-kevinbatdorf-code-block-pro');
+    expect(result.innerHTML).toContain('<pre class="shiki');
+  });
+
+  it('inlines wrapper style from font / colour attributes', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontFamily: 'Code-Pro-JetBrains-Mono',
+        fontSize: '1rem',
+        lineHeight: '1.25rem',
+        bgColor: '#0F2B62',
+        textColor: '#d8dee9ff',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain('font-family:Code-Pro-JetBrains-Mono');
+    expect(result.innerHTML).toContain('font-size:1rem');
+    expect(result.innerHTML).toContain('background-color:#0F2B62');
+    expect(result.innerHTML).toContain('color:#d8dee9ff');
+  });
+
+  it('includes copy-textarea when copyButton is enabled', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'const a = 1;', language: 'javascript', copyButton: true },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toMatch(/<textarea[^>]*>const a = 1;<\/textarea>/);
+  });
+
+  it('omits copy-textarea when copyButton is false', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'const a = 1;', language: 'javascript', copyButton: false },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).not.toContain('<textarea');
   });
 
   it('keeps explicit php language without inference', async () => {
@@ -118,13 +165,72 @@ describe('enrichBlock — Code Block Pro', () => {
 // ── CBP enrichment — language inference ──────────────────────────────────────
 
 describe('enrichBlock — language inference', () => {
-  it('infers css when language is plaintext and code looks like CSS', async () => {
+  /**
+   * Explicit `language: 'plaintext'` is the caller saying "render this as plain
+   * text, no syntax highlighting." Pre-fix the enricher treated 'plaintext' as
+   * "no preference, infer" — so a chat prompt containing "from … from …" was
+   * detected as SQL and rendered with mis-coloured English words. The contract
+   * now is: explicit 'plaintext'/'text'/'plain'/'txt'/'none' is respected;
+   * inference only runs when the attribute is missing, empty, or 'auto'.
+   */
+  it('respects explicit plaintext language without inference', async () => {
     const block: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',
       attributes: { code: '.hero { color: red; }', language: 'plaintext' },
     };
     const result = await enrichBlock(block);
+    expect(result.attributes?.language).toBe('plaintext');
+  });
+
+  it.each(['text', 'plain', 'txt', 'none'])(
+    'respects explicit %s as plaintext alias',
+    async (alias) => {
+      const block: BlockDef = {
+        name: 'kevinbatdorf/code-block-pro',
+        attributes: { code: '.hero { color: red; }', language: alias },
+      };
+      const result = await enrichBlock(block);
+      expect(result.attributes?.language).toBe('plaintext');
+    },
+  );
+
+  it('infers css when language attribute is missing', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: '.hero { color: red; }' },
+    };
+    const result = await enrichBlock(block);
     expect(result.attributes?.language).toBe('css');
+  });
+
+  it('infers css when language is "auto"', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: '.hero { color: red; }', language: 'auto' },
+    };
+    const result = await enrichBlock(block);
+    expect(result.attributes?.language).toBe('css');
+  });
+
+  /**
+   * Regression: chat prompts pasted into a CBP block via the API used to detect
+   * as SQL because inferLanguage's SQL heuristic fires on the word "from" — and
+   * "from" appears twice in the canonical "Set up Block MCP from … from me"
+   * prompt. With explicit plaintext respected, the prompt renders correctly.
+   */
+  it('does not mis-detect English prose as SQL when caller passes plaintext', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'Set up Block MCP from https://example.com on my computer. Walk me through anything you need from me — WordPress site URL, username, and Application Password.',
+        language: 'plaintext',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.attributes?.language).toBe('plaintext');
+    // The generated codeHTML must not contain SQL keyword tokens for the
+    // English words that previously got mis-coloured.
+    expect(result.attributes?.codeHTML).not.toContain('shiki-token-keyword');
   });
 
   it('does not override non-plaintext language with inference', async () => {
@@ -172,17 +278,26 @@ describe('enrichBlock — innerHTML update', () => {
 // ── CBP enrichment — no-op (codeHTML already current) ────────────────────────
 
 describe('enrichBlock — no-op when already enriched', () => {
-  it('returns original block reference when codeHTML already matches', async () => {
+  /**
+   * A fully-enriched CBP block has both `codeHTML` (attribute) and `innerHTML`
+   * (the rendered widget). Passing such a block through the enricher again
+   * must be a no-op — same object reference returned. If only one side is
+   * populated, the enricher rebuilds the missing piece so first-pass blocks
+   * created via the API (no innerHTML) still render correctly.
+   */
+  it('returns original block reference when codeHTML and innerHTML are already current', async () => {
     const code = 'const x = 1;';
     const firstPass = await enrichBlock({
       name: 'kevinbatdorf/code-block-pro',
       attributes: { code, language: 'javascript' },
     });
     const codeHTML = firstPass.attributes?.codeHTML as string;
+    const innerHTML = firstPass.innerHTML as string;
 
     const block: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',
       attributes: { code, language: 'javascript', codeHTML },
+      innerHTML,
     };
     const result = await enrichBlock(block);
     expect(result).toBe(block);

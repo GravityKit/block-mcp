@@ -562,6 +562,17 @@ The MCP server version is informational; the plugin version is what site owners 
    - If the MCP server side also moved, bump `package.json` in the same commit
 3. Push.
 
+### Tagging the release
+
+Every plugin version bump gets a matching annotated git tag. Tags live on the merge commit on `main`; never on a feature branch tip.
+
+- **Format**: `v{plugin-version}` — e.g. `v1.7.0`. Match the plugin version, not the MCP server version. (When the MCP server bumps independently without a plugin bump, no tag — server versions are informational.)
+- **Annotated, not lightweight**: `git tag -a v1.7.0 -m "<release notes>"`. Lightweight tags don't carry a message and don't show up in `git show`.
+- **Tag message**: the same prose as the `readme.txt` `Upgrade Notice` for that version, plus a `Highlights:` bulleted list of the headline changes. Look at `git show v1.6.0` for the canonical shape.
+- **Push the tag explicitly**: `git push origin v1.7.0`. Bare `git push` does not push tags. Without this step the tag exists locally only and `gh release create` can't find it.
+- **When to tag**: after the version-bump commit has landed on `main` (via PR merge or direct push). Tagging on the feature branch and merging via squash strands the tag on a dead commit.
+- **GitHub release**: optional, but if you create one, attach it to the tag (`gh release create v1.7.0 --notes-file …` or via the UI). The marketplace pin / Composer installer reads the tag, not the release.
+
 ### Backfilling missing entries
 
 If a version was bumped without a corresponding `readme.txt` entry (it happens — historically `1.4.1`, `1.4.2`, and `1.5.0` all shipped without changelog updates), audit the commits that landed between the previous bump and the version bump commit (`git log <prev-bump>..<this-bump> -- wordpress-plugin/gk-block-api/`) and write the missing entries. Keep the Upgrade Notice and Changelog sections in strict reverse-chronological order across all versions.

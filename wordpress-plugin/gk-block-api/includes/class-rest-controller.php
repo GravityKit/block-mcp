@@ -909,6 +909,22 @@ class REST_Controller {
 				'permission_callback' => array( $this, 'check_upload_permissions' ),
 			)
 		);
+
+		// Per-site MCP serverInfo instructions addendum. PUBLIC: the value
+		// reaches every connected MCP client at handshake before any
+		// tool-call auth, so this endpoint must be readable unauthenticated.
+		// Rate-limited at Instructions::RATE_LIMIT_PER_MIN per IP to deter
+		// scraping. Admins MUST NOT put secrets in the option value; the UI
+		// copy on the settings page warns about this.
+		register_rest_route(
+			self::NAMESPACE,
+			'/instructions',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_instructions' ),
+				'permission_callback' => '__return_true',
+			)
+		);
 	}
 
 	/**
@@ -959,6 +975,66 @@ class REST_Controller {
 			);
 		}
 		return true;
+	}
+
+	/**
+	 * GET /instructions — serve the site's MCP serverInfo addendum.
+	 *
+	 * Public endpoint by design. The MCP server fetches this at startup
+	 * (before any tool call), combines with its hard-coded baseline, and
+	 * passes the result to `McpServer`'s `instructions` field.
+	 *
+	 * Response shape: `{ addendum, length, max_length, updated_at }`. Empty
+	 * addendum is returned as an empty string (NOT 404) so the client
+	 * doesn't have to special-case missing-vs-empty.
+	 *
+	 * Cache-Control: `public, max-age=60` — fresh enough that admin edits
+	 * land quickly in dev; long enough that legitimate clients don't hammer
+	 * the endpoint. Caller-side cache key is the WordPress URL + path.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_instructions( $request ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- WP_REST_Server requires the request object on every callback signature even when the route has no params.
+		try {
+			$ip = isset( $_SERVER['REMOTE_ADDR'] )
+				? sanitize_text_field( wp_unslash( (string) $_SERVER['REMOTE_ADDR'] ) )
+				: '';
+
+			if ( '' !== $ip && ! Instructions::check_rate_limit( $ip ) ) {
+				return new \WP_Error(
+					'rate_limit_exceeded',
+					__( 'Too many requests. Try again in a minute.', 'gk-block-api' ),
+					array( 'status' => 429 )
+				);
+			}
+
+			$addendum   = Instructions::get_addendum();
+			$updated_at = Instructions::get_updated_at();
+
+			$response = rest_ensure_response(
+				array(
+					'addendum'   => $addendum,
+					// `length` reports UTF-8 character count to match
+					// Instructions::MAX_LENGTH semantics (also characters,
+					// not bytes). Clients comparing the two stay
+					// apples-to-apples.
+					'length'     => mb_strlen( $addendum, 'UTF-8' ),
+					'max_length' => Instructions::MAX_LENGTH,
+					'updated_at' => $updated_at,
+				)
+			);
+
+			// Short TTL public cache. Surrogates and reverse proxies are
+			// welcome to cache; private intermediaries should not because
+			// every visitor receives the same payload.
+			$response->header( 'Cache-Control', 'public, max-age=60' );
+
+			return $response;
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
 	}
 
 	// =========================================================================
