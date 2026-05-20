@@ -40,6 +40,8 @@ tests_add_filter(
 
 require $_tests_dir . '/includes/bootstrap.php';
 
-// Shared test-base class. Loaded AFTER wp-phpunit's bootstrap so
-// WP_UnitTestCase is defined and BlockApiTestCase can extend it.
+// Shared test base classes. Loaded AFTER wp-phpunit's bootstrap so
+// WP_UnitTestCase is defined. RestControllerTestCase extends
+// BlockApiTestCase, so order matters.
 require __DIR__ . '/BlockApiTestCase.php';
+require __DIR__ . '/RestControllerTestCase.php';

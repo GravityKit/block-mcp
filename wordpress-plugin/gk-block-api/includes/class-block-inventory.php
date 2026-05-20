@@ -687,14 +687,25 @@ class Block_Inventory {
 		$preferences = new Preferences();
 		$legacy      = array();
 
-		// Synced patterns are user-created — typically dozens, occasionally
-		// hundreds. Hard-cap at 500 to keep memory bounded; sites with more
-		// can extend via the `gk_block_api_legacy_patterns_scan_limit` filter.
+		/**
+		 * Filters the maximum number of synced patterns scanned for legacy
+		 * block usage in one pass.
+		 *
+		 * Each fetched pattern is parsed and walked to detect legacy-tier
+		 * blocks (`stackable/*`, `ugb/*`, `jetpack/*`, etc.), so peak memory
+		 * scales with the number returned. The default cap covers the
+		 * "typically dozens, occasionally hundreds" of user-created synced
+		 * patterns on real sites; raise only when a known site has more.
+		 *
+		 * @param int $limit Maximum synced patterns to scan. Default 500.
+		 */
+		$legacy_scan_limit = (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 );
+
 		$patterns = get_posts(
 			array(
 				'post_type'           => 'wp_block',
 				'post_status'         => 'publish',
-				'posts_per_page'      => (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 ),
+				'posts_per_page'      => $legacy_scan_limit,
 				'no_found_rows'       => true,
 				'orderby'             => 'ID',
 				'order'               => 'ASC',

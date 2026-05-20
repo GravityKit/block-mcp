@@ -290,6 +290,7 @@ export class WordPressBlockClient {
     category?: string;
     limit?: number;
     order_by?: string;
+    refresh?: boolean;
   }): Promise<PatternsResponse> {
     const queryParams: Record<string, string> = {};
     if (params?.q) queryParams.q = params.q;
@@ -298,6 +299,7 @@ export class WordPressBlockClient {
     if (params?.category) queryParams.category = params.category;
     if (params?.limit !== undefined) queryParams.limit = String(params.limit);
     if (params?.order_by) queryParams.order_by = params.order_by;
+    if (params?.refresh) queryParams.refresh = 'true';
 
     const response = await this.client.get<PatternsResponse>('/patterns', {
       params: queryParams,

@@ -23,11 +23,50 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Pattern_Manager {
 
 	/**
+	 * Transient key for the synced-pattern reference-count map.
+	 *
+	 * Keyed `wp_block` post ID → count of distinct published posts that contain
+	 * a `<!-- wp:block {"ref":ID} /-->` reference. One transient, not one per
+	 * pattern, so listing all patterns is a single cached lookup instead of N
+	 * post_content LIKE scans.
+	 */
+	const REF_COUNT_CACHE_KEY = 'gk_block_api_pattern_ref_counts';
+
+	/**
+	 * TTL for the reference-count cache (1 hour).
+	 *
+	 * Matches `Block_Inventory`'s cache TTL. Counts are an informational scoring
+	 * input, not a correctness invariant — a one-hour lag on reference totals
+	 * is acceptable. Callers needing fresh data pass `refresh=true`.
+	 */
+	const REF_COUNT_CACHE_TTL = HOUR_IN_SECONDS;
+
+	/**
+	 * Rows pulled per chunk when scanning post_content for pattern references.
+	 * Peak memory scales with batch_size × matching post_content size.
+	 * Override via the `gk_block_api_pattern_ref_scan_batch_size` filter.
+	 */
+	const SCAN_BATCH_SIZE = 200;
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
 	 */
 	private $preferences;
+
+	/**
+	 * Per-request memo of the pattern reference-count map.
+	 *
+	 * `format_synced_pattern()` resolves each pattern's count through this
+	 * class once per pattern in a list response; without an instance-level
+	 * memo each call would re-enter `get_transient()`. Null until the first
+	 * lookup; cleared naturally with the Pattern_Manager instance at end
+	 * of request.
+	 *
+	 * @var array<int,int>|null
+	 */
+	private $ref_counts_memo;
 
 	/**
 	 * Constructor.
@@ -62,9 +101,20 @@ class Pattern_Manager {
 			'category'  => '',
 			'limit'     => 20,
 			'order_by'  => 'score',
+			'refresh'   => false,
 		);
 
-		$args    = wp_parse_args( $args, $defaults );
+		$args = wp_parse_args( $args, $defaults );
+
+		// Bust the reference-count cache before per-pattern enrichment runs so
+		// every formatted pattern in this response reads from the rebuilt map.
+		// The instance memo must drop too — otherwise a refresh call inside
+		// the same request would still see the pre-bust map.
+		if ( ! empty( $args['refresh'] ) ) {
+			delete_transient( self::REF_COUNT_CACHE_KEY );
+			$this->ref_counts_memo = null;
+		}
+
 		$results = array();
 
 		// Collect synced patterns (wp_block CPT).
@@ -178,13 +228,10 @@ class Pattern_Manager {
 	 * @return array Formatted pattern data.
 	 */
 	private function get_synced_patterns( $args ) {
-		// Synced patterns are user-created; capped to keep memory bounded
-		// even on edge-case sites with thousands. Extend via the
-		// `gk_block_api_synced_patterns_query_limit` filter if needed.
 		$query_args = array(
 			'post_type'           => 'wp_block',
 			'post_status'         => 'publish',
-			'posts_per_page'      => (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 ),
+			'posts_per_page'      => $this->synced_patterns_query_limit(),
 			'no_found_rows'       => true,
 			'orderby'             => 'modified',
 			'order'               => 'DESC',
@@ -270,7 +317,8 @@ class Pattern_Manager {
 		$block_names     = $this->extract_block_names( $blocks );
 		$legacy_blocks   = $this->find_legacy_blocks_in_list( $block_names );
 		$has_legacy      = ! empty( $legacy_blocks );
-		$reference_count = $this->count_pattern_references( $post->ID );
+		$ref_counts      = $this->get_all_pattern_reference_counts();
+		$reference_count = isset( $ref_counts[ $post->ID ] ) ? (int) $ref_counts[ $post->ID ] : 0;
 
 		// Build scoring input.
 		$scoring_input = array(
@@ -404,52 +452,141 @@ class Pattern_Manager {
 	}
 
 	/**
-	 * Count references to a synced pattern across published content.
+	 * Maximum number of synced patterns acknowledged per query.
 	 *
-	 * Uses a simple meta/content search for the pattern's ref attribute.
+	 * Shared by `get_synced_patterns()` (the listing query) and
+	 * `get_all_pattern_reference_counts()` (the orphan-filter allow-list),
+	 * so both call sites agree on which patterns exist. Without a shared
+	 * cap, the allow-list could outgrow the list it gates.
 	 *
-	 * @param int $pattern_id Pattern post ID.
-	 *
-	 * @return int Number of pages/posts referencing this pattern.
+	 * @return int
 	 */
-	private function count_pattern_references( $pattern_id ) {
-		$pattern_id = (int) $pattern_id;
-		if ( $pattern_id <= 0 ) {
-			return 0;
+	private function synced_patterns_query_limit() {
+		/**
+		 * Filters the maximum number of synced patterns acknowledged per query.
+		 *
+		 * Applies to the listing query and the orphan-filter allow-list so
+		 * both call sites use the same set. Raising the cap affects both.
+		 *
+		 * @param int $limit Maximum synced patterns acknowledged. Default 500.
+		 */
+		return (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 );
+	}
+
+	/**
+	 * Build (or read from cache) a map of `pattern_id => reference_count`
+	 * spanning every published post on the site.
+	 *
+	 * Uses a single LIKE query to collect post_content rows that contain
+	 * `"ref":` substrings, then regex-extracts the IDs in PHP and de-duplicates
+	 * per post. The old per-pattern implementation ran two LIKE scans of
+	 * `wp_posts` per pattern, so a /patterns response of N synced patterns
+	 * cost 2N full-table scans (e.g. 60 on gravitykit.com). This collapses
+	 * the work into one scan plus an in-memory tally and caches the result.
+	 *
+	 * @return array<int,int> Map of pattern ID → count.
+	 */
+	public function get_all_pattern_reference_counts() {
+		if ( null !== $this->ref_counts_memo ) {
+			return $this->ref_counts_memo;
 		}
 
-		// Per-request memoization. `format_synced_pattern()` calls this once
-		// per pattern in a list; without memoization an /patterns response
-		// of N items triggers N table scans.
-		static $cache = array();
-		if ( isset( $cache[ $pattern_id ] ) ) {
-			return $cache[ $pattern_id ];
+		$cached = get_transient( self::REF_COUNT_CACHE_KEY );
+		if ( is_array( $cached ) ) {
+			$this->ref_counts_memo = $cached;
+			return $this->ref_counts_memo;
 		}
 
-		global $wpdb;
-
-		// Match `"ref":<id>` followed by either `}` (closing the JSON object)
-		// or `,` (next attribute). Without a trailing boundary, "ref":123
-		// would also match "ref":1234, "ref":12345, etc. and inflate the
-		// count for low-numbered patterns. `esc_like` neutralizes `%`/`_`
-		// if a future ID format ever contains them. Direct query because
-		// there's no WP API for content full-text search.
-		$prefix       = '"ref":' . $pattern_id;
-		$needle_close = '%' . $wpdb->esc_like( $prefix . '}' ) . '%';
-		$needle_next  = '%' . $wpdb->esc_like( $prefix . ',' ) . '%';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT( DISTINCT ID ) FROM {$wpdb->posts}
-				WHERE post_status = 'publish'
-				AND ( post_content LIKE %s OR post_content LIKE %s )",
-				$needle_close,
-				$needle_next
+		// Allow-list of real published synced patterns. Extracted refs that
+		// don't appear here (orphaned IDs, leftover copy-pastes from other
+		// installs) are dropped so the cache stays bounded to actual patterns.
+		// Shares the same cap as the listing query so both call sites agree
+		// on which patterns exist.
+		$valid_ids = get_posts(
+			array(
+				'post_type'           => 'wp_block',
+				'post_status'         => 'publish',
+				'posts_per_page'      => $this->synced_patterns_query_limit(),
+				'fields'              => 'ids',
+				'no_found_rows'       => true,
+				'orderby'             => 'ID',
+				'order'               => 'ASC',
+				'ignore_sticky_posts' => true,
 			)
 		);
 
-		$cache[ $pattern_id ] = (int) $count;
-		return $cache[ $pattern_id ];
+		// Empty allow-list → no patterns to count. Persist the empty map so
+		// repeated cold reads on a site with zero patterns don't keep scanning.
+		if ( empty( $valid_ids ) ) {
+			set_transient( self::REF_COUNT_CACHE_KEY, array(), self::REF_COUNT_CACHE_TTL );
+			$this->ref_counts_memo = array();
+			return $this->ref_counts_memo;
+		}
+
+		$valid_lookup = array_flip( array_map( 'intval', $valid_ids ) );
+
+		global $wpdb;
+		$like_pattern = '%' . $wpdb->esc_like( '"ref":' ) . '%';
+
+		/**
+		 * Filters the batch size used when paging through post_content rows
+		 * to tally synced-pattern references. Values < 1 are clamped to 1.
+		 *
+		 * @param int $batch_size Rows pulled per chunk. Default 200.
+		 */
+		$batch_size = (int) apply_filters( 'gk_block_api_pattern_ref_scan_batch_size', self::SCAN_BATCH_SIZE );
+		$batch_size = max( 1, $batch_size );
+
+		$offset = 0;
+		$counts = array();
+
+		do {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$rows = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT post_content FROM {$wpdb->posts}
+						WHERE post_status = 'publish'
+						AND post_content LIKE %s
+						ORDER BY ID
+						LIMIT %d OFFSET %d",
+					$like_pattern,
+					$batch_size,
+					$offset
+				)
+			);
+
+			foreach ( $rows as $content ) {
+				if ( ! is_string( $content ) || '' === $content ) {
+					continue;
+				}
+
+				// `"ref":<digits>` followed by `,` or `}` — trailing-boundary
+				// guard so `"ref":12` and `"ref":123` never collide.
+				if ( ! preg_match_all( '/"ref":(\d+)\s*[,}]/', $content, $matches ) ) {
+					continue;
+				}
+
+				// De-duplicate per post so a post that references the same
+				// pattern twice counts once — matches COUNT(DISTINCT ID).
+				$unique_ids = array_unique( array_map( 'intval', $matches[1] ) );
+				foreach ( $unique_ids as $id ) {
+					// Skip non-positive IDs and orphaned/foreign refs that
+					// don't resolve to a real published wp_block on this site.
+					if ( $id <= 0 || ! isset( $valid_lookup[ $id ] ) ) {
+						continue;
+					}
+					$counts[ $id ] = isset( $counts[ $id ] ) ? $counts[ $id ] + 1 : 1;
+				}
+			}
+
+			$rows_returned = count( $rows );
+			$offset       += $rows_returned;
+		} while ( $rows_returned === $batch_size );
+
+		set_transient( self::REF_COUNT_CACHE_KEY, $counts, self::REF_COUNT_CACHE_TTL );
+
+		$this->ref_counts_memo = $counts;
+		return $this->ref_counts_memo;
 	}
 
 	/**

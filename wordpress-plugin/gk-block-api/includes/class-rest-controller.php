@@ -1141,7 +1141,21 @@ class REST_Controller {
 				'category'  => $request->get_param( 'category' ),
 				'limit'     => $request->get_param( 'limit' ),
 				'order_by'  => $request->get_param( 'order_by' ),
+				'refresh'   => $request->get_param( 'refresh' ),
 			);
+
+			// Cache busting is an admin concern. The base /patterns route
+			// requires `edit_posts`, but rebuilding the reference-count cache
+			// is expensive enough that we don't want any editor able to force
+			// it on demand. Without this gate an authenticated user can loop
+			// `refresh=true` to repeatedly trigger the full post_content scan.
+			if ( ! empty( $args['refresh'] ) && ! current_user_can( 'manage_options' ) ) {
+				return new \WP_Error(
+					'rest_forbidden_refresh',
+					__( 'You do not have permission to refresh the pattern cache.', 'gk-block-api' ),
+					array( 'status' => rest_authorization_required_code() )
+				);
+			}
 
 			// Normalize synced param: "true"/"false" strings to booleans, null if not set.
 			if ( null !== $args['synced'] ) {
@@ -2556,6 +2570,11 @@ class REST_Controller {
 				'default'           => 'score',
 				'enum'              => array( 'score', 'usage', 'date', 'name' ),
 				'sanitize_callback' => 'sanitize_text_field',
+			),
+			'refresh'   => array(
+				'type'        => 'boolean',
+				'default'     => false,
+				'description' => 'Bust the cached pattern-reference counts before listing.',
 			),
 		);
 	}

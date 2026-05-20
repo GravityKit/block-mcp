@@ -33,6 +33,9 @@ function gk_block_api_uninstall_blog() {
 	delete_transient( 'gk_block_inventory' );
 	delete_transient( 'gk_block_usage_stats' );
 
+	// Pattern reference-count cache (Pattern_Manager::REF_COUNT_CACHE_KEY).
+	delete_transient( 'gk_block_api_pattern_ref_counts' );
+
 	// Per-post rate-limit transients accumulate per write activity. Sweep
 	// the option table directly — there's no core helper for prefixed
 	// transient deletion.
