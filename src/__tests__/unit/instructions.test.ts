@@ -208,6 +208,53 @@ describe('fetchAddendum', () => {
     expect(config!.headers).toMatchObject({ Accept: 'application/json' });
   });
 
+  /**
+   * Pins the hardening from BLOCK-19 review: a compromised or misconfigured
+   * WP site must not be able to redirect us to a different origin.
+   * `maxRedirects: 0` makes axios surface any 3xx as an error which falls
+   * through to baseline-only via the existing catch path.
+   */
+  it('disables redirect following (maxRedirects: 0)', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: { addendum: 'x' } });
+    await fetchAddendum('https://example.com');
+    const [, config] = vi.mocked(axios.get).mock.calls[0]!;
+    expect(config!.maxRedirects).toBe(0);
+  });
+
+  /**
+   * Pins the hardening from BLOCK-19 review: the HTTP layer must cap
+   * response body size before anything reaches `sanitizeAddendum`.
+   * Primary defense against unbounded payloads; sanitize is secondary.
+   */
+  it('caps response body size via maxContentLength', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: { addendum: 'x' } });
+    await fetchAddendum('https://example.com');
+    const [, config] = vi.mocked(axios.get).mock.calls[0]!;
+    expect(typeof config!.maxContentLength).toBe('number');
+    // Headroom over MAX_ADDENDUM_LENGTH but well under a megabyte —
+    // 16 KB is the chosen value; assert a window so an intentional
+    // bump up or down doesn't silently break the contract.
+    expect(config!.maxContentLength).toBeGreaterThan(MAX_ADDENDUM_LENGTH);
+    expect(config!.maxContentLength).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  /**
+   * Same-host enforcement at the HTTP layer: a 3xx response from the
+   * site (whatever the Location header points to) is treated as an
+   * error and we fall back to baseline-only.
+   */
+  it('treats a 302 redirect as a fetch failure', async () => {
+    const err = Object.assign(new Error('Maximum number of redirects exceeded'), {
+      isAxiosError: true,
+      code: 'ERR_FR_MAX_REDIRECTS_EXCEEDED',
+    });
+    vi.mocked(axios.get).mockRejectedValueOnce(err);
+    vi.mocked(axios.isAxiosError).mockReturnValue(true);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await fetchAddendum('https://example.com')).toBe('');
+    spy.mockRestore();
+  });
+
   it('returns the sanitized addendum on success', async () => {
     vi.mocked(axios.get).mockResolvedValueOnce({
       data: { addendum: 'A\x00B' },

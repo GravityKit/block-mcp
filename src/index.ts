@@ -33,7 +33,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { WordPressBlockClient } from './client.js';
-import { BASELINE as INSTRUCTIONS_BASELINE, getInstructions } from './instructions.js';
+import { getInstructions } from './instructions.js';
 import { DISCOVERY_TOOLS, handleDiscoveryTool } from './tools/discovery.js';
 import { READ_TOOLS, handleReadTool } from './tools/read.js';
 import { WRITE_TOOLS, handleWriteTool } from './tools/write.js';
@@ -86,28 +86,18 @@ const client = new WordPressBlockClient({
 });
 
 // ============================================
-// Create MCP server
-// ============================================
-
-const server = new McpServer(
-  {
-    name: 'block-mcp',
-    version: pkg.version,
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {},
-      prompts: {},
-    },
-    // Baseline lives in ./instructions.ts so the source of truth is
-    // single. main() fetches the per-site addendum at startup and
-    // upgrades the instructions string in-place before the transport
-    // accepts the first request.
-    instructions: INSTRUCTIONS_BASELINE,
-  }
-);
-
+// MCP server construction is deferred to main() so the per-site
+// instructions addendum can be fetched from WordPress before the
+// `McpServer` constructor is called. Constructing once with the final
+// instructions string uses the SDK's public API; an earlier draft
+// mutated `server.server._instructions` post-construction, which
+// depended on a private SDK field and would silently degrade to
+// baseline-only if the field were ever renamed.
+//
+// The baseline string is imported from `./instructions.ts` and combined
+// with the remote addendum inside main(). All request handlers are
+// registered in `registerHandlers(server)` (defined below) which main()
+// calls after constructing the server.
 // ============================================
 // Aggregate all tool definitions
 // ============================================
@@ -227,8 +217,16 @@ How to behave:
 - When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
 
 // ============================================
-// Handler: List tools
+// Handler registration
+//
+// All request handlers run on the server passed in by main(). Keeping
+// this in a function instead of running at module scope means the
+// server can be constructed AFTER fetching the per-site instructions
+// addendum (otherwise we'd have to mutate the SDK's private
+// `_instructions` field — see the construction note above).
 // ============================================
+
+function registerHandlers(server: McpServer): void {
 
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
@@ -395,32 +393,36 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   };
 });
 
+} // end registerHandlers
+
 // ============================================
 // Start the server
 // ============================================
 
 async function main(): Promise<void> {
-  // Fetch the per-site instructions addendum BEFORE accepting the first
-  // request so the initialize handshake includes the combined string.
-  // getInstructions never throws — on any failure it logs to stderr and
-  // returns the baseline only.
+  // Fetch the per-site instructions addendum BEFORE constructing the
+  // server so the initialize handshake includes the combined string
+  // from the start — no post-construction mutation of SDK internals.
+  // `getInstructions` never throws: on any failure it logs to stderr
+  // and returns the baseline only.
   const instructions = await getInstructions(WORDPRESS_URL as string);
 
-  // The MCP SDK stores the instructions string on a private field
-  // (`_instructions`) of the underlying Server class. It's read once,
-  // at the initialize response (sdk/server/index.js:282), so updating
-  // it any time before `connect()` returns the new value to the next
-  // client to handshake. Gating with a runtime check so a future SDK
-  // rename surfaces as a clear stderr message rather than a silent fall-
-  // through to baseline.
-  const inner = server.server as unknown as { _instructions?: unknown };
-  if (typeof inner._instructions !== 'string') {
-    console.error(
-      '[block-mcp] MCP SDK Server._instructions field missing or wrong type — using baseline-only.'
-    );
-  } else {
-    inner._instructions = instructions;
-  }
+  const server = new McpServer(
+    {
+      name: 'block-mcp',
+      version: pkg.version,
+    },
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
+      instructions,
+    }
+  );
+
+  registerHandlers(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

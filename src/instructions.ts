@@ -59,6 +59,21 @@ export const MAX_ADDENDUM_LENGTH = 2000;
 const FETCH_TIMEOUT_MS = 3000;
 
 /**
+ * Hard cap on the response body axios accepts from `/instructions`.
+ *
+ * The expected payload is `{ addendum, length, max_length, updated_at }`
+ * where `addendum` is at most `MAX_ADDENDUM_LENGTH` characters. With
+ * 4-byte UTF-8 codepoints and the JSON envelope, the realistic ceiling
+ * is well under 10 KB. Capping at 16 KB gives generous headroom while
+ * making a compromised or malicious WP site unable to push an unbounded
+ * stream of bytes at us (slowloris-style DoS, memory pressure).
+ *
+ * The HTTP-layer cap is the primary defense; `sanitizeAddendum` is the
+ * secondary defense. Both stay in place.
+ */
+const FETCH_MAX_BYTES = 16 * 1024;
+
+/**
  * Env var that disables the fetch entirely. Useful for offline tests,
  * isolation, or when running against an internal site whose admin you
  * don't trust to manage the addendum.
@@ -174,16 +189,28 @@ export async function fetchAddendum(wordpressUrl: string): Promise<string> {
   try {
     const response = await axios.get<InstructionsResponse>(url, {
       timeout: FETCH_TIMEOUT_MS,
-      // Don't follow redirects to a different host — a misconfigured
-      // site shouldn't be able to silently forward our request elsewhere.
-      // The default axios behaviour follows up to 5 redirects which is
-      // fine for same-host HTTPS upgrade redirects.
-      maxRedirects: 3,
+      // Disable axios's automatic redirect following entirely. Without
+      // this, a compromised or misconfigured WP site could redirect us
+      // to a different origin (an exfil endpoint, an SSRF target on the
+      // internal network, etc.). Admins should configure
+      // WORDPRESS_URL with the canonical scheme + host so the first
+      // hop returns 200 directly. If the site needs an HTTP → HTTPS
+      // redirect, fix the env var instead of relying on axios to
+      // follow it for us.
+      //
+      // The corollary is a 3xx response now surfaces as an axios
+      // error and we fall back to baseline-only. Logged to stderr.
+      maxRedirects: 0,
+      // Hard cap the response body size. Primary defense against an
+      // unbounded payload — `sanitizeAddendum` still truncates after,
+      // but we never want raw bytes past this cap to hit our process.
+      maxContentLength: FETCH_MAX_BYTES,
       // Lower-case Accept so caches see a stable Vary key.
       headers: {
         Accept: 'application/json',
       },
-      // We treat 2xx as success; everything else falls back to empty.
+      // We treat 2xx as success; 3xx (any redirect) and 4xx/5xx fall
+      // back to empty via the catch block.
       validateStatus: (status) => status >= 200 && status < 300,
     });
 

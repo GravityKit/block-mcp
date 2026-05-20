@@ -475,7 +475,7 @@ class Settings_Page {
 					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-api' ); ?>"
 				><?php echo esc_textarea( $instructions_val ); ?></textarea>
 				<p class="description">
-					<span id="gk-block-api-instructions-count"><?php echo esc_html( (string) strlen( $instructions_val ) ); ?></span>
+					<span id="gk-block-api-instructions-count"><?php echo esc_html( (string) mb_strlen( $instructions_val, 'UTF-8' ) ); ?></span>
 					<?php
 					echo esc_html(
 						sprintf(

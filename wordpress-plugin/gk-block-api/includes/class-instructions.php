@@ -38,8 +38,11 @@ class Instructions {
 	const UPDATED_AT_OPTION = 'gk_block_api_instructions_updated_at';
 
 	/**
-	 * Maximum allowed length (characters). Hard-enforced on save and again
-	 * on the REST read path as defense in depth.
+	 * Maximum allowed length, counted in UTF-8 characters (not bytes).
+	 * Hard-enforced on save and again on the REST read path as defense in
+	 * depth. All length checks and truncations use `mb_strlen` /
+	 * `mb_substr` with the `'UTF-8'` encoding so multibyte input (emoji,
+	 * CJK, accented Latin) isn't split mid-codepoint.
 	 *
 	 * Sized to roughly 500 tokens of English text — small enough to be a
 	 * cheap addition to every LLM session, big enough for a useful rules
@@ -99,15 +102,17 @@ class Instructions {
 
 		// Length check fires after sanitize so HTML/shortcode stripping
 		// doesn't accidentally push a 1990-char input over the limit; the
-		// 2000-char budget is the post-sanitize size that reaches clients.
-		if ( strlen( $clean ) > self::MAX_LENGTH ) {
+		// 2000-char budget is the post-sanitize character count that
+		// reaches clients. `mb_strlen` counts UTF-8 codepoints so emoji
+		// and CJK don't blow the cap on byte-length alone.
+		if ( mb_strlen( $clean, 'UTF-8' ) > self::MAX_LENGTH ) {
 			return new \WP_Error(
 				'addendum_too_long',
 				sprintf(
 					/* translators: 1: max length, 2: submitted length */
 					__( 'Instructions addendum is too long: %2$d characters (max %1$d).', 'gk-block-api' ),
 					self::MAX_LENGTH,
-					strlen( $clean )
+					mb_strlen( $clean, 'UTF-8' )
 				),
 				array( 'status' => 400 )
 			);
@@ -171,9 +176,12 @@ class Instructions {
 		// don't carry meaning and waste budget.
 		$str = trim( $str );
 
-		// Length cap last so it operates on the post-sanitize size.
-		if ( strlen( $str ) > self::MAX_LENGTH ) {
-			$str = substr( $str, 0, self::MAX_LENGTH );
+		// Length cap last so it operates on the post-sanitize size. Use
+		// the multibyte variants so a truncation never lands inside a
+		// UTF-8 codepoint sequence (which would produce a mojibake tail
+		// and could break a downstream client's JSON parser).
+		if ( mb_strlen( $str, 'UTF-8' ) > self::MAX_LENGTH ) {
+			$str = mb_substr( $str, 0, self::MAX_LENGTH, 'UTF-8' );
 		}
 
 		return $str;

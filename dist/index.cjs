@@ -44432,6 +44432,7 @@ After a write, the response already includes the canonical post-save snapshot (\
 Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`;
 var MAX_ADDENDUM_LENGTH = 2e3;
 var FETCH_TIMEOUT_MS = 3e3;
+var FETCH_MAX_BYTES = 16 * 1024;
 var OFF_ENV_VAR = "BLOCK_MCP_INSTRUCTIONS_OFF";
 function sanitizeAddendum(input) {
   if (typeof input !== "string") {
@@ -44465,16 +44466,28 @@ async function fetchAddendum(wordpressUrl) {
   try {
     const response = await axios_default.get(url3, {
       timeout: FETCH_TIMEOUT_MS,
-      // Don't follow redirects to a different host — a misconfigured
-      // site shouldn't be able to silently forward our request elsewhere.
-      // The default axios behaviour follows up to 5 redirects which is
-      // fine for same-host HTTPS upgrade redirects.
-      maxRedirects: 3,
+      // Disable axios's automatic redirect following entirely. Without
+      // this, a compromised or misconfigured WP site could redirect us
+      // to a different origin (an exfil endpoint, an SSRF target on the
+      // internal network, etc.). Admins should configure
+      // WORDPRESS_URL with the canonical scheme + host so the first
+      // hop returns 200 directly. If the site needs an HTTP → HTTPS
+      // redirect, fix the env var instead of relying on axios to
+      // follow it for us.
+      //
+      // The corollary is a 3xx response now surfaces as an axios
+      // error and we fall back to baseline-only. Logged to stderr.
+      maxRedirects: 0,
+      // Hard cap the response body size. Primary defense against an
+      // unbounded payload — `sanitizeAddendum` still truncates after,
+      // but we never want raw bytes past this cap to hit our process.
+      maxContentLength: FETCH_MAX_BYTES,
       // Lower-case Accept so caches see a stable Vary key.
       headers: {
         Accept: "application/json"
       },
-      // We treat 2xx as success; everything else falls back to empty.
+      // We treat 2xx as success; 3xx (any redirect) and 4xx/5xx fall
+      // back to empty via the catch block.
       validateStatus: (status) => status >= 200 && status < 300
     });
     if (!response.data || typeof response.data !== "object") {
@@ -59137,24 +59150,6 @@ var client = new WordPressBlockClient({
     application_password: WORDPRESS_APP_PASSWORD
   }
 });
-var server = new McpServer(
-  {
-    name: "block-mcp",
-    version: package_default.version
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {},
-      prompts: {}
-    },
-    // Baseline lives in ./instructions.ts so the source of truth is
-    // single. main() fetches the per-site addendum at startup and
-    // upgrades the instructions string in-place before the transport
-    // accepts the first request.
-    instructions: BASELINE
-  }
-);
 var ALL_TOOLS = [
   ...DISCOVERY_TOOLS,
   ...READ_TOOLS,
@@ -59237,132 +59232,141 @@ How to behave:
 - Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
 - When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
-server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: ALL_TOOLS };
-});
-server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  const toolArgs = args ?? {};
-  try {
-    const handle2 = TOOL_DISPATCH.get(name);
-    if (!handle2) {
-      throw new Error(`Unknown tool: ${name}`);
+function registerHandlers(server) {
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return { tools: ALL_TOOLS };
+  });
+  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const toolArgs = args ?? {};
+    try {
+      const handle2 = TOOL_DISPATCH.get(name);
+      if (!handle2) {
+        throw new Error(`Unknown tool: ${name}`);
+      }
+      const result = await handle2(name, toolArgs, client);
+      const toolDef = ALL_TOOLS.find((t) => t.name === name);
+      const response = {
+        content: [
+          { type: "text", text: JSON.stringify(result, null, 2) }
+        ]
+      };
+      if (toolDef && toolDef.outputSchema !== void 0 && result !== null && typeof result === "object") {
+        response.structuredContent = result;
+      }
+      return response;
+    } catch (error2) {
+      const err = error2;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                error: true,
+                tool: name,
+                message: err.message || "Unknown error occurred",
+                code: err.wpCode,
+                statusCode: err.wpStatus ?? err.response?.status,
+                hint: err.wpData ?? null
+              },
+              null,
+              2
+            )
+          }
+        ],
+        isError: true
+      };
     }
-    const result = await handle2(name, toolArgs, client);
-    const toolDef = ALL_TOOLS.find((t) => t.name === name);
-    const response = {
-      content: [
-        { type: "text", text: JSON.stringify(result, null, 2) }
-      ]
-    };
-    if (toolDef && toolDef.outputSchema !== void 0 && result !== null && typeof result === "object") {
-      response.structuredContent = result;
-    }
-    return response;
-  } catch (error2) {
-    const err = error2;
+  });
+  server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
     return {
-      content: [
+      resources: [
         {
-          type: "text",
-          text: JSON.stringify(
-            {
-              error: true,
-              tool: name,
-              message: err.message || "Unknown error occurred",
-              code: err.wpCode,
-              statusCode: err.wpStatus ?? err.response?.status,
-              hint: err.wpData ?? null
-            },
-            null,
-            2
-          )
+          uri: AGENT_GUIDE_RESOURCE_URI,
+          name: "Block MCP \u2014 Agent Guide",
+          description: "Editing workflow + how to discover the live block-preference policy on this site. Read this before editing pages.",
+          mimeType: "text/plain"
+        },
+        // Legacy alias kept for one release; resolves to the same content.
+        {
+          uri: LEGACY_PREFERENCES_RESOURCE_URI,
+          name: "Block MCP \u2014 Agent Guide (legacy URI)",
+          description: "Renamed to block-mcp://agent-guide. Same content; kept for backwards compatibility.",
+          mimeType: "text/plain"
         }
-      ],
-      isError: true
-    };
-  }
-});
-server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-  return {
-    resources: [
-      {
-        uri: AGENT_GUIDE_RESOURCE_URI,
-        name: "Block MCP \u2014 Agent Guide",
-        description: "Editing workflow + how to discover the live block-preference policy on this site. Read this before editing pages.",
-        mimeType: "text/plain"
-      },
-      // Legacy alias kept for one release; resolves to the same content.
-      {
-        uri: LEGACY_PREFERENCES_RESOURCE_URI,
-        name: "Block MCP \u2014 Agent Guide (legacy URI)",
-        description: "Renamed to block-mcp://agent-guide. Same content; kept for backwards compatibility.",
-        mimeType: "text/plain"
-      }
-    ]
-  };
-});
-server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const { uri } = request.params;
-  if (uri === AGENT_GUIDE_RESOURCE_URI || uri === LEGACY_PREFERENCES_RESOURCE_URI) {
-    return {
-      contents: [
-        { uri, mimeType: "text/plain", text: AGENT_GUIDE_CONTENT }
       ]
     };
-  }
-  throw new Error(`Unknown resource: ${uri}`);
-});
-var PROMPTS = [
-  {
-    name: "edit-block-page",
-    description: "Bundle: workflow guidance + reminder to call get_page_blocks first. Pass `url` to seed a specific page.",
-    arguments: [
-      {
-        name: "url",
-        description: "Optional. Full URL or path of the page being edited.",
-        required: false
-      }
-    ]
-  }
-];
-server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-  prompts: PROMPTS
-}));
-server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  if (name !== "edit-block-page") {
-    throw new Error(`Unknown prompt: ${name}`);
-  }
-  const url3 = args?.url ?? "";
-  const seed = url3 ? `Editing target: ${url3}
+  });
+  server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const { uri } = request.params;
+    if (uri === AGENT_GUIDE_RESOURCE_URI || uri === LEGACY_PREFERENCES_RESOURCE_URI) {
+      return {
+        contents: [
+          { uri, mimeType: "text/plain", text: AGENT_GUIDE_CONTENT }
+        ]
+      };
+    }
+    throw new Error(`Unknown resource: ${uri}`);
+  });
+  const PROMPTS = [
+    {
+      name: "edit-block-page",
+      description: "Bundle: workflow guidance + reminder to call get_page_blocks first. Pass `url` to seed a specific page.",
+      arguments: [
+        {
+          name: "url",
+          description: "Optional. Full URL or path of the page being edited.",
+          required: false
+        }
+      ]
+    }
+  ];
+  server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: PROMPTS
+  }));
+  server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    if (name !== "edit-block-page") {
+      throw new Error(`Unknown prompt: ${name}`);
+    }
+    const url3 = args?.url ?? "";
+    const seed = url3 ? `Editing target: ${url3}
 
 First tool call: get_page_blocks({ url: ${JSON.stringify(url3)}, summary_only: true }) for cheap orientation, then re-fetch with search/block_name filters as needed.
 
 ` : "";
-  return {
-    description: "Workflow primer for editing a WordPress page via block-mcp.",
-    messages: [
-      {
-        role: "user",
-        content: {
-          type: "text",
-          text: `${seed}${AGENT_GUIDE_CONTENT}`
+    return {
+      description: "Workflow primer for editing a WordPress page via block-mcp.",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `${seed}${AGENT_GUIDE_CONTENT}`
+          }
         }
-      }
-    ]
-  };
-});
+      ]
+    };
+  });
+}
 async function main2() {
   const instructions = await getInstructions(WORDPRESS_URL);
-  const inner = server.server;
-  if (typeof inner._instructions !== "string") {
-    console.error(
-      "[block-mcp] MCP SDK Server._instructions field missing or wrong type \u2014 using baseline-only."
-    );
-  } else {
-    inner._instructions = instructions;
-  }
+  const server = new McpServer(
+    {
+      name: "block-mcp",
+      version: package_default.version
+    },
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {}
+      },
+      instructions
+    }
+  );
+  registerHandlers(server);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Block MCP Server running on stdio");

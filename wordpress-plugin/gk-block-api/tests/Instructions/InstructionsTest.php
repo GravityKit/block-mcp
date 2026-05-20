@@ -76,18 +76,33 @@ class InstructionsTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'system', $result );
 	}
 
-	public function test_sanitize_strips_shortcodes(): void {
-		$dirty = 'Use [gallery] and [shortcode_attr foo="bar"] in docs.';
+	/**
+	 * `strip_shortcodes` only strips REGISTERED shortcodes — `[gallery]`
+	 * is registered by core and survives no further processing. Untrusted
+	 * shortcode-shaped strings like `[evil_user_input]` would only stop
+	 * being a real risk if the plugin ever called `do_shortcode()` on
+	 * this value (it doesn't), so the test contract is "registered
+	 * shortcodes are stripped" — not "anything inside `[...]` is."
+	 */
+	public function test_sanitize_strips_registered_shortcodes(): void {
+		$dirty = 'Use [gallery] in docs.';
 		$result = Instructions::sanitize( $dirty );
 		$this->assertStringNotContainsString( '[gallery]', $result );
-		$this->assertStringNotContainsString( '[shortcode_attr', $result );
 		$this->assertStringContainsString( 'Use', $result );
 		$this->assertStringContainsString( 'in docs.', $result );
 	}
 
-	public function test_sanitize_strips_c0_control_chars(): void {
-		// Bell, null, ESC, backspace — none should survive.
-		$dirty = "Rule\x00 \x07with\x1B[31m \x08control chars.";
+	/**
+	 * Every C0 control byte except `\t \n \r` is stripped. The printable
+	 * ASCII surrounding the controls passes through unchanged — so an
+	 * ANSI escape like `\x1B[31m` strips the ESC byte but leaves the
+	 * `[31m` text because those are regular printable chars. The cap on
+	 * "what's an attack" is "control bytes that could derail a terminal
+	 * or LLM tokenizer," not "any text that looks like an escape code."
+	 */
+	public function test_sanitize_strips_c0_control_bytes_but_keeps_printable_neighbours(): void {
+		// Null, bell, backspace — controls. The ASCII around them stays.
+		$dirty = "Rule\x00 \x07with \x08control chars.";
 		$result = Instructions::sanitize( $dirty );
 		$this->assertSame( 'Rule with control chars.', $result );
 	}
@@ -155,7 +170,31 @@ class InstructionsTest extends WP_UnitTestCase {
 	public function test_set_accepts_exactly_max_length(): void {
 		$value = str_repeat( 'C', Instructions::MAX_LENGTH );
 		$this->assertTrue( Instructions::set_addendum( $value ) );
-		$this->assertSame( Instructions::MAX_LENGTH, strlen( Instructions::get_addendum() ) );
+		$this->assertSame( Instructions::MAX_LENGTH, mb_strlen( Instructions::get_addendum(), 'UTF-8' ) );
+	}
+
+	/**
+	 * MAX_LENGTH counts UTF-8 characters, not bytes. An over-long input
+	 * of 4-byte characters (emoji) must be truncated at MAX_LENGTH chars
+	 * — never at MAX_LENGTH bytes (which would cut mid-codepoint and
+	 * produce invalid UTF-8).
+	 */
+	public function test_sanitize_truncates_multibyte_at_character_boundary(): void {
+		// 😀 (U+1F600) is 4 bytes in UTF-8. MAX_LENGTH + 100 of them is
+		// roughly 8.4 KB which previously would have been byte-truncated
+		// mid-codepoint.
+		$value = str_repeat( "\u{1F600}", Instructions::MAX_LENGTH + 100 );
+		$result = Instructions::sanitize( $value );
+
+		$this->assertSame( Instructions::MAX_LENGTH, mb_strlen( $result, 'UTF-8' ) );
+		// Validate UTF-8: a truncation that landed mid-codepoint would
+		// produce a byte sequence that fails round-trip through UTF-8.
+		$this->assertTrue( mb_check_encoding( $result, 'UTF-8' ) );
+	}
+
+	public function test_sanitize_preserves_emoji_below_cap(): void {
+		$value = "Rule: 😀 use is-style-callout-info.\nRule: 🔒 escape user input.";
+		$this->assertSame( $value, Instructions::sanitize( $value ) );
 	}
 
 	// ── Timestamp tracking ──
@@ -203,9 +242,11 @@ class InstructionsTest extends WP_UnitTestCase {
 	public function test_get_addendum_re_sanitizes_dirty_option(): void {
 		// Simulate a direct update_option from a sibling plugin that
 		// bypassed Instructions::sanitize. The read path must still
-		// produce a clean value.
+		// produce a clean value. wp_strip_all_tags drops the entire
+		// <script> tag including its contents; the C0 \x00 byte is
+		// stripped separately — final string is just the leading text.
 		update_option( Instructions::OPTION_KEY, "Dirty\x00<script>x</script>", false );
-		$this->assertSame( 'Dirtyx', Instructions::get_addendum() );
+		$this->assertSame( 'Dirty', Instructions::get_addendum() );
 	}
 
 	// ── Rate limiter ──

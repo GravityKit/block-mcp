@@ -1016,7 +1016,11 @@ class REST_Controller {
 			$response = rest_ensure_response(
 				array(
 					'addendum'   => $addendum,
-					'length'     => strlen( $addendum ),
+					// `length` reports UTF-8 character count to match
+					// Instructions::MAX_LENGTH semantics (also characters,
+					// not bytes). Clients comparing the two stay
+					// apples-to-apples.
+					'length'     => mb_strlen( $addendum, 'UTF-8' ),
 					'max_length' => Instructions::MAX_LENGTH,
 					'updated_at' => $updated_at,
 				)
