@@ -105,24 +105,33 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Numeric-prefix safety: `"ref":12` must not match a post that only
-	 * references `"ref":123`. This was the bug guarded against by the
-	 * trailing `,`/`}` boundary in the original implementation.
+	 * Numeric-prefix safety: the regex must not let `"ref":<X>9...` falsely
+	 * increment pattern `X`. The trailing `[,}]` boundary on
+	 * `/"ref":(\d+)\s*[,}]/` is what guarantees this. We use real pattern
+	 * `$pa` plus a synthetic longer ref starting with `$pa`'s digits
+	 * (e.g. pa=4 → longer=499). The longer ID isn't a real pattern, so
+	 * the orphan-id filter drops it from the map; the real pattern's
+	 * count must remain 1 from its one explicit reference.
 	 */
 	public function test_does_not_count_numeric_prefix_matches(): void {
-		$small = 12;
-		$big   = 123;
+		$pa     = $this->make_pattern();
+		$longer = (int) ( $pa . '99' );
 
-		$this->make_pattern( 'Small (id forced)' );
-		$this->make_pattern( 'Big (id forced)' );
+		// One post that legitimately references $pa.
+		$this->make_post_referencing( array( $pa ) );
 
-		// Only references 123 — should not increment 12.
-		$this->make_post_referencing( array( $big ) );
+		// Another post whose only ref is the longer-id-starting-with-$pa.
+		// A regex without the trailing boundary would also count $pa here.
+		self::factory()->post->create( array(
+			'post_type'    => 'post',
+			'post_status'  => 'publish',
+			'post_content' => sprintf( '<!-- wp:block {"ref":%d} /-->', $longer ),
+		) );
 
 		$counts = $this->manager->get_all_pattern_reference_counts();
 
-		$this->assertArrayNotHasKey( $small, $counts );
-		$this->assertSame( 1, $counts[ $big ] );
+		$this->assertSame( 1, $counts[ $pa ], 'pa must not be incremented by the longer-prefix ref.' );
+		$this->assertArrayNotHasKey( $longer, $counts, 'longer is not a real pattern, so it is filtered out.' );
 	}
 
 	/** Drafts, private posts, and trashed posts must NOT contribute. */
@@ -171,6 +180,63 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 		$counts = $fresh->get_all_pattern_reference_counts();
 
 		$this->assertSame( 999, $counts[ $pa ], 'Transient should be returned without rescanning the DB.' );
+	}
+
+	/**
+	 * Refs to a pattern post ID that doesn't exist on this site (orphaned
+	 * imports, copy-pasted content from another install) must NOT appear
+	 * in the counts map. The previous implementation tallied any numeric
+	 * ref it saw, which let the transient grow with bogus keys.
+	 */
+	public function test_excludes_refs_to_non_existent_patterns(): void {
+		$pa    = $this->make_pattern();
+		$bogus = 9999999;
+
+		$this->make_post_referencing( array( $pa, $bogus ) );
+
+		$counts = $this->manager->get_all_pattern_reference_counts();
+
+		$this->assertSame( 1, $counts[ $pa ] );
+		$this->assertArrayNotHasKey( $bogus, $counts, 'Orphaned refs are dropped from the cached map.' );
+	}
+
+	/**
+	 * The aggregate pages through `wp_posts` in batches to bound peak memory.
+	 * This test forces a tiny batch size via filter so we can exercise the
+	 * pagination boundary cheaply, then asserts that the chunked totals sum
+	 * to the same per-pattern counts a single-pass scan would produce.
+	 *
+	 * Regression guard against an off-by-one in the do/while loop termination
+	 * or an incorrect offset increment dropping rows on a batch boundary.
+	 */
+	public function test_chunked_scan_counts_match_across_batches(): void {
+		add_filter(
+			'gk_block_api_pattern_ref_scan_batch_size',
+			static function (): int {
+				return 2;
+			}
+		);
+
+		try {
+			$pa = $this->make_pattern( 'Hot pattern' );
+			$pb = $this->make_pattern( 'Cool pattern' );
+
+			// 5 posts referencing pa — exceeds batch size of 2 (3 batches).
+			for ( $i = 0; $i < 5; $i++ ) {
+				$this->make_post_referencing( array( $pa ) );
+			}
+			// 3 posts referencing pb — also spans batches (2 batches).
+			for ( $i = 0; $i < 3; $i++ ) {
+				$this->make_post_referencing( array( $pb ) );
+			}
+
+			$counts = $this->manager->get_all_pattern_reference_counts();
+
+			$this->assertSame( 5, $counts[ $pa ] );
+			$this->assertSame( 3, $counts[ $pb ] );
+		} finally {
+			remove_all_filters( 'gk_block_api_pattern_ref_scan_batch_size' );
+		}
 	}
 
 	/** count_pattern_references() returns the map's value for the given pattern. */

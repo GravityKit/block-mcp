@@ -1144,6 +1144,19 @@ class REST_Controller {
 				'refresh'   => $request->get_param( 'refresh' ),
 			);
 
+			// Cache busting is an admin concern. The base /patterns route
+			// requires `edit_posts`, but rebuilding the reference-count cache
+			// is expensive enough that we don't want any editor able to force
+			// it on demand. Without this gate an authenticated user can loop
+			// `refresh=true` to repeatedly trigger the full post_content scan.
+			if ( ! empty( $args['refresh'] ) && ! current_user_can( 'manage_options' ) ) {
+				return new \WP_Error(
+					'rest_forbidden_refresh',
+					__( 'You do not have permission to refresh the pattern cache.', 'gk-block-api' ),
+					array( 'status' => rest_authorization_required_code() )
+				);
+			}
+
 			// Normalize synced param: "true"/"false" strings to booleans, null if not set.
 			if ( null !== $args['synced'] ) {
 				$args['synced'] = rest_sanitize_boolean( $args['synced'] );

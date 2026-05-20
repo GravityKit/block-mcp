@@ -42,6 +42,20 @@ class Pattern_Manager {
 	const REF_COUNT_CACHE_TTL = HOUR_IN_SECONDS;
 
 	/**
+	 * Rows pulled per chunk when scanning post_content for pattern references.
+	 *
+	 * The aggregate loads `post_content` into PHP for every published post that
+	 * matches `LIKE '%"ref":%'`. Without chunking, a site with thousands of
+	 * matching rows (or a handful of multi-megabyte pillar pages) can exhaust
+	 * `memory_limit` mid-rebuild. Streaming in batches keeps peak resident
+	 * memory bounded to one batch worth of content regardless of corpus size.
+	 *
+	 * Tests override this via the `gk_block_api_pattern_ref_scan_batch_size`
+	 * filter so the chunked path can be exercised with small fixtures.
+	 */
+	const SCAN_BATCH_SIZE = 200;
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
@@ -473,39 +487,75 @@ class Pattern_Manager {
 
 		global $wpdb;
 
-		// One scan, not N. Pull `post_content` for every published post that
-		// contains a `"ref":` substring — a coarse filter cheap enough to
-		// run once, after which all per-pattern work happens in PHP.
+		// Allow-list of real published synced patterns. Extracted refs that
+		// don't appear here (orphaned IDs, leftover copy-pastes from other
+		// installs) are dropped so the cache stays bounded to actual patterns.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$rows = $wpdb->get_col(
-			"SELECT post_content FROM {$wpdb->posts}
-				WHERE post_status = 'publish'
-				AND post_content LIKE '%\"ref\":%'"
+		$valid_ids = $wpdb->get_col(
+			"SELECT ID FROM {$wpdb->posts}
+				WHERE post_type = 'wp_block' AND post_status = 'publish'"
 		);
 
-		$counts = array();
-		foreach ( (array) $rows as $content ) {
-			if ( ! is_string( $content ) || '' === $content ) {
-				continue;
-			}
+		// Empty allow-list → no patterns to count. Persist the empty map so
+		// repeated cold reads on a site with zero patterns don't keep scanning.
+		if ( empty( $valid_ids ) ) {
+			set_transient( self::REF_COUNT_CACHE_KEY, array(), self::REF_COUNT_CACHE_TTL );
+			return array();
+		}
 
-			// `"ref":<digits>` followed by `,` or `}` — same trailing-boundary
-			// guard the old per-pattern method used, so `"ref":12` and
-			// `"ref":123` never collide.
-			if ( ! preg_match_all( '/"ref":(\d+)\s*[,}]/', $content, $matches ) ) {
-				continue;
-			}
+		$valid_lookup = array_flip( array_map( 'intval', $valid_ids ) );
 
-			// De-duplicate per post so a post that references the same pattern
-			// twice counts once — matches the old COUNT(DISTINCT ID) semantic.
-			$unique_ids = array_unique( array_map( 'intval', $matches[1] ) );
-			foreach ( $unique_ids as $id ) {
-				if ( $id <= 0 ) {
+		// LIKE-prefilter, then page through results so peak memory stays
+		// bounded to one batch worth of post_content regardless of how many
+		// rows match. Sites with hundreds of pages × 200KB content each
+		// otherwise risk OOM mid-rebuild.
+		$like_pattern = '%' . $wpdb->esc_like( '"ref":' ) . '%';
+		$batch_size   = max( 1, (int) apply_filters( 'gk_block_api_pattern_ref_scan_batch_size', self::SCAN_BATCH_SIZE ) );
+		$offset       = 0;
+		$counts       = array();
+
+		do {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$rows = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT post_content FROM {$wpdb->posts}
+						WHERE post_status = 'publish'
+						AND post_content LIKE %s
+						ORDER BY ID
+						LIMIT %d OFFSET %d",
+					$like_pattern,
+					$batch_size,
+					$offset
+				)
+			);
+
+			foreach ( (array) $rows as $content ) {
+				if ( ! is_string( $content ) || '' === $content ) {
 					continue;
 				}
-				$counts[ $id ] = isset( $counts[ $id ] ) ? $counts[ $id ] + 1 : 1;
+
+				// `"ref":<digits>` followed by `,` or `}` — trailing-boundary
+				// guard so `"ref":12` and `"ref":123` never collide.
+				if ( ! preg_match_all( '/"ref":(\d+)\s*[,}]/', $content, $matches ) ) {
+					continue;
+				}
+
+				// De-duplicate per post so a post that references the same
+				// pattern twice counts once — matches COUNT(DISTINCT ID).
+				$unique_ids = array_unique( array_map( 'intval', $matches[1] ) );
+				foreach ( $unique_ids as $id ) {
+					// Skip non-positive IDs and orphaned/foreign refs that
+					// don't resolve to a real published wp_block on this site.
+					if ( $id <= 0 || ! isset( $valid_lookup[ $id ] ) ) {
+						continue;
+					}
+					$counts[ $id ] = isset( $counts[ $id ] ) ? $counts[ $id ] + 1 : 1;
+				}
 			}
-		}
+
+			$rows_returned = count( (array) $rows );
+			$offset       += $rows_returned;
+		} while ( $rows_returned === $batch_size );
 
 		set_transient( self::REF_COUNT_CACHE_KEY, $counts, self::REF_COUNT_CACHE_TTL );
 
