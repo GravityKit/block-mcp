@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.7.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.7.1 =
+Fixes two Code Block Pro rendering bugs and hardens the wrapper against attribute injection. Code blocks inserted by an AI agent now render correctly (previously appeared as blank gaps), explicit `plaintext` language is respected instead of being auto-detected (English prose with the word "from" no longer renders as SQL), and caller-supplied font / colour / className values are HTML-encoded before they reach the wrapper markup.
+
 = 1.7.0 =
 New per-site MCP server instructions addendum. Paste site-specific conventions (callout className mapping, code-block theme, doc structure rules) under Settings → Block MCP and every connected MCP client receives them at handshake — no more rediscovery per session. Plain-text, 2,000-char cap, public-by-design endpoint with per-IP rate limiting.
 
@@ -127,6 +130,32 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.7.1 on May 20, 2026 =
+
+Two Code Block Pro rendering bugs fixed and one hardening pass on the wrapper markup. All three changes ship in the TypeScript MCP server; the WordPress plugin is unchanged apart from version metadata.
+
+#### 🐛 Fixed
+
+* Code Block Pro blocks inserted via the MCP (e.g. `edit_block_tree` → `replace-block`) now render correctly on the front-end. The enricher previously populated only the `codeHTML` attribute and left `innerHTML` empty, so the block saved successfully but appeared as a blank gap on the page. The enricher now builds a minimal wrapper (`<div class="wp-block-kevinbatdorf-code-block-pro" style="…">{codeHTML}{optional <textarea>}</div>`) when `innerHTML` is missing, mirroring CBP's `save()` inline-style behaviour.
+* Explicit `language: "plaintext"` is now respected instead of triggering auto-detection. Previously the enricher collapsed missing + `plaintext` into "infer the language", and a chat-style prompt containing the word "from" twice tripped the SQL signal in `inferLanguage()` — the block rendered with mis-coloured English words ("Set", "Block", "from", "URL", "and", "Password"). The contract now is: missing / `''` / `'auto'` → infer; `'plaintext'` / `'text'` / `'plain'` / `'txt'` / `'none'` → render as plaintext, no inference; anything else → use verbatim.
+
+#### 🔒 Security
+
+* Caller-supplied wrapper attributes (`fontFamily`, `fontSize`, `lineHeight`, `bgColor`, `textColor`, `className`) are now HTML-encoded before being interpolated into the wrapper `style="…"` and `class="…"` attributes. A value containing `"` (whether accidental — `"Helvetica Neue"` — or hostile — `safe" onclick="alert(1)`) used to break out of the attribute and either corrupt the markup or inject active content. The new `escapeAttr` helper maps `& < > " '` to their entity equivalents on every wrapper value before the `<div>` is built.
+
+#### 🧪 Tests
+
+* 14 new vitest cases in `src/__tests__/unit/enrichers/cbp-enricher.test.ts`:
+  * Wrapper-build path (no incoming `innerHTML`): wrapper class + Shiki `<pre>` present; inline-style values mirrored from font/colour attributes; copy `<textarea>` present when `copyButton: true`, omitted when `false`; literal `</textarea>` in source code escaped.
+  * Language contract: explicit `plaintext` respected; `text` / `plain` / `txt` / `none` treated as plaintext aliases; inference runs only when language is missing or `'auto'`; explicit non-plaintext language passes through verbatim; regression for the English-prose-detected-as-SQL bug.
+  * Attribute encoding: double-quotes in style values escape; `<script>` and `&` in style values escape; double-quotes in className escape.
+* Existing "no-op when already enriched" test updated to assert no-op only when both `codeHTML` AND `innerHTML` are already current — partial enrichment correctly triggers wrapper rebuild instead of returning the half-built block.
+
+#### 💻 Developer Updates
+
+* New TypeScript export: `escapeAttr(value: string): string` in `src/enrichers.ts`. Mapped to entities: `& → &amp;`, `< → &lt;`, `> → &gt;`, `" → &quot;`, `' → &#39;`. Callers MUST quote the resulting value with `"` (the apostrophe escape uses `&#39;` for older-browser compatibility, the rest assume `"` surrounds).
+* New TypeScript language-attribute contract documented in code: missing → infer; `auto` → infer; `plaintext` (and aliases `text` / `plain` / `txt` / `none`) → render as plaintext, no inference; anything else → use verbatim. Callers that previously relied on `language: "plaintext"` triggering auto-detect must switch to `language: "auto"` (or omit the attribute) to keep the same behaviour.
 
 = 1.7.0 on May 20, 2026 =
 
