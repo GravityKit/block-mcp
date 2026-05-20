@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.7.0 =
+New per-site MCP server instructions addendum. Paste site-specific conventions (callout className mapping, code-block theme, doc structure rules) under Settings → Block MCP and every connected MCP client receives them at handshake — no more rediscovery per session. Plain-text, 2,000-char cap, public-by-design endpoint with per-IP rate limiting.
+
 = 1.6.1 =
 Fixes a 30-second timeout on `/patterns` for sites with many synced patterns: the per-pattern LIKE scan that ran twice per pattern is now a single chunked aggregate scan cached for an hour. `?refresh=true` on `/patterns` now requires `manage_options`, and orphaned refs from copy-pasted content no longer pollute the cache.
 
@@ -124,6 +127,30 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.7.0 on May 20, 2026 =
+
+New per-site MCP server instructions addendum. Admins paste rules in **Settings → Block MCP**; the TypeScript MCP server fetches them on startup and appends to its hard-coded baseline before constructing `serverInfo.instructions`, so every connected client receives the same site-specific conventions at handshake — eliminating the per-session rediscovery LLM agents currently do for things like callout className conventions or code-block theme choices.
+
+#### ✨ New
+
+* New admin field at **Settings → Block MCP** → *MCP server instructions*. Plain-text textarea, 2,000-character cap, live character counter, in-page warning that the value is served unauthenticated.
+* New REST endpoint `GET /gk-block-api/v1/instructions`. Returns `{ addendum, length, max_length, updated_at }` with `Cache-Control: public, max-age=60`. Unauthenticated by design — the value reaches MCP clients before any tool-call auth, same posture as MCP `initialize` itself.
+* New `Instructions` service class (`includes/class-instructions.php`) owning option storage, sanitize, length cap, and the rate-limit bucket.
+
+#### 🔒 Security
+
+* Save path sanitization: `wp_strip_all_tags` (HTML/PHP), `strip_shortcodes` (no `do_shortcode` is ever called on this value), C0/C1 control characters stripped except `\t \n \r`, length cap enforced after sanitize so the 2,000-character budget is the post-sanitize size that reaches clients.
+* Read path sanitization (defense in depth) — the same `Instructions::sanitize` runs on every `get_addendum()` so direct `update_option` writes from sibling plugins or database restores can't bypass it.
+* Public read endpoint rate-limited at 30 req/min per remote IP (sliding 60s window, IP hashed before use as a transient key for PII minimization).
+* Admin field is `manage_options`-gated; settings save retains the Settings API's built-in nonce.
+
+#### 💻 Developer Updates
+
+* `Instructions::OPTION_KEY`, `Instructions::UPDATED_AT_OPTION`, `Instructions::MAX_LENGTH`, `Instructions::RATE_LIMIT_PER_MIN` exposed as public constants for downstream callers.
+* `Instructions::sanitize( $value )` callable from anywhere as the canonical sanitizer for this option.
+* New uninstall sweep: `gk_block_api_instructions`, `gk_block_api_instructions_updated_at`, and per-IP `_transient_gk_block_api_instr_rl_*` transients are removed alongside existing plugin data.
+* Reset-to-defaults handler clears the new options + per-IP rate-limit transients so admins can wipe instructions without a full uninstall.
 
 = 1.6.1 on May 20, 2026 =
 

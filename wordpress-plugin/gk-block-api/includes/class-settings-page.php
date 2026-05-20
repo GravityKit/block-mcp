@@ -116,7 +116,21 @@ class Settings_Page {
 			)
 		);
 
-		// 4. Global media-uploads kill-switch. Stored as the string '0' or
+		// 4. MCP server instructions addendum (BLOCK-19).
+		// Stored as a plain-text string. The Instructions class handles
+		// sanitize + length-cap + timestamp; the REST endpoint serves it
+		// unauthenticated to MCP clients at handshake.
+		register_setting(
+			self::OPTION_GROUP,
+			Instructions::OPTION_KEY,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( Instructions::class, 'sanitize_callback' ),
+				'default'           => '',
+			)
+		);
+
+		// 5. Global media-uploads kill-switch. Stored as the string '0' or
 		// '1' rather than a PHP bool because update_option() can't
 		// reliably persist boolean false when the option is missing
 		// (the equality check against the "doesn't exist → false" default
@@ -298,6 +312,8 @@ class Settings_Page {
 		delete_option( self::DUAL_MANUAL_OPTION );
 		delete_option( Media_Manager::UPLOADS_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
+		delete_option( Instructions::OPTION_KEY );
+		delete_option( Instructions::UPDATED_AT_OPTION );
 		delete_transient( Block_Inventory::CACHE_KEY );
 
 		// Per-post rate-limit transients accumulate per write activity. Sweep
@@ -306,7 +322,9 @@ class Settings_Page {
 		$wpdb->query(
 			"DELETE FROM {$wpdb->options}
 				WHERE option_name LIKE '_transient_gk_block_api_rate_%'
-				   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'"
+				   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'
+				   OR option_name LIKE '_transient_gk_block_api_instr_rl_%'
+				   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'"
 		);
 
 		nocache_headers();
@@ -343,6 +361,8 @@ class Settings_Page {
 		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
 		$uploads_enabled  = \GravityKit\BlockAPI\Media_Manager::uploads_enabled();
 		$uploads_option   = \GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION;
+		$instructions_val = Instructions::get_addendum();
+		$instructions_max = Instructions::MAX_LENGTH;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -421,6 +441,59 @@ class Settings_Page {
 
 			<form method="post" action="options.php">
 				<?php settings_fields( self::OPTION_GROUP ); ?>
+
+				<h2><?php esc_html_e( 'MCP server instructions', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php
+					echo wp_kses(
+						sprintf(
+							/* translators: 1: link to MCP spec, 2: max length */
+							__( 'Custom rules that every connected MCP client receives at handshake via <a href="%1$s" target="_blank" rel="noopener noreferrer">serverInfo.instructions</a>. Use it to encode site-specific conventions — callout className mapping, code-block theme, doc structure rules — so LLM agents don\'t have to re-discover them. Plain text up to %2$d characters; appended to the server\'s baseline.', 'gk-block-api' ),
+							'https://modelcontextprotocol.io/specification',
+							(int) $instructions_max
+						),
+						array(
+							'a' => array(
+								'href'   => array(),
+								'target' => array(),
+								'rel'    => array(),
+							),
+						)
+					);
+					?>
+				</p>
+				<p class="description" style="color:#b32d2e;">
+					<strong><?php esc_html_e( 'Public data:', 'gk-block-api' ); ?></strong>
+					<?php esc_html_e( 'This value is served unauthenticated to every connected MCP client. Do NOT paste secrets, API keys, or internal URLs.', 'gk-block-api' ); ?>
+				</p>
+				<textarea
+					id="gk-block-api-instructions"
+					name="<?php echo esc_attr( Instructions::OPTION_KEY ); ?>"
+					rows="8"
+					maxlength="<?php echo esc_attr( (string) $instructions_max ); ?>"
+					class="large-text code"
+					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-api' ); ?>"
+				><?php echo esc_textarea( $instructions_val ); ?></textarea>
+				<p class="description">
+					<span id="gk-block-api-instructions-count"><?php echo esc_html( (string) strlen( $instructions_val ) ); ?></span>
+					<?php
+					echo esc_html(
+						sprintf(
+							/* translators: %d: max length */
+							__( '/ %d characters used. Roughly 500 tokens at max length — keep it short and use concise bulleted rules rather than prose.', 'gk-block-api' ),
+							(int) $instructions_max
+						)
+					);
+					?>
+				</p>
+				<script>
+				(function () {
+					var ta    = document.getElementById('gk-block-api-instructions');
+					var count = document.getElementById('gk-block-api-instructions-count');
+					if (!ta || !count) return;
+					ta.addEventListener('input', function () { count.textContent = String(ta.value.length); });
+				})();
+				</script>
 
 				<h2><?php esc_html_e( 'Namespace tier scores', 'gk-block-api' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = avoid (warning), < 10 = legacy (hard reject on insert).', 'gk-block-api' ); ?></p>

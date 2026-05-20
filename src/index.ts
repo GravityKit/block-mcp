@@ -33,6 +33,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { WordPressBlockClient } from './client.js';
+import { BASELINE as INSTRUCTIONS_BASELINE, getInstructions } from './instructions.js';
 import { DISCOVERY_TOOLS, handleDiscoveryTool } from './tools/discovery.js';
 import { READ_TOOLS, handleReadTool } from './tools/read.js';
 import { WRITE_TOOLS, handleWriteTool } from './tools/write.js';
@@ -99,12 +100,11 @@ const server = new McpServer(
       resources: {},
       prompts: {},
     },
-    instructions:
-      `Block-level WordPress CRUD. URL → post_id is resolved server-side — pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
-
-After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification — do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) — same shape, no extra plumbing.
-
-Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`,
+    // Baseline lives in ./instructions.ts so the source of truth is
+    // single. main() fetches the per-site addendum at startup and
+    // upgrades the instructions string in-place before the transport
+    // accepts the first request.
+    instructions: INSTRUCTIONS_BASELINE,
   }
 );
 
@@ -400,6 +400,28 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ============================================
 
 async function main(): Promise<void> {
+  // Fetch the per-site instructions addendum BEFORE accepting the first
+  // request so the initialize handshake includes the combined string.
+  // getInstructions never throws — on any failure it logs to stderr and
+  // returns the baseline only.
+  const instructions = await getInstructions(WORDPRESS_URL as string);
+
+  // The MCP SDK stores the instructions string on a private field
+  // (`_instructions`) of the underlying Server class. It's read once,
+  // at the initialize response (sdk/server/index.js:282), so updating
+  // it any time before `connect()` returns the new value to the next
+  // client to handshake. Gating with a runtime check so a future SDK
+  // rename surfaces as a clear stderr message rather than a silent fall-
+  // through to baseline.
+  const inner = server.server as unknown as { _instructions?: unknown };
+  if (typeof inner._instructions !== 'string') {
+    console.error(
+      '[block-mcp] MCP SDK Server._instructions field missing or wrong type — using baseline-only.'
+    );
+  } else {
+    inner._instructions = instructions;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Block MCP Server running on stdio');

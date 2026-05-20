@@ -39771,7 +39771,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "1.6.0",
+  version: "1.7.0",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   type: "module",
@@ -44423,6 +44423,96 @@ var WordPressBlockClient = class {
     return response.data;
   }
 };
+
+// src/instructions.ts
+var BASELINE = `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
+
+After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification \u2014 do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) \u2014 same shape, no extra plumbing.
+
+Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`;
+var MAX_ADDENDUM_LENGTH = 2e3;
+var FETCH_TIMEOUT_MS = 3e3;
+var OFF_ENV_VAR = "BLOCK_MCP_INSTRUCTIONS_OFF";
+function sanitizeAddendum(input) {
+  if (typeof input !== "string") {
+    return "";
+  }
+  let s2 = input;
+  s2 = s2.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  s2 = s2.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, "");
+  s2 = s2.replace(/\r\n?/g, "\n");
+  s2 = s2.trim();
+  if (s2.length > MAX_ADDENDUM_LENGTH) {
+    s2 = s2.slice(0, MAX_ADDENDUM_LENGTH);
+  }
+  return s2;
+}
+function combineInstructions(baseline, addendum) {
+  const clean = addendum.trim();
+  if (clean.length === 0) {
+    return baseline;
+  }
+  return `${baseline}
+
+${clean}`;
+}
+async function fetchAddendum(wordpressUrl) {
+  if (process.env[OFF_ENV_VAR] === "1") {
+    return "";
+  }
+  const base = wordpressUrl.replace(/\/+$/, "");
+  const url3 = `${base}/wp-json/gk-block-api/v1/instructions`;
+  try {
+    const response = await axios_default.get(url3, {
+      timeout: FETCH_TIMEOUT_MS,
+      // Don't follow redirects to a different host — a misconfigured
+      // site shouldn't be able to silently forward our request elsewhere.
+      // The default axios behaviour follows up to 5 redirects which is
+      // fine for same-host HTTPS upgrade redirects.
+      maxRedirects: 3,
+      // Lower-case Accept so caches see a stable Vary key.
+      headers: {
+        Accept: "application/json"
+      },
+      // We treat 2xx as success; everything else falls back to empty.
+      validateStatus: (status) => status >= 200 && status < 300
+    });
+    if (!response.data || typeof response.data !== "object") {
+      console.error(
+        `[block-mcp] /instructions returned non-object payload; using baseline only.`
+      );
+      return "";
+    }
+    return sanitizeAddendum(response.data.addendum);
+  } catch (err) {
+    const message = formatFetchError(err);
+    console.error(`[block-mcp] Failed to fetch /instructions (${message}); using baseline only.`);
+    return "";
+  }
+}
+async function getInstructions(wordpressUrl) {
+  const addendum = await fetchAddendum(wordpressUrl);
+  return combineInstructions(BASELINE, addendum);
+}
+function formatFetchError(err) {
+  if (axios_default.isAxiosError(err)) {
+    const axiosErr = err;
+    if (axiosErr.code === "ECONNABORTED" || axiosErr.message.includes("timeout")) {
+      return `timeout after ${FETCH_TIMEOUT_MS}ms`;
+    }
+    if (axiosErr.response) {
+      return `HTTP ${axiosErr.response.status}`;
+    }
+    if (axiosErr.code) {
+      return axiosErr.code;
+    }
+    return axiosErr.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
 
 // src/preferences.ts
 function getNamespace(blockName) {
@@ -59058,11 +59148,11 @@ var server = new McpServer(
       resources: {},
       prompts: {}
     },
-    instructions: `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
-
-After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification \u2014 do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) \u2014 same shape, no extra plumbing.
-
-Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`
+    // Baseline lives in ./instructions.ts so the source of truth is
+    // single. main() fetches the per-site addendum at startup and
+    // upgrades the instructions string in-place before the transport
+    // accepts the first request.
+    instructions: BASELINE
   }
 );
 var ALL_TOOLS = [
@@ -59264,6 +59354,15 @@ First tool call: get_page_blocks({ url: ${JSON.stringify(url3)}, summary_only: t
   };
 });
 async function main2() {
+  const instructions = await getInstructions(WORDPRESS_URL);
+  const inner = server.server;
+  if (typeof inner._instructions !== "string") {
+    console.error(
+      "[block-mcp] MCP SDK Server._instructions field missing or wrong type \u2014 using baseline-only."
+    );
+  } else {
+    inner._instructions = instructions;
+  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Block MCP Server running on stdio");
