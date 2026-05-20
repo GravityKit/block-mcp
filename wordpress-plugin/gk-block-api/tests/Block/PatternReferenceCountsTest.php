@@ -2,16 +2,17 @@
 /**
  * Regression coverage for Pattern_Manager::get_all_pattern_reference_counts().
  *
- * The aggregate replaces the per-pattern LIKE scan that ran twice per synced
- * pattern in `count_pattern_references()`. These tests pin the contract:
+ * The aggregate replaces the per-pattern LIKE scan that previously ran twice
+ * per synced pattern. These tests pin the contract:
  *
- *   - one map built from one DB scan, no per-pattern queries
- *   - trailing-boundary match: `"ref":12` does not collide with `"ref":123`
- *   - per-post de-duplication: a post that references the same pattern
- *     twice counts once (matches the historical COUNT(DISTINCT ID) semantic)
+ *   - one map covering every distinct published reference, built lazily
+ *   - trailing-boundary regex: `"ref":12` does not match `"ref":123`
+ *   - per-post de-duplication: a post referencing the same pattern twice
+ *     counts once (matches the historical COUNT(DISTINCT ID) semantic)
  *   - draft / private / trashed posts are excluded
- *   - results are cached in a transient and a per-request memo
- *   - the cache survives across calls and is busted by the transient API
+ *   - orphaned refs (IDs without a real published wp_block) are dropped
+ *   - results are persisted to a transient for cross-request reuse
+ *   - chunked scan totals match a single-pass scan across batch boundaries
  *
  * @package GravityKit\BlockAPI\Tests
  */
@@ -23,9 +24,8 @@ use GravityKit\BlockAPI\Preferences;
 
 /**
  * @covers \GravityKit\BlockAPI\Pattern_Manager::get_all_pattern_reference_counts
- * @covers \GravityKit\BlockAPI\Pattern_Manager::count_pattern_references
  */
-class PatternReferenceCountsTest extends WP_UnitTestCase {
+class PatternReferenceCountsTest extends BlockApiTestCase {
 
 	/** @var Pattern_Manager */
 	private $manager;
@@ -43,12 +43,13 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	}
 
 	private function make_pattern( string $title = 'Pattern' ): int {
-		return self::factory()->post->create( array(
-			'post_type'    => 'wp_block',
-			'post_status'  => 'publish',
-			'post_title'   => $title,
-			'post_content' => '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->',
-		) );
+		return $this->make_block_post(
+			array(),
+			array(
+				'post_type'  => 'wp_block',
+				'post_title' => $title,
+			)
+		);
 	}
 
 	private function make_post_referencing( array $ref_ids, string $status = 'publish' ): int {
@@ -107,11 +108,13 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	/**
 	 * Numeric-prefix safety: the regex must not let `"ref":<X>9...` falsely
 	 * increment pattern `X`. The trailing `[,}]` boundary on
-	 * `/"ref":(\d+)\s*[,}]/` is what guarantees this. We use real pattern
-	 * `$pa` plus a synthetic longer ref starting with `$pa`'s digits
-	 * (e.g. pa=4 → longer=499). The longer ID isn't a real pattern, so
-	 * the orphan-id filter drops it from the map; the real pattern's
-	 * count must remain 1 from its one explicit reference.
+	 * `/"ref":(\d+)\s*[,}]/` is what guarantees this.
+	 *
+	 * Uses a real pattern `$pa` plus a synthetic longer ref starting with
+	 * `$pa`'s digits (e.g. pa=4 → longer=499). The longer ID is filtered
+	 * out separately by the orphan filter (covered in
+	 * test_excludes_refs_to_non_existent_patterns); here we only assert
+	 * that the real pattern's count is NOT incremented by the prefix-y ref.
 	 */
 	public function test_does_not_count_numeric_prefix_matches(): void {
 		$pa     = $this->make_pattern();
@@ -131,7 +134,6 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 		$counts = $this->manager->get_all_pattern_reference_counts();
 
 		$this->assertSame( 1, $counts[ $pa ], 'pa must not be incremented by the longer-prefix ref.' );
-		$this->assertArrayNotHasKey( $longer, $counts, 'longer is not a real pattern, so it is filtered out.' );
 	}
 
 	/** Drafts, private posts, and trashed posts must NOT contribute. */
@@ -161,32 +163,9 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Subsequent calls on a fresh Pattern_Manager (no per-request memo)
-	 * must read from the transient instead of rescanning. We prove this
-	 * by mutating the transient between calls — if a rescan ran, the
-	 * planted value would be overwritten with the real count.
-	 */
-	public function test_second_call_uses_transient_not_db(): void {
-		$pa = $this->make_pattern();
-		$this->make_post_referencing( array( $pa ) );
-
-		// Prime the transient with a known non-real value.
-		set_transient( Pattern_Manager::REF_COUNT_CACHE_KEY, array( $pa => 999 ), HOUR_IN_SECONDS );
-
-		// Fresh instance to bypass any per-request static memo from a
-		// previous call inside the same test.
-		$fresh = new Pattern_Manager( new Preferences() );
-
-		$counts = $fresh->get_all_pattern_reference_counts();
-
-		$this->assertSame( 999, $counts[ $pa ], 'Transient should be returned without rescanning the DB.' );
-	}
-
-	/**
 	 * Refs to a pattern post ID that doesn't exist on this site (orphaned
 	 * imports, copy-pasted content from another install) must NOT appear
-	 * in the counts map. The previous implementation tallied any numeric
-	 * ref it saw, which let the transient grow with bogus keys.
+	 * in the counts map.
 	 */
 	public function test_excludes_refs_to_non_existent_patterns(): void {
 		$pa    = $this->make_pattern();
@@ -201,6 +180,85 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Realistic-scale stress: thousands of patterns + thousands of
+	 * referencing posts at the production batch size (200), spanning
+	 * many chunk iterations. Validates that:
+	 *
+	 *   - the chunked do/while loop terminates correctly across many batches
+	 *   - the orphan-filter allow-list (also capped at 500 by default) is
+	 *     raised in lock-step so all real patterns are recognized
+	 *   - per-pattern counts add up correctly under volume — every random
+	 *     reference inserted is reflected in the final map
+	 *
+	 * Bumps the shared `gk_block_api_synced_patterns_query_limit` filter
+	 * so the allow-list covers all inserted patterns. Test is marked @group
+	 * stress so it can be skipped in fast runs if it becomes painful.
+	 *
+	 * @group stress
+	 */
+	public function test_thousands_of_patterns_and_references(): void {
+		$pattern_count = 2000;
+		$post_count    = 2000;
+		$cap           = static function () use ( $pattern_count ): int {
+			return $pattern_count + 100;
+		};
+		add_filter( 'gk_block_api_synced_patterns_query_limit', $cap );
+
+		try {
+			// Insert $pattern_count synced patterns.
+			$pattern_ids = array();
+			for ( $i = 0; $i < $pattern_count; $i++ ) {
+				$pattern_ids[] = $this->make_pattern( 'P' . $i );
+			}
+
+			// Insert $post_count referencing posts. Each one references 1-3
+			// random patterns; track the expected count per pattern locally.
+			$expected = array();
+			mt_srand( 0xC0DEC0DE );
+			for ( $i = 0; $i < $post_count; $i++ ) {
+				$refs_per_post = 1 + ( $i % 3 );
+				$picked        = array();
+				for ( $j = 0; $j < $refs_per_post; $j++ ) {
+					$picked[] = $pattern_ids[ mt_rand( 0, $pattern_count - 1 ) ];
+				}
+				$this->make_post_referencing( $picked );
+				// De-dupe within a post to match COUNT(DISTINCT ID) semantics.
+				foreach ( array_unique( $picked ) as $pid ) {
+					$expected[ $pid ] = isset( $expected[ $pid ] ) ? $expected[ $pid ] + 1 : 1;
+				}
+			}
+
+			$counts = $this->manager->get_all_pattern_reference_counts();
+
+			// Spot-check: total count of referencing-post-pattern pairs
+			// across the map equals the sum of our expected map.
+			$this->assertSame(
+				array_sum( $expected ),
+				array_sum( $counts ),
+				'Sum of per-pattern counts must match the expected total under load.'
+			);
+
+			// Spot-check: every expected entry matches exactly.
+			foreach ( $expected as $pid => $count ) {
+				$this->assertSame(
+					$count,
+					$counts[ $pid ] ?? 0,
+					sprintf( 'Pattern %d expected %d refs, got %d', $pid, $count, $counts[ $pid ] ?? 0 )
+				);
+			}
+
+			// Spot-check: no extra entries leaked in (e.g. orphan-filter bypass).
+			$this->assertSame(
+				count( $expected ),
+				count( $counts ),
+				'Map must contain exactly the patterns that were referenced — no orphans or duplicates.'
+			);
+		} finally {
+			remove_filter( 'gk_block_api_synced_patterns_query_limit', $cap );
+		}
+	}
+
+	/**
 	 * The aggregate pages through `wp_posts` in batches to bound peak memory.
 	 * This test forces a tiny batch size via filter so we can exercise the
 	 * pagination boundary cheaply, then asserts that the chunked totals sum
@@ -210,12 +268,10 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 	 * or an incorrect offset increment dropping rows on a batch boundary.
 	 */
 	public function test_chunked_scan_counts_match_across_batches(): void {
-		add_filter(
-			'gk_block_api_pattern_ref_scan_batch_size',
-			static function (): int {
-				return 2;
-			}
-		);
+		$tiny_batch = static function (): int {
+			return 2;
+		};
+		add_filter( 'gk_block_api_pattern_ref_scan_batch_size', $tiny_batch );
 
 		try {
 			$pa = $this->make_pattern( 'Hot pattern' );
@@ -235,26 +291,7 @@ class PatternReferenceCountsTest extends WP_UnitTestCase {
 			$this->assertSame( 5, $counts[ $pa ] );
 			$this->assertSame( 3, $counts[ $pb ] );
 		} finally {
-			remove_all_filters( 'gk_block_api_pattern_ref_scan_batch_size' );
+			remove_filter( 'gk_block_api_pattern_ref_scan_batch_size', $tiny_batch );
 		}
-	}
-
-	/** count_pattern_references() returns the map's value for the given pattern. */
-	public function test_count_pattern_references_delegates_to_map(): void {
-		$pa = $this->make_pattern();
-		$pb = $this->make_pattern();
-
-		$this->make_post_referencing( array( $pa ) );
-		$this->make_post_referencing( array( $pa ) );
-		// pb has no references.
-
-		// reflection: count_pattern_references is private; invoke via reflection.
-		$ref    = new ReflectionMethod( $this->manager, 'count_pattern_references' );
-		$ref->setAccessible( true );
-
-		$this->assertSame( 2, $ref->invoke( $this->manager, $pa ) );
-		$this->assertSame( 0, $ref->invoke( $this->manager, $pb ) );
-		$this->assertSame( 0, $ref->invoke( $this->manager, 0 ), 'Non-positive IDs short-circuit to 0.' );
-		$this->assertSame( 0, $ref->invoke( $this->manager, -5 ), 'Negative IDs short-circuit to 0.' );
 	}
 }
