@@ -196,6 +196,25 @@ export function inferLanguage(code: string): string {
 
 // ── Built-in: kevinbatdorf/code-block-pro ────────────────────────────────────
 
+/**
+ * Encode a string for safe use inside an HTML attribute value (double-quoted
+ * context: `class="…"`, `style="…"`). Covers the five characters that change
+ * meaning inside quoted attributes — `&`, `<`, `>`, `"`, `'` — by mapping each
+ * to its named or numeric entity.
+ *
+ * Callers MUST quote the resulting value with `"` (not single quotes) — the
+ * apostrophe escape uses `&#39;` rather than `&apos;` for older-browser
+ * compatibility, and the rest assume the surrounding quote is `"`.
+ */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code as string | undefined;
@@ -264,15 +283,22 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
     // Mirror CBP's save() inline style attribute. Without these the wrapper
     // falls back to theme defaults and the code uses the surrounding font /
     // colour, breaking visual parity with editor-created blocks.
+    //
+    // Every value is HTML-encoded before interpolation. Caller-supplied
+    // attributes can contain quotes, angle brackets, or ampersands either by
+    // accident (a font-name like `"Helvetica Neue"`) or by intent (an
+    // attacker-controlled className that breaks out of the attribute with
+    // `foo" onclick="…`). The encoder collapses all five
+    // attribute-significant characters to entities.
     const styleParts: string[] = [];
-    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${attrs.fontFamily}`);
-    if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${attrs.fontSize}`);
-    if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${attrs.lineHeight}`);
-    if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${attrs.bgColor}`);
-    if (typeof attrs.textColor === 'string') styleParts.push(`color:${attrs.textColor}`);
+    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${escapeAttr(attrs.fontFamily)}`);
+    if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
+    if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
+    if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);
+    if (typeof attrs.textColor === 'string') styleParts.push(`color:${escapeAttr(attrs.textColor)}`);
     const styleAttr = styleParts.length ? ` style="${styleParts.join(';')}"` : '';
     const classNameExtra = typeof attrs.className === 'string' && (attrs.className as string).trim() !== ''
-      ? ` ${(attrs.className as string).trim()}`
+      ? ` ${escapeAttr((attrs.className as string).trim())}`
       : '';
     const copyTextarea = attrs.copyButton
       ? `<textarea style="display:none" aria-hidden="true">${encodedCode}</textarea>`

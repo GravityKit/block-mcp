@@ -39771,7 +39771,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "1.7.1",
+  version: "1.7.2",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   type: "module",
@@ -57935,6 +57935,9 @@ function inferLanguage(code) {
   if (/^\s*#!?\/bin\/(?:bash|sh)|^\s*\$\s+\w/.test(head2)) return "bash";
   return "plaintext";
 }
+function escapeAttr(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code;
@@ -57967,13 +57970,13 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
     );
   } else {
     const styleParts = [];
-    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${attrs.fontFamily}`);
-    if (typeof attrs.fontSize === "string") styleParts.push(`font-size:${attrs.fontSize}`);
-    if (typeof attrs.lineHeight === "string") styleParts.push(`line-height:${attrs.lineHeight}`);
-    if (typeof attrs.bgColor === "string") styleParts.push(`background-color:${attrs.bgColor}`);
-    if (typeof attrs.textColor === "string") styleParts.push(`color:${attrs.textColor}`);
+    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${escapeAttr(attrs.fontFamily)}`);
+    if (typeof attrs.fontSize === "string") styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
+    if (typeof attrs.lineHeight === "string") styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
+    if (typeof attrs.bgColor === "string") styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);
+    if (typeof attrs.textColor === "string") styleParts.push(`color:${escapeAttr(attrs.textColor)}`);
     const styleAttr = styleParts.length ? ` style="${styleParts.join(";")}"` : "";
-    const classNameExtra = typeof attrs.className === "string" && attrs.className.trim() !== "" ? ` ${attrs.className.trim()}` : "";
+    const classNameExtra = typeof attrs.className === "string" && attrs.className.trim() !== "" ? ` ${escapeAttr(attrs.className.trim())}` : "";
     const copyTextarea = attrs.copyButton ? `<textarea style="display:none" aria-hidden="true">${encodedCode}</textarea>` : "";
     updatedInnerHTML = `<div class="wp-block-kevinbatdorf-code-block-pro${classNameExtra}"${styleAttr}>${codeHTML}${copyTextarea}</div>`;
   }

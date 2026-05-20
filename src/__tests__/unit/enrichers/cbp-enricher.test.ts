@@ -152,6 +152,80 @@ describe('enrichBlock — Code Block Pro', () => {
     expect(result.innerHTML).not.toContain('<textarea');
   });
 
+  /**
+   * Regression: a literal `</textarea>` in the source code would otherwise
+   * close the copy-button <textarea> early and corrupt the wrapper. The
+   * enricher must HTML-encode `<` (and `&`, `>`) in the textarea content so
+   * the closing tag in the code is rendered as inert text, not parsed as a
+   * tag boundary.
+   */
+  it('escapes closing textarea in code payload', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: "const x = '</textarea>';", language: 'javascript', copyButton: true },
+    };
+    const result = await enrichBlock(block);
+    // Isolate just the copy-button <textarea> contents — the codeHTML <pre>
+    // above it legitimately escapes its own markup separately.
+    const match = result.innerHTML!.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/);
+    expect(match).not.toBeNull();
+    const textareaContent = match![1];
+    expect(textareaContent).not.toContain('</textarea>');
+    expect(textareaContent).toContain('&lt;/textarea&gt;');
+  });
+
+  /**
+   * Wrapper-style values come straight from caller-supplied attributes. A
+   * value containing `"` (whether malicious or just a quoted font-name like
+   * `"Helvetica Neue"`) used to break out of the style="" attribute and
+   * either corrupt the markup or inject active content. The enricher now
+   * HTML-encodes attribute values before interpolation.
+   */
+  it('escapes double-quotes in style attribute values', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontFamily: 'Arial" onerror="alert(1)',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).not.toContain('onerror="alert(1)');
+    expect(result.innerHTML).toContain('&quot;');
+  });
+
+  it('escapes special characters in className', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        className: 'safe" onclick="alert(1)',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).not.toContain('onclick="alert(1)');
+    // The literal double-quote inside the className value must be encoded
+    // rather than rendered raw, regardless of where the escape happens.
+    expect(result.innerHTML).toMatch(/class="wp-block-kevinbatdorf-code-block-pro[^"]*"/);
+  });
+
+  it('escapes ampersands and angle brackets in style values', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        bgColor: '#fff & <script>',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).not.toContain('<script>');
+    expect(result.innerHTML).toContain('&amp;');
+    expect(result.innerHTML).toContain('&lt;script&gt;');
+  });
+
   it('keeps explicit php language without inference', async () => {
     const block: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',
