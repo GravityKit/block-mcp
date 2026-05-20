@@ -201,46 +201,88 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   const code = attrs.code as string | undefined;
   if (!code) return null;
 
-  const rawLang = ((attrs.language as string) || 'plaintext').toLowerCase();
-  const { langs } = await getHighlighter();
-
-  const lang = (rawLang === 'plaintext' || rawLang === 'text' || rawLang === '')
+  // Three caller intents on `language`:
+  //   • Missing / '' / 'auto'      → run inferLanguage()
+  //   • 'plaintext' (and aliases)  → render as plaintext, NO inference
+  //   • Any other string           → use it verbatim (caller knows the language)
+  //
+  // Earlier the enricher collapsed missing + 'plaintext' into "infer", which
+  // surprised callers passing 'plaintext' for prose. A chat prompt with the
+  // word "from" appearing twice tripped the SQL signal in inferLanguage() and
+  // rendered as syntax-highlighted SQL.
+  const rawLangAttr = typeof attrs.language === 'string' ? (attrs.language as string).trim() : '';
+  const rawLang = rawLangAttr.toLowerCase();
+  const PLAINTEXT_ALIASES = new Set(['plaintext', 'text', 'plain', 'txt', 'none']);
+  const shouldInfer = rawLang === '' || rawLang === 'auto';
+  const lang = shouldInfer
     ? inferLanguage(code)
-    : rawLang;
+    : (PLAINTEXT_ALIASES.has(rawLang) ? 'plaintext' : rawLang);
+
+  const { langs } = await getHighlighter();
   const effectiveLang = langs.has(lang) ? lang : 'plaintext';
 
   const themeName = (attrs.theme as string | undefined) || undefined;
   const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split('\n').length;
-  if (codeHTML === attrs.codeHTML && lang === rawLang) return null;
+  const incomingInnerHTML = block.innerHTML ?? '';
+  // Bail out only when nothing meaningful has changed AND innerHTML is already
+  // populated. An empty incomingInnerHTML always falls through so the wrapper
+  // gets built below, even if codeHTML matches a previously-stored attribute.
+  if (codeHTML === attrs.codeHTML && lang === rawLang && incomingInnerHTML !== '') {
+    return null;
+  }
 
   const updatedAttrs = { ...attrs, language: lang, codeHTML, highestLineNumber };
 
-  // CBP is dual-storage: codeHTML is embedded verbatim inside innerHTML. When
-  // innerHTML is provided, replace the <pre class="shiki"> portion in-place and
-  // update the copy-button <textarea> so both match the new code.
-  let updatedInnerHTML = block.innerHTML;
-  if (updatedInnerHTML) {
-    updatedInnerHTML = updatedInnerHTML.replace(
+  // Encode `&`, `<`, `>` before injecting raw source code into the
+  // copy-button <textarea>'s text content. A literal `</textarea>` in the
+  // source would otherwise close the element early and corrupt innerHTML.
+  const encodedCode = code
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // CBP is dual-storage: codeHTML lives both as an attribute (for the editor)
+  // and inside innerHTML (the rendered widget served on the front-end).
+  //   • innerHTML already exists → replace the <pre class="shiki"> portion
+  //     in-place and re-sync the copy-button <textarea> contents.
+  //   • innerHTML is empty       → build a minimal wrapper from scratch so the
+  //     block actually renders. Without this branch, a CBP block inserted via
+  //     the API saves the codeHTML attribute but emits no visible HTML — the
+  //     post renders a blank gap where the code should be.
+  let updatedInnerHTML: string;
+  if (incomingInnerHTML !== '') {
+    updatedInnerHTML = incomingInnerHTML.replace(
       /<pre class="shiki[\s\S]*?<\/pre>/,
-      codeHTML
+      codeHTML,
     );
-    // Encode `&`, `<`, `>` before injecting raw source code into the
-    // <textarea>'s text content. A literal `</textarea>` in the source
-    // would otherwise close the element early and corrupt innerHTML.
-    const encoded = code
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
-      (_m, open, _old, close) => `${open}${encoded}${close}`
+      (_m, open, _old, close) => `${open}${encodedCode}${close}`,
     );
+  } else {
+    // Mirror CBP's save() inline style attribute. Without these the wrapper
+    // falls back to theme defaults and the code uses the surrounding font /
+    // colour, breaking visual parity with editor-created blocks.
+    const styleParts: string[] = [];
+    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${attrs.fontFamily}`);
+    if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${attrs.fontSize}`);
+    if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${attrs.lineHeight}`);
+    if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${attrs.bgColor}`);
+    if (typeof attrs.textColor === 'string') styleParts.push(`color:${attrs.textColor}`);
+    const styleAttr = styleParts.length ? ` style="${styleParts.join(';')}"` : '';
+    const classNameExtra = typeof attrs.className === 'string' && (attrs.className as string).trim() !== ''
+      ? ` ${(attrs.className as string).trim()}`
+      : '';
+    const copyTextarea = attrs.copyButton
+      ? `<textarea style="display:none" aria-hidden="true">${encodedCode}</textarea>`
+      : '';
+    updatedInnerHTML = `<div class="wp-block-kevinbatdorf-code-block-pro${classNameExtra}"${styleAttr}>${codeHTML}${copyTextarea}</div>`;
   }
 
   return {
     ...block,
     attributes: updatedAttrs,
-    ...(updatedInnerHTML !== block.innerHTML ? { innerHTML: updatedInnerHTML } : {}),
+    innerHTML: updatedInnerHTML,
   };
 });

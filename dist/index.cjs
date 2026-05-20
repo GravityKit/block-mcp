@@ -39771,7 +39771,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "1.7.0",
+  version: "1.7.1",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   type: "module",
@@ -57939,31 +57939,48 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code;
   if (!code) return null;
-  const rawLang = (attrs.language || "plaintext").toLowerCase();
+  const rawLangAttr = typeof attrs.language === "string" ? attrs.language.trim() : "";
+  const rawLang = rawLangAttr.toLowerCase();
+  const PLAINTEXT_ALIASES = /* @__PURE__ */ new Set(["plaintext", "text", "plain", "txt", "none"]);
+  const shouldInfer = rawLang === "" || rawLang === "auto";
+  const lang254 = shouldInfer ? inferLanguage(code) : PLAINTEXT_ALIASES.has(rawLang) ? "plaintext" : rawLang;
   const { langs } = await getHighlighter();
-  const lang254 = rawLang === "plaintext" || rawLang === "text" || rawLang === "" ? inferLanguage(code) : rawLang;
   const effectiveLang = langs.has(lang254) ? lang254 : "plaintext";
   const themeName = attrs.theme || void 0;
   const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split("\n").length;
-  if (codeHTML === attrs.codeHTML && lang254 === rawLang) return null;
+  const incomingInnerHTML = block.innerHTML ?? "";
+  if (codeHTML === attrs.codeHTML && lang254 === rawLang && incomingInnerHTML !== "") {
+    return null;
+  }
   const updatedAttrs = { ...attrs, language: lang254, codeHTML, highestLineNumber };
-  let updatedInnerHTML = block.innerHTML;
-  if (updatedInnerHTML) {
-    updatedInnerHTML = updatedInnerHTML.replace(
+  const encodedCode = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let updatedInnerHTML;
+  if (incomingInnerHTML !== "") {
+    updatedInnerHTML = incomingInnerHTML.replace(
       /<pre class="shiki[\s\S]*?<\/pre>/,
       codeHTML
     );
-    const encoded = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
-      (_m, open, _old, close) => `${open}${encoded}${close}`
+      (_m, open, _old, close) => `${open}${encodedCode}${close}`
     );
+  } else {
+    const styleParts = [];
+    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${attrs.fontFamily}`);
+    if (typeof attrs.fontSize === "string") styleParts.push(`font-size:${attrs.fontSize}`);
+    if (typeof attrs.lineHeight === "string") styleParts.push(`line-height:${attrs.lineHeight}`);
+    if (typeof attrs.bgColor === "string") styleParts.push(`background-color:${attrs.bgColor}`);
+    if (typeof attrs.textColor === "string") styleParts.push(`color:${attrs.textColor}`);
+    const styleAttr = styleParts.length ? ` style="${styleParts.join(";")}"` : "";
+    const classNameExtra = typeof attrs.className === "string" && attrs.className.trim() !== "" ? ` ${attrs.className.trim()}` : "";
+    const copyTextarea = attrs.copyButton ? `<textarea style="display:none" aria-hidden="true">${encodedCode}</textarea>` : "";
+    updatedInnerHTML = `<div class="wp-block-kevinbatdorf-code-block-pro${classNameExtra}"${styleAttr}>${codeHTML}${copyTextarea}</div>`;
   }
   return {
     ...block,
     attributes: updatedAttrs,
-    ...updatedInnerHTML !== block.innerHTML ? { innerHTML: updatedInnerHTML } : {}
+    innerHTML: updatedInnerHTML
   };
 });
 
