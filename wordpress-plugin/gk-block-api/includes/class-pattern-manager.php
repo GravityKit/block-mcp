@@ -219,13 +219,24 @@ class Pattern_Manager {
 	 * @return array Formatted pattern data.
 	 */
 	private function get_synced_patterns( $args ) {
-		// Synced patterns are user-created; capped to keep memory bounded
-		// even on edge-case sites with thousands. Extend via the
-		// `gk_block_api_synced_patterns_query_limit` filter if needed.
+		/**
+		 * Filters the maximum number of synced patterns fetched in one query.
+		 *
+		 * Synced patterns are user-created `wp_block` posts. The default cap
+		 * bounds memory on edge-case sites with thousands of entries; the
+		 * pattern list is also fully loaded into PHP for scoring + enrichment
+		 * downstream, so the value isn't purely an SQL concern. Raise only
+		 * when a known site exceeds the default and the full set is needed
+		 * in a single response.
+		 *
+		 * @param int $limit Maximum synced patterns to fetch. Default 500.
+		 */
+		$synced_patterns_limit = (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 );
+
 		$query_args = array(
 			'post_type'           => 'wp_block',
 			'post_status'         => 'publish',
-			'posts_per_page'      => (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 ),
+			'posts_per_page'      => $synced_patterns_limit,
 			'no_found_rows'       => true,
 			'orderby'             => 'modified',
 			'order'               => 'DESC',
@@ -510,9 +521,24 @@ class Pattern_Manager {
 		// rows match. Sites with hundreds of pages × 200KB content each
 		// otherwise risk OOM mid-rebuild.
 		$like_pattern = '%' . $wpdb->esc_like( '"ref":' ) . '%';
-		$batch_size   = max( 1, (int) apply_filters( 'gk_block_api_pattern_ref_scan_batch_size', self::SCAN_BATCH_SIZE ) );
-		$offset       = 0;
-		$counts       = array();
+
+		/**
+		 * Filters the batch size used when paging through post_content rows
+		 * to tally synced-pattern references.
+		 *
+		 * Each batch is loaded into PHP whole (one row per post that contains
+		 * a `"ref":` substring), so peak memory is roughly batch_size ×
+		 * average matching post_content size. Lower the value on sites with
+		 * very large pages; raise it on small sites to cut round-trips.
+		 * Values < 1 are clamped to 1.
+		 *
+		 * @param int $batch_size Rows pulled per chunk. Default 200.
+		 */
+		$batch_size = (int) apply_filters( 'gk_block_api_pattern_ref_scan_batch_size', self::SCAN_BATCH_SIZE );
+		$batch_size = max( 1, $batch_size );
+
+		$offset = 0;
+		$counts = array();
 
 		do {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
