@@ -139,8 +139,14 @@ export function sanitizeAddendum(input: unknown): string {
 
   s = s.trim();
 
-  if (s.length > MAX_ADDENDUM_LENGTH) {
-    s = s.slice(0, MAX_ADDENDUM_LENGTH);
+  // Count and slice by Unicode code points, NOT UTF-16 code units, so an
+  // astral character (emoji, rare CJK, math symbol) is never split mid
+  // surrogate pair — which would leave the tail as an unpaired surrogate
+  // that downstream JSON serializers either reject or mangle. Matches
+  // the server's `mb_strlen($s, 'UTF-8')` semantics.
+  const codePoints = Array.from(s);
+  if (codePoints.length > MAX_ADDENDUM_LENGTH) {
+    s = codePoints.slice(0, MAX_ADDENDUM_LENGTH).join('');
   }
 
   return s;

@@ -466,11 +466,22 @@ class Settings_Page {
 					<strong><?php esc_html_e( 'Public data:', 'gk-block-api' ); ?></strong>
 					<?php esc_html_e( 'This value is served unauthenticated to every connected MCP client. Do NOT paste secrets, API keys, or internal URLs.', 'gk-block-api' ); ?>
 				</p>
+				<?php
+				/*
+				 * No HTML `maxlength` attribute. The browser counts UTF-16
+				 * code units while the server counts UTF-8 code points
+				 * (mb_strlen / Instructions::MAX_LENGTH), so a maxlength
+				 * value of 2000 would block ~1000 emoji at the client
+				 * even though the server would accept them. The inline
+				 * JS below enforces a true code-point limit that matches
+				 * the server's counter.
+				 */
+				?>
 				<textarea
 					id="gk-block-api-instructions"
 					name="<?php echo esc_attr( Instructions::OPTION_KEY ); ?>"
 					rows="8"
-					maxlength="<?php echo esc_attr( (string) $instructions_max ); ?>"
+					data-max-codepoints="<?php echo esc_attr( (string) $instructions_max ); ?>"
 					class="large-text code"
 					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-api' ); ?>"
 				><?php echo esc_textarea( $instructions_val ); ?></textarea>
@@ -491,7 +502,21 @@ class Settings_Page {
 					var ta    = document.getElementById('gk-block-api-instructions');
 					var count = document.getElementById('gk-block-api-instructions-count');
 					if (!ta || !count) return;
-					ta.addEventListener('input', function () { count.textContent = String(ta.value.length); });
+					var max = parseInt(ta.getAttribute('data-max-codepoints'), 10) || 0;
+
+					// Count Unicode code points, not UTF-16 code units, so
+					// astral characters (emoji, rare CJK, math symbols)
+					// match the server's mb_strlen(...) tally.
+					function codePoints(s) { return Array.from(s); }
+
+					ta.addEventListener('input', function () {
+						var cps = codePoints(ta.value);
+						if (max > 0 && cps.length > max) {
+							ta.value = cps.slice(0, max).join('');
+							cps = codePoints(ta.value);
+						}
+						count.textContent = String(cps.length);
+					});
 				})();
 				</script>
 

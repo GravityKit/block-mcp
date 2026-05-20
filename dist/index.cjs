@@ -44443,8 +44443,9 @@ function sanitizeAddendum(input) {
   s2 = s2.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, "");
   s2 = s2.replace(/\r\n?/g, "\n");
   s2 = s2.trim();
-  if (s2.length > MAX_ADDENDUM_LENGTH) {
-    s2 = s2.slice(0, MAX_ADDENDUM_LENGTH);
+  const codePoints = Array.from(s2);
+  if (codePoints.length > MAX_ADDENDUM_LENGTH) {
+    s2 = codePoints.slice(0, MAX_ADDENDUM_LENGTH).join("");
   }
   return s2;
 }

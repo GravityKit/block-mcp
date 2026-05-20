@@ -133,6 +133,25 @@ describe('sanitizeAddendum', () => {
     expect(sanitizeAddendum(exact)).toHaveLength(MAX_ADDENDUM_LENGTH);
   });
 
+  /**
+   * Surrogate-pair safety. `😀` (U+1F600) is one code point but two
+   * UTF-16 code units. Naive `slice(0, MAX_ADDENDUM_LENGTH)` on a
+   * string of emoji would land in the middle of the last codepoint's
+   * surrogate pair, leaving a lone high surrogate that downstream JSON
+   * encoders either reject or mangle. The sanitizer counts and slices
+   * by `Array.from` so this can never happen.
+   */
+  it('truncates emoji-heavy input at code-point boundaries', () => {
+    const input = '😀'.repeat(MAX_ADDENDUM_LENGTH + 100);
+    const result = sanitizeAddendum(input);
+    expect(Array.from(result)).toHaveLength(MAX_ADDENDUM_LENGTH);
+    // Every codepoint is the full emoji; never a lone surrogate. The
+    // matchAll iterator over the regex emits one match per scalar
+    // codepoint, so equality with the Array.from count confirms no
+    // half-pair remained.
+    expect([...result].every((c) => c === '😀')).toBe(true);
+  });
+
   it('returns empty for empty string', () => {
     expect(sanitizeAddendum('')).toBe('');
   });
