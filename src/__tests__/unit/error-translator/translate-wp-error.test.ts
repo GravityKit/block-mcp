@@ -153,20 +153,53 @@ describe('translateWpError — block ref / path resolution', () => {
 describe('translateWpError — preference enforcement', () => {
   it('legacy_block embeds block name and replacement', () => {
     const msg = translateWpError('legacy_block', {
-      block: 'stackable/heading',
+      block: 'example/heading',
       suggested_replacement: 'core/heading',
     })!;
-    expect(msg).toMatch(/stackable\/heading is a legacy block/);
+    expect(msg).toMatch(/example\/heading is in a namespace this site has configured as legacy/);
     expect(msg).toMatch(/core\/heading/);
   });
 
   it('legacy_block accepts block_name as alternative to block', () => {
-    const msg = translateWpError('legacy_block', { block_name: 'ugb/text' })!;
-    expect(msg).toMatch(/ugb\/text is a legacy block/);
+    const msg = translateWpError('legacy_block', { block_name: 'example/text' })!;
+    expect(msg).toMatch(/example\/text is in a namespace this site has configured as legacy/);
   });
 
   it('legacy_block falls back to generic when no block name', () => {
     expect(translateWpError('legacy_block', null)).toMatch(/Legacy block rejected/);
+  });
+
+  it('legacy_block message does not name specific third-party vendors', () => {
+    // Sanity check: the message must stay vendor-agnostic — naming specific
+    // namespaces (stackable / ugb / jetpack) makes the message brittle when
+    // site preferences change and singles out individual plugins.
+    const msg = translateWpError('legacy_block', { block: 'example/x' })!;
+    expect(msg).not.toMatch(/Stackable|UGB|Jetpack/i);
+  });
+
+  it('inner_html_required names the offending attributes and the block', () => {
+    const msg = translateWpError('inner_html_required', {
+      block: 'core/paragraph',
+      source_bound_attributes: ['content'],
+    })!;
+    expect(msg).toMatch(/core\/paragraph/);
+    expect(msg).toMatch(/\[content\]/);
+    expect(msg).toMatch(/innerHTML/);
+    expect(msg).toMatch(/invalid content/);
+  });
+
+  it('inner_html_required falls back gracefully without block name', () => {
+    const msg = translateWpError('inner_html_required', {
+      source_bound_attributes: ['url'],
+    })!;
+    expect(msg).toMatch(/\[url\]/);
+    expect(msg).toMatch(/innerHTML/);
+  });
+
+  it('inner_html_required survives missing source_bound_attributes hint', () => {
+    const msg = translateWpError('inner_html_required', { block: 'core/heading' })!;
+    expect(msg).toMatch(/core\/heading/);
+    expect(msg).toMatch(/innerHTML/);
   });
 
   it('static_markup_stale_risk mentions innerHTML and static block', () => {
@@ -270,16 +303,16 @@ describe('translateWpError — data extraction edge cases', () => {
   });
 
   it('block_name field is used when block field is absent', () => {
-    const msg = translateWpError('legacy_block', { block_name: 'stackable/icon' })!;
-    expect(msg).toContain('stackable/icon');
+    const msg = translateWpError('legacy_block', { block_name: 'example/icon' })!;
+    expect(msg).toContain('example/icon');
   });
 
   it('block field takes precedence over block_name when both present', () => {
     const msg = translateWpError('legacy_block', {
-      block: 'ugb/text',
+      block: 'example/text',
       block_name: 'other/block',
     })!;
-    expect(msg).toContain('ugb/text');
+    expect(msg).toContain('example/text');
     expect(msg).not.toContain('other/block');
   });
 });

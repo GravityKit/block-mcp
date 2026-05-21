@@ -558,6 +558,659 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertEquals( 'invalid_block', $result->get_error_code() );
 	}
 
+	/**
+	 * Empty class="" / class=' ' attributes get stripped from innerHTML on insert.
+	 *
+	 * Live audit on /assist/ surfaced nine paragraph blocks stored as
+	 * `<p class="">...</p>` while their attributes had nothing that would
+	 * make save() emit a class attribute. On the next edit Gutenberg's
+	 * parser reads `class=""`, save() produces `<p>...</p>`, the two
+	 * disagree, and "Block contains unexpected or invalid content" fires.
+	 *
+	 * `class=""` is never legitimate Gutenberg save() output — the JS
+	 * `useBlockProps.save()` helper omits the class attribute entirely
+	 * when there are no classes to emit. So normalising it out on the
+	 * write path is information-preserving (an empty class attribute is
+	 * semantically identical to no class attribute in HTML) and prevents
+	 * the round-trip mismatch on next reload.
+	 */
+	public function test_insert_blocks_strips_empty_class_attribute_from_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'      => 'core/paragraph',
+				'innerHTML' => '<p class="">Hello world</p>',
+			) )
+		);
+		$this->assertTrue( $result['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringContainsString( '<p>Hello world</p>', $post_content );
+		$this->assertStringNotContainsString( 'class=""', $post_content );
+	}
+
+	/**
+	 * Whitespace-only class values are equally invalid and must be stripped.
+	 *
+	 * Same rationale as the empty-string case — `<p class="   ">…</p>` parses
+	 * to a class list of [], so save() will not reproduce it, and on next
+	 * reload the editor flags the block as invalid.
+	 */
+	public function test_insert_blocks_strips_whitespace_only_class_attribute_from_inner_html() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'      => 'core/paragraph',
+				'innerHTML' => "<p class=\"   \">Whitespace class</p>",
+			) )
+		);
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringContainsString( '<p>Whitespace class</p>', $post_content );
+		$this->assertStringNotContainsString( 'class="', $post_content );
+	}
+
+	/**
+	 * Real classes must NOT be touched by the empty-class normalisation.
+	 *
+	 * Negative-space test guarding against the strip being too aggressive.
+	 */
+	public function test_insert_blocks_preserves_non_empty_class_attribute() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'      => 'core/paragraph',
+				'innerHTML' => '<p class="has-text-align-center">Aligned</p>',
+			) )
+		);
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringContainsString( 'class="has-text-align-center"', $post_content );
+	}
+
+	/**
+	 * Single-quoted empty class attribute is handled identically.
+	 *
+	 * Some HTML tooling emits single-quoted attributes; we accept and
+	 * strip them with the same logic.
+	 */
+	public function test_insert_blocks_strips_single_quoted_empty_class_attribute() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'      => 'core/paragraph',
+				'innerHTML' => "<p class=''>Single quoted</p>",
+			) )
+		);
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringNotContainsString( "class=''", $post_content );
+		$this->assertStringNotContainsString( 'class=""', $post_content );
+	}
+
+	/**
+	 * Empty-class stripping must also apply when update_block replaces the
+	 * innerHTML — agents who recover from the bug by patching just the HTML
+	 * shouldn't be able to re-introduce the same broken markup.
+	 */
+	public function test_update_block_strips_empty_class_attribute_from_inner_html() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>Initial</p>' ) ) );
+		$result = $this->crud->update_block(
+			$this->post_id,
+			0,
+			array(),
+			'<p class="">Replaced</p>'
+		);
+		$this->assertTrue( $result['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringContainsString( '<p>Replaced</p>', $post_content );
+		$this->assertStringNotContainsString( 'class=""', $post_content );
+	}
+
+	/**
+	 * Blocks in a legacy-configured namespace surface `legacy_block` even when not registered.
+	 *
+	 * Preference scoring is namespace-based and resolves from site
+	 * configuration regardless of whether the source plugin is installed.
+	 * Returning the generic `invalid_block` for an unregistered block whose
+	 * namespace is configured as legacy hides the actionable replacement
+	 * guidance the agent needs. This test pins the reordered
+	 * validate_block_def: legacy tier wins over registry-not-registered.
+	 *
+	 * Uses an arbitrary block name picked from the default legacy namespace
+	 * set in `Preferences::get_defaults()` — change the test fixture if
+	 * the default tier configuration changes.
+	 */
+	public function test_insert_blocks_legacy_namespace_rejects_as_legacy_even_when_not_registered() {
+		// Pick the first namespace whose default tier is "legacy" from the
+		// shipped preference defaults. Test stays valid as the policy
+		// configuration evolves.
+		$defaults         = \GravityKit\BlockAPI\Preferences::get_defaults();
+		$legacy_namespace = null;
+		foreach ( ( $defaults['namespace_scores'] ?? array() ) as $ns => $score ) {
+			if ( \GravityKit\BlockAPI\Preferences::score_to_tier( $score ) === 'legacy' ) {
+				$legacy_namespace = $ns;
+				break;
+			}
+		}
+		$this->assertNotNull( $legacy_namespace, 'Default preferences must contain at least one legacy namespace.' );
+
+		$block_name = $legacy_namespace . '/never-installed';
+		$registry   = \WP_Block_Type_Registry::get_instance();
+		if ( $registry->is_registered( $block_name ) ) {
+			$registry->unregister( $block_name );
+		}
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => $block_name, 'innerHTML' => '<div>x</div>' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'legacy_block', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertEquals( $legacy_namespace, $data['namespace'] );
+	}
+
+	/**
+	 * Reject attributes-only inserts for blocks whose attribute schema is HTML-sourced.
+	 *
+	 * Callers (notably MCP agents) frequently send
+	 * { name: "core/paragraph", attributes: { content: "Hello" } } and omit
+	 * innerHTML. With no innerHTML and no innerBlocks, serialize_blocks() emits
+	 * the self-closing form `<!-- wp:paragraph {"content":"Hello"} /-->`.
+	 * On reload Gutenberg's rich-text source selector runs against an empty
+	 * DOM, returns "", and reports "Block contains unexpected or invalid
+	 * content" because the parsed attribute disagrees with the saved comment.
+	 * Scaffolding the markup in PHP would re-implement each block's JS save()
+	 * and rot whenever core changes — instead we reject with a message that
+	 * names the offending attribute, so the caller learns the contract.
+	 */
+	public function test_insert_blocks_rejects_paragraph_with_content_attr_but_no_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/paragraph', 'attributes' => array( 'content' => 'Hello world' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertEquals( 'core/paragraph', $data['block'] );
+		$this->assertContains( 'content', $data['source_bound_attributes'] );
+	}
+
+	/**
+	 * Same rejection applies to core/heading — its `content` attribute is
+	 * rich-text sourced, so an attributes-only insert produces the same
+	 * "invalid content" warning Gutenberg shows on reload.
+	 */
+	public function test_insert_blocks_rejects_heading_with_content_attr_but_no_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/heading', 'attributes' => array( 'level' => 3, 'content' => 'Section title' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+	}
+
+	/**
+	 * Providing innerHTML alongside attributes is the canonical form and must
+	 * still succeed. This pins the workaround agents already use and prevents
+	 * the rejection check from regressing into a blanket "no attributes-only"
+	 * block.
+	 */
+	public function test_insert_blocks_accepts_paragraph_with_content_attr_and_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/paragraph',
+				'attributes' => array( 'content' => 'Hello world' ),
+				'innerHTML'  => '<p>Hello world</p>',
+			) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 1, $saved );
+		$this->assertStringContainsString( 'Hello world', $saved[0]['innerHTML'] );
+	}
+
+	/**
+	 * Attribute-sourced fields (e.g., core/image.url, source: attribute) ARE
+	 * rejected by the inner_html_required guard.
+	 *
+	 * Initially the guard's allow-list omitted `source: attribute` on the
+	 * theory that the failure mode was "block can't render at all" rather
+	 * than the same round-trip mismatch. A later schema review against
+	 * https://schemas.wp.org/trunk/block.json showed the failure surfaces
+	 * identically in the editor — Gutenberg's parser reads the wrapper
+	 * selector against an empty DOM, the parsed attribute value disagrees
+	 * with the saved comment payload, and the block is flagged as invalid.
+	 * Every core block using `source: attribute` (core/image, core/button,
+	 * core/audio, core/video, core/cover, core/details, core/file,
+	 * core/media-text) is static, so adding the source to the allow-list
+	 * carries no false-positive risk among shipping core blocks.
+	 */
+	public function test_insert_blocks_rejects_attribute_sourced_block_without_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/image', 'attributes' => array( 'url' => 'https://example.com/img.jpg' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertContains( 'url', $data['source_bound_attributes'] );
+	}
+
+	/**
+	 * Blocks whose attribute schema has no HTML-sourced attributes (e.g.,
+	 * core/spacer's `height`) must continue to allow attributes-only inserts
+	 * since their save output legitimately has no inner markup. This guards
+	 * against the rejection check becoming over-broad.
+	 */
+	public function test_insert_blocks_allows_attributes_only_when_no_source_bound_attrs() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/spacer', 'attributes' => array( 'height' => '50px' ) ) )
+		);
+		$this->assertTrue( $result['success'] );
+	}
+
+	/**
+	 * core/html stores its `content` attribute with `source: raw` (one of
+	 * the canonical sources in the block.json meta-schema). The guard's
+	 * allow-list now includes `raw`, so an attribute-only insert here
+	 * must be rejected the same way `rich-text` blocks are.
+	 *
+	 * Regression for the gap found by reviewing the meta-schema at
+	 * https://schemas.wp.org/trunk/block.json — the prior allow-list of
+	 * ['rich-text','html','children'] silently passed source=raw blocks
+	 * through, producing self-closing inserts on core/html and
+	 * core/shortcode that Gutenberg flagged on next edit.
+	 */
+	public function test_insert_blocks_rejects_raw_source_block_with_attr_but_no_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/html', 'attributes' => array( 'content' => '<div>raw markup</div>' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertContains( 'content', $data['source_bound_attributes'] );
+	}
+
+	/**
+	 * core/html canonical form: attribute + matching innerHTML succeeds and
+	 * round-trips through parse_blocks/serialize_blocks intact.
+	 *
+	 * core/html's `content` attribute is `source: raw, selector: '*'` —
+	 * the value IS the inner HTML. The canonical insert mirrors the
+	 * attribute value inside `innerHTML` so the saved block parses back
+	 * to the same content.
+	 */
+	public function test_insert_blocks_accepts_core_html_with_attr_and_inner_html() {
+		$this->make_post( array() );
+		$html_value = '<div class="ext-widget"><p>Embed me</p></div>';
+		$result     = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/html',
+				'attributes' => array( 'content' => $html_value ),
+				'innerHTML'  => $html_value,
+			) )
+		);
+		$this->assertTrue( $result['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertSame( 'core/html', $reparsed[0]['blockName'] );
+		$this->assertStringContainsString( 'Embed me', $reparsed[0]['innerHTML'] );
+	}
+
+	/**
+	 * core/shortcode also uses `source: raw` (on the `text` attribute) and
+	 * must trip the same rejection when sent without matching innerHTML.
+	 */
+	public function test_insert_blocks_rejects_core_shortcode_with_text_attr_but_no_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/shortcode', 'attributes' => array( 'text' => '[gallery ids="1,2,3"]' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertEquals( 'core/shortcode', $data['block'] );
+		$this->assertContains( 'text', $data['source_bound_attributes'] );
+	}
+
+	/**
+	 * core/shortcode canonical form: shortcode text in both the attribute
+	 * and the innerHTML. Confirms the rejection isn't blanket — the proper
+	 * form still works and survives the round-trip.
+	 */
+	public function test_insert_blocks_accepts_core_shortcode_with_attr_and_inner_html() {
+		$this->make_post( array() );
+		$shortcode = '[gallery ids="10,11,12"]';
+		$result    = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/shortcode',
+				'attributes' => array( 'text' => $shortcode ),
+				'innerHTML'  => $shortcode,
+			) )
+		);
+		$this->assertTrue( $result['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertSame( 'core/shortcode', $reparsed[0]['blockName'] );
+		$this->assertStringContainsString( 'gallery', $reparsed[0]['innerHTML'] );
+	}
+
+	/**
+	 * Update path applies to raw-source blocks too — attribute-only update
+	 * on a core/html that previously had content + innerHTML must use the
+	 * auto-transform path (the writer pairs the new attribute value with
+	 * the updated innerHTML on the same write).
+	 *
+	 * Mirrors the regression check for rich-text blocks at
+	 * test_round_trip_paragraph_update_block_content_attr_rewrites_inner_html.
+	 */
+	public function test_round_trip_core_html_update_block_content_attr_rewrites_inner_html() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/html',
+				'attributes' => array( 'content' => '<p>Before</p>' ),
+				'innerHTML'  => '<p>Before</p>',
+			) )
+		);
+
+		$update = $this->crud->update_block(
+			$this->post_id,
+			0,
+			array(),
+			'<p>After</p>'
+		);
+		$this->assertTrue( $update['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertStringContainsString( 'After', $reparsed[0]['innerHTML'] );
+		$this->assertStringNotContainsString( 'Before', $reparsed[0]['innerHTML'] );
+	}
+
+	/**
+	 * Same rejection applies to core/list-item — its `content` attribute is
+	 * rich-text sourced, so an attributes-only insert produces the same
+	 * "invalid content" warning Gutenberg shows on reload.
+	 */
+	public function test_insert_blocks_rejects_list_item_with_content_attr_but_no_inner_html() {
+		$this->make_post( array() );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/list-item', 'attributes' => array( 'content' => 'A bullet' ) ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'inner_html_required', $result->get_error_code() );
+	}
+
+	// ── Round-trip coverage ────────────────────────────────────────
+	//
+	// The bug at the root of this fix is a round-trip failure: a block
+	// passes through insert_blocks → save → parse_blocks and ends up with
+	// an inconsistent state (comment carries a content attribute, inner
+	// HTML is empty, editor rejects on reload). These tests exhaust the
+	// round-trip contract for the canonical form (attributes + innerHTML
+	// together): the persisted post_content, when re-parsed, must surface
+	// the same block name, the same attributes, and a non-empty innerHTML
+	// that still contains the caller's text.
+
+	/**
+	 * Paragraph: insert → save → re-parse round-trip preserves attribute,
+	 * innerHTML, and the text payload. The serialized comment must NOT be
+	 * self-closing — the presence of `/-->` with a `content` attribute is
+	 * the exact failure mode the editor flags as "invalid content".
+	 */
+	public function test_round_trip_paragraph_preserves_attrs_and_inner_html() {
+		$this->make_post( array() );
+		$insert = $this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/paragraph',
+				'attributes' => array( 'content' => 'Round-trip paragraph' ),
+				'innerHTML'  => '<p>Round-trip paragraph</p>',
+			) )
+		);
+		$this->assertTrue( $insert['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$this->assertStringContainsString( '<!-- wp:paragraph', $post_content );
+		$this->assertStringNotContainsString( '/-->', $post_content, 'Block comment must not be self-closing (would trigger Gutenberg invalid-content warning)' );
+		$this->assertStringContainsString( '<p>Round-trip paragraph</p>', $post_content );
+
+		$reparsed = parse_blocks( $post_content );
+		$this->assertCount( 1, $reparsed );
+		$this->assertSame( 'core/paragraph', $reparsed[0]['blockName'] );
+		$this->assertSame( 'Round-trip paragraph', $reparsed[0]['attrs']['content'] );
+		$this->assertStringContainsString( 'Round-trip paragraph', $reparsed[0]['innerHTML'] );
+	}
+
+	/**
+	 * Heading: each level (h1–h6) survives the round-trip with the correct
+	 * tag name in innerHTML. Heading is the canonical case for a block whose
+	 * save() output depends on TWO attributes (level governs the tag name,
+	 * content governs the text); the caller-supplied innerHTML is the
+	 * source of truth in the post_content blob.
+	 *
+	 * @dataProvider provide_heading_levels
+	 */
+	public function test_round_trip_heading_levels( $level ) {
+		// See test_insert_blocks_rejects_heading_with_content_attr_but_no_inner_html
+		// — same pre-existing WP core schema notice on heading registration.
+		$this->setExpectedIncorrectUsage( 'rest_validate_value_from_schema' );
+		$tag = 'h' . $level;
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'       => 'core/heading',
+				'attributes' => array( 'level' => $level, 'content' => 'Heading ' . $level ),
+				'innerHTML'  => '<' . $tag . '>Heading ' . $level . '</' . $tag . '>',
+			) )
+		);
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertSame( 'core/heading', $reparsed[0]['blockName'] );
+		$this->assertSame( $level, $reparsed[0]['attrs']['level'] );
+		$this->assertStringContainsString( '<' . $tag . '>', $reparsed[0]['innerHTML'] );
+		$this->assertStringContainsString( '</' . $tag . '>', $reparsed[0]['innerHTML'] );
+	}
+
+	public static function provide_heading_levels(): array {
+		return array(
+			'h1' => array( 1 ),
+			'h2' => array( 2 ),
+			'h3' => array( 3 ),
+			'h4' => array( 4 ),
+			'h5' => array( 5 ),
+			'h6' => array( 6 ),
+		);
+	}
+
+	/**
+	 * Container with inner blocks: a core/group containing children must
+	 * round-trip with the wrapper innerHTML opening/closing split and the
+	 * children re-parsed at the correct positions. This pins that the
+	 * source-bound-attr rejection doesn't fire when innerBlocks are
+	 * present (the inner content lives in the children, not in the
+	 * top-level innerHTML).
+	 */
+	public function test_round_trip_group_with_inner_blocks_preserves_children() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array(
+				'name'        => 'core/group',
+				'attributes'  => array( 'tagName' => 'section' ),
+				'innerHTML'   => '<section class="wp-block-group"></section>',
+				'innerBlocks' => array(
+					array(
+						'name'       => 'core/paragraph',
+						'attributes' => array( 'content' => 'Inside group' ),
+						'innerHTML'  => '<p>Inside group</p>',
+					),
+				),
+			) )
+		);
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertCount( 1, $reparsed );
+		$this->assertSame( 'core/group', $reparsed[0]['blockName'] );
+		$this->assertCount( 1, $reparsed[0]['innerBlocks'] );
+		$this->assertSame( 'core/paragraph', $reparsed[0]['innerBlocks'][0]['blockName'] );
+		$this->assertStringContainsString( 'Inside group', $reparsed[0]['innerBlocks'][0]['innerHTML'] );
+	}
+
+	/**
+	 * Batch insert: every block in a multi-block insert round-trips
+	 * independently. Catches a class of bug where one well-formed insert
+	 * could mask a malformed sibling.
+	 */
+	public function test_round_trip_multiple_blocks_preserved_in_order() {
+		$this->setExpectedIncorrectUsage( 'rest_validate_value_from_schema' );
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array(
+				array( 'name' => 'core/heading',   'attributes' => array( 'level' => 2, 'content' => 'Title' ), 'innerHTML' => '<h2>Title</h2>' ),
+				array( 'name' => 'core/paragraph', 'attributes' => array( 'content' => 'First paragraph' ),     'innerHTML' => '<p>First paragraph</p>' ),
+				array( 'name' => 'core/paragraph', 'attributes' => array( 'content' => 'Second paragraph' ),    'innerHTML' => '<p>Second paragraph</p>' ),
+			)
+		);
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$reparsed     = array_values( array_filter( $reparsed, static function ( $b ) {
+			return ! empty( $b['blockName'] );
+		} ) );
+		$this->assertCount( 3, $reparsed );
+		$this->assertSame( 'core/heading',   $reparsed[0]['blockName'] );
+		$this->assertSame( 'core/paragraph', $reparsed[1]['blockName'] );
+		$this->assertSame( 'core/paragraph', $reparsed[2]['blockName'] );
+		$this->assertStringContainsString( 'Title',            $reparsed[0]['innerHTML'] );
+		$this->assertStringContainsString( 'First paragraph',  $reparsed[1]['innerHTML'] );
+		$this->assertStringContainsString( 'Second paragraph', $reparsed[2]['innerHTML'] );
+	}
+
+	/**
+	 * Insert → update_block (via apply_block_update_in_place auto-transform)
+	 * round-trip preserves the changed text in innerHTML. Without
+	 * auto_transform_html applied to the existing innerHTML, a content-attr
+	 * update would leave the saved markup stale and the editor would flag
+	 * the block on reload — same failure mode as the insert bug, different
+	 * mutation path.
+	 */
+	public function test_round_trip_paragraph_update_block_content_attr_rewrites_inner_html() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/paragraph', 'attributes' => array( 'content' => 'Before' ), 'innerHTML' => '<p>Before</p>' ) )
+		);
+
+		$result = $this->crud->update_block(
+			$this->post_id,
+			0,
+			array( 'content' => 'After' )
+		);
+		$this->assertTrue( $result['success'] );
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$this->assertSame( 'After', $reparsed[0]['attrs']['content'] );
+		$this->assertStringContainsString( 'After', $reparsed[0]['innerHTML'] );
+		$this->assertStringNotContainsString( 'Before', $reparsed[0]['innerHTML'] );
+	}
+
+	/**
+	 * Insert → save → fetch via Block_CRUD::get_blocks() returns the same
+	 * innerHTML the caller posted. This pins the read-path round-trip in
+	 * addition to the raw parse_blocks() round-trip, since real callers
+	 * (MCP get_page_blocks) round-trip through format_blocks(), not
+	 * parse_blocks() directly.
+	 */
+	public function test_round_trip_get_blocks_returns_inserted_inner_html() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/paragraph', 'attributes' => array( 'content' => 'Read me back' ), 'innerHTML' => '<p>Read me back</p>' ) )
+		);
+
+		$fetched = $this->crud->get_blocks( $this->post_id, false );
+		$top     = array_values( array_filter( $fetched, static function ( $b ) {
+			return ! empty( $b['name'] );
+		} ) );
+		$this->assertCount( 1, $top );
+		$this->assertSame( 'core/paragraph', $top[0]['name'] );
+		$this->assertStringContainsString( 'Read me back', $top[0]['innerHTML'] );
+		$this->assertSame( 'Read me back', $top[0]['attributes']['content'] );
+	}
+
+	/**
+	 * Spacer round-trip: blocks with no source-bound attributes serialize
+	 * cleanly even without innerHTML and re-parse with attributes intact.
+	 * Pins that the rejection branch doesn't accidentally start failing
+	 * legitimate self-closing block forms.
+	 */
+	public function test_round_trip_spacer_attributes_only_preserves_attrs() {
+		$this->make_post( array() );
+		$this->crud->insert_blocks(
+			$this->post_id,
+			null,
+			array( array( 'name' => 'core/spacer', 'attributes' => array( 'height' => '40px' ) ) )
+		);
+
+		$post_content = (string) get_post_field( 'post_content', $this->post_id );
+		$reparsed     = parse_blocks( $post_content );
+		$reparsed     = array_values( array_filter( $reparsed, static function ( $b ) {
+			return ! empty( $b['blockName'] );
+		} ) );
+		$this->assertCount( 1, $reparsed );
+		$this->assertSame( 'core/spacer',  $reparsed[0]['blockName'] );
+		$this->assertSame( '40px',         $reparsed[0]['attrs']['height'] );
+	}
+
 	// ── delete_blocks ──────────────────────────────────────────────
 
 	public function test_delete_blocks_removes_at_index() {

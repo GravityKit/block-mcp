@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.7.1
+Stable tag: 1.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.8.0 =
+Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
+
 = 1.7.1 =
 Fixes two Code Block Pro rendering bugs and hardens the wrapper against attribute injection. Code blocks inserted by an AI agent now render correctly (previously appeared as blank gaps), explicit `plaintext` language is respected instead of being auto-detected (English prose with the word "from" no longer renders as SQL), and caller-supplied font / colour / className values are HTML-encoded before they reach the wrapper markup.
 
@@ -130,6 +133,20 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.8.0 on May 21, 2026 =
+
+Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
+
+#### ✨ Improved
+
+* Full compatibility coverage across every block in WordPress core and the entire Gutenberg trunk block library — each release verifies the write API works against the shipping block catalogue, so when a new block type lands it's usable immediately.
+* `insert_blocks` reads each block's own inline HTML attribute definitions from its `block.json` schema and validates inserts against them. When an attribute that lives in saved HTML arrives without matching `innerHTML`, the API responds with a clear `inner_html_required` error that names the field and shows the canonical form to use — covering `core/paragraph`, `core/heading`, `core/image`, `core/button`, `core/html`, `core/shortcode`, and every other block whose data is stored in markup.
+* Legacy-block errors fire with a replacement suggestion even on sites that never had the source plugin installed, surfacing actionable guidance instead of a generic "not registered" error.
+
+#### 🐛 Fixed
+
+* Strips empty `class=""` attributes from `innerHTML` on save — they previously surfaced as "Block contains unexpected or invalid content" warnings the next time the page was edited.
 
 = 1.7.1 on May 20, 2026 =
 

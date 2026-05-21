@@ -18,7 +18,7 @@ export const BLOCK_INPUT_SCHEMA = {
   properties: {
     name: { type: 'string', description: 'Fully-qualified block name (e.g. "core/heading").' },
     attributes: { type: 'object', description: 'Block attributes.' },
-    innerHTML: { type: 'string', description: 'Wrapper HTML for container blocks (e.g. "<ul class=\"wp-block-list\"></ul>"); leaf-block HTML otherwise.' },
+    innerHTML: { type: 'string', description: 'Wrapper HTML for container blocks (e.g. "<ul class=\"wp-block-list\"></ul>"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as "Block contains unexpected or invalid content" on next edit.' },
     innerBlocks: { type: 'array', description: 'Child blocks. Nest recursively to build lists, columns, groups, etc.', items: { type: 'object' } },
   },
   required: ['name'],
@@ -192,7 +192,7 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
+      'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Blocks whose attribute schema is HTML-sourced (e.g. core/paragraph `content`, core/image `url`) must include `innerHTML` matching the attribute(s) — attribute-only inserts are rejected with `inner_html_required` to prevent the self-closing-block / "invalid content" failure mode. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {

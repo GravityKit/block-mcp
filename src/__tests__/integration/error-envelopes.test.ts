@@ -29,7 +29,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import axios from 'axios';
-import { makeLiveClient, skipUnlessLive, withTestPost, LIVE_ENV, hasRoute } from './setup.js';
+import { makeLiveClient, skipUnlessLive, LIVE_ENV, hasRoute } from './setup.js';
 
 const skip = skipUnlessLive();
 
@@ -173,6 +173,55 @@ describe.skipIf(skip)('real REST error envelopes (integration)', () => {
     });
     expect(result.status).toBe(400);
     expect(result.message).toBeTruthy();
+  });
+
+  it('inner_html_required: inserting a paragraph with content attr but no innerHTML returns 400', async () => {
+    // Regression for the "Block contains unexpected or invalid content" bug:
+    // attribute-only inserts of a source-bound block (core/paragraph) used
+    // to serialize as a self-closing comment; Gutenberg flagged the block on
+    // reload because the parsed DOM ("") disagreed with the saved attribute.
+    // The plugin now rejects up front with `inner_html_required` and lists
+    // the offending attribute names in `data.source_bound_attributes`.
+    const result = await rawRequest('post', `/posts/${livePostId}/blocks`, {
+      after: 0,
+      blocks: [{ name: 'core/paragraph', attributes: { content: 'should reject' } }],
+    });
+    expect(result.status).toBe(400);
+    expect(result.code).toBe('inner_html_required');
+    expect(result.message).toMatch(/innerHTML/i);
+    const data = result.data as any;
+    expect(data?.block).toBe('core/paragraph');
+    expect(data?.source_bound_attributes).toContain('content');
+  });
+
+  it('inner_html_required: providing innerHTML alongside attributes is accepted (round-trip)', async () => {
+    // Negative-space check: the rejection above must not become a blanket
+    // "no attributes-only" — the canonical form (attrs + innerHTML) still
+    // succeeds, and the saved post_content carries non-self-closing markup
+    // that re-parses with the same content the agent sent.
+    const insertResult = await rawRequest('post', `/posts/${livePostId}/blocks`, {
+      after: 0,
+      blocks: [
+        {
+          name: 'core/paragraph',
+          attributes: { content: 'integration round-trip' },
+          innerHTML: '<p>integration round-trip</p>',
+        },
+      ],
+    });
+    // POST returns 201 Created on success.
+    expect([200, 201]).toContain(insertResult.status);
+
+    // Read the post back through the typed MCP client so we get the
+    // canonical { blocks: [...] } shape regardless of REST wrapping.
+    const client = makeLiveClient();
+    const blocks = await client.getPageBlocks(livePostId);
+    const hit = blocks.blocks.find(
+      (b: any) => b.name === 'core/paragraph' && (b.innerHTML ?? '').includes('integration round-trip')
+    );
+    expect(hit).toBeTruthy();
+    expect(hit!.innerHTML).toContain('<p>');
+    expect(hit!.innerHTML).toContain('</p>');
   });
 
   // Move cleanup to afterAll so the shared post is trashed even if any of

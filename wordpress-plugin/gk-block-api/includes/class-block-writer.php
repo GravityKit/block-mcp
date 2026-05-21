@@ -442,7 +442,7 @@ class Block_Writer {
 		}
 
 		if ( null !== $inner_html ) {
-			$block['innerHTML'] = wp_kses_post( $inner_html );
+			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( wp_kses_post( $inner_html ) );
 			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
 				$block['innerContent'] = $this->transformer->rebuild_inner_content(
 					$block['innerContent'],
@@ -473,7 +473,18 @@ class Block_Writer {
 
 		$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
 		$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
+		$inner_html = $this->transformer->strip_empty_class_attributes( $inner_html );
 		$children   = array();
+
+		$inner_html_required = $this->require_inner_html_for_source_bound_attrs(
+			$name,
+			is_array( $attrs ) ? $attrs : array(),
+			'' !== $inner_html,
+			! empty( $block_def['innerBlocks'] )
+		);
+		if ( is_wp_error( $inner_html_required ) ) {
+			return $inner_html_required;
+		}
 
 		if ( ! empty( $block_def['innerBlocks'] ) && is_array( $block_def['innerBlocks'] ) ) {
 			foreach ( $block_def['innerBlocks'] as $child_def ) {
@@ -521,6 +532,114 @@ class Block_Writer {
 	}
 
 	/**
+	 * Reject inserts that omit innerHTML for blocks whose attribute schema is HTML-sourced.
+	 *
+	 * WordPress core blocks like core/paragraph and core/heading declare
+	 * attributes with `source: rich-text|html|children` and a DOM `selector`.
+	 * The save() output is the HTML those attributes are parsed back out of —
+	 * the comment payload is a hint, not a substitute. When serialize_blocks()
+	 * receives an empty innerHTML and an empty innerContent it emits the
+	 * self-closing form (`<!-- wp:paragraph {"content":"…"} /-->`), and on
+	 * reload Gutenberg's parser runs the selector against an empty DOM, gets
+	 * back "", and disagrees with the persisted attribute payload — hence
+	 * "Block contains unexpected or invalid content".
+	 *
+	 * Rather than scaffolding the missing markup (which would re-implement
+	 * each block's JS save() in PHP and rot whenever core changes), this
+	 * helper detects the precondition and refuses the insert with a message
+	 * that names the offending attribute(s). Callers who legitimately want a
+	 * self-closing block (dynamic blocks, or static blocks with no
+	 * source-bound attrs in the payload) pass through unchanged.
+	 *
+	 * @param string $block_name        Block type name.
+	 * @param array  $attrs             Attributes from the caller's block def.
+	 * @param bool   $has_inner_html    Whether the caller provided a non-empty innerHTML.
+	 * @param bool   $has_inner_blocks  Whether the caller provided innerBlocks.
+	 *
+	 * @return \WP_Error|null WP_Error describing the missing innerHTML, or null to pass.
+	 */
+	public function require_inner_html_for_source_bound_attrs( $block_name, array $attrs, $has_inner_html, $has_inner_blocks ) {
+		if ( $has_inner_html || $has_inner_blocks ) {
+			return null;
+		}
+		if ( empty( $attrs ) ) {
+			return null;
+		}
+
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( ! $registry ) {
+			return null;
+		}
+		$block_type = $registry->get_registered( $block_name );
+		if ( ! $block_type ) {
+			return null;
+		}
+
+		// Note: a render_callback presence does NOT exempt the block. Since
+		// WP 6.5 the block bindings system attaches render callbacks to
+		// otherwise-static blocks (core/paragraph, core/heading, …) while the
+		// editor still uses the save() output for round-trip validation. The
+		// only reliable signal is the attribute schema: if any source-bound
+		// attribute is set, the editor will compare the parsed DOM against
+		// the stored attribute on next load.
+
+		$type_attrs = isset( $block_type->attributes ) && is_array( $block_type->attributes ) ? $block_type->attributes : array();
+		if ( empty( $type_attrs ) ) {
+			return null;
+		}
+
+		// Sources whose attribute values are derived from the saved DOM
+		// at parse time. When the caller sends one of these attributes
+		// without matching innerHTML, Gutenberg's parser runs the selector
+		// against an empty DOM, disagrees with the persisted attribute
+		// payload, and flags the block as invalid on next edit.
+		//
+		// The set is the canonical block.json meta-schema enum
+		// (https://schemas.wp.org/trunk/block.json, saved at
+		// tests/fixtures/core-blocks/block-schema.json) minus `meta` —
+		// `meta`-sourced attributes round-trip through wp_postmeta and
+		// have no DOM dependency. `children` is kept for backwards
+		// compatibility with third-party blocks still registering the
+		// legacy source value, even though it has been removed from the
+		// trunk schema.
+		$html_sources = array( 'rich-text', 'html', 'children', 'text', 'raw', 'attribute', 'query' );
+		$missing      = array();
+		foreach ( $type_attrs as $attr_name => $attr_def ) {
+			if ( ! is_array( $attr_def ) || empty( $attr_def['source'] ) ) {
+				continue;
+			}
+			if ( ! in_array( $attr_def['source'], $html_sources, true ) ) {
+				continue;
+			}
+			if ( ! array_key_exists( $attr_name, $attrs ) ) {
+				continue;
+			}
+			$missing[] = $attr_name;
+		}
+
+		if ( empty( $missing ) ) {
+			return null;
+		}
+
+		$message = sprintf(
+			/* translators: 1: block type name (e.g., core/paragraph), 2: comma-separated attribute names */
+			__( 'Block "%1$s" stores attribute(s) [%2$s] in HTML markup. Without innerHTML the saved block becomes self-closing and Gutenberg reports "Block contains unexpected or invalid content" on next edit. Include innerHTML that contains the same content (for example, set innerHTML to "<p>…</p>" when sending content on core/paragraph).', 'gk-block-api' ),
+			$block_name,
+			implode( ', ', $missing )
+		);
+
+		return new \WP_Error(
+			'inner_html_required',
+			$message,
+			array(
+				'status'                  => 400,
+				'block'                   => $block_name,
+				'source_bound_attributes' => array_values( $missing ),
+			)
+		);
+	}
+
+	/**
 	 * Validate a block name against the registry and preference tiers.
 	 *
 	 * Returns an array with 'error' (WP_Error or null) and 'warnings' (array).
@@ -549,17 +668,12 @@ class Block_Writer {
 			return $result;
 		}
 
-		$registry = \WP_Block_Type_Registry::get_instance();
-		if ( $registry && ! $registry->is_registered( $block_name ) ) {
-			$result['error'] = new \WP_Error(
-				'invalid_block',
-				/* translators: %s: block type name (e.g., core/paragraph) */
-				sprintf( __( 'Block type "%s" is not registered.', 'gk-block-api' ), $block_name ),
-				array( 'status' => 400 )
-			);
-			return $result;
-		}
-
+		// Preference tier is namespace-based — it resolves regardless of
+		// whether the block is registered on this install. Check it BEFORE
+		// the registry lookup so a block whose namespace is configured as
+		// legacy surfaces the actionable `legacy_block` error even on sites
+		// that never had the source plugin installed. The previous order
+		// returned the less informative `invalid_block` in that case.
 		$pref = $this->preferences->get_block_score( $block_name );
 
 		if ( 'legacy' === $pref['tier'] ) {
@@ -589,6 +703,17 @@ class Block_Writer {
 					'suggested_replacement' => $replacement,
 					'policy_resource'       => 'block-mcp://agent-guide',
 				)
+			);
+			return $result;
+		}
+
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( $registry && ! $registry->is_registered( $block_name ) ) {
+			$result['error'] = new \WP_Error(
+				'invalid_block',
+				/* translators: %s: block type name (e.g., core/paragraph) */
+				sprintf( __( 'Block type "%s" is not registered.', 'gk-block-api' ), $block_name ),
+				array( 'status' => 400 )
 			);
 			return $result;
 		}

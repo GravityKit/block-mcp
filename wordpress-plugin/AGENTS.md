@@ -449,6 +449,20 @@ The plugin does not define custom WordPress hooks/filters. It relies on:
 
 Both options and the usage transient are cleaned on uninstall. Rate-limit transients expire naturally.
 
+## Public-facing language
+
+Do not call out specific third-party block types or namespaces as "legacy" in code comments, docblocks, error messages, REST responses, readme entries, or changelog text. The legacy tier is *site-configurable* via `Preferences::get_defaults()['namespace_scores']` — naming concrete namespaces hardcodes a value that lives in config and turns a policy decision into a public callout of a specific vendor.
+
+Use generic phrasing instead:
+
+| Avoid | Prefer |
+|---|---|
+| `// (example/*, legacy/*) is known-legacy` | `// the namespace is configured as legacy` |
+| `legacy-namespace blocks (example/*, legacy/*) now …` (changelog) | `blocks whose namespace is configured as legacy now …` |
+| Test fixture: hardcoded `'example/never-installed'` | Resolve a legacy namespace from `Preferences::get_defaults()` and build the block name at runtime |
+
+Test code is the one place where a concrete namespace name appears in *fixture data* — but the surrounding docblock and assertion messages must still use generic language. See `BlockCrudTest::test_insert_blocks_legacy_namespace_rejects_as_legacy_even_when_not_registered()` for the canonical pattern: it picks the first legacy-tier namespace out of the default config at runtime instead of hardcoding one.
+
 ## Conventions
 
 - All classes use the `GravityKit\BlockAPI` namespace.

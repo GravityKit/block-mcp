@@ -361,6 +361,35 @@ class HTML_Transformer {
 	}
 
 	/**
+	 * Strip empty class attributes from innerHTML.
+	 *
+	 * Removes `class=""`, `class=''`, and class attributes whose value is
+	 * pure whitespace. These never round-trip cleanly through Gutenberg:
+	 * `useBlockProps.save()` omits the class attribute entirely when there
+	 * are no classes to emit, so any empty class in the stored DOM creates
+	 * a save-output mismatch and triggers "Block contains unexpected or
+	 * invalid content" on next edit. Stripping is information-preserving —
+	 * `class=""` and no class attribute are semantically identical in HTML.
+	 *
+	 * The regex only matches the attribute when it's preceded by whitespace
+	 * inside a tag (so we never touch text that happens to contain the
+	 * literal string `class=""`). The closing whitespace is normalised so
+	 * the resulting tag stays well-formed.
+	 *
+	 * @param string $html innerHTML to normalise.
+	 *
+	 * @return string Normalised innerHTML.
+	 */
+	public function strip_empty_class_attributes( $html ) {
+		if ( ! is_string( $html ) || '' === $html ) {
+			return $html;
+		}
+		// Match: whitespace, class=, quote, optional whitespace-only value,
+		// matching quote. Captures both single- and double-quoted forms.
+		return preg_replace( '/\s+class=(["\'])\s*\1/', '', $html );
+	}
+
+	/**
 	 * Rebuild innerContent when innerHTML is replaced on a container block.
 	 *
 	 * WordPress innerContent is an array like ['<div>', null, '</div>'] where

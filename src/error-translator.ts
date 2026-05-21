@@ -106,8 +106,17 @@ export function translateWpError(code: string | undefined, data: unknown): strin
     // ── Block tier / preference enforcement ────────────────────────
     case 'legacy_block':
       return blockName
-        ? `${blockName} is a legacy block (typically Stackable / UGB / Jetpack). Use ${hints.suggested_replacement ?? 'a core block instead'}.`
+        ? `${blockName} is in a namespace this site has configured as legacy. Use ${hints.suggested_replacement ?? 'a core block instead'}.`
         : 'Legacy block rejected. Use a core block (or a higher-tier alternative) instead.';
+
+    case 'inner_html_required': {
+      const attrs = Array.isArray(hints.source_bound_attributes)
+        ? hints.source_bound_attributes.join(', ')
+        : 'one or more';
+      return blockName
+        ? `${blockName} stores attribute(s) [${attrs}] in HTML markup. Include \`innerHTML\` matching the attribute value (e.g. \`<p>{content}</p>\` for core/paragraph) — without it the saved block is self-closing and Gutenberg reports "Block contains unexpected or invalid content" on next edit.`
+        : `Block stores source-bound attribute(s) [${attrs}] in HTML markup but no \`innerHTML\` was provided. The saved block would be self-closing and Gutenberg would flag it as invalid on next edit.`;
+    }
 
     case 'static_markup_stale_risk':
       return 'Updating attributes on a static block without new innerHTML may leave its rendered markup stale. Pass `innerHTML` alongside `attributes`, or use a dynamic block.';

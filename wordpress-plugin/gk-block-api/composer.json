@@ -35,13 +35,20 @@
     ],
     "scripts": {
         "post-install-cmd": [
-            "@install-sqlite-dropin"
+            "@install-sqlite-dropin",
+            "@refresh-core-blocks-if-missing"
         ],
         "post-update-cmd": [
-            "@install-sqlite-dropin"
+            "@install-sqlite-dropin",
+            "@refresh-core-blocks-if-missing"
         ],
         "install-sqlite-dropin": "php tests/install-sqlite-dropin.php",
-        "test": "phpunit -c tests/phpunit.xml",
+        "refresh-core-blocks": "bash scripts/refresh-core-blocks.sh",
+        "refresh-core-blocks-if-missing": "php scripts/ensure-core-blocks.php",
+        "test": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit.xml"
+        ],
         "lint": "phpcs",
         "lint:fix": "phpcbf"
     },
