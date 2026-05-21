@@ -28,13 +28,12 @@ class CoreBlocksConformanceTest extends BlockApiTestCase {
 	 * Sources that store data inside DOM content (not attributes). These are
 	 * the ones the `require_inner_html_for_source_bound_attrs` guard targets.
 	 *
-	 * Must stay aligned with the allow-list in
-	 * `Block_Writer::require_inner_html_for_source_bound_attrs()`. The set
-	 * is the meta-schema enum from
-	 * `tests/fixtures/core-blocks/block-schema.json` minus `meta` (the only
-	 * source that doesn't read from the DOM).
+	 * Mirrored from `Block_Writer::HTML_SOURCES` — the test exercises the
+	 * guard's contract, so the test's view of the set must match the
+	 * implementation's exactly. Aliased here rather than referenced
+	 * directly to keep the data provider call signature simple.
 	 */
-	private const HTML_SOURCES = array( 'rich-text', 'html', 'children', 'text', 'raw', 'attribute', 'query' );
+	private const HTML_SOURCES = \GravityKit\BlockAPI\Block_Writer::HTML_SOURCES;
 
 	/**
 	 * Core block names that need extra setup or that legitimately fail this

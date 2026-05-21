@@ -24,6 +24,27 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Block_Writer {
 
 	/**
+	 * Block attribute `source` values whose data lives inside the saved DOM.
+	 *
+	 * An attribute declared with one of these sources is parsed back out of
+	 * `innerHTML` at edit time, so the saved markup must be present and must
+	 * match what `save()` would emit for the stored attribute value.
+	 * Inserts that omit `innerHTML` are rejected with `inner_html_required`
+	 * (see `require_inner_html_for_source_bound_attrs`).
+	 *
+	 * The set is the canonical block.json meta-schema enum
+	 * (https://schemas.wp.org/trunk/block.json, mirrored at
+	 * tests/fixtures/core-blocks/block-schema.json) minus `meta` — the
+	 * only source that doesn't read from the DOM. `children` is kept for
+	 * backwards compatibility with third-party blocks that still register
+	 * the legacy source value, even though it has been removed from the
+	 * trunk schema.
+	 *
+	 * @var string[]
+	 */
+	const HTML_SOURCES = array( 'rich-text', 'html', 'children', 'text', 'raw', 'attribute', 'query' );
+
+	/**
 	 * Reference back to the owning Block_CRUD instance for shared utilities.
 	 *
 	 * @var Block_CRUD
@@ -588,27 +609,12 @@ class Block_Writer {
 			return null;
 		}
 
-		// Sources whose attribute values are derived from the saved DOM
-		// at parse time. When the caller sends one of these attributes
-		// without matching innerHTML, Gutenberg's parser runs the selector
-		// against an empty DOM, disagrees with the persisted attribute
-		// payload, and flags the block as invalid on next edit.
-		//
-		// The set is the canonical block.json meta-schema enum
-		// (https://schemas.wp.org/trunk/block.json, saved at
-		// tests/fixtures/core-blocks/block-schema.json) minus `meta` —
-		// `meta`-sourced attributes round-trip through wp_postmeta and
-		// have no DOM dependency. `children` is kept for backwards
-		// compatibility with third-party blocks still registering the
-		// legacy source value, even though it has been removed from the
-		// trunk schema.
-		$html_sources = array( 'rich-text', 'html', 'children', 'text', 'raw', 'attribute', 'query' );
-		$missing      = array();
+		$missing = array();
 		foreach ( $type_attrs as $attr_name => $attr_def ) {
 			if ( ! is_array( $attr_def ) || empty( $attr_def['source'] ) ) {
 				continue;
 			}
-			if ( ! in_array( $attr_def['source'], $html_sources, true ) ) {
+			if ( ! in_array( $attr_def['source'], self::HTML_SOURCES, true ) ) {
 				continue;
 			}
 			if ( ! array_key_exists( $attr_name, $attrs ) ) {
