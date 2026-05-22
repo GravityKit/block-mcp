@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.8.0
+Stable tag: 1.8.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 1.8.1 =
+Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
+
 = 1.8.0 =
 Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
 
@@ -133,6 +136,14 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.8.1 on May 22, 2026 =
+
+Fixes nested container blocks rendering their children as top-level siblings on the front end while looking correct in the editor. Pages built inside-out — adding columns first, then columns/column children, then content — now render with children correctly nested inside their wrappers.
+
+#### 🐛 Fixed
+
+* Nested layouts built via `insert-child` (columns/column, group, buttons, hero splits, and similar containers) now serialise with children inside their wrapper instead of as siblings outside it. The editor was always correct; only the front-end output was broken.
 
 = 1.8.0 on May 21, 2026 =
 
