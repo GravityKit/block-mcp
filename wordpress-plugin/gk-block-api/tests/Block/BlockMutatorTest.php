@@ -839,6 +839,162 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertInstanceOf( \WP_Error::class, $result );
 	}
 
+	/**
+	 * insert-child must nest the new block INSIDE the wrapper, not as a sibling.
+	 *
+	 * Regression pins BLOCK-20: when a container is created with a self-closing
+	 * wrapper and no children (e.g. insert_blocks called with
+	 * innerHTML="<div class=\"wp-block-columns\"></div>" and an empty
+	 * innerBlocks list), parse_blocks reads innerContent back as a single
+	 * unsplit string ['<div class="wp-block-columns"></div>']. The original
+	 * insert-child logic scanned backward for the "closing-tag string" and
+	 * spliced the null at that string's index — but with only one string the
+	 * splice landed the null BEFORE it, producing [null, '<div></div>'] and a
+	 * serialized output of `<child-block><div></div>` (child outside the
+	 * wrapper, wrapper rendered empty AFTER children). The fix normalises
+	 * such single-string wrappers into [opening, closing] before splicing so
+	 * the new null lands between them.
+	 */
+	public function test_insert_child_nests_inside_self_closing_wrapper() {
+		// Seed the post with the exact innerContent shape parse_blocks
+		// produces for an empty container wrapper inserted with no children.
+		$this->make_post( array(
+			array(
+				'blockName'    => 'core/columns',
+				'attrs'        => array(),
+				'innerHTML'    => '<div class="wp-block-columns"></div>',
+				'innerContent' => array( '<div class="wp-block-columns"></div>' ),
+				'innerBlocks'  => array(),
+			),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'      => 'core/column',
+					'innerHTML' => '<div class="wp-block-column"></div>',
+				),
+			)
+		);
+
+		$this->assertTrue( $result['success'] );
+
+		$saved = $this->current_blocks();
+		$this->assertCount( 1, $saved[0]['innerBlocks'], 'columns must contain the inserted column' );
+
+		// innerContent must have a string-null-string shape so serialize_blocks
+		// interleaves the child inside the wrapper.
+		$ic = $saved[0]['innerContent'];
+		$this->assertGreaterThanOrEqual( 3, count( $ic ), 'innerContent must be split open/null/close after insert.' );
+		$this->assertIsString( $ic[0], 'First innerContent entry must be the opening wrapper string.' );
+		$null_indexes  = array_keys( array_filter( $ic, function ( $piece ) { return null === $piece; } ) );
+		$this->assertCount( 1, $null_indexes, 'Exactly one null placeholder for the inserted child.' );
+		$null_at = $null_indexes[0];
+		$this->assertGreaterThan( 0, $null_at, 'Null must come AFTER the opening wrapper string.' );
+		$this->assertLessThan( count( $ic ) - 1, $null_at, 'Null must come BEFORE the closing wrapper string.' );
+
+		// The serialized markup must place the child block comments between
+		// the wrapper's opening and closing tags, not outside them.
+		$serialized = serialize_blocks( $saved );
+		$open_at    = strpos( $serialized, '<div class="wp-block-columns">' );
+		$close_at   = strpos( $serialized, '</div>', $open_at );
+		$child_at   = strpos( $serialized, 'wp:column ' );
+		$this->assertNotFalse( $open_at, 'Opening columns tag must be present.' );
+		$this->assertNotFalse( $close_at, 'Closing columns tag must be present.' );
+		$this->assertNotFalse( $child_at, 'Child column comment must be present.' );
+		$this->assertGreaterThan( $open_at, $child_at, 'Child must appear AFTER the opening wrapper tag.' );
+		$this->assertLessThan( $close_at, $child_at, 'Child must appear BEFORE the closing wrapper tag.' );
+	}
+
+	/**
+	 * insert-child handles the full inside-out chain: columns → column → heading.
+	 *
+	 * Regression pins the multi-level BLOCK-20 repro: a page built by
+	 * insert_blocks (self-closing columns wrapper) followed by two cascading
+	 * insert-child calls (a column inside the columns, then a heading inside
+	 * that column) used to serialise as three empty wrappers with the heading
+	 * as a top-level sibling. After the fix, each intermediate wrapper must
+	 * be normalised on demand so the heading lands two levels deep, between
+	 * the column's opening and closing tags, which in turn sit between the
+	 * columns' opening and closing tags.
+	 */
+	public function test_insert_child_nests_through_multiple_self_closing_wrappers() {
+		// Step 1 equivalent — seed with what insert_blocks(columns, no children)
+		// leaves behind after a parse_blocks round-trip.
+		$this->make_post( array(
+			array(
+				'blockName'    => 'core/columns',
+				'attrs'        => array(),
+				'innerHTML'    => '<div class="wp-block-columns"></div>',
+				'innerContent' => array( '<div class="wp-block-columns"></div>' ),
+				'innerBlocks'  => array(),
+			),
+		) );
+
+		// Step 2: insert-child a self-closing column into the columns wrapper.
+		$add_column = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0 ),
+			array(
+				'block' => array(
+					'name'      => 'core/column',
+					'innerHTML' => '<div class="wp-block-column"></div>',
+				),
+			)
+		);
+		$this->assertTrue( $add_column['success'] );
+
+		// Step 3: insert-child a heading into that column (path [0, 0]).
+		$add_heading = $this->mutator->mutate(
+			$this->post_id,
+			'insert-child',
+			array( 0, 0 ),
+			array(
+				'block' => array(
+					'name'       => 'core/heading',
+					'attributes' => array( 'level' => 3 ),
+					'innerHTML'  => '<h3 class="wp-block-heading">Hello</h3>',
+				),
+			)
+		);
+		$this->assertTrue( $add_heading['success'] );
+
+		$saved = $this->current_blocks();
+		$this->assertCount( 1, $saved[0]['innerBlocks'], 'columns has one column' );
+		$this->assertCount( 1, $saved[0]['innerBlocks'][0]['innerBlocks'], 'column has one heading' );
+		$this->assertSame( 'core/heading', $saved[0]['innerBlocks'][0]['innerBlocks'][0]['blockName'] );
+
+		// Both wrappers must now have a null sandwiched between opening/closing
+		// strings so serialize_blocks() interleaves children inside them.
+		$columns_ic = $saved[0]['innerContent'];
+		$column_ic  = $saved[0]['innerBlocks'][0]['innerContent'];
+		$this->assertGreaterThanOrEqual( 3, count( $columns_ic ), 'columns innerContent must be split.' );
+		$this->assertGreaterThanOrEqual( 3, count( $column_ic ), 'column innerContent must be split.' );
+
+		// End-to-end serialisation check: the heading must sit two levels deep,
+		// between the column's opening and closing tags (which sit between the
+		// columns' opening and closing tags).
+		$serialized   = serialize_blocks( $saved );
+		$cols_open    = strpos( $serialized, '<div class="wp-block-columns">' );
+		$col_open     = strpos( $serialized, '<div class="wp-block-column">' );
+		$heading_at   = strpos( $serialized, 'wp:heading' );
+		$col_close    = strpos( $serialized, '</div>', $col_open );
+		$cols_close   = $col_close !== false ? strpos( $serialized, '</div>', $col_close + 6 ) : false;
+		$this->assertNotFalse( $cols_open, 'Opening columns tag must be present.' );
+		$this->assertNotFalse( $col_open, 'Opening column tag must be present.' );
+		$this->assertNotFalse( $heading_at, 'Heading block comment must be present.' );
+		$this->assertNotFalse( $col_close, 'Closing column tag must be present.' );
+		$this->assertNotFalse( $cols_close, 'Closing columns tag must be present.' );
+		$this->assertGreaterThan( $cols_open, $col_open, 'column must appear AFTER columns opening.' );
+		$this->assertGreaterThan( $col_open, $heading_at, 'heading must appear AFTER column opening.' );
+		$this->assertLessThan( $col_close, $heading_at, 'heading must appear BEFORE column closing.' );
+		$this->assertLessThan( $cols_close, $col_close, 'column close must appear BEFORE columns close.' );
+	}
+
 	// ── emoji round-trip ───────────────────────────────────────────
 
 	/**
