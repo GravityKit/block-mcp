@@ -582,6 +582,42 @@ class Block_Mutator {
 				// Insert a null placeholder for the new child in innerContent.
 				$ic = &$parent[ $target_index ]['innerContent'];
 
+				// Normalise self-closing wrappers before splicing. A container
+				// created by insert_blocks with innerHTML="<div…></div>" and
+				// no innerBlocks parses back with innerContent stored as a
+				// single, unsplit string. Without a separable opening/closing
+				// pair, the splice logic below lands the new null adjacent to
+				// that string and serialize_blocks() emits children OUTSIDE
+				// the wrapper. Splitting the wrapper at the first `>` here
+				// turns ['<div></div>'] into ['<div>', '</div>'] so the new
+				// null falls between them, preserving the contract that
+				// children are interleaved INSIDE the wrapper.
+				$has_null = false;
+				foreach ( $ic as $piece ) {
+					if ( null === $piece ) {
+						$has_null = true;
+						break;
+					}
+				}
+				if ( ! $has_null ) {
+					foreach ( $ic as $piece_idx => $piece ) {
+						if ( ! is_string( $piece ) ) {
+							continue;
+						}
+						$open_end = strpos( $piece, '>' );
+						if ( false === $open_end || ( strlen( $piece ) - 1 ) === $open_end ) {
+							continue;
+						}
+						$opening = substr( $piece, 0, $open_end + 1 );
+						$closing = substr( $piece, $open_end + 1 );
+						if ( '' === $closing ) {
+							continue;
+						}
+						array_splice( $ic, $piece_idx, 1, array( $opening, $closing ) );
+						break;
+					}
+				}
+
 				if ( 'start' === $position ) {
 					// Insert after the first string entry (opening tag).
 					$insert_at = 0;
