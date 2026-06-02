@@ -323,7 +323,7 @@ export function writeCursorConfig(creds: Credentials): void {
 }
 
 /** Write to the Claude Desktop config, preserving existing servers. */
-export function writeClaudeDesktopConfig(creds: Credentials, platform = process.platform): void {
+export function writeClaudeDesktopConfig(creds: Credentials, platform: string = process.platform): void {
   const configPath = claudeDesktopConfigPath(platform);
   const existing = readJsonFile(configPath, { mcpServers: {} });
   const updated = mergeMcpServers(existing, creds);

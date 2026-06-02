@@ -476,7 +476,6 @@ describe('password-never-logged invariant', () => {
     // The args array must NOT be joined and passed to a shell.
     // Verify the array form: no single element contains the whole command.
     const args = claudeCodeAddArgs(CREDS);
-    const joinedAll = args.join(' ');
     // The joined string would contain the password — that's expected in the
     // args array itself. What we assert is that this is an array (not a string)
     // so it never goes through shell expansion.
