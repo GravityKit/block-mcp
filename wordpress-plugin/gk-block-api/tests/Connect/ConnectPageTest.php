@@ -422,14 +422,14 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 	/**
 	 * render_section() in the 'ready' state must output the after-download
-	 * guidance block and both client-picker options (Claude Desktop and the
-	 * "Something else" fallback).
+	 * guidance block and both client-picker radio cards (Claude Desktop and the
+	 * "Something else" fallback), with the Claude Desktop radio checked by default.
 	 *
-	 * This pins the P0 deliverables for the ready/pre-connection state: the
-	 * next-steps panel and the client picker must be present whenever the form
-	 * is rendered. The method outputs only the inner content (no wrapping
-	 * <div class="wrap"> or page <h1>) so it can be embedded in the host
-	 * Settings_Page tab without double-wrapping.
+	 * The picker was converted from a <select> to a fieldset of radio cards so
+	 * keyboard navigation and screen readers work with native browser behaviour.
+	 * This test pins the P0 deliverables for the ready/pre-connection state: the
+	 * next-steps panel, both radio inputs with name="client", both option labels,
+	 * and the default-checked state on the Claude Desktop card.
 	 */
 	public function test_render_section_shows_next_steps_and_picker_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -442,8 +442,28 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$html = ob_get_clean();
 
 		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must be present' );
-		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop picker option must be present' );
-		$this->assertStringContainsString( "Something else", $html, '"Something else" picker option must be present' );
+
+		// Radio inputs must be present with name="client" (not a <select>).
+		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
+		$this->assertStringContainsString( 'name="client"', $html, 'Radio inputs must carry name="client"' );
+
+		// Both option labels must be present.
+		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop radio card label must be present' );
+		$this->assertStringContainsString( 'Something else', $html, '"Something else" radio card label must be present' );
+
+		// Both option values must be present.
+		$this->assertStringContainsString( 'value="Claude Desktop"', $html, 'Claude Desktop radio value must be present' );
+		$this->assertStringContainsString( 'value="other"', $html, '"other" radio value must be present' );
+
+		// The Claude Desktop radio must be checked by default.
+		$this->assertMatchesRegularExpression(
+			'/value="Claude Desktop"[^>]*checked|checked[^>]*value="Claude Desktop"/',
+			$html,
+			'Claude Desktop radio must be checked by default'
+		);
+
+		// A <select> must NOT be present — the picker is now radio cards.
+		$this->assertStringNotContainsString( '<select', $html, 'A <select> must not be present; picker uses radio cards' );
 	}
 
 	/**

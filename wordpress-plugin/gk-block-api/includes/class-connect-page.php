@@ -438,53 +438,162 @@ class Connect_Page {
 	/**
 	 * Render the client-picker form that triggers a bundle download.
 	 *
-	 * Extracted so render_page() stays readable. The 'other' client option
-	 * still proceeds with a Claude Desktop bundle for v1 — a browser-based
-	 * path is planned but not yet available.
+	 * The picker is a fieldset of radio cards so keyboard navigation, screen
+	 * readers, and pointer devices all work with standard browser behaviour.
+	 * The 'other' card reveals a support note; the submit button label updates
+	 * to reflect the selected client.
 	 *
 	 * @since 1.9.0
 	 */
 	private function render_connect_form() {
 		?>
+		<style>
+		.gk-radio-card-group {
+			display: flex;
+			gap: 12px;
+			flex-wrap: wrap;
+			margin: 8px 0 16px;
+		}
+		.gk-radio-card {
+			display: flex;
+			align-items: flex-start;
+			gap: 10px;
+			border: 2px solid #dcdcde;
+			border-radius: 4px;
+			padding: 14px 16px;
+			cursor: pointer;
+			max-width: 280px;
+			background: #fff;
+			transition: border-color 0.1s, box-shadow 0.1s;
+		}
+		.gk-radio-card:hover {
+			border-color: #2271b1;
+		}
+		.gk-radio-card:has(input:checked),
+		.gk-radio-card.is-selected {
+			border-color: #2271b1;
+			box-shadow: 0 0 0 1px #2271b1;
+			background: #f0f6fc;
+		}
+		.gk-radio-card__radio {
+			margin-top: 3px;
+			flex-shrink: 0;
+			accent-color: #2271b1;
+		}
+		.gk-radio-card__body {
+			display: flex;
+			flex-direction: column;
+			gap: 3px;
+		}
+		.gk-radio-card__title {
+			font-weight: 600;
+			color: #1d2327;
+			line-height: 1.4;
+		}
+		.gk-radio-card__desc {
+			font-size: 0.875em;
+			color: #646970;
+			line-height: 1.4;
+		}
+		</style>
+
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 			<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_CONNECT ); ?>" />
 			<?php wp_nonce_field( self::ACTION_CONNECT ); ?>
 
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row">
-						<label for="gk-block-api-client"><?php esc_html_e( 'Which app do you use to chat with AI?', 'gk-block-api' ); ?></label>
-					</th>
-					<td>
-						<select id="gk-block-api-client" name="client">
-							<option value="Claude Desktop"><?php esc_html_e( 'Claude Desktop app', 'gk-block-api' ); ?></option>
-							<option value="other"><?php esc_html_e( "Something else / I'm not sure", 'gk-block-api' ); ?></option>
-						</select>
-						<p class="description" id="gk-block-api-other-note" style="display:none; color:#646970;">
-							<?php
-							echo wp_kses(
-								sprintf(
-									/* translators: %s: mailto link */
-									__( 'Browser-based setup is coming soon. In the meantime, <a href="%s">contact support</a> or install Claude Desktop to get started.', 'gk-block-api' ),
-									'mailto:support@gravitykit.com'
-								),
-								array( 'a' => array( 'href' => array() ) )
-							);
-							?>
-						</p>
-					</td>
-				</tr>
-			</table>
+			<fieldset style="border:none; margin:0; padding:0;">
+				<legend style="font-weight:600; margin-bottom:8px;">
+					<?php esc_html_e( 'Which app do you use to chat with AI?', 'gk-block-api' ); ?>
+				</legend>
+
+				<div class="gk-radio-card-group" role="radiogroup">
+
+					<label class="gk-radio-card is-selected" id="gk-card-claude">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="Claude Desktop"
+							checked
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( 'Claude Desktop app', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'One-click install. Recommended.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-radio-card" id="gk-card-other">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="other"
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( "Something else / I'm not sure", 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'ChatGPT, a web app, or not sure yet.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+				</div>
+
+				<p class="description" id="gk-block-api-other-note" style="display:none; color:#646970; margin-top:4px;">
+					<?php
+					echo wp_kses(
+						sprintf(
+							/* translators: %s: mailto link */
+							__( 'Browser-based setup is coming soon. In the meantime, <a href="%s">contact support</a> or install Claude Desktop to get started.', 'gk-block-api' ),
+							'mailto:support@gravitykit.com'
+						),
+						array( 'a' => array( 'href' => array() ) )
+					);
+					?>
+				</p>
+			</fieldset>
 
 			<script>
 			(function () {
-				var sel  = document.getElementById('gk-block-api-client');
-				var note = document.getElementById('gk-block-api-other-note');
-				if (!sel || !note) return;
-				sel.addEventListener('change', function () {
-					note.style.display = (sel.value === 'other') ? '' : 'none';
-				});
-			})();
+				var cards  = document.querySelectorAll( '.gk-radio-card' );
+				var radios = document.querySelectorAll( 'input[name="client"]' );
+				var note   = document.getElementById( 'gk-block-api-other-note' );
+				var btn    = document.getElementById( 'submit' );
+
+				if ( ! radios.length ) return;
+
+				function updateState() {
+					var checkedVal = '';
+					radios.forEach( function ( r ) {
+						var card = r.closest( '.gk-radio-card' );
+						if ( r.checked ) {
+							checkedVal = r.value;
+							if ( card ) card.classList.add( 'is-selected' );
+						} else {
+							if ( card ) card.classList.remove( 'is-selected' );
+						}
+					} );
+
+					if ( note ) {
+						note.style.display = ( 'other' === checkedVal ) ? '' : 'none';
+					}
+
+					if ( btn ) {
+						btn.value = ( 'other' === checkedVal )
+							? btn.getAttribute( 'data-label-other' )
+							: btn.getAttribute( 'data-label-default' );
+					}
+				}
+
+				radios.forEach( function ( r ) {
+					r.addEventListener( 'change', updateState );
+				} );
+
+				if ( btn ) {
+					btn.setAttribute( 'data-label-default', btn.value );
+					btn.setAttribute( 'data-label-other',   btn.getAttribute( 'data-other-label' ) || btn.value );
+				}
+
+				updateState();
+			} )();
 			</script>
 
 			<?php submit_button( __( 'Connect Claude Desktop', 'gk-block-api' ), 'primary', 'submit', true ); ?>
