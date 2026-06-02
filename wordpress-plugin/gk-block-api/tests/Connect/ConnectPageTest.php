@@ -430,6 +430,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * This test pins the P0 deliverables for the ready/pre-connection state: the
 	 * next-steps panel, both radio inputs with name="client", both option labels,
 	 * and the default-checked state on the Claude Desktop card.
+	 *
+	 * The modern block-editor restyling wraps all output in <div class="gk-connect">
+	 * and nests the content inside <div class="gk-connect__card"> so all CSS
+	 * selectors are scoped and the card container is present.
 	 */
 	public function test_render_section_shows_next_steps_and_picker_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -440,6 +444,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		ob_start();
 		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
+
+		// Wrapper class and card container must be present for scoped CSS.
+		$this->assertStringContainsString( 'class="gk-connect"', $html, 'Outer wrapper must carry class gk-connect' );
+		$this->assertStringContainsString( 'gk-connect__card', $html, 'Card container must be present' );
 
 		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must be present' );
 

@@ -319,6 +319,9 @@ class Connect_Page {
 	 * connect form with client picker and post-download next-steps, or an
 	 * active-connections list with per-connection revoke buttons.
 	 *
+	 * All selectors are scoped under .gk-connect to avoid leaking into the
+	 * rest of wp-admin.
+	 *
 	 * @since 1.9.0
 	 */
 	public function render_section() {
@@ -345,7 +348,7 @@ class Connect_Page {
 		}
 
 		?>
-		<h2><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h2>
+		<div class="gk-connect">
 
 		<?php if ( $revoked ) : ?>
 			<div class="notice notice-success is-dismissible">
@@ -357,81 +360,90 @@ class Connect_Page {
 			<div class="notice notice-warning">
 				<p>
 					<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong><br />
-					<code style="font-size:1.1em; user-select:all;"><?php echo esc_html( $paste_pw ); ?></code>
+					<code class="gk-connect__paste-pw"><?php echo esc_html( $paste_pw ); ?></code>
 				</p>
 				<p><?php esc_html_e( 'Copy this password and paste it into the Application Password field when you open the downloaded file. It will not be shown again.', 'gk-block-api' ); ?></p>
 			</div>
 		<?php endif; ?>
 
-		<p>
-			<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you. Setup takes about a minute — no passwords to copy, no technical files to edit.', 'gk-block-api' ); ?>
-		</p>
-		<p>
-			<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
-		</p>
+		<div class="gk-connect__card">
 
-		<?php if ( 'needs_https' === $state ) : ?>
+			<h2 class="gk-connect__heading"><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h2>
 
-			<div class="notice notice-warning inline">
-				<p>
-					<strong><?php esc_html_e( 'HTTPS required', 'gk-block-api' ); ?></strong>
-				</p>
-				<p>
-					<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-api' ); ?>
-				</p>
-			</div>
+			<p class="gk-connect__intro">
+				<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you. Setup takes about a minute — no passwords to copy, no technical files to edit.', 'gk-block-api' ); ?>
+			</p>
+			<p class="gk-connect__intro">
+				<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
+			</p>
 
-		<?php else : ?>
+			<?php if ( 'needs_https' === $state ) : ?>
 
-			<?php if ( 'connected' === $state ) : ?>
-				<p><strong>✅ <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
+				<div class="notice notice-warning inline">
+					<p>
+						<strong><?php esc_html_e( 'HTTPS required', 'gk-block-api' ); ?></strong>
+					</p>
+					<p>
+						<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-api' ); ?>
+					</p>
+				</div>
+
+			<?php else : ?>
+
+				<?php if ( 'connected' === $state ) : ?>
+					<p class="gk-connect__connected-badge"><strong>&#x2705; <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
+				<?php endif; ?>
+
+				<?php $this->render_connect_form(); ?>
+				<?php $this->render_next_steps(); ?>
+
+				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
+					<div class="gk-connect__connections-card">
+						<h3 class="gk-connect__connections-heading"><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h3>
+						<p class="gk-connect__connections-desc">
+							<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
+						</p>
+						<table class="gk-connect__connections-table">
+							<thead>
+								<tr>
+									<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
+									<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
+									<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
+									<th scope="col"></th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php foreach ( $connections as $conn ) : ?>
+									<tr>
+										<td><?php echo esc_html( $conn['name'] ); ?></td>
+										<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
+										<td>
+											<?php
+											echo $conn['last_used']
+												? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
+												: esc_html__( 'Never', 'gk-block-api' );
+											?>
+										</td>
+										<td>
+											<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+												<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
+												<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
+												<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
+												<button type="submit" class="gk-connect__disconnect-btn button button-link"><?php esc_html_e( 'Disconnect', 'gk-block-api' ); ?></button>
+											</form>
+										</td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+				<?php endif; ?>
+
 			<?php endif; ?>
 
-			<?php $this->render_connect_form(); ?>
-			<?php $this->render_next_steps(); ?>
+		</div><!-- /.gk-connect__card -->
 
-			<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
-				<hr />
-				<h2><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h2>
-				<p class="description">
-					<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
-				</p>
-				<table class="widefat striped" style="max-width: 800px;">
-					<thead>
-						<tr>
-							<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
-							<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
-							<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
-							<th scope="col"></th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php foreach ( $connections as $conn ) : ?>
-							<tr>
-								<td><?php echo esc_html( $conn['name'] ); ?></td>
-								<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
-								<td>
-									<?php
-									echo $conn['last_used']
-										? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
-										: esc_html__( 'Never', 'gk-block-api' );
-									?>
-								</td>
-								<td>
-									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-										<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
-										<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
-										<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
-										<?php submit_button( __( 'Disconnect', 'gk-block-api' ), 'small delete', 'submit', false ); ?>
-									</form>
-								</td>
-							</tr>
-						<?php endforeach; ?>
-					</tbody>
-				</table>
-			<?php endif; ?>
-
-		<?php endif; ?>
+		</div><!-- /.gk-connect -->
 		<?php
 	}
 
@@ -443,11 +455,54 @@ class Connect_Page {
 	 * The 'other' card reveals a support note; the submit button label updates
 	 * to reflect the selected client.
 	 *
+	 * All selectors are scoped under .gk-connect to prevent leaking into
+	 * the rest of wp-admin. The design follows the WordPress block-editor /
+	 *
+	 * @wordpress/components visual language: white card surfaces on the gray
+	 * admin background, accent-color via --wp-admin-theme-color, and
+	 * component-style button and selectable-card treatments.
+	 *
 	 * @since 1.9.0
 	 */
 	private function render_connect_form() {
 		?>
 		<style>
+		/* ── Outer card ────────────────────────────────────────────────────── */
+		.gk-connect__card {
+			background: #fff;
+			border: 1px solid #e0e0e0;
+			border-radius: 8px;
+			box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+			padding: 24px 28px;
+			max-width: 800px;
+			margin-top: 16px;
+		}
+
+		/* ── Typography ────────────────────────────────────────────────────── */
+		.gk-connect__heading {
+			font-size: 1.1em;
+			font-weight: 600;
+			color: #1e1e1e;
+			margin: 0 0 12px;
+			padding: 0;
+			border: none;
+		}
+		.gk-connect__intro {
+			color: #1e1e1e;
+			margin: 0 0 12px;
+		}
+		.gk-connect__connected-badge {
+			color: #1e1e1e;
+			margin: 0 0 16px;
+		}
+
+		/* ── Paste-mode password display ───────────────────────────────────── */
+		.gk-connect__paste-pw {
+			font-size: 1.1em;
+			user-select: all;
+		}
+
+		/* ── Radio card group ──────────────────────────────────────────────── */
 		.gk-radio-card-group {
 			display: flex;
 			gap: 12px;
@@ -458,27 +513,32 @@ class Connect_Page {
 			display: flex;
 			align-items: flex-start;
 			gap: 10px;
-			border: 2px solid #dcdcde;
+			background: #fff;
+			border: 1px solid #c3c4c7;
 			border-radius: 4px;
 			padding: 14px 16px;
 			cursor: pointer;
-			max-width: 280px;
-			background: #fff;
-			transition: border-color 0.1s, box-shadow 0.1s;
+			min-width: 240px;
+			flex: 1;
+			transition: border-color .1s, box-shadow .1s;
 		}
 		.gk-radio-card:hover {
-			border-color: #2271b1;
+			border-color: var(--wp-admin-theme-color, #2271b1);
+		}
+		.gk-radio-card:has(input:focus-visible) {
+			outline: 2px solid var(--wp-admin-theme-color, #2271b1);
+			outline-offset: 2px;
 		}
 		.gk-radio-card:has(input:checked),
 		.gk-radio-card.is-selected {
-			border-color: #2271b1;
-			box-shadow: 0 0 0 1px #2271b1;
-			background: #f0f6fc;
+			border-color: var(--wp-admin-theme-color, #2271b1);
+			box-shadow: 0 0 0 1px var(--wp-admin-theme-color, #2271b1);
+			background: #fff;
 		}
 		.gk-radio-card__radio {
 			margin-top: 3px;
 			flex-shrink: 0;
-			accent-color: #2271b1;
+			accent-color: var(--wp-admin-theme-color, #2271b1);
 		}
 		.gk-radio-card__body {
 			display: flex;
@@ -487,13 +547,134 @@ class Connect_Page {
 		}
 		.gk-radio-card__title {
 			font-weight: 600;
-			color: #1d2327;
+			color: #1e1e1e;
 			line-height: 1.4;
 		}
 		.gk-radio-card__desc {
-			font-size: 0.875em;
-			color: #646970;
+			font-size: .875em;
+			color: #757575;
 			line-height: 1.4;
+		}
+
+		/* ── Primary submit button (components Button is-primary style) ─────── */
+		.gk-connect #submit {
+			background: var(--wp-admin-theme-color, #2271b1);
+			color: #fff;
+			border: none;
+			border-radius: 2px;
+			padding: 6px 16px;
+			min-height: 36px;
+			font-size: 13px;
+			line-height: 1.4;
+			font-weight: 500;
+			cursor: pointer;
+			text-decoration: none;
+			box-shadow: none;
+		}
+		.gk-connect #submit:hover,
+		.gk-connect #submit:active {
+			background: var(--wp-admin-theme-color-darker-10, #1d6196);
+			color: #fff;
+		}
+		.gk-connect #submit:focus-visible {
+			outline: none;
+			box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px var(--wp-admin-theme-color, #2271b1);
+		}
+
+		/* ── "After you download" inner panel ──────────────────────────────── */
+		.gk-connect__next-steps {
+			background: #fff;
+			border: 1px solid #e0e0e0;
+			border-radius: 4px;
+			padding: 16px 20px;
+			max-width: 700px;
+			margin-top: 24px;
+		}
+		.gk-connect__next-steps h3 {
+			margin-top: 0;
+			font-weight: 600;
+			color: #1e1e1e;
+		}
+		.gk-connect__next-steps ol {
+			margin: 0 0 12px;
+			padding-left: 1.5em;
+		}
+		.gk-connect__next-steps li {
+			color: #1e1e1e;
+			margin-bottom: 8px;
+			line-height: 1.5;
+		}
+		.gk-connect__next-steps p {
+			margin-bottom: 0;
+			color: #757575;
+		}
+
+		/* ── Active connections inner panel ────────────────────────────────── */
+		.gk-connect__connections-card {
+			background: #fff;
+			border: 1px solid #e0e0e0;
+			border-radius: 4px;
+			padding: 16px 20px;
+			max-width: 800px;
+			margin-top: 24px;
+		}
+		.gk-connect__connections-heading {
+			font-size: 1em;
+			font-weight: 600;
+			color: #1e1e1e;
+			margin: 0 0 4px;
+		}
+		.gk-connect__connections-desc {
+			color: #757575;
+			font-size: .875em;
+			margin: 0 0 12px;
+		}
+		.gk-connect__connections-table {
+			width: 100%;
+			border-collapse: collapse;
+		}
+		.gk-connect__connections-table th {
+			text-align: left;
+			font-weight: 600;
+			color: #757575;
+			font-size: .8125em;
+			text-transform: uppercase;
+			letter-spacing: .03em;
+			padding: 6px 12px 6px 0;
+			border-bottom: 1px solid #f0f0f1;
+		}
+		.gk-connect__connections-table td {
+			color: #1e1e1e;
+			padding: 10px 12px 10px 0;
+			border-bottom: 1px solid #f0f0f1;
+			font-size: .9375em;
+		}
+		.gk-connect__connections-table tr:last-child td {
+			border-bottom: none;
+		}
+
+		/* ── Disconnect button (link-button, tertiary style) ───────────────── */
+		.gk-connect__disconnect-btn.button.button-link {
+			color: var(--wp-admin-theme-color, #2271b1);
+			text-decoration: none;
+			padding: 0;
+			background: none;
+			border: none;
+			box-shadow: none;
+			font-size: .9375em;
+			cursor: pointer;
+			height: auto;
+			min-height: 0;
+			line-height: inherit;
+		}
+		.gk-connect__disconnect-btn.button.button-link:hover {
+			color: var(--wp-admin-theme-color-darker-10, #1d6196);
+			text-decoration: underline;
+		}
+		.gk-connect__disconnect-btn.button.button-link:focus-visible {
+			outline: 2px solid var(--wp-admin-theme-color, #2271b1);
+			outline-offset: 2px;
+			box-shadow: none;
 		}
 		</style>
 
@@ -611,8 +792,8 @@ class Connect_Page {
 	 */
 	private function render_next_steps() {
 		?>
-		<div style="background:#f6f7f7; border:1px solid #dcdcde; border-radius:4px; padding:16px 20px; max-width:700px; margin-top:24px;">
-			<h3 style="margin-top:0;"><?php esc_html_e( 'After you download', 'gk-block-api' ); ?></h3>
+		<div class="gk-connect__next-steps">
+			<h3><?php esc_html_e( 'After you download', 'gk-block-api' ); ?></h3>
 			<ol>
 				<li>
 					<?php
@@ -650,7 +831,7 @@ class Connect_Page {
 					?>
 				</li>
 			</ol>
-			<p style="margin-bottom:0; color:#646970;">
+			<p>
 				<?php esc_html_e( 'That file briefly holds a private key; once you\'ve clicked Enable you can delete it from Downloads — your AI app has stored the key securely.', 'gk-block-api' ); ?>
 			</p>
 		</div>
