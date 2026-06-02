@@ -181,6 +181,9 @@ function init_settings_page() {
 	try {
 		$settings = new Settings_Page( new Block_Inventory() );
 		$settings->register();
+
+		$connect = new Connect_Page();
+		$connect->register();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'GK Block API settings init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
