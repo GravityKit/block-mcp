@@ -325,16 +325,17 @@ class ConnectPageTest extends WP_UnitTestCase {
 	// ──────────────────────────────────────────────────────────────────────
 
 	/**
-	 * setup_artifact() for 'Claude Code' must return a bash command containing
-	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client claude-code`.
-	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
+	 * setup_artifact() for the 'claude-code' slug must return a bash command
+	 * containing `npx -y @gravitykit/block-mcp connect`, the site URL, and
+	 * `--client claude-code`. The body must NOT contain WORDPRESS_APP_PASSWORD
+	 * or any password.
 	 *
 	 * Credentials are delivered later via the browser-Approve handshake; the
 	 * artifact is purely a terminal command that triggers that flow.
 	 */
 	public function test_setup_artifact_claude_code_is_npx_connect_command_no_secret() {
 		$page     = new Connect_Page();
-		$artifact = $page->setup_artifact( 'Claude Code', 'https://example.com' );
+		$artifact = $page->setup_artifact( 'claude-code', 'https://example.com' );
 
 		$this->assertSame( 'bash', $artifact['language'] );
 		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
@@ -345,13 +346,13 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * setup_artifact() for 'Cursor' must return a bash command containing
+	 * setup_artifact() for the 'cursor' slug must return a bash command containing
 	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client cursor`.
 	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
 	 */
 	public function test_setup_artifact_cursor_is_npx_connect_command_no_secret() {
 		$page     = new Connect_Page();
-		$artifact = $page->setup_artifact( 'Cursor', 'https://example.com' );
+		$artifact = $page->setup_artifact( 'cursor', 'https://example.com' );
 
 		$this->assertSame( 'bash', $artifact['language'] );
 		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
@@ -362,13 +363,14 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * setup_artifact() for 'ChatGPT Desktop' must return a bash command containing
-	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client chatgpt-desktop`.
-	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
+	 * setup_artifact() for the 'chatgpt-desktop' slug must return a bash command
+	 * containing `npx -y @gravitykit/block-mcp connect`, the site URL, and
+	 * `--client chatgpt-desktop`. The body must NOT contain WORDPRESS_APP_PASSWORD
+	 * or any password.
 	 */
 	public function test_setup_artifact_chatgpt_desktop_is_npx_connect_command_no_secret() {
 		$page     = new Connect_Page();
-		$artifact = $page->setup_artifact( 'ChatGPT Desktop', 'https://example.com' );
+		$artifact = $page->setup_artifact( 'chatgpt-desktop', 'https://example.com' );
 
 		$this->assertSame( 'bash', $artifact['language'] );
 		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
@@ -796,17 +798,21 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 	/**
 	 * render_section() in the 'ready' state must output the after-download
-	 * guidance block and all six client-picker radio cards with correct values,
-	 * with Claude Desktop checked by default.
+	 * guidance block and all six client-picker radio cards with stable slug
+	 * values, with Claude Desktop checked by default.
 	 *
-	 * The six required cards are: Claude Desktop, Claude Code, Cursor,
-	 * ChatGPT Desktop, ai-prompt, and other. The "Let my AI set it up" card
-	 * must carry the is-ai class so it is visually prominent. The Claude Desktop
-	 * radio must be checked by default.
+	 * Radio values are the stable, translation-proof slugs defined by the
+	 * CLIENT_* constants. Labels (e.g. "Claude Desktop app") are display-only
+	 * and appear as card text — they must also be present but must NOT be used
+	 * as the radio `value`.
 	 *
-	 * The modern block-editor restyling wraps all output in <div class="gk-connect">
-	 * and nests the content inside <div class="gk-connect__card"> so all CSS
-	 * selectors are scoped and the card container is present.
+	 * The six required slugs: CLIENT_CLAUDE_DESKTOP, CLIENT_CLAUDE_CODE,
+	 * CLIENT_CURSOR, CLIENT_CHATGPT, CLIENT_AI_PROMPT, CLIENT_OTHER.
+	 * The "Let my AI set it up" card must carry the is-ai class.
+	 * The Claude Desktop radio must be checked by default.
+	 *
+	 * Wrapping markup uses <div class="gk-connect"> + <div class="gk-connect__card">
+	 * so all CSS selectors are scoped.
 	 */
 	public function test_render_section_shows_next_steps_and_all_six_picker_cards_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -828,28 +834,28 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
 		$this->assertStringContainsString( 'name="client"', $html, 'Radio inputs must carry name="client"' );
 
-		// All six client values must be present.
-		$this->assertStringContainsString( 'value="Claude Desktop"', $html, 'Claude Desktop radio value must be present' );
-		$this->assertStringContainsString( 'value="Claude Code"', $html, 'Claude Code radio value must be present' );
-		$this->assertStringContainsString( 'value="Cursor"', $html, 'Cursor radio value must be present' );
-		$this->assertStringContainsString( 'value="ChatGPT Desktop"', $html, 'ChatGPT Desktop radio value must be present' );
-		$this->assertStringContainsString( 'value="ai-prompt"', $html, '"ai-prompt" radio value must be present' );
-		$this->assertStringContainsString( 'value="other"', $html, '"other" radio value must be present' );
+		// All six radio values must be stable slugs — NOT translated labels.
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"', $html, 'claude-desktop slug must be the radio value' );
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_CODE . '"', $html, 'claude-code slug must be the radio value' );
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CURSOR . '"', $html, 'cursor slug must be the radio value' );
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CHATGPT . '"', $html, 'chatgpt-desktop slug must be the radio value' );
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_AI_PROMPT . '"', $html, 'ai-prompt slug must be the radio value' );
+		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_OTHER . '"', $html, 'other slug must be the radio value' );
 
-		// Card labels must be present.
-		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop card label must be present' );
-		$this->assertStringContainsString( 'Claude Code', $html, 'Claude Code card label must be present' );
-		$this->assertStringContainsString( 'Cursor', $html, 'Cursor card label must be present' );
-		$this->assertStringContainsString( 'ChatGPT Desktop', $html, 'ChatGPT Desktop card label must be present' );
-		$this->assertStringContainsString( 'Let my AI set it up', $html, '"Let my AI" card label must be present' );
-		$this->assertStringContainsString( 'Something else', $html, '"Something else" card label must be present' );
+		// Human-facing card labels (display-only) must also appear as card text.
+		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop card label must be present as card text' );
+		$this->assertStringContainsString( 'Claude Code', $html, 'Claude Code card label must be present as card text' );
+		$this->assertStringContainsString( 'Cursor', $html, 'Cursor card label must be present as card text' );
+		$this->assertStringContainsString( 'ChatGPT Desktop', $html, 'ChatGPT Desktop card label must be present as card text' );
+		$this->assertStringContainsString( 'Let my AI set it up', $html, '"Let my AI" card label must be present as card text' );
+		$this->assertStringContainsString( 'Something else', $html, '"Something else" card label must be present as card text' );
 
 		// The "Let my AI" card must carry the is-ai accent class.
 		$this->assertStringContainsString( 'is-ai', $html, '"Let my AI" card must carry is-ai class' );
 
 		// The Claude Desktop radio must be checked by default.
 		$this->assertMatchesRegularExpression(
-			'/value="Claude Desktop"[^>]*checked|checked[^>]*value="Claude Desktop"/',
+			'/value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"[^>]*checked|checked[^>]*value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"/',
 			$html,
 			'Claude Desktop radio must be checked by default'
 		);
@@ -889,18 +895,71 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * render_section() with ?setup=Claude+Code must show the secret-free npx connect
-	 * command for Claude Code. No password field and no "Copy password" button must
+	 * render_section() with ?setup=<label-string> must NOT render the command
+	 * artifact. Only stable slug values trigger rendering.
+	 *
+	 * This is the regression test for the label/slug mismatch bug: when
+	 * handle_connect() redirected with ?setup=Claude+Code (a label), render_section()
+	 * compared it against the slug 'claude-code' — a mismatch — so the artifact
+	 * card was silently skipped. The fix uses slugs as the canonical key everywhere,
+	 * ensuring ?setup=<slug> always matches and ?setup=<label> never does.
+	 *
+	 * The test also confirms that setting $_GET['setup'] to a slug (the post-fix
+	 * canonical form) DOES render the artifact, and setting it to the old label
+	 * value does NOT.
+	 */
+	public function test_render_section_setup_slug_renders_artifact_label_does_not() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		// Slug renders the artifact (the fixed behaviour).
+		$_GET['setup'] = Connect_Page::CLIENT_CLAUDE_CODE; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html_slug = ob_get_clean();
+
+		unset( $_GET['setup'] );
+
+		$this->assertStringContainsString(
+			'npx -y @gravitykit/block-mcp connect',
+			$html_slug,
+			'Artifact card must render when ?setup carries the slug'
+		);
+		$this->assertStringContainsString(
+			'--client ' . Connect_Page::CLIENT_CLAUDE_CODE,
+			$html_slug,
+			'Artifact body must include the --client slug flag'
+		);
+
+		// Old label value must NOT render the artifact (was the broken behaviour).
+		$_GET['setup'] = 'Claude Code'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html_label = ob_get_clean();
+
+		unset( $_GET['setup'] );
+
+		$this->assertStringNotContainsString(
+			'npx -y @gravitykit/block-mcp connect',
+			$html_label,
+			'Artifact card must NOT render when ?setup carries an old label value'
+		);
+	}
+
+	/**
+	 * render_section() with ?setup=<client-slug> must show the secret-free npx connect
+	 * command for that client. No password field and no "Copy password" button must
 	 * appear — the credential is delivered via the browser-Approve handshake, not
 	 * shown in the UI.
 	 *
-	 * This test simulates the GET redirect from handle_connect() by writing
-	 * $_GET['setup'] directly, then asserting that:
-	 *  - the artifact textarea contains the npx connect command.
-	 *  - the site URL appears in the command.
-	 *  - WORDPRESS_APP_PASSWORD does NOT appear in the HTML.
-	 *  - no "Copy password" button is present.
-	 *  - the "No password to copy" note is present.
+	 * This test uses the canonical slug (CLIENT_CLAUDE_CODE) as handle_connect()
+	 * now redirects with after the refactor. Previously, handle_connect() redirected
+	 * with ?setup=Claude+Code (the label), which never matched the slug comparison
+	 * in render_section() — causing the artifact card to silently disappear.
 	 */
 	public function test_render_section_setup_query_shows_command_artifact_no_password() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -908,7 +967,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		delete_option( 'gk_block_api_agent_user_id' );
 
-		$_GET['setup'] = 'Claude Code'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['setup'] = Connect_Page::CLIENT_CLAUDE_CODE; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		ob_start();
 		( new Connect_Page() )->render_section();
@@ -917,7 +976,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		unset( $_GET['setup'] );
 
 		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $html, 'Artifact textarea must contain the npx connect command' );
-		$this->assertStringContainsString( '--client claude-code', $html, 'Artifact must carry the --client claude-code slug' );
+		$this->assertStringContainsString( '--client ' . Connect_Page::CLIENT_CLAUDE_CODE, $html, 'Artifact must carry the --client slug' );
 		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $html, 'WORDPRESS_APP_PASSWORD must NOT appear in the output' );
 		$this->assertStringNotContainsString( 'Copy password', $html, 'No "Copy password" button must be present' );
 		$this->assertStringContainsString( 'No password to copy', $html, '"No password to copy" note must be present' );
@@ -953,6 +1012,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		// The normal client picker must NOT appear in authorize mode.
 		$this->assertStringNotContainsString( 'Connect an AI Assistant', $html, 'Normal connect UI heading must NOT appear in authorize mode' );
-		$this->assertStringNotContainsString( 'value="Claude Desktop"', $html, 'Client picker radios must NOT appear in authorize mode' );
+		$this->assertStringNotContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"', $html, 'Client picker radios must NOT appear in authorize mode' );
 	}
 }

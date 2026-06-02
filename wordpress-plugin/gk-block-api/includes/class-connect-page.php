@@ -36,6 +36,64 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Connect_Page {
 
 	/**
+	 * Stable slug for the Claude Desktop app client.
+	 *
+	 * Used as the radio `value`, redirect parameter, command flag, and array key
+	 * everywhere the client identity is needed. Human labels are sourced only from
+	 * clients() and must never appear in branching logic.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_CLAUDE_DESKTOP = 'claude-desktop';
+
+	/**
+	 * Stable slug for the Claude Code terminal agent client.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_CLAUDE_CODE = 'claude-code';
+
+	/**
+	 * Stable slug for the Cursor AI code editor client.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_CURSOR = 'cursor';
+
+	/**
+	 * Stable slug for the ChatGPT Desktop client.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_CHATGPT = 'chatgpt-desktop';
+
+	/**
+	 * Stable slug for the "let my AI set it up" path.
+	 *
+	 * Selecting this option presents a natural-language prompt the user pastes
+	 * into any AI assistant to trigger the npx connect flow.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_AI_PROMPT = 'ai-prompt';
+
+	/**
+	 * Stable slug for the "something else / not sure" option.
+	 *
+	 * Redirects with ?other=1 so a coming-soon note is shown instead of
+	 * attempting provisioning.
+	 *
+	 * @since 1.12.0
+	 * @var string
+	 */
+	const CLIENT_OTHER = 'other';
+
+	/**
 	 * Form action for the connect (download bundle / generate config) handler.
 	 *
 	 * @since 1.9.0
@@ -84,6 +142,62 @@ class Connect_Page {
 	const PASTE_TRANSIENT_PREFIX = 'gk_block_api_paste_pw_';
 
 	/**
+	 * Return the slug-keyed client metadata map.
+	 *
+	 * Each key is the stable, URL-safe slug used everywhere internally (form
+	 * values, query-string parameters, command flags). Labels and descriptions
+	 * are translatable and used only for display.
+	 *
+	 * @since 1.12.0
+	 *
+	 * @return array<string, array{label: string, description: string}>
+	 */
+	private function clients(): array {
+		return array(
+			self::CLIENT_CLAUDE_DESKTOP => array(
+				'label'       => __( 'Claude Desktop app', 'gk-block-api' ),
+				'description' => __( 'One-click install. Recommended.', 'gk-block-api' ),
+			),
+			self::CLIENT_CLAUDE_CODE    => array(
+				'label'       => __( 'Claude Code', 'gk-block-api' ),
+				'description' => __( "Anthropic's terminal coding agent.", 'gk-block-api' ),
+			),
+			self::CLIENT_CURSOR         => array(
+				'label'       => __( 'Cursor', 'gk-block-api' ),
+				'description' => __( 'AI code editor.', 'gk-block-api' ),
+			),
+			self::CLIENT_CHATGPT        => array(
+				'label'       => __( 'ChatGPT Desktop', 'gk-block-api' ),
+				'description' => __( 'OpenAI desktop app.', 'gk-block-api' ),
+			),
+			self::CLIENT_AI_PROMPT      => array(
+				'label'       => __( 'Let my AI set it up for me', 'gk-block-api' ),
+				'description' => __( 'Copy a prompt and let your AI assistant configure it.', 'gk-block-api' ),
+			),
+			self::CLIENT_OTHER          => array(
+				'label'       => __( "Something else / I'm not sure", 'gk-block-api' ),
+				'description' => __( 'Web apps, or not sure yet.', 'gk-block-api' ),
+			),
+		);
+	}
+
+	/**
+	 * Return the human-readable label for a client slug.
+	 *
+	 * Falls back to the slug itself when the slug is not found in clients(),
+	 * so callers always receive a printable string.
+	 *
+	 * @since 1.12.0
+	 *
+	 * @param  string $slug One of the slugs returned by clients().
+	 * @return string Translatable display label.
+	 */
+	public function client_label( string $slug ): string {
+		$clients = $this->clients();
+		return isset( $clients[ $slug ] ) ? $clients[ $slug ]['label'] : $slug;
+	}
+
+	/**
 	 * Provision the agent service account and mint a fresh Application Password.
 	 *
 	 * This is the shared credential-provisioning seam used by both
@@ -93,7 +207,9 @@ class Connect_Page {
 	 *
 	 * @since  1.10.0
 	 *
-	 * @param  string $client Display name for the connecting client (e.g. 'Claude Code').
+	 * @param  string $client Human-readable display name for the connecting client
+	 *                        (e.g. the return value of client_label()). Used only as
+	 *                        the Application Password label — never matched or branched on.
 	 * @return array|\WP_Error {
 	 *     On success, a credential array ready for callers to use.
 	 *
@@ -132,7 +248,9 @@ class Connect_Page {
 	 *
 	 * @since  1.9.0
 	 *
-	 * @param  string      $client      Display name for the connecting client (e.g. 'Claude Desktop').
+	 * @param  string      $client      Human-readable display label for the connecting client
+	 *                                  (e.g. the return value of client_label('claude-desktop')).
+	 *                                  Used as the Application Password name and the .mcpb display_name.
 	 * @param  string|null $server_path Absolute path to index.cjs. Defaults to the bundled server.
 	 * @return array|\WP_Error {
 	 *     Success array — keys consumed by handle_connect() and render_page().
@@ -199,7 +317,7 @@ class Connect_Page {
 	}
 
 	/**
-	 * Build the secret-free command artifact for a given client.
+	 * Build the secret-free command artifact for a given client slug.
 	 *
 	 * Returns a label, language hint, and a raw body containing only an
 	 * `npx -y @gravitykit/block-mcp connect` command. No password or credential
@@ -210,8 +328,9 @@ class Connect_Page {
 	 * escape it at output time — render_artifact_card() uses esc_textarea().
 	 *
 	 * @since  1.11.0
+	 * @since  1.12.0 Parameter renamed from label string to stable slug.
 	 *
-	 * @param  string $client   One of: 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt'.
+	 * @param  string $slug     One of: 'claude-code', 'cursor', 'chatgpt-desktop', 'ai-prompt'.
 	 * @param  string $site_url Untrailed home_url() base to embed in the command.
 	 * @return array {
 	 *     @type string $label    Short description shown above the textarea (HTML-safe).
@@ -219,30 +338,32 @@ class Connect_Page {
 	 *     @type string $body     Raw command string. Must be escaped by the caller before HTML output.
 	 * }
 	 */
-	public function setup_artifact( $client, $site_url ) {
-		switch ( $client ) {
-			case 'Claude Code':
+	public function setup_artifact( $slug, $site_url ) {
+		$terminal_label = esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' );
+
+		switch ( $slug ) {
+			case self::CLIENT_CLAUDE_CODE:
 				return array(
-					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
+					'label'    => $terminal_label,
 					'language' => 'bash',
-					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client claude-code",
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client " . self::CLIENT_CLAUDE_CODE,
 				);
 
-			case 'Cursor':
+			case self::CLIENT_CURSOR:
 				return array(
-					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
+					'label'    => $terminal_label,
 					'language' => 'bash',
-					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client cursor",
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client " . self::CLIENT_CURSOR,
 				);
 
-			case 'ChatGPT Desktop':
+			case self::CLIENT_CHATGPT:
 				return array(
-					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
+					'label'    => $terminal_label,
 					'language' => 'bash',
-					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client chatgpt-desktop",
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client " . self::CLIENT_CHATGPT,
 				);
 
-			case 'ai-prompt':
+			case self::CLIENT_AI_PROMPT:
 			default:
 				return array(
 					'label'    => esc_html__( 'Paste this to your AI assistant. It will run the command, a browser window will open for you to click Approve, and then confirm it can read your blocks.', 'gk-block-api' ),
@@ -341,18 +462,20 @@ class Connect_Page {
 	/**
 	 * Handle the connect form submission.
 	 *
-	 * For Claude Desktop: provisions credentials, builds the .mcpb bundle, and
-	 * streams it as an octet-stream download (unchanged behaviour).
+	 * For the claude-desktop slug: provisions credentials, builds the .mcpb
+	 * bundle, and streams it as an octet-stream download.
 	 *
-	 * For Claude Code, Cursor, ChatGPT Desktop, and ai-prompt: does NOT provision
-	 * any credential. Instead redirects back to the connect tab with ?setup=<client>
-	 * so render_section() can display the secret-free CLI command for that client.
+	 * For claude-code, cursor, chatgpt-desktop, and ai-prompt: does NOT provision
+	 * any credential. Redirects back to the connect tab with ?setup=<slug> so
+	 * render_section() can display the secret-free CLI command for that client.
 	 * The credential is delivered later via the browser-Approve handshake when the
 	 * user runs the printed npx command and clicks Approve.
 	 *
 	 * For 'other': redirects back with ?other=1 so the "coming soon" note is shown.
 	 *
 	 * @since 1.9.0
+	 * @since 1.12.0 Uses stable slugs from clients(); dropped rawurlencode()
+	 *               double-encode (add_query_arg already encodes values).
 	 */
 	public function handle_connect() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -361,24 +484,26 @@ class Connect_Page {
 
 		check_admin_referer( self::ACTION_CONNECT );
 
-		$client = isset( $_POST['client'] ) // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above via check_admin_referer.
-			? sanitize_text_field( wp_unslash( $_POST['client'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Missing
-			: 'Claude Desktop';
+		// Slugs are URL-safe ASCII — sanitize_key is the right sanitizer.
+		$slug = isset( $_POST['client'] ) // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above via check_admin_referer.
+			? sanitize_key( wp_unslash( $_POST['client'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			: self::CLIENT_CLAUDE_DESKTOP;
 
-		if ( '' === $client ) {
-			$client = 'Claude Desktop';
+		if ( '' === $slug ) {
+			$slug = self::CLIENT_CLAUDE_DESKTOP;
 		}
 
-		// Command-artifact clients: no provisioning — redirect back with the client
-		// slug so render_section() can display the secret-free npx command.
-		$artifact_clients = array( 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt' );
-		if ( in_array( $client, $artifact_clients, true ) ) {
+		// Command-artifact clients: no provisioning — redirect back with the slug
+		// so render_section() can display the secret-free npx command.
+		// add_query_arg() encodes query values; no rawurlencode() wrapper needed.
+		$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT );
+		if ( in_array( $slug, $artifact_clients, true ) ) {
 			wp_safe_redirect(
 				add_query_arg(
 					array(
 						'page'  => Settings_Page::PAGE_SLUG,
 						'tab'   => 'connect',
-						'setup' => rawurlencode( $client ),
+						'setup' => $slug,
 					),
 					admin_url( 'options-general.php' )
 				)
@@ -386,8 +511,8 @@ class Connect_Page {
 			exit;
 		}
 
-		// 'other' client: redirect with a note flag, no provisioning.
-		if ( 'other' === $client ) {
+		// 'other' slug: redirect with a note flag, no provisioning.
+		if ( self::CLIENT_OTHER === $slug ) {
 			wp_safe_redirect(
 				add_query_arg(
 					array(
@@ -401,8 +526,10 @@ class Connect_Page {
 			exit;
 		}
 
-		// Default: Claude Desktop — stream the .mcpb bundle.
-		$r = $this->prepare_installer( $client );
+		// Default: CLIENT_CLAUDE_DESKTOP — stream the .mcpb bundle.
+		// Pass the human label so the Application Password name and .mcpb
+		// display_name read as "Block MCP — Claude Desktop app".
+		$r = $this->prepare_installer( $this->client_label( $slug ) );
 
 		if ( is_wp_error( $r ) ) {
 			wp_die( esc_html( $r->get_error_message() ) );
@@ -597,12 +724,12 @@ class Connect_Page {
 		}
 
 		// ── Command-artifact mode ─────────────────────────────────────────────
-		// handle_connect() redirects back with ?setup=<client> for non-Desktop
-		// clients. Render the secret-free command artifact for that client.
+		// handle_connect() redirects back with ?setup=<slug> for non-Desktop
+		// clients. Render the secret-free command artifact for that slug.
 		$setup_client = ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( isset( $_GET['setup'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			$raw_setup        = sanitize_text_field( wp_unslash( $_GET['setup'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			$artifact_clients = array( 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt' );
+			$raw_setup        = sanitize_key( wp_unslash( $_GET['setup'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT );
 			if ( in_array( $raw_setup, $artifact_clients, true ) ) {
 				$setup_client = $raw_setup;
 			}
@@ -752,12 +879,14 @@ class Connect_Page {
 	 *
 	 * @since 1.10.0
 	 * @since 1.11.0 Password param removed; command-only artifact, no credential shown.
+	 * @since 1.12.0 $client is now a stable slug; label resolved via client_label().
 	 *
-	 * @param string $client   Client name (e.g. 'Claude Code').
+	 * @param string $client   Stable client slug (e.g. 'claude-code').
 	 * @param array  $artifact Return value of setup_artifact().
 	 * @return void
 	 */
 	private function render_artifact_card( $client, array $artifact ) {
+		$display_name = $this->client_label( $client );
 		?>
 		<div class="gk-connect__artifact-card">
 			<h3 class="gk-connect__artifact-heading">
@@ -766,7 +895,7 @@ class Connect_Page {
 					sprintf(
 						/* translators: %s: AI client name e.g. "Claude Code" */
 						__( '%s setup', 'gk-block-api' ),
-						$client
+						$display_name
 					)
 				);
 				?>
@@ -926,11 +1055,13 @@ class Connect_Page {
 	 *
 	 * The picker is a fieldset of radio cards so keyboard navigation, screen
 	 * readers, and pointer devices all work with standard browser behaviour.
-	 * Six clients are offered: Claude Desktop (.mcpb download), Claude Code,
-	 * Cursor, ChatGPT Desktop, an "ai-prompt" path, and an "other" fallback.
-	 * The "Let my AI set it up" card is visually prominent with an accent
-	 * left-border modifier so it is an obvious choice for users who are already
-	 * in an AI session.
+	 * Six clients are offered: claude-desktop (.mcpb download), claude-code,
+	 * cursor, chatgpt-desktop, ai-prompt, and other. The ai-prompt card is
+	 * visually prominent with an accent left-border modifier so it is an obvious
+	 * choice for users who are already in an AI session.
+	 *
+	 * Cards are generated by iterating clients() so the form and the branching
+	 * logic share a single source of truth.
 	 *
 	 * All selectors are scoped under .gk-connect to prevent leaking into
 	 * the rest of wp-admin. The design follows the WordPress block-editor /
@@ -939,8 +1070,10 @@ class Connect_Page {
 	 * admin background, accent-color via --wp-admin-theme-color.
 	 *
 	 * @since 1.9.0
+	 * @since 1.12.0 Radio values are stable slugs; labels come from clients().
 	 */
 	private function render_connect_form() {
+		$clients = $this->clients();
 		?>
 		<style>
 		/* ── Outer card ────────────────────────────────────────────────────── */
@@ -1173,84 +1306,24 @@ class Connect_Page {
 
 				<div class="gk-radio-card-group" role="radiogroup">
 
-					<label class="gk-radio-card is-selected" id="gk-card-claude-desktop">
+					<?php foreach ( $clients as $slug => $meta ) : ?>
+					<label
+						class="gk-radio-card<?php echo ( self::CLIENT_CLAUDE_DESKTOP === $slug ) ? ' is-selected' : ''; ?><?php echo ( self::CLIENT_AI_PROMPT === $slug ) ? ' is-ai' : ''; ?>"
+						id="<?php echo esc_attr( 'gk-card-' . $slug ); ?>"
+					>
 						<input
 							class="gk-radio-card__radio"
 							type="radio"
 							name="client"
-							value="Claude Desktop"
-							checked
+							value="<?php echo esc_attr( $slug ); ?>"
+							<?php checked( self::CLIENT_CLAUDE_DESKTOP, $slug ); ?>
 						/>
 						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( 'Claude Desktop app', 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'One-click install. Recommended.', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__title"><?php echo esc_html( $meta['label'] ); ?></span>
+							<span class="gk-radio-card__desc"><?php echo esc_html( $meta['description'] ); ?></span>
 						</span>
 					</label>
-
-					<label class="gk-radio-card" id="gk-card-claude-code">
-						<input
-							class="gk-radio-card__radio"
-							type="radio"
-							name="client"
-							value="Claude Code"
-						/>
-						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( 'Claude Code', 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( "Anthropic's terminal coding agent.", 'gk-block-api' ); ?></span>
-						</span>
-					</label>
-
-					<label class="gk-radio-card" id="gk-card-cursor">
-						<input
-							class="gk-radio-card__radio"
-							type="radio"
-							name="client"
-							value="Cursor"
-						/>
-						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( 'Cursor', 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'AI code editor.', 'gk-block-api' ); ?></span>
-						</span>
-					</label>
-
-					<label class="gk-radio-card" id="gk-card-chatgpt">
-						<input
-							class="gk-radio-card__radio"
-							type="radio"
-							name="client"
-							value="ChatGPT Desktop"
-						/>
-						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( 'ChatGPT Desktop', 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'OpenAI desktop app.', 'gk-block-api' ); ?></span>
-						</span>
-					</label>
-
-					<label class="gk-radio-card is-ai" id="gk-card-ai-prompt">
-						<input
-							class="gk-radio-card__radio"
-							type="radio"
-							name="client"
-							value="ai-prompt"
-						/>
-						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( 'Let my AI set it up for me', 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'Copy a prompt and let your AI assistant configure it.', 'gk-block-api' ); ?></span>
-						</span>
-					</label>
-
-					<label class="gk-radio-card" id="gk-card-other">
-						<input
-							class="gk-radio-card__radio"
-							type="radio"
-							name="client"
-							value="other"
-						/>
-						<span class="gk-radio-card__body">
-							<span class="gk-radio-card__title"><?php esc_html_e( "Something else / I'm not sure", 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'Web apps, or not sure yet.', 'gk-block-api' ); ?></span>
-						</span>
-					</label>
+					<?php endforeach; ?>
 
 				</div>
 
@@ -1277,12 +1350,12 @@ class Connect_Page {
 				if ( ! radios.length ) return;
 
 				var labels = {
-					'Claude Desktop' : '<?php echo esc_js( __( 'Download installer', 'gk-block-api' ) ); ?>',
-					'Claude Code'    : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'Cursor'         : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'ChatGPT Desktop': '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'ai-prompt'      : '<?php echo esc_js( __( 'Copy AI setup prompt', 'gk-block-api' ) ); ?>',
-					'other'          : '<?php echo esc_js( __( 'Choose an app above', 'gk-block-api' ) ); ?>'
+					'<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>': '<?php echo esc_js( __( 'Download installer', 'gk-block-api' ) ); ?>',
+					'<?php echo esc_js( self::CLIENT_CLAUDE_CODE ); ?>'   : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'<?php echo esc_js( self::CLIENT_CURSOR ); ?>'        : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'<?php echo esc_js( self::CLIENT_CHATGPT ); ?>'       : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'<?php echo esc_js( self::CLIENT_AI_PROMPT ); ?>'     : '<?php echo esc_js( __( 'Copy AI setup prompt', 'gk-block-api' ) ); ?>',
+					'<?php echo esc_js( self::CLIENT_OTHER ); ?>'         : '<?php echo esc_js( __( 'Choose an app above', 'gk-block-api' ) ); ?>'
 				};
 
 				function updateState() {
@@ -1298,11 +1371,11 @@ class Connect_Page {
 					} );
 
 					if ( note ) {
-						note.style.display = ( 'other' === checkedVal ) ? '' : 'none';
+						note.style.display = ( '<?php echo esc_js( self::CLIENT_OTHER ); ?>' === checkedVal ) ? '' : 'none';
 					}
 
 					if ( btn ) {
-						var label = labels[ checkedVal ] || labels[ 'Claude Desktop' ];
+						var label = labels[ checkedVal ] || labels[ '<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>' ];
 						btn.value = label;
 					}
 				}
