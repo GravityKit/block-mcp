@@ -393,22 +393,42 @@ class Settings_Page {
 		?>
 		<div class="wrap">
 			<style>
-				/* Modern WordPress look: a white content canvas instead of the
-				   default gray admin background. Scoped to this settings page via
-				   its body class so the rest of wp-admin is untouched. */
+				/* Modern WordPress look: a white content canvas that fills the
+					window and scrolls normally, instead of the default gray admin
+					background. Scoped to this settings page (body class, plus :has()
+					for the html element it can't otherwise reach) so the rest of
+					wp-admin is untouched. Whiten the full backing stack — html /
+					body / #wpwrap / #wpbody / #wpcontent / #wpbody-content — so no
+					gray shows through beside the menu or below short content. */
+				html:has( body.settings_page_gk-block-api-settings ) {
+					background: #fff;
+				}
 				body.settings_page_gk-block-api-settings,
+				body.settings_page_gk-block-api-settings #wpwrap,
+				body.settings_page_gk-block-api-settings #wpbody,
 				body.settings_page_gk-block-api-settings #wpcontent,
 				body.settings_page_gk-block-api-settings #wpbody-content {
 					background: #fff;
 				}
+				/* Fill at least the viewport height so a short page still reads as
+					a full white canvas. min-height (not height) keeps the normal
+					document scroll for taller pages. 32px = admin bar height. */
 				body.settings_page_gk-block-api-settings #wpbody-content {
+					min-height: calc( 100vh - 32px );
 					padding-bottom: 24px;
+				}
+				/* Extend the dark admin menu's backing to the full page height so
+					the sidebar doesn't visually stop partway down a tall page (its
+					natural item-list height) against the white canvas. */
+				body.settings_page_gk-block-api-settings #adminmenuback,
+				body.settings_page_gk-block-api-settings #adminmenuwrap {
+					min-height: 100% !important;
 				}
 
 				/* Modern components-style tabs (underline indicator) in place of
-				   the classic gray boxed nav-tabs. Body-class scoped so core
-				   nav-tab styling elsewhere is untouched; the prefix raises
-				   specificity above core's single-class rules. */
+					the classic gray boxed nav-tabs. Body-class scoped so core
+					nav-tab styling elsewhere is untouched; the prefix raises
+					specificity above core's single-class rules. */
 				.settings_page_gk-block-api-settings .nav-tab-wrapper {
 					display: flex;
 					gap: 4px;
