@@ -392,6 +392,19 @@ class Settings_Page {
 
 		?>
 		<div class="wrap">
+			<style>
+				/* Modern WordPress look: a white content canvas instead of the
+				   default gray admin background. Scoped to this settings page via
+				   its body class so the rest of wp-admin is untouched. */
+				body.settings_page_gk-block-api-settings,
+				body.settings_page_gk-block-api-settings #wpcontent,
+				body.settings_page_gk-block-api-settings #wpbody-content {
+					background: #fff;
+				}
+				body.settings_page_gk-block-api-settings #wpbody-content {
+					padding-bottom: 24px;
+				}
+			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 
 			<h2 class="nav-tab-wrapper">
