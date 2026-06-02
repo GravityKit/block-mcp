@@ -22,6 +22,11 @@ require_once __DIR__ . '/includes/class-agent-provisioner.php';
 
 /**
  * Delete every plugin option / transient on the current blog.
+ *
+ * Called once per blog inside switch_to_blog() on multisite, and once on
+ * single-site installations. Agent_Provisioner::purge() is NOT called here;
+ * it requires blog context to read gk_block_api_agent_user_id and must be
+ * invoked separately after this function, while still inside switch_to_blog().
  */
 function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
@@ -41,6 +46,11 @@ function gk_block_api_uninstall_blog() {
 
 	// Pattern reference-count cache (Pattern_Manager::REF_COUNT_CACHE_KEY).
 	delete_transient( 'gk_block_api_pattern_ref_counts' );
+
+	// Deactivation-notice transient. Normally auto-cleared on the next admin
+	// page load after deactivation, but survives when the plugin is deleted
+	// immediately after deactivation without a page load in between.
+	delete_transient( 'gk_block_api_deactivation_notice' );
 
 	// Per-post rate-limit transients accumulate per write activity. Sweep
 	// the option table directly — there's no core helper for prefixed
@@ -64,13 +74,24 @@ if ( is_multisite() ) {
 	foreach ( $blog_ids as $blog_id ) { // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- $blog_id is the multisite loop variable passed to switch_to_blog(); intentional WP multisite pattern.
 		switch_to_blog( $blog_id );
 		gk_block_api_uninstall_blog();
+
+		// Tear down the agent for this blog while its option scope is active.
+		// gk_block_api_agent_user_id is stored blog-scoped (autoload=false), so
+		// purge() must run inside switch_to_blog() to read the correct user ID.
+		// purge() gates on the _gk_block_api_agent meta flag and is idempotent,
+		// so subsequent blogs that share a network user will not re-delete an
+		// already-removed account. wpmu_delete_user() removes the network user
+		// globally on the first blog that provisioned it; the meta-guard on every
+		// subsequent call makes those calls safe no-ops.
+		GravityKit\BlockAPI\Agent_Provisioner::purge();
+
 		restore_current_blog();
 	}
 } else {
 	gk_block_api_uninstall_blog();
-}
 
-// Tear down the agent service account (user + app passwords + role + option).
-// purge() is idempotent and respects the gk_block_api_remove_agent_on_uninstall
-// filter, so operators can opt out of agent deletion during reinstalls.
-GravityKit\BlockAPI\Agent_Provisioner::purge();
+	// Tear down the agent service account (user + app passwords + role + option).
+	// purge() is idempotent and respects the gk_block_api_remove_agent_on_uninstall
+	// filter, so operators can opt out of agent deletion during reinstalls.
+	GravityKit\BlockAPI\Agent_Provisioner::purge();
+}
