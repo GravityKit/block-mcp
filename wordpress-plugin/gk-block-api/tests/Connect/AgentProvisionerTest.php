@@ -27,6 +27,15 @@ use GravityKit\BlockAPI\Agent_Provisioner;
 class AgentProvisionerTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
+		// Clear any agent user a previous aborted run may have left behind
+		// before WP_UnitTestCase opens its per-test transaction — otherwise a
+		// stale 'block-mcp' user pushes a test onto the wrong code branch.
+		$stale = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		if ( $stale ) {
+			wp_delete_user( $stale->ID );
+		}
+		delete_option( 'gk_block_api_agent_user_id' );
+
 		parent::set_up();
 		remove_role( Agent_Provisioner::ROLE );
 	}
@@ -74,7 +83,7 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		$second = $p->ensure();
 		$this->assertSame( $first, $second );
 		$this->assertSame( $first, (int) get_option( 'gk_block_api_agent_user_id' ) );
-		$this->assertCount( 1, get_users( array( 'login' => Agent_Provisioner::LOGIN ) ) );
+		$this->assertCount( 1, get_users( array( 'login__in' => array( Agent_Provisioner::LOGIN ) ) ) );
 	}
 
 	/**

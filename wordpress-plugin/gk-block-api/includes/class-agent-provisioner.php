@@ -69,9 +69,9 @@ class Agent_Provisioner {
 	 * Calling this method when the role already exists is a no-op.
 	 *
 	 * @since 1.9.0
-	 * @return void
+	 * @return string The effective role slug (post-filter) callers should assign.
 	 */
-	public static function register_role() {
+	public static function register_role(): string {
 		$caps = apply_filters(
 			'gk_block_api_agent_caps',
 			array(
@@ -96,6 +96,8 @@ class Agent_Provisioner {
 		if ( self::ROLE === $role && ! get_role( self::ROLE ) ) {
 			add_role( self::ROLE, 'Block MCP Agent', $caps );
 		}
+
+		return $role;
 	}
 
 	/**
@@ -141,10 +143,9 @@ class Agent_Provisioner {
 			return $existing->ID;
 		}
 
-		// No existing user — register the role and create the account.
-		self::register_role();
-
-		$role = apply_filters( 'gk_block_api_agent_role', self::ROLE );
+		// No existing user — register the role and create the account. Reuse
+		// the slug register_role() resolved so the filter is applied once.
+		$role = self::register_role();
 
 		$host  = wp_parse_url( home_url(), PHP_URL_HOST );
 		$email = 'block-mcp@' . ( $host ? $host : 'localhost' );
@@ -167,5 +168,29 @@ class Agent_Provisioner {
 		update_option( 'gk_block_api_agent_user_id', $user_id, false );
 
 		return $user_id;
+	}
+
+	/**
+	 * Block interactive login for the service account.
+	 *
+	 * Filters `authenticate`: any user carrying the agent meta flag is
+	 * rejected with an `agent_no_login` WP_Error, so the account's credentials
+	 * work only for non-interactive (REST / Application Password) requests.
+	 * Pass-through for every other user.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param null|\WP_User|\WP_Error $user Authenticating user, or a prior filter's result.
+	 * @return null|\WP_User|\WP_Error The user unchanged, or WP_Error for the service account.
+	 */
+	public static function block_agent_login( $user ) {
+		if ( $user instanceof \WP_User && '1' === get_user_meta( $user->ID, self::META_FLAG, true ) ) {
+			return new \WP_Error(
+				'agent_no_login',
+				__( 'This is a service account and cannot log in interactively.', 'gk-block-api' )
+			);
+		}
+
+		return $user;
 	}
 }

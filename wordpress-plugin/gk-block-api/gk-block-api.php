@@ -200,20 +200,7 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
  */
 function init_agent() {
 	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
-
-	add_filter(
-		'authenticate',
-		static function ( $user ) {
-			if ( $user instanceof \WP_User && '1' === get_user_meta( $user->ID, \GravityKit\BlockAPI\Agent_Provisioner::META_FLAG, true ) ) {
-				return new \WP_Error(
-					'agent_no_login',
-					__( 'This is a service account and cannot log in interactively.', 'gk-block-api' )
-				);
-			}
-			return $user;
-		},
-		99
-	);
+	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 99 );
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
 
