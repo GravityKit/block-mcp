@@ -1,16 +1,16 @@
 <?php
 /**
- * Connect_Page: provision-mint-build, connection-state, artifact, and render contracts.
+ * Connect_Page: provision-mint-build, connection-state, artifact, authorize, and render contracts.
  *
  * The Connect_Page orchestrates the full connect flow: provisioning the agent
  * service account, minting an Application Password, and either building a
- * pre-filled .mcpb bundle (Claude Desktop) or producing a ready-to-paste
- * setup artifact (Claude Code, Cursor, ChatGPT Desktop, ai-prompt).
+ * pre-filled .mcpb bundle (Claude Desktop) or emitting a secret-free
+ * `npx connect` command that drives the browser-Approve handshake.
  *
  * These tests pin the testable seams — provision_credentials(),
- * prepare_installer(), setup_artifact(), connection_state(), and
- * render_section() — without exercising the HTTP-streaming or admin-menu
- * registration paths, which have no testable surface in the unit harness.
+ * prepare_installer(), setup_artifact(), is_loopback_callback(),
+ * handle_authorize(), connection_state(), and render_section() — without
+ * exercising the HTTP-streaming or admin-menu registration paths.
  *
  * Contracts pinned here:
  *
@@ -20,7 +20,13 @@
  *    the block-mcp login (propagated from Agent_Provisioner::ensure()).
  *  - prepare_installer() calls provision_credentials() and builds the .mcpb
  *    from the returned creds; the .mcpb path is unchanged.
- *  - setup_artifact() returns correct bash/json/text bodies for each client.
+ *  - setup_artifact() returns secret-free npx-connect commands for each
+ *    non-Desktop client; bodies must NOT contain any password or
+ *    WORDPRESS_APP_PASSWORD.
+ *  - is_loopback_callback() accepts only loopback http:// URLs with an
+ *    explicit port and no userinfo; rejects everything else.
+ *  - handle_authorize() mints exactly one credential and redirects it to the
+ *    loopback callback; rejects non-loopback callbacks; rejects missing caps.
  *  - The manifest inside the .mcpb zip carries the home_url() base (not
  *    site_url()) so subdirectory installs produce working credentials.
  *  - When Application Passwords are unavailable, prepare_installer() returns
@@ -34,6 +40,9 @@
  *    return the plaintext separately.
  *  - render_section() in the 'ready' state outputs all six client radio cards
  *    with the correct values, Claude Desktop checked by default.
+ *  - render_section() with ?setup=<client> shows the secret-free command
+ *    artifact for that client; no password field is rendered.
+ *  - render_section() with ?gk_authorize renders the Approve screen.
  *
  * @package GravityKit\BlockAPI\Tests\Connect
  */
@@ -73,6 +82,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 		remove_filter( 'wp_is_application_passwords_available', '__return_false' );
 		remove_all_filters( 'gk_block_api_secret_at_rest_mode' );
 		remove_all_filters( 'home_url' );
+		remove_all_filters( 'wp_redirect' );
+		remove_all_filters( 'wp_die_handler' );
+
+		// Clean up superglobals set by authorize / setup render tests.
+		unset( $_GET['gk_authorize'], $_GET['setup'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+		unset( $_REQUEST['_wpnonce'] );
 
 		if ( $this->fixture_server && file_exists( $this->fixture_server ) ) {
 			wp_delete_file( $this->fixture_server );
@@ -306,131 +321,293 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
-	// setup_artifact() — per-client bodies.
+	// setup_artifact() — per-client secret-free command bodies.
 	// ──────────────────────────────────────────────────────────────────────
 
 	/**
-	 * setup_artifact() for 'Claude Code' must return a bash snippet containing
-	 * `claude mcp add`, the site URL, and WORDPRESS_APP_PASSWORD with the
-	 * placeholder — never the real password.
+	 * setup_artifact() for 'Claude Code' must return a bash command containing
+	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client claude-code`.
+	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
 	 *
-	 * The real secret must not appear in the artifact body because it would land
-	 * in shell history when the user pastes the command into a terminal. It is
-	 * surfaced separately by render_artifact_card() in a dedicated password field.
+	 * Credentials are delivered later via the browser-Approve handshake; the
+	 * artifact is purely a terminal command that triggers that flow.
 	 */
-	public function test_setup_artifact_claude_code_contains_placeholder_not_password() {
-		$page  = new Connect_Page();
-		$creds = array(
-			'url'      => 'https://example.com',
-			'user'     => 'block-mcp',
-			'password' => 'testpass123',
-			'uuid'     => 'test-uuid',
-		);
-
-		$artifact = $page->setup_artifact( 'Claude Code', $creds );
+	public function test_setup_artifact_claude_code_is_npx_connect_command_no_secret() {
+		$page     = new Connect_Page();
+		$artifact = $page->setup_artifact( 'Claude Code', 'https://example.com' );
 
 		$this->assertSame( 'bash', $artifact['language'] );
-		// The body is raw (not HTML-escaped); esc_textarea() is applied at render time.
-		$this->assertStringContainsString( 'claude mcp add', $artifact['body'], 'body must contain claude mcp add command' );
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
 		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
-		$this->assertStringContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must contain WORDPRESS_APP_PASSWORD' );
-		$this->assertStringContainsString( '@gravitykit/block-mcp', $artifact['body'], 'body must reference the npm package' );
-		$this->assertStringContainsString( Connect_Page::PW_PLACEHOLDER, $artifact['body'], 'body must contain the placeholder' );
-		$this->assertStringNotContainsString( 'testpass123', $artifact['body'], 'body must NOT contain the real password' );
+		$this->assertStringContainsString( '--client claude-code', $artifact['body'], 'body must contain --client claude-code slug' );
+		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must NOT contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringNotContainsString( 'password', strtolower( $artifact['body'] ), 'body must NOT contain any password text' );
 	}
 
 	/**
-	 * setup_artifact() for 'Cursor' must return valid JSON containing mcpServers
-	 * with a block-mcp entry carrying the site URL and user, but using the
-	 * placeholder for WORDPRESS_APP_PASSWORD — never the real password.
-	 *
-	 * Embedding the real secret in the JSON snippet would expose it if the user
-	 * pastes the snippet into an AI chat or commits the config file to source control.
+	 * setup_artifact() for 'Cursor' must return a bash command containing
+	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client cursor`.
+	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
 	 */
-	public function test_setup_artifact_cursor_is_valid_json_with_placeholder_not_password() {
-		$page  = new Connect_Page();
-		$creds = array(
-			'url'      => 'https://example.com',
-			'user'     => 'block-mcp',
-			'password' => 'cursorpass',
-			'uuid'     => 'test-uuid',
-		);
+	public function test_setup_artifact_cursor_is_npx_connect_command_no_secret() {
+		$page     = new Connect_Page();
+		$artifact = $page->setup_artifact( 'Cursor', 'https://example.com' );
 
-		$artifact = $page->setup_artifact( 'Cursor', $creds );
-
-		$this->assertSame( 'json', $artifact['language'] );
-
-		// The body is raw JSON (not HTML-escaped); decode directly.
-		$decoded = json_decode( $artifact['body'], true );
-		$this->assertNotNull( $decoded, 'body must be valid JSON' );
-		$this->assertArrayHasKey( 'mcpServers', $decoded );
-		$this->assertArrayHasKey( 'block-mcp', $decoded['mcpServers'] );
-
-		$server = $decoded['mcpServers']['block-mcp'];
-		$this->assertSame( 'https://example.com', $server['env']['WORDPRESS_URL'] );
-		$this->assertSame( Connect_Page::PW_PLACEHOLDER, $server['env']['WORDPRESS_APP_PASSWORD'], 'WORDPRESS_APP_PASSWORD must be the placeholder, not the real secret' );
-		$this->assertStringNotContainsString( 'cursorpass', $artifact['body'], 'body must NOT contain the real password' );
+		$this->assertSame( 'bash', $artifact['language'] );
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
+		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
+		$this->assertStringContainsString( '--client cursor', $artifact['body'], 'body must contain --client cursor slug' );
+		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must NOT contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringNotContainsString( 'password', strtolower( $artifact['body'] ), 'body must NOT contain any password text' );
 	}
 
 	/**
-	 * setup_artifact() for 'ChatGPT Desktop' must return valid JSON containing
-	 * mcpServers with a block-mcp entry using the placeholder for
-	 * WORDPRESS_APP_PASSWORD — same contract as Cursor.
-	 *
-	 * The snippet lands in a config file the user may share or version-control,
-	 * so the real secret must never appear there.
+	 * setup_artifact() for 'ChatGPT Desktop' must return a bash command containing
+	 * `npx -y @gravitykit/block-mcp connect`, the site URL, and `--client chatgpt-desktop`.
+	 * The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
 	 */
-	public function test_setup_artifact_chatgpt_desktop_is_valid_json_with_placeholder_not_password() {
-		$page  = new Connect_Page();
-		$creds = array(
-			'url'      => 'https://example.com',
-			'user'     => 'block-mcp',
-			'password' => 'chatgptpass',
-			'uuid'     => 'test-uuid',
-		);
+	public function test_setup_artifact_chatgpt_desktop_is_npx_connect_command_no_secret() {
+		$page     = new Connect_Page();
+		$artifact = $page->setup_artifact( 'ChatGPT Desktop', 'https://example.com' );
 
-		$artifact = $page->setup_artifact( 'ChatGPT Desktop', $creds );
-
-		$this->assertSame( 'json', $artifact['language'] );
-
-		// The body is raw JSON (not HTML-escaped); decode directly.
-		$decoded = json_decode( $artifact['body'], true );
-		$this->assertNotNull( $decoded, 'body must be valid JSON' );
-		$this->assertArrayHasKey( 'mcpServers', $decoded );
-		$this->assertArrayHasKey( 'block-mcp', $decoded['mcpServers'] );
-
-		$server = $decoded['mcpServers']['block-mcp'];
-		$this->assertSame( 'https://example.com', $server['env']['WORDPRESS_URL'] );
-		$this->assertSame( Connect_Page::PW_PLACEHOLDER, $server['env']['WORDPRESS_APP_PASSWORD'], 'WORDPRESS_APP_PASSWORD must be the placeholder, not the real secret' );
-		$this->assertStringNotContainsString( 'chatgptpass', $artifact['body'], 'body must NOT contain the real password' );
+		$this->assertSame( 'bash', $artifact['language'] );
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
+		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
+		$this->assertStringContainsString( '--client chatgpt-desktop', $artifact['body'], 'body must contain --client chatgpt-desktop slug' );
+		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must NOT contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringNotContainsString( 'password', strtolower( $artifact['body'] ), 'body must NOT contain any password text' );
 	}
 
 	/**
-	 * setup_artifact() for 'ai-prompt' must return a plain-text body containing
-	 * the site URL, WORDPRESS_APP_PASSWORD, and the "block-mcp" server name with
-	 * the placeholder — never the real password.
+	 * setup_artifact() for 'ai-prompt' must return a plain-text instruction for the
+	 * AI to run the npx connect command, containing the site URL and the approve
+	 * instruction. The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
 	 *
-	 * The prompt is pasted into an AI chat transcript. Including the real secret
-	 * there would expose it to the AI provider's servers and the chat history.
+	 * The prompt is pasted into an AI chat transcript. No secret should ever appear
+	 * there — the credential arrives via the browser-Approve handshake instead.
 	 */
-	public function test_setup_artifact_ai_prompt_contains_placeholder_not_password() {
-		$page  = new Connect_Page();
-		$creds = array(
-			'url'      => 'https://example.com',
-			'user'     => 'block-mcp',
-			'password' => 'promptpass',
-			'uuid'     => 'test-uuid',
-		);
+	public function test_setup_artifact_ai_prompt_is_npx_connect_instruction_no_secret() {
+		$page     = new Connect_Page();
+		$artifact = $page->setup_artifact( 'ai-prompt', 'https://example.com' );
 
-		$artifact = $page->setup_artifact( 'ai-prompt', $creds );
-
-		// The body is raw (not HTML-escaped); esc_textarea() is applied at render time.
 		$this->assertSame( 'text', $artifact['language'] );
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
 		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
-		$this->assertStringContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must contain WORDPRESS_APP_PASSWORD' );
-		$this->assertStringContainsString( 'block-mcp', $artifact['body'], 'body must reference the block-mcp server name' );
-		$this->assertStringContainsString( Connect_Page::PW_PLACEHOLDER, $artifact['body'], 'body must contain the placeholder' );
-		$this->assertStringNotContainsString( 'promptpass', $artifact['body'], 'body must NOT contain the real password' );
+		$this->assertStringContainsString( 'approve', strtolower( $artifact['body'] ), 'body must reference the approve step' );
+		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must NOT contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringNotContainsString( 'password', strtolower( $artifact['body'] ), 'body must NOT contain any password text' );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// is_loopback_callback() — URL validation.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * is_loopback_callback() must accept loopback http:// URLs with an explicit
+	 * numeric port and reject everything else.
+	 *
+	 * Accepted: http://127.0.0.1:<port>/path, http://localhost:<port>/callback,
+	 *           http://[::1]:<port>/
+	 * Rejected: https://, missing port, remote host, userinfo, file://, empty.
+	 *
+	 * @dataProvider loopback_callback_cases
+	 *
+	 * @param string $url      Candidate callback URL.
+	 * @param bool   $expected Whether the URL should be accepted.
+	 * @param string $message  Failure description.
+	 */
+	public function test_is_loopback_callback( $url, $expected, $message ) {
+		$page = new Connect_Page();
+		$this->assertSame( $expected, $page->is_loopback_callback( $url ), $message );
+	}
+
+	/**
+	 * Data provider for test_is_loopback_callback().
+	 *
+	 * @return array[]
+	 */
+	public function loopback_callback_cases() {
+		return array(
+			// Accept cases.
+			array( 'http://127.0.0.1:51791/cb', true, 'standard loopback IP + port must be accepted' ),
+			array( 'http://localhost:8080/callback', true, 'localhost + port must be accepted' ),
+			array( 'http://localhost:3000/', true, 'localhost + port + trailing slash must be accepted' ),
+			array( 'http://[::1]:3000/cb', true, 'IPv6 loopback + port must be accepted' ),
+			array( 'http://127.0.0.1:1/path?foo=bar', true, 'loopback + query string must be accepted' ),
+
+			// Reject: wrong scheme.
+			array( 'https://127.0.0.1:51791/cb', false, 'https:// must be rejected (loopback needs no TLS, avoids cert surprises)' ),
+			array( 'file:///etc/passwd', false, 'file:// must be rejected' ),
+			array( '', false, 'empty string must be rejected' ),
+
+			// Reject: non-loopback host.
+			array( 'http://evil.com/cb', false, 'remote host must be rejected' ),
+			array( 'http://192.168.1.1:8080/cb', false, 'LAN IP must be rejected' ),
+			array( 'http://127.0.0.1.evil.com:80/cb', false, 'lookalike host must be rejected' ),
+
+			// Reject: missing port.
+			array( 'http://127.0.0.1/cb', false, 'missing port must be rejected' ),
+			array( 'http://localhost/callback', false, 'localhost without port must be rejected' ),
+
+			// Reject: userinfo present (http://user@host style confusion).
+			array( 'http://localhost@evil.com:80/cb', false, 'userinfo-style host confusion must be rejected' ),
+			array( 'http://user:pass@127.0.0.1:8080/cb', false, 'explicit userinfo must be rejected' ),
+		);
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// handle_authorize() — browser-Approve handler.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * handle_authorize() with a valid loopback callback must mint exactly one
+	 * Application Password and redirect the credential to the callback URL with
+	 * site/user/password/state query parameters.
+	 *
+	 * We hook wp_redirect to capture the redirect target and throw a catchable
+	 * marker so the handler's exit() does not terminate the test process.
+	 */
+	public function test_handle_authorize_mints_credential_and_redirects_to_loopback() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']       = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']     = 'http://127.0.0.1:51791/cb';
+		$_POST['state']        = 'test-state-token';
+		$_POST['client']       = 'block-mcp';
+		$_POST['_wpnonce']     = $nonce;
+		$_REQUEST['_wpnonce']  = $nonce; // check_admin_referer() reads $_REQUEST in CLI.
+
+		$captured_redirect = null;
+
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+
+		remove_all_filters( 'wp_redirect' );
+
+		// Clean up superglobals.
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
+
+		$parts = wp_parse_url( $captured_redirect );
+		$this->assertSame( '127.0.0.1', $parts['host'], 'redirect must target the loopback host' );
+		$this->assertSame( 51791, $parts['port'], 'redirect must target the correct loopback port' );
+
+		parse_str( $parts['query'], $qs );
+		$this->assertNotEmpty( $qs['password'], 'redirect must carry a password query param' );
+		$this->assertNotEmpty( $qs['user'], 'redirect must carry a user query param' );
+		$this->assertNotEmpty( $qs['site'], 'redirect must carry a site query param' );
+		$this->assertSame( 'test-state-token', $qs['state'], 'redirect must echo back the state token' );
+
+		// Exactly one Application Password must have been minted.
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+		$passwords = WP_Application_Passwords::get_user_application_passwords( $agent->ID );
+		$this->assertCount( 1, $passwords, 'exactly one Application Password must be minted' );
+	}
+
+	/**
+	 * handle_authorize() with a non-loopback callback must reject the request
+	 * with wp_die() and must NOT mint any Application Password.
+	 *
+	 * We set up a filter on wp_die to assert it is called, then verify no agent
+	 * account was provisioned and no password was minted.
+	 */
+	public function test_handle_authorize_rejects_non_loopback_callback_and_does_not_mint() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'https://evil.com/steal';
+		$_POST['state']       = 'anything';
+		$_POST['client']      = 'block-mcp';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$wp_die_called = false;
+
+		add_filter(
+			'wp_die_handler',
+			static function () use ( &$wp_die_called ) {
+				return static function () use ( &$wp_die_called ) {
+					$wp_die_called = true;
+					throw new \RuntimeException( 'wp_die_called' );
+				};
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			// Expected.
+		}
+
+		remove_all_filters( 'wp_die_handler' );
+
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		$this->assertTrue( $wp_die_called, 'handle_authorize() must call wp_die() for a non-loopback callback' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertFalse( $agent, 'no agent user must be created when the callback is rejected' );
+	}
+
+	/**
+	 * handle_authorize() must call wp_die() with a 403 response when the current
+	 * user lacks manage_options, and must not mint any credential.
+	 */
+	public function test_handle_authorize_rejects_user_without_manage_options() {
+		$subscriber_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( $subscriber_id );
+
+		// No nonce needed — the capability check fires before the nonce check.
+		$_POST['action']   = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback'] = 'http://127.0.0.1:9999/cb';
+		$_POST['state']    = 'x';
+		$_POST['client']   = 'block-mcp';
+
+		$die_called = false;
+
+		add_filter(
+			'wp_die_handler',
+			static function () use ( &$die_called ) {
+				return static function () use ( &$die_called ) {
+					$die_called = true;
+					throw new \RuntimeException( 'wp_die_called' );
+				};
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			// Expected.
+		}
+
+		remove_all_filters( 'wp_die_handler' );
+
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'] );
+
+		$this->assertTrue( $die_called, 'handle_authorize() must wp_die() when the user lacks manage_options' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertFalse( $agent, 'no credential must be minted for an unauthorized user' );
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -712,78 +889,70 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * render_section() after a non-.mcpb connect must surface the real password
-	 * ONLY in the dedicated password field, never embedded in the artifact textarea.
+	 * render_section() with ?setup=Claude+Code must show the secret-free npx connect
+	 * command for Claude Code. No password field and no "Copy password" button must
+	 * appear — the credential is delivered via the browser-Approve handshake, not
+	 * shown in the UI.
 	 *
-	 * The artifact textarea uses PW_PLACEHOLDER so copying it into a terminal or
-	 * AI chat does not leak the secret into shell history or a chat transcript.
-	 * The actual one-time password appears in a separate readonly input so the
-	 * user substitutes it as a deliberate step.
-	 *
-	 * This test simulates the post-redirect render by writing the transient
-	 * directly, then asserting:
-	 *  - the artifact textarea contains the placeholder, not the real password.
-	 *  - the real password appears in the separate password input (value="…").
-	 *  - the "Copy password" button is present.
-	 *  - the "shown once" notice text is present.
+	 * This test simulates the GET redirect from handle_connect() by writing
+	 * $_GET['setup'] directly, then asserting that:
+	 *  - the artifact textarea contains the npx connect command.
+	 *  - the site URL appears in the command.
+	 *  - WORDPRESS_APP_PASSWORD does NOT appear in the HTML.
+	 *  - no "Copy password" button is present.
+	 *  - the "No password to copy" note is present.
 	 */
-	public function test_render_section_artifact_card_shows_password_separately_not_in_artifact() {
+	public function test_render_section_setup_query_shows_command_artifact_no_password() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
 		delete_option( 'gk_block_api_agent_user_id' );
 
-		// Simulate the transient written by handle_connect() after provisioning.
-		$fake_password = 'S3cr3tPassw0rd!';
-		$transient_key = Connect_Page::PASTE_TRANSIENT_PREFIX . $admin_id;
-		set_transient(
-			$transient_key,
-			array(
-				'client' => 'Claude Code',
-				'creds'  => array(
-					'url'      => 'https://example.com',
-					'user'     => 'block-mcp',
-					'password' => $fake_password,
-					'uuid'     => 'fake-uuid',
-				),
-			),
-			5 * MINUTE_IN_SECONDS
-		);
+		$_GET['setup'] = 'Claude Code'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		ob_start();
 		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
-		// The body is escaped via esc_textarea() at render time, so '<' becomes '&lt;'.
-		$this->assertStringContainsString(
-			esc_textarea( Connect_Page::PW_PLACEHOLDER ),
-			$html,
-			'Artifact textarea must contain PW_PLACEHOLDER (HTML-encoded by esc_textarea)'
-		);
+		unset( $_GET['setup'] );
 
-		// The real password must appear in the dedicated password input field.
-		$this->assertStringContainsString(
-			'value="' . esc_attr( $fake_password ) . '"',
-			$html,
-			'Real password must appear in the dedicated password input'
-		);
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $html, 'Artifact textarea must contain the npx connect command' );
+		$this->assertStringContainsString( '--client claude-code', $html, 'Artifact must carry the --client claude-code slug' );
+		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $html, 'WORDPRESS_APP_PASSWORD must NOT appear in the output' );
+		$this->assertStringNotContainsString( 'Copy password', $html, 'No "Copy password" button must be present' );
+		$this->assertStringContainsString( 'No password to copy', $html, '"No password to copy" note must be present' );
+	}
 
-		// The "Copy password" button must be present.
-		$this->assertStringContainsString( 'Copy password', $html, '"Copy password" button must be present' );
+	/**
+	 * render_section() with ?gk_authorize set must render the Approve screen,
+	 * not the normal connect UI.
+	 *
+	 * The Approve screen must include the heading "Authorize a connection", an
+	 * Approve submit button, and a Cancel link. The normal client-picker form
+	 * must NOT appear.
+	 */
+	public function test_render_section_gk_authorize_shows_approve_screen() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
 
-		// The "shown once" notice must be present.
-		$this->assertStringContainsString( 'shown once', $html, '"Shown once" notice must be present' );
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
 
-		// The real password must NOT appear inside the artifact textarea value.
-		// We detect this by checking that the password does not appear between the
-		// opening <textarea … > tag and the closing </textarea> tag.
-		$textarea_start = strpos( $html, 'gk-connect__artifact-textarea' );
-		$textarea_end   = strpos( $html, '</textarea>', $textarea_start );
-		$textarea_body  = substr( $html, $textarea_start, $textarea_end - $textarea_start );
-		$this->assertStringNotContainsString(
-			$fake_password,
-			$textarea_body,
-			'Real password must NOT appear inside the artifact textarea'
-		);
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( 'Authorize a connection', $html, 'Authorize heading must be present' );
+		$this->assertStringContainsString( 'Approve', $html, 'Approve button must be present' );
+		$this->assertStringContainsString( 'Cancel', $html, 'Cancel link must be present' );
+		$this->assertStringContainsString( Connect_Page::ACTION_AUTHORIZE, $html, 'Form action must reference the authorize action' );
+
+		// The normal client picker must NOT appear in authorize mode.
+		$this->assertStringNotContainsString( 'Connect an AI Assistant', $html, 'Normal connect UI heading must NOT appear in authorize mode' );
+		$this->assertStringNotContainsString( 'value="Claude Desktop"', $html, 'Client picker radios must NOT appear in authorize mode' );
 	}
 }

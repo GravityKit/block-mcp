@@ -3,16 +3,16 @@
  * Connect_Page — admin "Connect an AI Assistant" wizard.
  *
  * Orchestrates the full connect flow: provisioning the agent service account,
- * minting an Application Password, and streaming a pre-configured .mcpb
- * bundle to the browser, or generating a ready-to-paste setup artifact for
- * clients that do not support .mcpb installers (Claude Code, Cursor,
- * ChatGPT Desktop, and a generic "let my AI set it up" prompt path).
+ * minting an Application Password, and either streaming a pre-configured .mcpb
+ * bundle (Claude Desktop) or returning a secret-free CLI command that the
+ * connector CLI uses to drive a browser-Approve handshake.
  *
  * The testable cores are:
- *  - provision_credentials() — shared credential path: ensure agent, issue password, return array.
- *  - prepare_installer()     — build the .mcpb bundle for Claude Desktop (calls provision_credentials()).
- *  - setup_artifact()        — assemble the ready-to-paste text/JSON/bash snippet.
- *  - connection_state()      — determines which render branch to show.
+ *  - provision_credentials()    — shared credential path: ensure agent, issue password, return array.
+ *  - prepare_installer()        — build the .mcpb bundle for Claude Desktop (calls provision_credentials()).
+ *  - setup_artifact()           — assemble the ready-to-run npx command (no secret).
+ *  - is_loopback_callback()     — validate a callback URL is loopback-only before redirecting creds to it.
+ *  - connection_state()         — determines which render branch to show.
  *
  * Admin-menu registration, HTTP streaming, and the redirect-then-render
  * pattern stay as thin as possible so the seams above stay unit-testable.
@@ -42,6 +42,18 @@ class Connect_Page {
 	 * @var string
 	 */
 	const ACTION_CONNECT = 'gk_block_api_connect';
+
+	/**
+	 * Form action for the browser-Approve authorize handler.
+	 *
+	 * The connector CLI opens a browser to the admin page with ?gk_authorize set.
+	 * The admin sees the Approve screen; submitting it POSTs here, mints a credential,
+	 * and redirects the one-time secret to the loopback callback.
+	 *
+	 * @since 1.11.0
+	 * @var string
+	 */
+	const ACTION_AUTHORIZE = 'gk_block_api_authorize';
 
 	/**
 	 * Form action for the revoke (disconnect) handler.
@@ -187,123 +199,106 @@ class Connect_Page {
 	}
 
 	/**
-	 * Placeholder string used in artifact bodies in place of the real password.
+	 * Build the secret-free command artifact for a given client.
 	 *
-	 * The actual Application Password must never appear inside a copy-pasteable
-	 * command, JSON snippet, or AI prompt because it would land in shell history
-	 * or a chat transcript. Callers embed this constant; render_artifact_card()
-	 * shows the real secret in a separate "Copy password" control so the user
-	 * fills it in as a deliberate manual step.
-	 *
-	 * @since 1.10.0
-	 * @var string
-	 */
-	const PW_PLACEHOLDER = '<paste your application password here>';
-
-	/**
-	 * Build the ready-to-paste setup artifact for a given client.
-	 *
-	 * Returns a label, language hint, and raw body string. The body contains
-	 * PW_PLACEHOLDER instead of the real password so copying it into a terminal
-	 * or AI chat does not leak the secret into shell history or a chat transcript.
-	 * The actual password is surfaced in a separate readonly field by
-	 * render_artifact_card().
+	 * Returns a label, language hint, and a raw body containing only an
+	 * `npx -y @gravitykit/block-mcp connect` command. No password or credential
+	 * of any kind appears in the body — the credential is delivered later via the
+	 * browser-Approve handshake driven by the connector CLI.
 	 *
 	 * The body is RAW (not HTML-escaped). Callers that write it to HTML must
-	 * escape it at output time — render_artifact_card() uses esc_textarea() on
-	 * the textarea value and esc_html() on the label.
+	 * escape it at output time — render_artifact_card() uses esc_textarea().
 	 *
-	 * TODO: replace the manual placeholder step with a one-time-code redemption
-	 * flow once a secure /redeem endpoint is implemented. The placeholder seam
-	 * is the hook: clients will swap PW_PLACEHOLDER for the redeemed secret
-	 * automatically, removing the copy-paste step entirely.
+	 * @since  1.11.0
 	 *
-	 * @since  1.10.0
-	 *
-	 * @param  string $client One of: 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt'.
-	 * @param  array  $creds  Credential array from provision_credentials():
-	 *                        { url, user, password, uuid }.
+	 * @param  string $client   One of: 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt'.
+	 * @param  string $site_url Untrailed home_url() base to embed in the command.
 	 * @return array {
 	 *     @type string $label    Short description shown above the textarea (HTML-safe).
-	 *     @type string $language Syntax hint ('bash', 'json', 'text').
-	 *     @type string $body     Raw ready-to-paste text with PW_PLACEHOLDER. Must be
-	 *                            escaped by the caller before writing to HTML output.
+	 *     @type string $language Syntax hint ('bash', 'text').
+	 *     @type string $body     Raw command string. Must be escaped by the caller before HTML output.
 	 * }
 	 */
-	public function setup_artifact( $client, array $creds ) {
-		$url  = $creds['url'];
-		$user = $creds['user'];
-
+	public function setup_artifact( $client, $site_url ) {
 		switch ( $client ) {
 			case 'Claude Code':
 				return array(
-					'label'    => esc_html__( 'Run this command in your terminal (replace the placeholder with your password below):', 'gk-block-api' ),
+					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
 					'language' => 'bash',
-					'body'     => "claude mcp add block-mcp \\\n" .
-						"  --env WORDPRESS_URL={$url} \\\n" .
-						"  --env WORDPRESS_USER={$user} \\\n" .
-						'  --env WORDPRESS_APP_PASSWORD="' . self::PW_PLACEHOLDER . "\" \\\n" .
-						'  -- npx -y @gravitykit/block-mcp',
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client claude-code",
 				);
 
 			case 'Cursor':
 				return array(
-					'label'    => esc_html__( 'Add this to ~/.cursor/mcp.json (or your project .cursor/mcp.json) and replace the placeholder with your password below:', 'gk-block-api' ),
-					'language' => 'json',
-					'body'     => (string) wp_json_encode(
-						array(
-							'mcpServers' => array(
-								'block-mcp' => array(
-									'command' => 'npx',
-									'args'    => array( '-y', '@gravitykit/block-mcp' ),
-									'env'     => array(
-										'WORDPRESS_URL'  => $url,
-										'WORDPRESS_USER' => $user,
-										'WORDPRESS_APP_PASSWORD' => self::PW_PLACEHOLDER,
-									),
-								),
-							),
-						),
-						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
-					),
+					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
+					'language' => 'bash',
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client cursor",
 				);
 
 			case 'ChatGPT Desktop':
 				return array(
-					'label'    => esc_html__( 'Add this to your MCP client config file and replace the placeholder with your password below:', 'gk-block-api' ),
-					'language' => 'json',
-					'body'     => (string) wp_json_encode(
-						array(
-							'mcpServers' => array(
-								'block-mcp' => array(
-									'command' => 'npx',
-									'args'    => array( '-y', '@gravitykit/block-mcp' ),
-									'env'     => array(
-										'WORDPRESS_URL'  => $url,
-										'WORDPRESS_USER' => $user,
-										'WORDPRESS_APP_PASSWORD' => self::PW_PLACEHOLDER,
-									),
-								),
-							),
-						),
-						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
-					),
+					'label'    => esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ),
+					'language' => 'bash',
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client chatgpt-desktop",
 				);
 
 			case 'ai-prompt':
 			default:
 				return array(
-					'label'    => esc_html__( 'Paste this prompt into your AI assistant (replace the placeholder with your password below):', 'gk-block-api' ),
+					'label'    => esc_html__( 'Paste this to your AI assistant. It will run the command, a browser window will open for you to click Approve, and then confirm it can read your blocks.', 'gk-block-api' ),
 					'language' => 'text',
 					'body'     =>
-						"Set up the GravityKit Block MCP server so you can edit my WordPress site's content.\n\n" .
-						"Install the MCP server \"@gravitykit/block-mcp\" in my MCP client config with these environment variables:\n" .
-						"  WORDPRESS_URL={$url}\n" .
-						"  WORDPRESS_USER={$user}\n" .
-						'  WORDPRESS_APP_PASSWORD=' . self::PW_PLACEHOLDER . "\n\n" .
-						'Use `claude mcp add` (or edit the mcp.json) to register it as "block-mcp", then connect and confirm you can read the blocks on one of my pages.',
+						"Run `npx -y @gravitykit/block-mcp connect --site {$site_url}` for me, " .
+						'then approve the connection in the browser window that opens, ' .
+						'and confirm you can read the blocks on one of my pages.',
 				);
 		}
+	}
+
+	/**
+	 * Validate that a callback URL is a loopback-only address.
+	 *
+	 * The connector CLI listens on a random loopback port and passes this URL
+	 * as the callback for the browser-Approve flow. Only loopback addresses are
+	 * accepted so the minted credential cannot be redirected to a remote host.
+	 *
+	 * Valid: http://127.0.0.1:51791/cb, http://localhost:8080/callback, http://[::1]:3000/
+	 * Invalid: https://evil.com/cb, missing port, file://, http://127.0.0.1.evil.com/
+	 *
+	 * @since  1.11.0
+	 *
+	 * @param  string $url Candidate callback URL.
+	 * @return bool True when the URL is safe to redirect credentials to.
+	 */
+	public function is_loopback_callback( $url ) {
+		$parts = wp_parse_url( $url );
+
+		// Scheme must be http (plain loopback — no need for TLS on 127.0.0.1).
+		if ( ! isset( $parts['scheme'] ) || 'http' !== $parts['scheme'] ) {
+			return false;
+		}
+
+		// Host must be an explicit loopback address.
+		if ( ! isset( $parts['host'] ) ) {
+			return false;
+		}
+		$host           = $parts['host'];
+		$loopback_hosts = array( '127.0.0.1', 'localhost', '[::1]', '::1' );
+		if ( ! in_array( $host, $loopback_hosts, true ) ) {
+			return false;
+		}
+
+		// A numeric port must be present — prevents ambiguous default-port redirects.
+		if ( ! isset( $parts['port'] ) || ! is_int( $parts['port'] ) ) {
+			return false;
+		}
+
+		// No userinfo — prevents http://user@evil.com/ style URL confusion.
+		if ( isset( $parts['user'] ) || isset( $parts['pass'] ) ) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -330,7 +325,7 @@ class Connect_Page {
 	}
 
 	/**
-	 * Register admin_post handlers for connect and revoke actions.
+	 * Register admin_post handlers for connect, authorize, and revoke actions.
 	 *
 	 * The menu page is hosted by Settings_Page; only the form-action handlers
 	 * need to be wired here.
@@ -339,19 +334,21 @@ class Connect_Page {
 	 */
 	public function register() {
 		add_action( 'admin_post_' . self::ACTION_CONNECT, array( $this, 'handle_connect' ) );
+		add_action( 'admin_post_' . self::ACTION_AUTHORIZE, array( $this, 'handle_authorize' ) );
 		add_action( 'admin_post_' . self::ACTION_REVOKE, array( $this, 'handle_revoke' ) );
 	}
 
 	/**
 	 * Handle the connect form submission.
 	 *
-	 * For Claude Desktop: builds and streams the .mcpb bundle as an octet-stream
-	 * download (unchanged behaviour).
+	 * For Claude Desktop: provisions credentials, builds the .mcpb bundle, and
+	 * streams it as an octet-stream download (unchanged behaviour).
 	 *
-	 * For Claude Code, Cursor, ChatGPT Desktop, and ai-prompt: provisions
-	 * credentials, stashes the client + credential set in the per-user transient,
-	 * then redirects back to the settings page with ?setup=1 so render_section()
-	 * can display the artifact once.
+	 * For Claude Code, Cursor, ChatGPT Desktop, and ai-prompt: does NOT provision
+	 * any credential. Instead redirects back to the connect tab with ?setup=<client>
+	 * so render_section() can display the secret-free CLI command for that client.
+	 * The credential is delivered later via the browser-Approve handshake when the
+	 * user runs the printed npx command and clicks Approve.
 	 *
 	 * For 'other': redirects back with ?other=1 so the "coming soon" note is shown.
 	 *
@@ -372,31 +369,16 @@ class Connect_Page {
 			$client = 'Claude Desktop';
 		}
 
-		// Artifact-path clients: provision creds, stash, redirect.
+		// Command-artifact clients: no provisioning — redirect back with the client
+		// slug so render_section() can display the secret-free npx command.
 		$artifact_clients = array( 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt' );
 		if ( in_array( $client, $artifact_clients, true ) ) {
-			$creds = $this->provision_credentials( $client );
-
-			if ( is_wp_error( $creds ) ) {
-				wp_die( esc_html( $creds->get_error_message() ) );
-			}
-
-			$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
-			set_transient(
-				$transient_key,
-				array(
-					'client' => $client,
-					'creds'  => $creds,
-				),
-				5 * MINUTE_IN_SECONDS
-			);
-
 			wp_safe_redirect(
 				add_query_arg(
 					array(
 						'page'  => Settings_Page::PAGE_SLUG,
 						'tab'   => 'connect',
-						'setup' => '1',
+						'setup' => rawurlencode( $client ),
 					),
 					admin_url( 'options-general.php' )
 				)
@@ -454,6 +436,68 @@ class Connect_Page {
 			wp_delete_file( $path );
 		}
 
+		exit;
+	}
+
+	/**
+	 * Handle the browser-Approve authorize POST.
+	 *
+	 * The connector CLI opens a browser to the authorize screen; the admin sees
+	 * a clear Approve/Cancel prompt. Submitting Approve POSTs here. This handler:
+	 *  1. Verifies manage_options + nonce (authorization gate).
+	 *  2. Reads and sanitizes callback, state, and client from POST.
+	 *  3. Validates the callback is a loopback-only URL (credential-redirect guard).
+	 *  4. Provisions / re-uses the agent account and mints one Application Password.
+	 *  5. Redirects the credential set to the callback — credential stays on-machine.
+	 *
+	 * wp_redirect() is used instead of wp_safe_redirect() because the target host
+	 * is loopback (already validated by is_loopback_callback()) and is therefore
+	 * not in WordPress's allowed_redirect_hosts list.
+	 *
+	 * @since 1.11.0
+	 */
+	public function handle_authorize() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-api' ), '', array( 'response' => 403 ) );
+		}
+
+		check_admin_referer( self::ACTION_AUTHORIZE );
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- nonce checked above via check_admin_referer.
+		$callback = isset( $_POST['callback'] ) ? sanitize_text_field( wp_unslash( $_POST['callback'] ) ) : '';
+		$state    = isset( $_POST['state'] ) ? sanitize_text_field( wp_unslash( $_POST['state'] ) ) : '';
+		$client   = isset( $_POST['client'] ) ? sanitize_text_field( wp_unslash( $_POST['client'] ) ) : 'block-mcp';
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		// Callback must resolve to a loopback address — credential must never leave
+		// the local machine via an attacker-controlled redirect target.
+		if ( ! $this->is_loopback_callback( $callback ) ) {
+			wp_die(
+				esc_html__( 'Invalid callback URL. Only loopback addresses (127.0.0.1, localhost) are accepted.', 'gk-block-api' ),
+				esc_html__( 'Authorization failed', 'gk-block-api' ),
+				array( 'response' => 400 )
+			);
+		}
+
+		$creds = $this->provision_credentials( $client );
+		if ( is_wp_error( $creds ) ) {
+			wp_die( esc_html( $creds->get_error_message() ) );
+		}
+
+		$redirect = add_query_arg(
+			array(
+				'site'     => rawurlencode( $creds['url'] ),
+				'user'     => rawurlencode( $creds['user'] ),
+				'password' => rawurlencode( $creds['password'] ),
+				'state'    => rawurlencode( $state ),
+			),
+			$callback
+		);
+
+		// wp_redirect() is intentional: the validated loopback host is never in
+		// WordPress's allowed_redirect_hosts list, but is_loopback_callback()
+		// above already confirmed it is safe.
+		wp_redirect( $redirect ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
 		exit;
 	}
 
@@ -520,43 +564,66 @@ class Connect_Page {
 	 * table. The outer <div class="wrap"> and page <h1> are supplied by the host
 	 * Settings_Page so this section can live inside a tab without double-wrapping.
 	 *
-	 * Branches on connection_state(): shows an HTTPS requirement notice, a
-	 * connect form with client picker and post-setup artifact display, or an
-	 * active-connections list with per-connection revoke buttons.
+	 * When $_GET['gk_authorize'] is set, renders the browser-Approve screen instead
+	 * of the normal connect UI (Part A — authorize mode).
 	 *
-	 * When the setup transient is present (written by handle_connect() and read
-	 * here exactly once), the artifact for the chosen client is displayed in a
-	 * readonly textarea with a Copy button. The transient is cleared after this
-	 * single render so the credential is not shown again on subsequent page loads.
+	 * When $_GET['setup'] carries a client name (written by handle_connect()), the
+	 * command artifact for that client is displayed in a readonly textarea. No
+	 * credential is shown — the secret arrives later via the Approve handshake.
 	 *
-	 * All selectors are scoped under .gk-connect to avoid leaking into the
-	 * rest of wp-admin.
+	 * Branches on connection_state(): shows an HTTPS requirement notice, a connect
+	 * form with client picker, or an active-connections list with revoke buttons.
+	 *
+	 * All selectors are scoped under .gk-connect to avoid leaking into the rest
+	 * of wp-admin.
 	 *
 	 * @since 1.9.0
 	 */
 	public function render_section() {
 		$state = $this->connection_state();
 
-		// One-time paste-mode password or setup artifact surfaced from a prior
-		// connect form submission via the per-user transient.
+		// ── Authorize mode ────────────────────────────────────────────────────
+		// When the connector CLI sends the admin to ?gk_authorize=1 we show a
+		// clear Approve/Cancel prompt instead of the normal connect UI.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- gk_authorize is a mode flag, not user data.
+		if ( isset( $_GET['gk_authorize'] ) ) {
+			$callback  = isset( $_GET['callback'] ) ? sanitize_text_field( wp_unslash( $_GET['callback'] ) ) : '';
+			$state_val = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+			$client    = isset( $_GET['client'] ) ? sanitize_text_field( wp_unslash( $_GET['client'] ) ) : 'block-mcp';
+			// phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+			$this->render_authorize_screen( $callback, $state_val, $client );
+			return;
+		}
+
+		// ── Command-artifact mode ─────────────────────────────────────────────
+		// handle_connect() redirects back with ?setup=<client> for non-Desktop
+		// clients. Render the secret-free command artifact for that client.
+		$setup_client = ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( isset( $_GET['setup'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$raw_setup        = sanitize_text_field( wp_unslash( $_GET['setup'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$artifact_clients = array( 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt' );
+			if ( in_array( $raw_setup, $artifact_clients, true ) ) {
+				$setup_client = $raw_setup;
+			}
+		}
+
+		$setup_data = null;
+		if ( '' !== $setup_client ) {
+			$site_url   = untrailingslashit( home_url() );
+			$setup_data = array(
+				'client'   => $setup_client,
+				'artifact' => $this->setup_artifact( $setup_client, $site_url ),
+			);
+		}
+
+		// Legacy scalar path: Claude Desktop paste-mode password (shown once after
+		// a paste-mode .mcpb download).
 		$paste_pw      = '';
-		$setup_data    = null;
 		$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
 		$stored        = get_transient( $transient_key );
-
 		if ( is_string( $stored ) && '' !== $stored ) {
-			// Legacy scalar path: Claude Desktop paste-mode password.
 			$paste_pw = $stored;
-			delete_transient( $transient_key );
-		} elseif ( is_array( $stored ) && isset( $stored['client'], $stored['creds'] ) ) {
-			// Artifact path: Claude Code / Cursor / ChatGPT Desktop / ai-prompt.
-			// The plaintext password is surfaced in a dedicated field, not embedded
-			// in the artifact body, so it stays out of shell history and chat transcripts.
-			$setup_data = array(
-				'client'   => $stored['client'],
-				'artifact' => $this->setup_artifact( $stored['client'], $stored['creds'] ),
-				'password' => $stored['creds']['password'],
-			);
 			delete_transient( $transient_key );
 		}
 
@@ -591,7 +658,7 @@ class Connect_Page {
 		<?php endif; ?>
 
 		<?php if ( null !== $setup_data ) : ?>
-			<?php $this->render_artifact_card( $setup_data['client'], $setup_data['artifact'], $setup_data['password'] ); ?>
+			<?php $this->render_artifact_card( $setup_data['client'], $setup_data['artifact'] ); ?>
 		<?php endif; ?>
 
 		<div class="gk-connect__card">
@@ -678,28 +745,19 @@ class Connect_Page {
 	/**
 	 * Render the setup-artifact card shown after a successful non-.mcpb connect.
 	 *
-	 * Displays two controls:
-	 *
-	 * 1. A readonly textarea with the ready-to-paste command, JSON snippet, or AI
-	 *    prompt. The body uses PW_PLACEHOLDER instead of the real secret so copying
-	 *    the textarea into a terminal or AI chat does not leak the password into
-	 *    shell history or a chat transcript.
-	 *
-	 * 2. A separate "Your application password" readonly field + "Copy password"
-	 *    button. This is where the actual one-time secret is surfaced, with a
-	 *    "shown once" notice. The user copies it independently and substitutes it
-	 *    for the placeholder in the artifact above.
-	 *
-	 * The password is never echoed anywhere outside the dedicated password field.
+	 * Displays a readonly textarea containing the secret-free `npx connect` command
+	 * and a single Copy button. No password field is shown — the credential is
+	 * delivered later via the browser-Approve handshake when the user runs the
+	 * command and clicks Approve in the browser window that opens.
 	 *
 	 * @since 1.10.0
+	 * @since 1.11.0 Password param removed; command-only artifact, no credential shown.
 	 *
 	 * @param string $client   Client name (e.g. 'Claude Code').
 	 * @param array  $artifact Return value of setup_artifact().
-	 * @param string $password Plaintext Application Password (shown once).
 	 * @return void
 	 */
-	private function render_artifact_card( $client, array $artifact, $password = '' ) {
+	private function render_artifact_card( $client, array $artifact ) {
 		?>
 		<div class="gk-connect__artifact-card">
 			<h3 class="gk-connect__artifact-heading">
@@ -719,29 +777,14 @@ class Connect_Page {
 				<textarea
 					class="gk-connect__artifact-textarea"
 					readonly
-					rows="8"
+					rows="3"
 					data-language="<?php echo esc_attr( $artifact['language'] ); ?>"
 				><?php echo esc_textarea( $artifact['body'] ); ?></textarea>
 				<button type="button" class="gk-connect__artifact-copy-btn button" data-target="artifact"><?php esc_html_e( 'Copy', 'gk-block-api' ); ?></button>
 			</div>
-
-			<?php if ( '' !== $password ) : ?>
-			<div class="gk-connect__artifact-pw-block">
-				<p class="gk-connect__artifact-pw-label">
-					<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong>
-					<?php esc_html_e( 'Copy it now and replace the placeholder above. It will not be shown again.', 'gk-block-api' ); ?>
-				</p>
-				<div class="gk-connect__artifact-copy-wrap">
-					<input
-						class="gk-connect__artifact-pw-input"
-						type="text"
-						readonly
-						value="<?php echo esc_attr( $password ); ?>"
-					/>
-					<button type="button" class="gk-connect__artifact-pw-copy-btn button" data-target="password"><?php esc_html_e( 'Copy password', 'gk-block-api' ); ?></button>
-				</div>
-			</div>
-			<?php endif; ?>
+			<p class="gk-connect__artifact-no-password-note">
+				<?php esc_html_e( 'A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ); ?>
+			</p>
 		</div>
 
 		<style>
@@ -781,30 +824,13 @@ class Connect_Page {
 			padding: 8px;
 			color: #1e1e1e;
 		}
-		.gk-connect__artifact-copy-btn,
-		.gk-connect__artifact-pw-copy-btn {
+		.gk-connect__artifact-copy-btn {
 			flex-shrink: 0;
 		}
-		.gk-connect__artifact-pw-block {
-			margin-top: 16px;
-			padding-top: 14px;
-			border-top: 1px solid #f0f0f1;
-		}
-		.gk-connect__artifact-pw-label {
+		.gk-connect__artifact-no-password-note {
 			font-size: .875em;
-			color: #1e1e1e;
-			margin: 0 0 8px;
-		}
-		.gk-connect__artifact-pw-input {
-			flex: 1;
-			font-family: monospace;
-			font-size: .875em;
-			background: #fff8e5;
-			border: 1px solid #dba617;
-			border-radius: 2px;
-			padding: 6px 8px;
-			color: #1e1e1e;
-			user-select: all;
+			color: #757575;
+			margin: 8px 0 0;
 		}
 		</style>
 
@@ -813,34 +839,85 @@ class Connect_Page {
 			var card = document.querySelector( '.gk-connect__artifact-card' );
 			if ( ! card ) return;
 
-			function makeCopyHandler( inputEl, btn, defaultLabel ) {
-				btn.addEventListener( 'click', function () {
-					var text = inputEl.tagName === 'TEXTAREA' ? inputEl.value : inputEl.value;
-					if ( navigator.clipboard && navigator.clipboard.writeText ) {
-						navigator.clipboard.writeText( text ).then( function () {
-							btn.textContent = '<?php echo esc_js( __( 'Copied!', 'gk-block-api' ) ); ?>';
-							setTimeout( function () { btn.textContent = defaultLabel; }, 2000 );
-						} );
-					} else {
-						inputEl.select();
-						document.execCommand( 'copy' );
-					}
-				} );
-			}
-
 			var artifactTextarea = card.querySelector( '.gk-connect__artifact-textarea' );
 			var artifactCopyBtn  = card.querySelector( '.gk-connect__artifact-copy-btn' );
-			if ( artifactTextarea && artifactCopyBtn ) {
-				makeCopyHandler( artifactTextarea, artifactCopyBtn, '<?php echo esc_js( __( 'Copy', 'gk-block-api' ) ); ?>' );
-			}
+			if ( ! artifactTextarea || ! artifactCopyBtn ) return;
 
-			var pwInput   = card.querySelector( '.gk-connect__artifact-pw-input' );
-			var pwCopyBtn = card.querySelector( '.gk-connect__artifact-pw-copy-btn' );
-			if ( pwInput && pwCopyBtn ) {
-				makeCopyHandler( pwInput, pwCopyBtn, '<?php echo esc_js( __( 'Copy password', 'gk-block-api' ) ); ?>' );
-			}
+			artifactCopyBtn.addEventListener( 'click', function () {
+				var defaultLabel = '<?php echo esc_js( __( 'Copy', 'gk-block-api' ) ); ?>';
+				if ( navigator.clipboard && navigator.clipboard.writeText ) {
+					navigator.clipboard.writeText( artifactTextarea.value ).then( function () {
+						artifactCopyBtn.textContent = '<?php echo esc_js( __( 'Copied!', 'gk-block-api' ) ); ?>';
+						setTimeout( function () { artifactCopyBtn.textContent = defaultLabel; }, 2000 );
+					} );
+				} else {
+					artifactTextarea.select();
+					document.execCommand( 'copy' );
+				}
+			} );
 		} )();
 		</script>
+		<?php
+	}
+
+	/**
+	 * Render the browser-Approve screen.
+	 *
+	 * Shown when render_section() detects ?gk_authorize in the query string.
+	 * Presents a clear heading, site/client context, and Approve/Cancel controls.
+	 * The Approve form POSTs to handle_authorize(), carrying the loopback callback,
+	 * state token, and client label as hidden fields with a nonce.
+	 *
+	 * @since 1.11.0
+	 *
+	 * @param string $callback Loopback callback URL (displayed for context; validated on POST).
+	 * @param string $state    Opaque state token from the connector CLI (echoed back on redirect).
+	 * @param string $client   Client label sent by the connector CLI (e.g. 'block-mcp').
+	 * @return void
+	 */
+	private function render_authorize_screen( $callback, $state, $client ) {
+		$site_name = get_bloginfo( 'name' );
+		?>
+		<div class="gk-connect">
+		<div class="gk-connect__card">
+
+			<h2 class="gk-connect__heading"><?php esc_html_e( 'Authorize a connection', 'gk-block-api' ); ?></h2>
+
+			<p>
+				<?php
+				echo wp_kses(
+					sprintf(
+						/* translators: 1: site name, 2: client label */
+						__( 'A local application on this computer is asking to connect to <strong>%1$s</strong> as the Block MCP agent (<code>%2$s</code>).', 'gk-block-api' ),
+						esc_html( $site_name ),
+						esc_html( $client )
+					),
+					array(
+						'strong' => array(),
+						'code'   => array(),
+					)
+				);
+				?>
+			</p>
+			<p><?php esc_html_e( 'Approving creates or reuses the dedicated block-mcp account and sends a credential to the local app. You can revoke it anytime from this page.', 'gk-block-api' ); ?></p>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action"   value="<?php echo esc_attr( self::ACTION_AUTHORIZE ); ?>" />
+				<input type="hidden" name="callback" value="<?php echo esc_attr( $callback ); ?>" />
+				<input type="hidden" name="state"    value="<?php echo esc_attr( $state ); ?>" />
+				<input type="hidden" name="client"   value="<?php echo esc_attr( $client ); ?>" />
+				<?php wp_nonce_field( self::ACTION_AUTHORIZE ); ?>
+				<?php submit_button( __( 'Approve', 'gk-block-api' ), 'primary', 'submit', false ); ?>
+			</form>
+
+			<p>
+				<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Settings_Page::PAGE_SLUG . '&tab=connect' ) ); ?>">
+					<?php esc_html_e( 'Cancel', 'gk-block-api' ); ?>
+				</a>
+			</p>
+
+		</div><!-- /.gk-connect__card -->
+		</div><!-- /.gk-connect -->
 		<?php
 	}
 
