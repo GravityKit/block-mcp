@@ -35,6 +35,12 @@ class AppPasswordIssuerTest extends WP_UnitTestCase {
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 	}
 
+	public function tear_down() {
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		remove_filter( 'wp_is_application_passwords_available', '__return_false' );
+		parent::tear_down();
+	}
+
 	/**
 	 * issue() must return a plaintext password and a UUID when Application
 	 * Passwords are available. The password must be exactly 24 characters of

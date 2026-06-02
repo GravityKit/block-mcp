@@ -35,7 +35,8 @@ class App_Password_Issuer {
 	 * @return array|\WP_Error {
 	 *     Success: array containing the minted credential.
 	 *
-	 *     @type string $password One-time plaintext password (24 chars, base-64 alphabet + spaces).
+	 *     @type string $password One-time plaintext password as returned by
+	 *                            WP_Application_Passwords::create_new_application_password().
 	 *     @type string $uuid     UUID of the stored Application Password entry.
 	 * }
 	 */
