@@ -190,6 +190,34 @@ function init_settings_page() {
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
 
 /**
+ * Agent identity bootstrap.
+ *
+ * Registers the minimal block_mcp_agent role on every request so it
+ * survives multi-site role-table resets or environments where the
+ * activation hook did not run (e.g. direct file drops, must-use setups).
+ * Also installs the authenticate filter that blocks interactive login for
+ * the service account.
+ */
+function init_agent() {
+	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
+
+	add_filter(
+		'authenticate',
+		static function ( $user ) {
+			if ( $user instanceof \WP_User && '1' === get_user_meta( $user->ID, \GravityKit\BlockAPI\Agent_Provisioner::META_FLAG, true ) ) {
+				return new \WP_Error(
+					'agent_no_login',
+					__( 'This is a service account and cannot log in interactively.', 'gk-block-api' )
+				);
+			}
+			return $user;
+		},
+		99
+	);
+}
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
+
+/**
  * WP-CLI bootstrap. Required for any CLI command — `rest_api_init` does
  * not fire under `wp` invocations, and `admin_init` only fires for the
  * web admin context. Lazy-loads class names so plain web requests don't
@@ -226,5 +254,7 @@ function on_activation() {
 		delete_transient( Block_Inventory::CACHE_KEY );
 		update_option( DB_VERSION_OPTION, CURRENT_DB_VERSION, false );
 	}
+
+	Agent_Provisioner::register_role();
 }
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\on_activation' );

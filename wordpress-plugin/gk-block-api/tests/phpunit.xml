@@ -14,6 +14,7 @@
             <directory>Integrations</directory>
             <directory>Security</directory>
             <directory>Stress</directory>
+            <directory>Connect</directory>
         </testsuite>
     </testsuites>
 </phpunit>
