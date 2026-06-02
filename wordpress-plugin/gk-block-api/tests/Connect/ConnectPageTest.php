@@ -797,19 +797,27 @@ class ConnectPageTest extends WP_UnitTestCase {
 	// ──────────────────────────────────────────────────────────────────────
 
 	/**
-	 * render_section() in the 'ready' state must output the after-download
-	 * guidance block and all six client-picker radio cards with stable slug
-	 * values, with Claude Desktop checked by default.
+	 * render_section() in the 'ready' state must output per-client next-steps blocks
+	 * for all six slugs and all six client-picker radio cards with stable slug values,
+	 * with Claude Desktop checked by default.
 	 *
 	 * Radio values are the stable, translation-proof slugs defined by the
 	 * CLIENT_* constants. Labels (e.g. "Claude Desktop app") are display-only
 	 * and appear as card text — they must also be present but must NOT be used
 	 * as the radio `value`.
 	 *
+	 * Per-client next-steps blocks are all in the DOM tagged with data-client.
+	 * Exactly one block is visible by default (claude-desktop); the other five
+	 * carry style="display:none;" and aria-hidden="true".
+	 *
+	 * The Claude Desktop block must contain the .mcpb download steps
+	 * ("After you download", "claude.ai/download"). Non-desktop blocks must
+	 * contain the Generate-setup-config / Approve / "No password to copy" copy
+	 * and must NOT contain the .mcpb download steps.
+	 *
 	 * The six required slugs: CLIENT_CLAUDE_DESKTOP, CLIENT_CLAUDE_CODE,
 	 * CLIENT_CURSOR, CLIENT_CHATGPT, CLIENT_AI_PROMPT, CLIENT_OTHER.
 	 * The "Let my AI set it up" card must carry the is-ai class.
-	 * The Claude Desktop radio must be checked by default.
 	 *
 	 * Wrapping markup uses <div class="gk-connect"> + <div class="gk-connect__card">
 	 * so all CSS selectors are scoped.
@@ -827,8 +835,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 		// Wrapper class and card container must be present for scoped CSS.
 		$this->assertStringContainsString( 'class="gk-connect"', $html, 'Outer wrapper must carry class gk-connect' );
 		$this->assertStringContainsString( 'gk-connect__card', $html, 'Card container must be present' );
-
-		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must be present' );
 
 		// Radio inputs must be present with name="client" (not a <select>).
 		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
@@ -862,6 +868,81 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		// A <select> must NOT be present — the picker is radio cards.
 		$this->assertStringNotContainsString( '<select', $html, 'A <select> must not be present; picker uses radio cards' );
+
+		// ── Per-client next-steps blocks ──────────────────────────────────────
+
+		// All six data-client blocks must be in the DOM.
+		$slugs = array(
+			Connect_Page::CLIENT_CLAUDE_DESKTOP,
+			Connect_Page::CLIENT_CLAUDE_CODE,
+			Connect_Page::CLIENT_CURSOR,
+			Connect_Page::CLIENT_CHATGPT,
+			Connect_Page::CLIENT_AI_PROMPT,
+			Connect_Page::CLIENT_OTHER,
+		);
+		foreach ( $slugs as $slug ) {
+			$this->assertStringContainsString(
+				'data-client="' . $slug . '"',
+				$html,
+				"Per-client next-steps block must exist for slug: {$slug}"
+			);
+		}
+
+		// Exactly one block — claude-desktop — must be visible by default;
+		// the other five must carry display:none and aria-hidden="true".
+		$this->assertStringNotContainsString(
+			'data-client="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '" style="display:none;"',
+			$html,
+			'The claude-desktop next-steps block must be visible by default (no display:none)'
+		);
+		$this->assertStringNotContainsString(
+			'data-client="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"  aria-hidden="true"',
+			$html,
+			'The claude-desktop next-steps block must not carry aria-hidden="true" by default'
+		);
+
+		$hidden_slugs = array(
+			Connect_Page::CLIENT_CLAUDE_CODE,
+			Connect_Page::CLIENT_CURSOR,
+			Connect_Page::CLIENT_CHATGPT,
+			Connect_Page::CLIENT_AI_PROMPT,
+			Connect_Page::CLIENT_OTHER,
+		);
+		foreach ( $hidden_slugs as $slug ) {
+			$this->assertMatchesRegularExpression(
+				'/data-client="' . preg_quote( $slug, '/' ) . '"[^>]*style="display:none;"/',
+				$html,
+				"Non-default next-steps block must carry display:none for slug: {$slug}"
+			);
+			$this->assertMatchesRegularExpression(
+				'/data-client="' . preg_quote( $slug, '/' ) . '"[^>]*aria-hidden="true"/',
+				$html,
+				"Non-default next-steps block must carry aria-hidden=\"true\" for slug: {$slug}"
+			);
+		}
+
+		// The claude-desktop block must contain the .mcpb download steps.
+		$this->assertStringContainsString( 'After you download', $html, 'Claude Desktop next-steps block must contain "After you download" heading' );
+		$this->assertStringContainsString( 'claude.ai/download', $html, 'Claude Desktop next-steps block must contain the claude.ai/download link' );
+		$this->assertStringContainsString( 'mcpb', $html, 'Claude Desktop next-steps block must reference the .mcpb file' );
+
+		// The claude-code block must contain Generate-setup-config / Approve /
+		// "No password to copy" copy, and must NOT contain the .mcpb download steps.
+		$this->assertStringContainsString(
+			'Generate setup config',
+			$html,
+			'claude-code next-steps block must mention "Generate setup config"'
+		);
+		$this->assertStringContainsString(
+			'Approve',
+			$html,
+			'CLI-client next-steps block must mention the Approve step'
+		);
+		$this->assertStringContainsString(
+			'No password to copy',
+			$html,
+			'CLI-client next-steps block must state "No password to copy"'
+		);
 	}
 
 	/**

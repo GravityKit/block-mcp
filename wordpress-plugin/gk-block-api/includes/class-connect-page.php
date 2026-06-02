@@ -817,7 +817,7 @@ class Connect_Page {
 				<?php endif; ?>
 
 				<?php $this->render_connect_form(); ?>
-				<?php $this->render_next_steps(); ?>
+				<?php $this->render_client_next_steps(); ?>
 
 				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
 					<div class="gk-connect__connections-card">
@@ -1343,9 +1343,10 @@ class Connect_Page {
 
 			<script>
 			(function () {
-				var radios = document.querySelectorAll( 'input[name="client"]' );
-				var note   = document.getElementById( 'gk-block-api-other-note' );
-				var btn    = document.getElementById( 'submit' );
+				var radios    = document.querySelectorAll( 'input[name="client"]' );
+				var note      = document.getElementById( 'gk-block-api-other-note' );
+				var btn       = document.getElementById( 'submit' );
+				var nextSteps = document.querySelectorAll( '.gk-connect__next-steps[data-client]' );
 
 				if ( ! radios.length ) return;
 
@@ -1378,6 +1379,13 @@ class Connect_Page {
 						var label = labels[ checkedVal ] || labels[ '<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>' ];
 						btn.value = label;
 					}
+
+					// Show only the next-steps block matching the selected client; hide the rest.
+					nextSteps.forEach( function ( el ) {
+						var isMatch = el.getAttribute( 'data-client' ) === checkedVal;
+						el.style.display = isMatch ? '' : 'none';
+						el.setAttribute( 'aria-hidden', isMatch ? 'false' : 'true' );
+					} );
 				}
 
 				radios.forEach( function ( r ) {
@@ -1394,58 +1402,165 @@ class Connect_Page {
 	}
 
 	/**
-	 * Render the static "After you download" numbered next-steps panel.
+	 * Render per-client "next steps" blocks — one for each of the six client slugs.
 	 *
-	 * Shown whenever the connect form is visible so the post-download moment
-	 * is never silent — users know what to do with the file immediately.
+	 * All six blocks are written to the DOM simultaneously. Only the block whose
+	 * `data-client` attribute matches the default selection (`claude-desktop`) is
+	 * visible on load; the others carry `aria-hidden="true"` and are hidden via
+	 * inline style. The JS `updateState` handler (in render_connect_form()) swaps
+	 * visibility whenever the radio selection changes.
 	 *
-	 * @since 1.9.0
+	 * The Claude Desktop block is the existing "After you download" content, moved
+	 * here verbatim. The CLI/AI blocks explain the Generate-setup-config / browser-
+	 * Approve flow; no download steps are shown for them. The `other` block keeps
+	 * the existing coming-soon note.
+	 *
+	 * @since 1.13.0
 	 */
-	private function render_next_steps() {
-		?>
-		<div class="gk-connect__next-steps">
-			<h3><?php esc_html_e( 'After you download', 'gk-block-api' ); ?></h3>
-			<ol>
-				<li>
+	private function render_client_next_steps() {
+		$clients = array(
+			self::CLIENT_CLAUDE_DESKTOP,
+			self::CLIENT_CLAUDE_CODE,
+			self::CLIENT_CURSOR,
+			self::CLIENT_CHATGPT,
+			self::CLIENT_AI_PROMPT,
+			self::CLIENT_OTHER,
+		);
+
+		foreach ( $clients as $slug ) {
+			$is_default  = ( self::CLIENT_CLAUDE_DESKTOP === $slug );
+			$hidden_attr = $is_default ? '' : ' style="display:none;"';
+			$aria_attr   = $is_default ? '' : ' aria-hidden="true"';
+			?>
+			<div
+				class="gk-connect__next-steps"
+				data-client="<?php echo esc_attr( $slug ); ?>"
+				<?php echo $hidden_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static safe attribute strings, no user data. ?>
+				<?php echo $aria_attr;   // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static safe attribute strings, no user data. ?>
+			>
+				<?php $this->render_client_next_steps_body( $slug ); ?>
+			</div>
+			<?php
+		}
+	}
+
+	/**
+	 * Render the inner content of a single per-client next-steps block.
+	 *
+	 * Separated from render_client_next_steps() so the markup for each client can
+	 * be read and tested in isolation. The containing <div> (with data-client and
+	 * visibility attributes) is the caller's responsibility.
+	 *
+	 * @since 1.13.0
+	 *
+	 * @param string $slug One of the CLIENT_* slug constants.
+	 * @return void
+	 */
+	private function render_client_next_steps_body( string $slug ) {
+		switch ( $slug ) {
+
+			case self::CLIENT_CLAUDE_DESKTOP:
+				?>
+				<h3><?php esc_html_e( 'After you download', 'gk-block-api' ); ?></h3>
+				<ol>
+					<li>
+						<?php
+						echo wp_kses(
+							sprintf(
+								/* translators: %s: download URL */
+								__( 'Get the <a href="%s" target="_blank" rel="noopener noreferrer">Claude Desktop app</a> if you don\'t have it yet.', 'gk-block-api' ),
+								'https://claude.ai/download'
+							),
+							array(
+								'a' => array(
+									'href'   => array(),
+									'target' => array(),
+									'rel'    => array(),
+								),
+							)
+						);
+						?>
+					</li>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'Open the downloaded file (it\'s named like <code>block-mcp-yoursite.mcpb</code>) by double-clicking it.', 'gk-block-api' ),
+							array( 'code' => array() )
+						);
+						?>
+					</li>
+					<li><?php esc_html_e( 'Click Enable — everything\'s pre-filled.', 'gk-block-api' ); ?></li>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'Try asking: <em>&#8220;Edit the homepage on my site.&#8221;</em>', 'gk-block-api' ),
+							array( 'em' => array() )
+						);
+						?>
+					</li>
+				</ol>
+				<p>
+					<?php esc_html_e( 'That file briefly holds a private key; once you\'ve clicked Enable you can delete it from Downloads — your AI app has stored the key securely.', 'gk-block-api' ); ?>
+				</p>
+				<?php
+				break;
+
+			case self::CLIENT_CLAUDE_CODE:
+			case self::CLIENT_CURSOR:
+			case self::CLIENT_CHATGPT:
+				$label = $this->client_label( $slug );
+				?>
+				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
+				<ol>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'Click <strong>Generate setup config</strong> above.', 'gk-block-api' ),
+							array( 'strong' => array() )
+						);
+						?>
+					</li>
+					<li><?php esc_html_e( "You'll get a one-line command to run in your terminal — a browser window opens, you click Approve, and the connection finishes automatically.", 'gk-block-api' ); ?></li>
+					<li><strong><?php esc_html_e( 'No password to copy.', 'gk-block-api' ); ?></strong></li>
+				</ol>
+				<?php
+				break;
+
+			case self::CLIENT_AI_PROMPT:
+				?>
+				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
+				<ol>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'Click <strong>Copy AI setup prompt</strong> above, then paste it to your AI assistant.', 'gk-block-api' ),
+							array( 'strong' => array() )
+						);
+						?>
+					</li>
+					<li><?php esc_html_e( 'It runs the command for you, a browser window opens, you click Approve, and it confirms the connection.', 'gk-block-api' ); ?></li>
+					<li><strong><?php esc_html_e( 'No password to copy.', 'gk-block-api' ); ?></strong></li>
+				</ol>
+				<?php
+				break;
+
+			case self::CLIENT_OTHER:
+			default:
+				?>
+				<p class="description">
 					<?php
 					echo wp_kses(
 						sprintf(
-							/* translators: %s: download URL */
-							__( 'Get the <a href="%s" target="_blank" rel="noopener noreferrer">Claude Desktop app</a> if you don\'t have it yet.', 'gk-block-api' ),
-							'https://claude.ai/download'
+							/* translators: %s: mailto link */
+							__( 'Browser-based setup is coming soon. In the meantime, <a href="%s">contact support</a> or install Claude Desktop to get started.', 'gk-block-api' ),
+							'mailto:support@gravitykit.com'
 						),
-						array(
-							'a' => array(
-								'href'   => array(),
-								'target' => array(),
-								'rel'    => array(),
-							),
-						)
+						array( 'a' => array( 'href' => array() ) )
 					);
 					?>
-				</li>
-				<li>
-					<?php
-					echo wp_kses(
-						__( 'Open the downloaded file (it\'s named like <code>block-mcp-yoursite.mcpb</code>) by double-clicking it.', 'gk-block-api' ),
-						array( 'code' => array() )
-					);
-					?>
-				</li>
-				<li><?php esc_html_e( 'Click Enable — everything\'s pre-filled.', 'gk-block-api' ); ?></li>
-				<li>
-					<?php
-					echo wp_kses(
-						__( 'Try asking: <em>&#8220;Edit the homepage on my site.&#8221;</em>', 'gk-block-api' ),
-						array( 'em' => array() )
-					);
-					?>
-				</li>
-			</ol>
-			<p>
-				<?php esc_html_e( 'That file briefly holds a private key; once you\'ve clicked Enable you can delete it from Downloads — your AI app has stored the key securely.', 'gk-block-api' ); ?>
-			</p>
-		</div>
-		<?php
+				</p>
+				<?php
+				break;
+		}
 	}
 }
