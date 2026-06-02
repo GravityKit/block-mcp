@@ -1,0 +1,576 @@
+/**
+ * connect — Browser-Approve handoff CLI for @gravitykit/block-mcp.
+ *
+ * Starts a loopback HTTP server, opens the WordPress admin authorize URL in
+ * the browser, waits for the admin to click Approve, then writes the chosen
+ * AI client's MCP config with the returned credentials.
+ *
+ * The app password is NEVER logged to stdout (only inside the explicit
+ * `--client print` path, which the user opted into).
+ */
+
+import * as http from 'node:http';
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as cp from 'node:child_process';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type ClientTarget =
+  | 'claude-code'
+  | 'cursor'
+  | 'chatgpt-desktop'
+  | 'claude-desktop'
+  | 'print';
+
+export interface ConnectArgs {
+  site: string;
+  client: ClientTarget;
+  port: number | null;
+  open: boolean;
+}
+
+export interface Credentials {
+  site: string;
+  user: string;
+  password: string;
+}
+
+export interface McpServerEntry {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export interface McpConfig {
+  mcpServers: Record<string, McpServerEntry>;
+}
+
+// ── Arg parsing ───────────────────────────────────────────────────────────────
+
+/**
+ * Parse the argv slice after `connect` into a ConnectArgs object.
+ * Throws a descriptive Error for missing or invalid input.
+ */
+export function parseConnectArgs(argv: string[]): ConnectArgs {
+  let site: string | undefined;
+  let client: ClientTarget = 'print';
+  let port: number | null = null;
+  let open = true;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--site') {
+      site = argv[++i];
+    } else if (arg === '--client') {
+      const val = argv[++i] as ClientTarget;
+      const valid: ClientTarget[] = [
+        'claude-code',
+        'cursor',
+        'chatgpt-desktop',
+        'claude-desktop',
+        'print',
+      ];
+      if (!valid.includes(val)) {
+        throw new Error(
+          `Invalid --client value "${val}". Must be one of: ${valid.join(', ')}`
+        );
+      }
+      client = val;
+    } else if (arg === '--port') {
+      const raw = argv[++i];
+      const n = parseInt(raw, 10);
+      if (isNaN(n) || n < 1 || n > 65535) {
+        throw new Error(`Invalid --port value "${raw}". Must be 1–65535.`);
+      }
+      port = n;
+    } else if (arg === '--no-open') {
+      open = false;
+    } else if (arg.startsWith('--site=')) {
+      site = arg.slice('--site='.length);
+    } else if (arg.startsWith('--client=')) {
+      client = arg.slice('--client='.length) as ClientTarget;
+    } else if (arg.startsWith('--port=')) {
+      const n = parseInt(arg.slice('--port='.length), 10);
+      if (isNaN(n) || n < 1 || n > 65535) {
+        throw new Error(`Invalid --port value. Must be 1–65535.`);
+      }
+      port = n;
+    }
+  }
+
+  if (!site) {
+    throw new Error('--site <url> is required. Example: --site https://example.com');
+  }
+
+  return { site, client, port, open };
+}
+
+// ── Site URL normalisation ────────────────────────────────────────────────────
+
+/**
+ * Normalise a site URL: strip trailing slashes, require http/https scheme.
+ * Throws a descriptive Error if the scheme is missing.
+ */
+export function normalizeSite(raw: string): string {
+  const trimmed = raw.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error(
+      `--site must start with http:// or https://. Got: "${raw}"`
+    );
+  }
+  return trimmed;
+}
+
+// ── Authorize URL builder ─────────────────────────────────────────────────────
+
+export interface AuthorizeUrlParams {
+  site: string;
+  callback: string;
+  state: string;
+  client: ClientTarget;
+}
+
+/**
+ * Build the WordPress admin authorize URL that the admin visits to approve.
+ * All variable query params are URL-encoded.
+ */
+export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
+  const { site, callback, state, client } = params;
+  const base = `${site}/wp-admin/options-general.php`;
+  const query = new URLSearchParams({
+    page: 'gk-block-api-settings',
+    tab: 'connect',
+    gk_authorize: '1',
+    callback,
+    state,
+    client,
+  });
+  return `${base}?${query.toString()}`;
+}
+
+// ── Callback handler ──────────────────────────────────────────────────────────
+
+export interface CallbackResult {
+  ok: true;
+  creds: Credentials;
+}
+
+export interface CallbackError {
+  ok: false;
+  reason: string;
+}
+
+/**
+ * Parse and validate the loopback callback URL.
+ * Verifies CSRF state, returns creds or an error descriptor.
+ */
+export function handleCallback(
+  reqUrl: string,
+  expectedState: string
+): CallbackResult | CallbackError {
+  let parsed: URL;
+  try {
+    // reqUrl may be just a path+query; prepend a dummy base to parse it
+    parsed = new URL(reqUrl, 'http://127.0.0.1');
+  } catch {
+    return { ok: false, reason: 'Could not parse callback URL' };
+  }
+
+  const state = parsed.searchParams.get('state');
+  if (!state || state !== expectedState) {
+    return { ok: false, reason: 'State mismatch — possible CSRF. Connection rejected.' };
+  }
+
+  const site = parsed.searchParams.get('site');
+  const user = parsed.searchParams.get('user');
+  const password = parsed.searchParams.get('password');
+
+  if (!site || !user || !password) {
+    return { ok: false, reason: 'Callback missing required parameters (site, user, password).' };
+  }
+
+  return {
+    ok: true,
+    creds: {
+      site: decodeURIComponent(site),
+      user: decodeURIComponent(user),
+      password: decodeURIComponent(password),
+    },
+  };
+}
+
+// ── MCP config builders ───────────────────────────────────────────────────────
+
+/** Build the mcpServers entry for @gravitykit/block-mcp. */
+export function buildMcpEntry(creds: Credentials): McpServerEntry {
+  return {
+    command: 'npx',
+    args: ['-y', '@gravitykit/block-mcp'],
+    env: {
+      WORDPRESS_URL: creds.site,
+      WORDPRESS_USER: creds.user,
+      WORDPRESS_APP_PASSWORD: creds.password,
+    },
+  };
+}
+
+/** Merge a block-mcp entry into an existing mcpServers config object. */
+export function mergeMcpServers(
+  existing: McpConfig,
+  creds: Credentials
+): McpConfig {
+  return {
+    ...existing,
+    mcpServers: {
+      ...existing.mcpServers,
+      'block-mcp': buildMcpEntry(creds),
+    },
+  };
+}
+
+/** Build the full cursor config object (for unit testing). */
+export function cursorConfig(creds: Credentials): McpConfig {
+  return mergeMcpServers({ mcpServers: {} }, creds);
+}
+
+// ── Platform-specific config paths ───────────────────────────────────────────
+
+/**
+ * Return the claude_desktop_config.json path for the given platform string.
+ * `platform` should be a `process.platform` value: 'darwin', 'win32', 'linux'.
+ */
+export function claudeDesktopConfigPath(platform: string): string {
+  switch (platform) {
+    case 'darwin':
+      return path.join(
+        os.homedir(),
+        'Library',
+        'Application Support',
+        'Claude',
+        'claude_desktop_config.json'
+      );
+    case 'win32': {
+      const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, 'Claude', 'claude_desktop_config.json');
+    }
+    default:
+      // Linux and anything else
+      return path.join(os.homedir(), '.config', 'Claude', 'claude_desktop_config.json');
+  }
+}
+
+/**
+ * Return the cursor MCP config path (~/.cursor/mcp.json).
+ */
+export function cursorConfigPath(): string {
+  return path.join(os.homedir(), '.cursor', 'mcp.json');
+}
+
+// ── claude mcp add argv builder ───────────────────────────────────────────────
+
+/**
+ * Build the argv array for `claude mcp add` WITHOUT a shell.
+ * The credential values are passed as discrete array elements so they
+ * never appear in a shell command string and aren't captured by shell history.
+ */
+export function claudeCodeAddArgs(creds: Credentials): string[] {
+  return [
+    'mcp',
+    'add',
+    'block-mcp',
+    '--scope',
+    'user',
+    '--env',
+    `WORDPRESS_URL=${creds.site}`,
+    '--env',
+    `WORDPRESS_USER=${creds.user}`,
+    '--env',
+    `WORDPRESS_APP_PASSWORD=${creds.password}`,
+    '--',
+    'npx',
+    '-y',
+    '@gravitykit/block-mcp',
+  ];
+}
+
+// ── Config file writers ───────────────────────────────────────────────────────
+
+/** Read a JSON file, return default if missing or unparseable. */
+function readJsonFile(filePath: string, defaultValue: McpConfig): McpConfig {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw) as McpConfig;
+  } catch {
+    return defaultValue;
+  }
+}
+
+/** Write a JSON file, creating parent directories as needed. */
+function writeJsonFile(filePath: string, data: McpConfig): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+/** Write to the Cursor MCP config, preserving existing servers. */
+export function writeCursorConfig(creds: Credentials): void {
+  const configPath = cursorConfigPath();
+  const existing = readJsonFile(configPath, { mcpServers: {} });
+  const updated = mergeMcpServers(existing, creds);
+  writeJsonFile(configPath, updated);
+}
+
+/** Write to the Claude Desktop config, preserving existing servers. */
+export function writeClaudeDesktopConfig(creds: Credentials, platform = process.platform): void {
+  const configPath = claudeDesktopConfigPath(platform);
+  const existing = readJsonFile(configPath, { mcpServers: {} });
+  const updated = mergeMcpServers(existing, creds);
+  writeJsonFile(configPath, updated);
+}
+
+/** Run `claude mcp add` via spawnSync (no shell — args array only). */
+export function runClaudeCodeAdd(creds: Credentials): { success: boolean; error?: string } {
+  const args = claudeCodeAddArgs(creds);
+  try {
+    const result = cp.spawnSync('claude', args, {
+      stdio: 'inherit',
+      shell: false,
+      encoding: 'utf8',
+    });
+    if (result.error) {
+      // Binary not found
+      return { success: false, error: (result.error as Error).message };
+    }
+    if (result.status !== 0) {
+      return { success: false, error: `claude exited with status ${result.status}` };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/** Print the mcpServers JSON block for manual paste. */
+export function printConfig(creds: Credentials): void {
+  const entry = buildMcpEntry(creds);
+  const block: McpConfig = { mcpServers: { 'block-mcp': entry } };
+  console.log('\nAdd this to your MCP client config:\n');
+  console.log(JSON.stringify(block, null, 2));
+  console.log(
+    '\nFor Claude Desktop: paste into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)'
+  );
+  console.log('For Cursor: paste into ~/.cursor/mcp.json\n');
+}
+
+// ── Browser opener ────────────────────────────────────────────────────────────
+
+/**
+ * Open a URL in the default browser using the platform-appropriate command.
+ * Uses spawn (not exec/shell) to avoid shell escaping issues.
+ */
+export function openBrowser(url: string): void {
+  let cmd: string;
+  let args: string[];
+
+  switch (process.platform) {
+    case 'darwin':
+      cmd = 'open';
+      args = [url];
+      break;
+    case 'win32':
+      cmd = 'cmd';
+      args = ['/c', 'start', '', url];
+      break;
+    default:
+      cmd = 'xdg-open';
+      args = [url];
+  }
+
+  cp.spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+}
+
+// ── HTML response ─────────────────────────────────────────────────────────────
+
+const SUCCESS_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Connected</title>
+<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;text-align:center}
+h1{color:#2d6a4f}p{color:#555}</style></head>
+<body><h1>&#x2713; Connected</h1>
+<p>You can close this tab and return to your terminal.</p></body>
+</html>`;
+
+const ERROR_HTML = (msg: string) => `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Error</title>
+<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;text-align:center}
+h1{color:#c0392b}p{color:#555}</style></head>
+<body><h1>Connection Error</h1><p>${msg}</p></body>
+</html>`;
+
+// ── Main orchestrator ─────────────────────────────────────────────────────────
+
+export interface RunConnectOptions {
+  /** Override process.platform for config path resolution. */
+  platform?: string;
+  /** Override the browser-open function (injectable for tests). */
+  openBrowserFn?: (url: string) => void;
+  /** Override the timeout in milliseconds (default 300_000 ms = 5 min). */
+  timeoutMs?: number;
+}
+
+/**
+ * Main entry point for the `connect` subcommand.
+ * `argv` is the slice of process.argv after 'connect'.
+ */
+export async function runConnect(
+  argv: string[],
+  opts: RunConnectOptions = {}
+): Promise<void> {
+  const {
+    platform = process.platform,
+    openBrowserFn = openBrowser,
+    timeoutMs = 300_000,
+  } = opts;
+
+  // ── 1. Parse args ──────────────────────────────────────────────────────
+  let args: ConnectArgs;
+  try {
+    args = parseConnectArgs(argv);
+    args = { ...args, site: normalizeSite(args.site) };
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  // ── 2. Generate state ──────────────────────────────────────────────────
+  const state = crypto.randomUUID();
+
+  // ── 3. Start loopback server ───────────────────────────────────────────
+  let resolveCallback!: (creds: Credentials) => void;
+  let rejectCallback!: (err: Error) => void;
+
+  const callbackPromise = new Promise<Credentials>((resolve, reject) => {
+    resolveCallback = resolve;
+    rejectCallback = reject;
+  });
+
+  const server = http.createServer((req, res) => {
+    if (!req.url?.startsWith('/callback')) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const result = handleCallback(req.url, state);
+
+    if (!result.ok) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(ERROR_HTML(result.reason));
+      rejectCallback(new Error(result.reason));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(SUCCESS_HTML);
+    resolveCallback(result.creds);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const listenPort = args.port ?? 0;
+    server.listen(listenPort, '127.0.0.1', () => resolve());
+    server.once('error', reject);
+  });
+
+  const address = server.address() as { port: number };
+  const port = address.port;
+  const callbackUrl = `http://127.0.0.1:${port}/callback`;
+
+  // ── 4. Build and open authorize URL ────────────────────────────────────
+  const authorizeUrl = buildAuthorizeUrl({
+    site: args.site,
+    callback: callbackUrl,
+    state,
+    client: args.client,
+  });
+
+  if (args.open) {
+    console.error(`Opening browser to authorize URL…`);
+    openBrowserFn(authorizeUrl);
+  } else {
+    console.log(`\nOpen this URL in your browser to authorize:\n\n  ${authorizeUrl}\n`);
+  }
+
+  console.error(`Waiting for approval (timeout ${timeoutMs / 1000}s)…`);
+
+  // ── 5. Wait for callback with timeout ──────────────────────────────────
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`Timed out after ${timeoutMs / 1000}s waiting for browser approval.`)),
+      timeoutMs
+    )
+  );
+
+  let creds: Credentials;
+  try {
+    creds = await Promise.race([callbackPromise, timeoutPromise]);
+  } catch (err) {
+    server.close();
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  } finally {
+    server.close();
+  }
+
+  // ── 6. Write config ─────────────────────────────────────────────────────
+  try {
+    switch (args.client) {
+      case 'cursor':
+        writeCursorConfig(creds);
+        console.log(`\n✓ Connected! Wrote block-mcp to ~/.cursor/mcp.json`);
+        console.log(`  Site: ${creds.site}  User: ${creds.user}`);
+        console.log(`  Restart Cursor to pick up the new server.\n`);
+        break;
+
+      case 'claude-desktop':
+        writeClaudeDesktopConfig(creds, platform);
+        console.log(`\n✓ Connected! Wrote block-mcp to ${claudeDesktopConfigPath(platform)}`);
+        console.log(`  Site: ${creds.site}  User: ${creds.user}`);
+        console.log(`  Restart Claude Desktop to pick up the new server.\n`);
+        break;
+
+      case 'claude-code': {
+        const result = runClaudeCodeAdd(creds);
+        if (result.success) {
+          console.log(`\n✓ Connected! Registered block-mcp via 'claude mcp add'.`);
+          console.log(`  Site: ${creds.site}  User: ${creds.user}\n`);
+        } else {
+          console.error(
+            `\nWarning: 'claude' binary not found or failed (${result.error}).`
+          );
+          console.log(`\nFall back — add this to your Claude Code MCP config manually:`);
+          printConfig(creds);
+        }
+        break;
+      }
+
+      case 'chatgpt-desktop': {
+        // ChatGPT Desktop does not have a standardised config path yet.
+        // Print the JSON block so the user can paste it.
+        console.log(`\n✓ Authorized! Paste the following into ChatGPT Desktop's MCP config:\n`);
+        printConfig(creds);
+        break;
+      }
+
+      case 'print':
+      default:
+        printConfig(creds);
+        break;
+    }
+  } catch (err) {
+    console.error(`Error writing config: ${(err as Error).message}`);
+    process.exit(1);
+  }
+}
