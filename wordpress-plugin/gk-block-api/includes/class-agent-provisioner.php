@@ -303,20 +303,23 @@ class Agent_Provisioner {
 	/**
 	 * Block interactive login for the service account.
 	 *
-	 * Hooked to `authenticate` at priority 10 — before the built-in password
-	 * check at priority 20 — so login is rejected regardless of whether the
-	 * caller supplies a correct password. The account's credentials are
-	 * therefore valid only for non-interactive (REST / Application Password)
-	 * requests.
+	 * Hooked to `authenticate` at priority 30 — after wp_authenticate_username_password
+	 * and wp_authenticate_application_password (both at priority 20) — so it
+	 * intercepts results from both paths.  It intentionally blocks ONLY interactive
+	 * (non-API) login.  Application Password / REST / XML-RPC authentication uses
+	 * this same filter, so the method returns $user unchanged when the request is
+	 * an API request; doing otherwise would cut off the agent's own REST auth.
 	 *
-	 * Two rejection paths exist:
-	 *  1. A prior filter has already resolved `$user` to the agent's WP_User
-	 *     (cookie auth, custom auth plugin running before priority 10).
+	 * The agent's random_bytes password already makes interactive login infeasible
+	 * by any realistic attacker.  This filter is defence-in-depth for the
+	 * interactive path only.
+	 *
+	 * Two rejection paths exist when the request is NOT an API request:
+	 *  1. A prior filter has already resolved `$user` to the agent's WP_User.
 	 *  2. `$user` is null or WP_Error and the supplied `$username` resolves to
-	 *     the agent — the common case where standard password auth has not yet
-	 *     run.
+	 *     the agent — the common case where standard password auth has not yet run.
 	 *
-	 * Pass-through for every other user.
+	 * Pass-through for every other user, and for all API requests.
 	 *
 	 * @since 1.9.0
 	 *
@@ -325,6 +328,21 @@ class Agent_Provisioner {
 	 * @return null|\WP_User|\WP_Error The user unchanged, or WP_Error for the service account.
 	 */
 	public static function block_agent_login( $user, string $username = '' ) {
+		// Application Passwords authenticate via this same `authenticate` filter
+		// (wp_authenticate_application_password, priority 20).  Never interfere
+		// with API requests — the interactive-login block is defence-in-depth for
+		// the browser login form only.
+		// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- reading a WordPress core filter, not registering a plugin-owned hook.
+		$is_api_request = apply_filters(
+			'application_password_is_api_request',
+			( defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST ) || ( defined( 'REST_REQUEST' ) && REST_REQUEST )
+		);
+		// phpcs:enable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
+
+		if ( $is_api_request ) {
+			return $user;
+		}
+
 		// Path 1: a prior filter already resolved a WP_User — check the meta flag.
 		if ( $user instanceof \WP_User && '1' === get_user_meta( $user->ID, self::META_FLAG, true ) ) {
 			return new \WP_Error(
