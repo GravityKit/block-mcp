@@ -219,6 +219,23 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertEmpty( $passwords, 'No password must be minted on a conflicting non-agent user' );
 	}
 
+	/**
+	 * prepare_installer() must propagate WP_Error from MCPB_Generator::build()
+	 * without masking the error code.
+	 *
+	 * When the server bundle path is not readable, build() returns
+	 * WP_Error('mcpb_server_missing'). The is_wp_error($path) guard in
+	 * prepare_installer() must detect this and return the same WP_Error to the
+	 * caller instead of treating the error object as a filesystem path.
+	 */
+	public function test_prepare_installer_propagates_build_wp_error() {
+		$page   = new Connect_Page();
+		$result = $page->prepare_installer( 'Claude Desktop', '/nonexistent/index.cjs' );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'mcpb_server_missing', $result->get_error_code() );
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// connection_state().
 	// ──────────────────────────────────────────────────────────────────────

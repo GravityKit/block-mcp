@@ -90,6 +90,71 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * build() must return WP_Error('mcpb_tempfile_failed') when the temporary
+	 * file cannot be created.
+	 *
+	 * wp_tempnam() can return false on systems where the temp directory is
+	 * missing, full, or has restricted permissions. Without the guard the
+	 * code would pass false to ZipArchive::open(), producing a PHP warning
+	 * and an indeterminate error code instead of a usable WP_Error.
+	 */
+	public function test_build_returns_wp_error_when_tempfile_fails() {
+		$generator = new class() extends MCPB_Generator {
+			protected function make_temp_path() {
+				return false;
+			}
+		};
+
+		$server_fixture = wp_tempnam( 'srv' );
+		file_put_contents( $server_fixture, "#!/usr/bin/env node\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+		$result = $generator->build( $this->creds(), $server_fixture );
+
+		wp_delete_file( $server_fixture );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'mcpb_tempfile_failed', $result->get_error_code() );
+	}
+
+	/**
+	 * build() must delete the temp file created by make_temp_path() when
+	 * ZipArchive::open() fails, leaving no orphaned file on disk.
+	 *
+	 * Before the fix, the zip-open failure path returned early without
+	 * calling wp_delete_file(), leaking the empty temp file. The test
+	 * subclass injects a path inside a non-existent directory so open()
+	 * always fails, then asserts the path is gone after build() returns.
+	 */
+	public function test_build_cleans_up_temp_file_on_zip_open_failure() {
+		$bogus_dir  = sys_get_temp_dir() . '/gk_nonexistent_' . uniqid( '', true );
+		$bogus_path = $bogus_dir . '/block-mcp.mcpb';
+
+		$generator = new class( $bogus_path ) extends MCPB_Generator {
+			/** @var string */
+			private $injected_path;
+
+			public function __construct( string $path ) {
+				$this->injected_path = $path;
+			}
+
+			protected function make_temp_path() {
+				return $this->injected_path;
+			}
+		};
+
+		$server_fixture = wp_tempnam( 'srv' );
+		file_put_contents( $server_fixture, "#!/usr/bin/env node\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+		$result = $generator->build( $this->creds(), $server_fixture );
+
+		wp_delete_file( $server_fixture );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'mcpb_zip_open_failed', $result->get_error_code() );
+		$this->assertFileDoesNotExist( $bogus_path, 'build() must not leave a temp file behind on zip-open failure' );
+	}
+
+	/**
 	 * build() must produce a valid zip archive containing manifest.json
 	 * (with name 'block-mcp') and the MCP server binary at the path
 	 * server/index.cjs that Claude Desktop expects at launch.

@@ -136,13 +136,16 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 	/**
 	 * On multisite, provisioning the agent on a non-main sub-site and then
 	 * running the per-blog uninstall teardown in that blog's context must
-	 * remove the sub-site's agent user and its Application Passwords.
+	 * remove the sub-site's agent user, its Application Passwords, and
+	 * reassign any agent-authored posts to an administrator rather than
+	 * deleting them.
 	 *
-	 * This exercises the Fix 1 contract: purge() is called inside the
-	 * per-blog switch_to_blog() sweep, not once after it. Without that fix,
-	 * gk_block_api_agent_user_id is read from the main site's option table
-	 * (where it was never written for sub-sites), and the sub-site agent
-	 * survives uninstall.
+	 * The post-reassignment contract: purge() issues a $wpdb->update on
+	 * wp_posts before calling wpmu_delete_user(). Without that update,
+	 * wpmu_delete_user() would delete the agent's posts network-wide.
+	 * This test inserts a post authored by the agent, runs purge(), and
+	 * asserts the post still exists and its post_author is no longer the
+	 * agent's ID.
 	 *
 	 * @group ms-required
 	 */
@@ -168,11 +171,25 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$before = WP_Application_Passwords::get_user_application_passwords( $agent_id );
 		$this->assertNotEmpty( $before, 'An app password must exist on the sub-site before teardown' );
 
+		// Insert a post authored by the agent — purge() must reassign it, not
+		// delete it, so the content survives plugin removal.
+		$post_id = wp_insert_post(
+			array(
+				'post_title'   => 'Agent-authored post (reassignment test)',
+				'post_status'  => 'publish',
+				'post_author'  => $agent_id,
+				'post_content' => 'Authored by the agent service account.',
+			)
+		);
+		$this->assertIsInt( $post_id );
+		$this->assertGreaterThan( 0, $post_id, 'Test post must be created before purge()' );
+
 		// Plant the deactivation-notice transient on this sub-site.
 		set_transient( 'gk_block_api_deactivation_notice', 1, 5 * MINUTE_IN_SECONDS );
 
 		// Simulate the per-blog teardown that uninstall.php runs inside
-		// switch_to_blog(). This is the code path Fix 1 moves purge() into.
+		// switch_to_blog(). purge() must (a) reassign the post and (b) delete
+		// the agent user — all while the blog context is active.
 		gk_block_api_uninstall_blog(); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedFunctionFound -- calling the function defined in uninstall.php
 		Agent_Provisioner::purge();
 
@@ -193,6 +210,20 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$this->assertEmpty(
 			$after,
 			'All Application Passwords for the sub-site agent user must be revoked after per-blog purge()'
+		);
+
+		// Post must still exist and its author must have been reassigned away
+		// from the (now-deleted) agent account.
+		$post = get_post( $post_id );
+		$this->assertInstanceOf(
+			\WP_Post::class,
+			$post,
+			'Agent-authored post must still exist after purge() — content must not be deleted'
+		);
+		$this->assertNotSame(
+			$agent_id,
+			(int) $post->post_author,
+			'post_author must no longer be the agent ID after purge() reassignment'
 		);
 
 		restore_current_blog();

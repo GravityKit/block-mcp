@@ -113,6 +113,19 @@ class MCPB_Generator {
 	}
 
 	/**
+	 * Return a writable temporary file path for the .mcpb archive.
+	 *
+	 * Extracted so tests can subclass and override this method to simulate
+	 * temp-file creation failures without touching the filesystem.
+	 *
+	 * @since 1.9.0
+	 * @return string|false Absolute path to the new empty temp file, or false on failure.
+	 */
+	protected function make_temp_path() {
+		return wp_tempnam( 'block-mcp.mcpb' );
+	}
+
+	/**
 	 * Build a .mcpb zip archive and return its filesystem path.
 	 *
 	 * The returned path points to a temporary file created by wp_tempnam().
@@ -139,10 +152,18 @@ class MCPB_Generator {
 			);
 		}
 
-		$path = wp_tempnam( 'block-mcp.mcpb' );
+		$path = $this->make_temp_path();
+
+		if ( ! $path ) {
+			return new \WP_Error(
+				'mcpb_tempfile_failed',
+				__( 'Could not create a temporary file for the installer.', 'gk-block-api' )
+			);
+		}
 
 		$zip = new \ZipArchive();
 		if ( true !== $zip->open( $path, \ZipArchive::OVERWRITE ) ) {
+			wp_delete_file( $path );
 			return new \WP_Error(
 				'mcpb_zip_open_failed',
 				__( 'Could not create the installer file.', 'gk-block-api' )
