@@ -203,7 +203,10 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
  */
 function init_agent() {
 	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
-	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 99 );
+	// Priority 30 ensures the block fires after wp_authenticate_username_password
+	// (priority 20) so it intercepts both wrong-password WP_Error results and
+	// correctly-authenticated WP_User objects for the service account.
+	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 30, 3 );
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
 

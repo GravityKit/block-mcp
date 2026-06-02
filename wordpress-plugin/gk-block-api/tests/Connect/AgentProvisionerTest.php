@@ -48,6 +48,7 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		}
 		remove_role( Agent_Provisioner::ROLE );
 		delete_option( 'gk_block_api_agent_user_id' );
+		remove_all_filters( 'authenticate' );
 		parent::tear_down();
 	}
 
@@ -84,6 +85,44 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		$this->assertSame( $first, $second );
 		$this->assertSame( $first, (int) get_option( 'gk_block_api_agent_user_id' ) );
 		$this->assertCount( 1, get_users( array( 'login__in' => array( Agent_Provisioner::LOGIN ) ) ) );
+	}
+
+	/**
+	 * Interactive login must be blocked for the service account regardless of
+	 * the password supplied.
+	 *
+	 * block_agent_login() is wired to the 'authenticate' filter in
+	 * gk-block-api.php on plugins_loaded, which fires before the test
+	 * bootstrap runs individual tests but after WP_UnitTestCase::set_up().
+	 * If the filter is not yet active in this environment we add it directly
+	 * so the contract is testable in isolation.
+	 *
+	 * Two sub-contracts:
+	 *  1. wp_authenticate() for the agent login returns WP_Error('agent_no_login').
+	 *  2. block_agent_login() called with a normal (non-agent) WP_User returns
+	 *     that user unchanged — it must not block real users.
+	 */
+	public function test_interactive_login_is_blocked_for_agent_and_passes_through_for_normal_users() {
+		$agent_id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $agent_id );
+
+		// Ensure the authenticate filter hook is active in this test context.
+		// The filter is registered at priority 30 with 3 accepted args in
+		// gk-block-api.php on plugins_loaded; it is present after the bootstrap
+		// loads the plugin. The check here guards test environments where the
+		// bootstrap path differs.
+		if ( ! has_filter( 'authenticate', array( 'GravityKit\BlockAPI\Agent_Provisioner', 'block_agent_login' ) ) ) {
+			add_filter( 'authenticate', array( 'GravityKit\BlockAPI\Agent_Provisioner', 'block_agent_login' ), 30, 3 );
+		}
+
+		$result = wp_authenticate( Agent_Provisioner::LOGIN, 'whatever' );
+
+		$this->assertInstanceOf( WP_Error::class, $result, 'wp_authenticate() must return WP_Error for the service account' );
+		$this->assertSame( 'agent_no_login', $result->get_error_code(), 'Error code must be agent_no_login' );
+
+		// Pass-through: a normal WP_User must be returned unchanged.
+		$normal_user = self::factory()->user->create_and_get( array( 'role' => 'editor' ) );
+		$this->assertSame( $normal_user, Agent_Provisioner::block_agent_login( $normal_user ), 'block_agent_login() must return a non-agent WP_User unchanged' );
 	}
 
 	/**

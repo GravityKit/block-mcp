@@ -83,9 +83,11 @@ class Agent_Provisioner {
 				'edit_pages'           => true,
 				'edit_others_pages'    => true,
 				'edit_published_pages' => true,
+				'publish_pages'        => true,
 				'upload_files'         => true,
-				'manage_categories'    => true,
-				// Deliberately NO delete_*, NO unfiltered_html, NO manage_options.
+				// Deliberately NO delete_*, NO unfiltered_html, NO manage_options,
+				// NO manage_categories (a delete-class cap; term assignment flows
+				// through assign_terms, derived from edit_posts).
 			)
 		);
 
@@ -188,6 +190,25 @@ class Agent_Provisioner {
 	 * This method is idempotent: calling it when no agent exists (missing
 	 * option, already-deleted user) completes silently with no errors.
 	 *
+	 * Content reassignment strategy
+	 * ──────────────────────────────
+	 * Single-site: wp_delete_user() accepts a reassign argument; authored posts
+	 * are transferred to that user ID rather than deleted.
+	 *
+	 * Multisite: wpmu_delete_user() does not accept a reassign argument and
+	 * deletes the user's posts across the network. To preserve content, this
+	 * method updates post_author on the current blog before calling
+	 * wpmu_delete_user(). Other blogs in the network are outside the scope of
+	 * a single-site uninstall; if full network coverage is required, a
+	 * network-admin uninstall hook should loop over blogs and call purge() on
+	 * each. The current blog's content is always protected.
+	 *
+	 * The reassign target is resolved via the gk_block_api_agent_reassign_to
+	 * filter (default 0). When the filter returns falsy, the first
+	 * administrator on the site is used. If no administrator exists — an edge
+	 * case on misconfigured sites — the fallback is null, which restores the
+	 * original deletion behaviour for that branch only.
+	 *
 	 * @since 1.9.0
 	 *
 	 * @return void
@@ -217,6 +238,33 @@ class Agent_Provisioner {
 			// where the deleted user row might still reside in an opcode cache.
 			\WP_Application_Passwords::delete_all_application_passwords( $agent_id );
 
+			// Resolve the reassign target: filter first, then first administrator.
+			/**
+			 * Filters the user ID that receives agent-authored content when the
+			 * service account is deleted.
+			 *
+			 * Return a non-zero integer to specify the reassign target directly.
+			 * When the filter returns 0 (the default), purge() selects the first
+			 * administrator on the site. If no administrator is found, authored
+			 * content is handled by WordPress default deletion behaviour.
+			 *
+			 * @since 1.9.0
+			 *
+			 * @param int $reassign_to Target user ID, or 0 to use the default. Default 0.
+			 */
+			$reassign = (int) apply_filters( 'gk_block_api_agent_reassign_to', 0 );
+
+			if ( ! $reassign ) {
+				$admins   = get_users(
+					array(
+						'role'   => 'administrator',
+						'number' => 1,
+						'fields' => 'ID',
+					)
+				);
+				$reassign = $admins ? (int) $admins[0] : 0;
+			}
+
 			// wp_delete_user() lives in wp-admin/includes/user.php and is not
 			// loaded on front-end or WP-CLI requests.
 			if ( ! function_exists( 'wp_delete_user' ) ) {
@@ -224,15 +272,27 @@ class Agent_Provisioner {
 			}
 
 			if ( is_multisite() ) {
-				// wpmu_delete_user() removes the user from the network entirely,
-				// including all sub-site relationships — appropriate for a
-				// service account that was never a real person.
 				if ( ! function_exists( 'wpmu_delete_user' ) ) {
 					require_once ABSPATH . 'wp-admin/includes/ms.php';
 				}
+
+				// wpmu_delete_user() takes no reassign parameter and deletes
+				// authored posts network-wide. Reassign content on the current
+				// blog before the network deletion runs.
+				if ( $reassign ) {
+					global $wpdb;
+					$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$wpdb->posts,
+						array( 'post_author' => $reassign ),
+						array( 'post_author' => $agent_id ),
+						array( '%d' ),
+						array( '%d' )
+					);
+				}
+
 				wpmu_delete_user( $agent_id );
 			} else {
-				wp_delete_user( $agent_id );
+				wp_delete_user( $agent_id, $reassign ? $reassign : null );
 			}
 		}
 
@@ -243,22 +303,50 @@ class Agent_Provisioner {
 	/**
 	 * Block interactive login for the service account.
 	 *
-	 * Filters `authenticate`: any user carrying the agent meta flag is
-	 * rejected with an `agent_no_login` WP_Error, so the account's credentials
-	 * work only for non-interactive (REST / Application Password) requests.
+	 * Hooked to `authenticate` at priority 10 — before the built-in password
+	 * check at priority 20 — so login is rejected regardless of whether the
+	 * caller supplies a correct password. The account's credentials are
+	 * therefore valid only for non-interactive (REST / Application Password)
+	 * requests.
+	 *
+	 * Two rejection paths exist:
+	 *  1. A prior filter has already resolved `$user` to the agent's WP_User
+	 *     (cookie auth, custom auth plugin running before priority 10).
+	 *  2. `$user` is null or WP_Error and the supplied `$username` resolves to
+	 *     the agent — the common case where standard password auth has not yet
+	 *     run.
+	 *
 	 * Pass-through for every other user.
 	 *
 	 * @since 1.9.0
 	 *
-	 * @param null|\WP_User|\WP_Error $user Authenticating user, or a prior filter's result.
+	 * @param null|\WP_User|\WP_Error $user     Authenticating user, or a prior filter's result.
+	 * @param string                  $username Login name supplied by the caller.
 	 * @return null|\WP_User|\WP_Error The user unchanged, or WP_Error for the service account.
 	 */
-	public static function block_agent_login( $user ) {
+	public static function block_agent_login( $user, string $username = '' ) {
+		// Path 1: a prior filter already resolved a WP_User — check the meta flag.
 		if ( $user instanceof \WP_User && '1' === get_user_meta( $user->ID, self::META_FLAG, true ) ) {
 			return new \WP_Error(
 				'agent_no_login',
 				__( 'This is a service account and cannot log in interactively.', 'gk-block-api' )
 			);
+		}
+
+		// Path 2: look up by the supplied login when no WP_User has been resolved
+		// yet. This covers both the pre-password-check case (user is null) and
+		// the post-check case where a prior filter returned a WP_Error (e.g.
+		// incorrect_password from wp_authenticate_username_password at priority
+		// 20 — running after us). By re-checking the username at this point, the
+		// block applies regardless of whether the password was correct or not.
+		if ( ! $user instanceof \WP_User && '' !== $username ) {
+			$looked_up = get_user_by( 'login', $username );
+			if ( $looked_up instanceof \WP_User && '1' === get_user_meta( $looked_up->ID, self::META_FLAG, true ) ) {
+				return new \WP_Error(
+					'agent_no_login',
+					__( 'This is a service account and cannot log in interactively.', 'gk-block-api' )
+				);
+			}
 		}
 
 		return $user;

@@ -168,6 +168,39 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * purge() must reassign agent-authored posts to another user rather than
+	 * deleting them.
+	 *
+	 * When an agent account is removed, any content it authored must survive.
+	 * Passing no reassign argument to wp_delete_user() causes WordPress to
+	 * delete every post the user authored. purge() resolves a reassign target
+	 * (via the gk_block_api_agent_reassign_to filter, falling back to the
+	 * first administrator) and passes it to wp_delete_user() so authored
+	 * content is preserved under a different owner.
+	 */
+	public function test_purge_reassigns_agent_authored_posts_rather_than_deleting_them() {
+		$agent_id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $agent_id );
+
+		$post_id = wp_insert_post(
+			array(
+				'post_title'  => 'Agent-authored post',
+				'post_status' => 'publish',
+				'post_type'   => 'post',
+				'post_author' => $agent_id,
+			)
+		);
+		$this->assertIsInt( $post_id );
+		$this->assertGreaterThan( 0, $post_id );
+
+		Agent_Provisioner::purge();
+
+		$post = get_post( $post_id );
+		$this->assertNotNull( $post, 'Agent-authored post must still exist after purge()' );
+		$this->assertNotSame( $agent_id, (int) $post->post_author, 'Post author must have been reassigned away from the deleted agent' );
+	}
+
+	/**
 	 * Calling purge() when no agent has ever been provisioned (no option, no
 	 * user) must complete silently without errors, warnings, or fatals.
 	 *

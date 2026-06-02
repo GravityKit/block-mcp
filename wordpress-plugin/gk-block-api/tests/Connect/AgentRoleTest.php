@@ -36,6 +36,12 @@ class AgentRoleTest extends WP_UnitTestCase {
 	/**
 	 * The default capability set must include the content-editing permissions
 	 * the agent requires and must exclude privileged capabilities.
+	 *
+	 * publish_pages is required for publishing pages via create_post — without
+	 * it, POST /posts with post_type:page and status:publish returns 403.
+	 * manage_categories is a delete-class capability that the role must not
+	 * hold; term assignment on editable posts flows through assign_terms which
+	 * is derived from edit_posts.
 	 */
 	public function test_register_role_creates_minimal_capabilities() {
 		Agent_Provisioner::register_role();
@@ -43,9 +49,32 @@ class AgentRoleTest extends WP_UnitTestCase {
 		$this->assertNotNull( $role );
 		$this->assertTrue( $role->has_cap( 'edit_others_posts' ) );
 		$this->assertTrue( $role->has_cap( 'upload_files' ) );
+		$this->assertTrue( $role->has_cap( 'publish_pages' ), 'publish_pages must be granted so the agent can publish pages' );
 		$this->assertFalse( $role->has_cap( 'delete_others_posts' ) );
 		$this->assertFalse( $role->has_cap( 'unfiltered_html' ) );
 		$this->assertFalse( $role->has_cap( 'manage_options' ) );
+		$this->assertFalse( $role->has_cap( 'manage_categories' ), 'manage_categories must not be granted — it is a delete-class cap the agent does not need' );
+	}
+
+	/**
+	 * When the gk_block_api_agent_role filter returns a non-canonical slug,
+	 * register_role() must return that slug and must NOT create or modify the
+	 * block_mcp_agent role — the operator is responsible for ensuring the
+	 * custom role exists.
+	 *
+	 * This covers the delegation path: a site that routes the agent into the
+	 * built-in 'editor' role (or any other custom role) via the filter must not
+	 * have a redundant block_mcp_agent role created alongside it.
+	 */
+	public function test_role_slug_filter_returns_custom_slug_without_creating_canonical_role() {
+		add_filter( 'gk_block_api_agent_role', static fn() => 'editor' );
+
+		$returned_slug = Agent_Provisioner::register_role();
+
+		remove_all_filters( 'gk_block_api_agent_role' );
+
+		$this->assertSame( 'editor', $returned_slug, 'register_role() must return the slug the filter resolves' );
+		$this->assertNull( get_role( Agent_Provisioner::ROLE ), 'block_mcp_agent role must not be created when the filter returns a custom slug' );
 	}
 
 	/**
