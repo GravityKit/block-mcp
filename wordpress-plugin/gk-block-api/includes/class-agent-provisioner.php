@@ -171,6 +171,76 @@ class Agent_Provisioner {
 	}
 
 	/**
+	 * Tear down the agent service account and all associated credentials.
+	 *
+	 * Reads the agent user ID from the gk_block_api_agent_user_id option,
+	 * verifies the user carries the _gk_block_api_agent meta flag (so a
+	 * stale option pointing at a real user can never cause accidental
+	 * deletion), revokes every Application Password on that user, deletes the
+	 * user, removes the option, and removes the block_mcp_agent role.
+	 *
+	 * The entire operation is gated on the
+	 * `gk_block_api_remove_agent_on_uninstall` filter (default true). When
+	 * the filter returns false, purge() is a no-op — an operator who wants to
+	 * keep the service account across plugin reinstalls can opt out without
+	 * forking the plugin.
+	 *
+	 * This method is idempotent: calling it when no agent exists (missing
+	 * option, already-deleted user) completes silently with no errors.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @return void
+	 */
+	public static function purge() {
+		/**
+		 * Filters whether purge() should remove the agent user and credentials
+		 * during uninstall.
+		 *
+		 * Return false to keep the service account intact — useful for operators
+		 * who manage credentials out-of-band and want to preserve them across
+		 * plugin reinstalls.
+		 *
+		 * @since 1.9.0
+		 *
+		 * @param bool $remove Whether to remove the agent. Default true.
+		 */
+		if ( ! apply_filters( 'gk_block_api_remove_agent_on_uninstall', true ) ) {
+			return;
+		}
+
+		$agent_id = (int) get_option( 'gk_block_api_agent_user_id' );
+
+		if ( $agent_id > 0 && '1' === get_user_meta( $agent_id, self::META_FLAG, true ) ) {
+			// Revoke all Application Passwords before the user account is deleted
+			// so the credentials cannot be replayed even during a brief window
+			// where the deleted user row might still reside in an opcode cache.
+			\WP_Application_Passwords::delete_all_application_passwords( $agent_id );
+
+			// wp_delete_user() lives in wp-admin/includes/user.php and is not
+			// loaded on front-end or WP-CLI requests.
+			if ( ! function_exists( 'wp_delete_user' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/user.php';
+			}
+
+			if ( is_multisite() ) {
+				// wpmu_delete_user() removes the user from the network entirely,
+				// including all sub-site relationships — appropriate for a
+				// service account that was never a real person.
+				if ( ! function_exists( 'wpmu_delete_user' ) ) {
+					require_once ABSPATH . 'wp-admin/includes/ms.php';
+				}
+				wpmu_delete_user( $agent_id );
+			} else {
+				wp_delete_user( $agent_id );
+			}
+		}
+
+		delete_option( 'gk_block_api_agent_user_id' );
+		remove_role( self::ROLE );
+	}
+
+	/**
 	 * Block interactive login for the service account.
 	 *
 	 * Filters `authenticate`: any user carrying the agent meta flag is

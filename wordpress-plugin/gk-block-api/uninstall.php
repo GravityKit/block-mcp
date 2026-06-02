@@ -16,6 +16,10 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
+// Agent_Provisioner is needed for purge(). The plugin's spl_autoload_register
+// is not active during uninstall, so load the class file directly.
+require_once __DIR__ . '/includes/class-agent-provisioner.php';
+
 /**
  * Delete every plugin option / transient on the current blog.
  */
@@ -41,14 +45,17 @@ function gk_block_api_uninstall_blog() {
 	// Per-post rate-limit transients accumulate per write activity. Sweep
 	// the option table directly — there's no core helper for prefixed
 	// transient deletion. Also sweeps the per-IP `instr_rl_` rate-limit
-	// transients written by the public /instructions endpoint.
+	// transients written by the public /instructions endpoint, and the
+	// one-time paste-mode passwords stashed by Connect_Page.
 	global $wpdb;
 	$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		"DELETE FROM {$wpdb->options}
 			WHERE option_name LIKE '_transient_gk_block_api_rate_%'
 			   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'
 			   OR option_name LIKE '_transient_gk_block_api_instr_rl_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'"
+			   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'
+			   OR option_name LIKE '_transient_gk_block_api_paste_pw_%'
+			   OR option_name LIKE '_transient_timeout_gk_block_api_paste_pw_%'"
 	);
 }
 
@@ -62,3 +69,8 @@ if ( is_multisite() ) {
 } else {
 	gk_block_api_uninstall_blog();
 }
+
+// Tear down the agent service account (user + app passwords + role + option).
+// purge() is idempotent and respects the gk_block_api_remove_agent_on_uninstall
+// filter, so operators can opt out of agent deletion during reinstalls.
+GravityKit\BlockAPI\Agent_Provisioner::purge();
