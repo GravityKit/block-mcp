@@ -14,6 +14,11 @@
 
 namespace GravityKit\BlockAPI;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Mints an Application Password for the supplied user.
  *

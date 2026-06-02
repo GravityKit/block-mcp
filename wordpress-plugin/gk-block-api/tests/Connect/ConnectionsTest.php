@@ -85,4 +85,24 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$this->assertTrue( $ok );
 		$this->assertSame( array(), \WP_Application_Passwords::get_user_application_passwords( $this->user_id ) );
 	}
+
+	/**
+	 * revoke() must return false when the supplied UUID does not match any
+	 * stored credential and must leave the unrelated seeded password intact.
+	 *
+	 * This pins the false-path contract: a caller passing a stale or invalid
+	 * UUID receives a clear false result rather than a silent no-op, and
+	 * any existing credentials on the user account are unaffected.
+	 */
+	public function test_revoke_returns_false_for_unknown_uuid() {
+		$uuid = $this->seed( 'Block MCP — Claude Desktop' );
+
+		$ok = ( new Connections() )->revoke( $this->user_id, 'nonexistent-uuid' );
+
+		$this->assertFalse( $ok );
+
+		$remaining = \WP_Application_Passwords::get_user_application_passwords( $this->user_id );
+		$this->assertCount( 1, $remaining, 'Seeded password must be untouched' );
+		$this->assertSame( $uuid, $remaining[0]['uuid'] );
+	}
 }

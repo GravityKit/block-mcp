@@ -200,6 +200,8 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
  * activation hook did not run (e.g. direct file drops, must-use setups).
  * Also installs the authenticate filter that blocks interactive login for
  * the service account.
+ *
+ * @since 1.9.0
  */
 function init_agent() {
 	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
@@ -335,11 +337,41 @@ function maybe_show_deactivation_notice() {
 }
 
 /**
+ * Revoke every Application Password on the agent user.
+ *
+ * This is the testable core of handle_revoke_all(). It reads the stored
+ * agent user ID, deletes all of its Application Passwords via core, and
+ * returns the count of passwords that were present before deletion. Cap/nonce
+ * enforcement and the redirect stay in the HTTP handler so tests can call
+ * this seam directly without triggering exit.
+ *
+ * @since  1.9.0
+ *
+ * @return int Number of Application Passwords that were revoked (0 when no
+ *             agent user is stored or the user has no passwords).
+ */
+function do_revoke_all() {
+	$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+	if ( $agent_id <= 0 ) {
+		return 0;
+	}
+
+	$passwords = \WP_Application_Passwords::get_user_application_passwords( $agent_id );
+	$count     = count( $passwords );
+
+	if ( $count > 0 ) {
+		\WP_Application_Passwords::delete_all_application_passwords( $agent_id );
+	}
+
+	return $count;
+}
+
+/**
  * Handle the "Revoke all connections" admin_post action.
  *
- * Verifies manage_options capability and nonce, then revokes every
- * Application Password on the agent user. Redirects back to the plugins
- * screen with a success notice.
+ * Verifies manage_options capability and nonce, delegates revocation to
+ * do_revoke_all(), then redirects back to the plugins screen with a success
+ * notice.
  *
  * @since 1.9.0
  */
@@ -354,10 +386,7 @@ function handle_revoke_all() {
 
 	check_admin_referer( 'gk_block_api_revoke_all' );
 
-	$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
-	if ( $agent_id > 0 ) {
-		\WP_Application_Passwords::delete_all_application_passwords( $agent_id );
-	}
+	do_revoke_all();
 
 	wp_safe_redirect(
 		add_query_arg(

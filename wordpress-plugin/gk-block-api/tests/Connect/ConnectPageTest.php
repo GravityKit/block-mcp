@@ -32,6 +32,7 @@ declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Agent_Provisioner;
 use GravityKit\BlockAPI\Connect_Page;
+use GravityKit\BlockAPI\Connections;
 
 /**
  * Tests for Connect_Page::prepare_installer() and Connect_Page::connection_state().
@@ -263,7 +264,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * This mode lets security-conscious operators avoid embedding the plaintext
 	 * credential in the downloadable file at the cost of requiring a manual copy.
 	 */
-	public function test_force_paste_constant_omits_password_default() {
+	public function test_secret_at_rest_filter_paste_mode_omits_password_default() {
 		add_filter(
 			'gk_block_api_secret_at_rest_mode',
 			static function () {
@@ -290,5 +291,169 @@ class ConnectPageTest extends WP_UnitTestCase {
 		);
 
 		wp_delete_file( $result['path'] );
+	}
+
+	/**
+	 * When GK_BLOCK_API_FORCE_PASTE_SECRET is defined and true (no filter), the
+	 * built bundle must carry an empty password default and the return array must
+	 * carry the plaintext password separately.
+	 *
+	 * This pins the constant-driven path independently of the filter-driven path
+	 * covered by test_secret_at_rest_filter_paste_mode_omits_password_default().
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_force_paste_constant_omits_password_default() {
+		define( 'GK_BLOCK_API_FORCE_PASTE_SECRET', true );
+
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+
+		$fixture = wp_tempnam( 'mcp-server' );
+		file_put_contents( $fixture, "#!/usr/bin/env node\n// fixture\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+		$page   = new Connect_Page();
+		$result = $page->prepare_installer( 'Claude Desktop', $fixture );
+
+		wp_delete_file( $fixture );
+
+		$this->assertIsArray( $result, 'prepare_installer() must return an array' );
+		$this->assertSame( 'paste', $result['mode'] );
+		$this->assertNotEmpty( $result['password'], 'plaintext password must be returned in paste mode' );
+
+		$zip = new ZipArchive();
+		$zip->open( $result['path'] );
+		$manifest = json_decode( $zip->getFromName( 'manifest.json' ), true );
+		$zip->close();
+
+		$this->assertSame(
+			'',
+			$manifest['user_config']['wordpress_app_password']['default'],
+			'manifest must carry empty password default when FORCE_PASTE_SECRET constant is true'
+		);
+
+		wp_delete_file( $result['path'] );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// do_revoke() — testable seam for the revoke handler.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * do_revoke() must delete the targeted Application Password and return true
+	 * when the agent user ID is stored and the UUID matches a live credential.
+	 *
+	 * This pins the testable seam extracted from handle_revoke() so the
+	 * credential-deletion logic can be verified without invoking the full handler
+	 * (which calls exit after the redirect).
+	 */
+	public function test_do_revoke_removes_the_credential() {
+		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		update_option( 'gk_block_api_agent_user_id', $agent_id );
+
+		$created = \WP_Application_Passwords::create_new_application_password(
+			$agent_id,
+			array( 'name' => 'Block MCP — Claude Desktop' )
+		);
+		$uuid = $created[1]['uuid'];
+
+		$page = new Connect_Page();
+		$ok   = $page->do_revoke( $uuid );
+
+		$this->assertTrue( $ok );
+
+		$remaining = \WP_Application_Passwords::get_user_application_passwords( $agent_id );
+		$this->assertEmpty( $remaining, 'Application Password must be deleted after do_revoke()' );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// gk_block_api_do_revoke_all() — testable seam for the revoke-all handler.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * The revoke-all seam must delete every Application Password on the agent
+	 * user and return the count of passwords that were present.
+	 *
+	 * Seeding two passwords and asserting both are gone after the call confirms
+	 * that delete_all_application_passwords() was invoked and that the return
+	 * value accurately reflects the pre-deletion count.
+	 */
+	public function test_do_revoke_all_removes_every_credential() {
+		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		update_option( 'gk_block_api_agent_user_id', $agent_id );
+
+		\WP_Application_Passwords::create_new_application_password(
+			$agent_id,
+			array( 'name' => 'Block MCP — Claude Desktop' )
+		);
+		\WP_Application_Passwords::create_new_application_password(
+			$agent_id,
+			array( 'name' => 'Block MCP — Cursor' )
+		);
+
+		$count = GravityKit\BlockAPI\do_revoke_all();
+
+		$this->assertSame( 2, $count, 'do_revoke_all() must return the number of passwords that were revoked' );
+
+		$remaining = \WP_Application_Passwords::get_user_application_passwords( $agent_id );
+		$this->assertEmpty( $remaining, 'All Application Passwords must be gone after do_revoke_all()' );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// render_page() — output contracts.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * render_page() in the 'ready' state must output the after-download
+	 * guidance block and both client-picker options (Claude Desktop and the
+	 * "Something else" fallback).
+	 *
+	 * This pins the P0 deliverables for the ready/pre-connection state: the
+	 * next-steps panel and the client picker must be present whenever the form
+	 * is rendered.
+	 */
+	public function test_render_page_shows_next_steps_and_picker_ready_state() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must be present' );
+		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop picker option must be present' );
+		$this->assertStringContainsString( "Something else", $html, '"Something else" picker option must be present' );
+	}
+
+	/**
+	 * render_page() in the 'connected' state must output the connected-state
+	 * markers ("You're connected") and a Disconnect control for each active
+	 * connection, in addition to the after-download guidance and client picker.
+	 *
+	 * This pins the P0 deliverable for the post-connection state: both the
+	 * connection indicator and the revoke affordance must be rendered when at
+	 * least one credential is live.
+	 */
+	public function test_render_page_shows_connected_state_markers() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		update_option( 'gk_block_api_agent_user_id', $agent_id );
+
+		\WP_Application_Passwords::create_new_application_password(
+			$agent_id,
+			array( 'name' => 'Block MCP — Claude Desktop' )
+		);
+
+		ob_start();
+		( new Connect_Page() )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( "You&#039;re connected", $html, "Connected state marker must be present" );
+		$this->assertStringContainsString( 'Disconnect', $html, 'Disconnect control must be present for active connection' );
+		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must still be present in connected state' );
 	}
 }

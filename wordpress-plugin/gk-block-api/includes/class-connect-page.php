@@ -266,11 +266,33 @@ class Connect_Page {
 	}
 
 	/**
+	 * Revoke the Application Password identified by UUID for the agent user.
+	 *
+	 * This is the testable core of handle_revoke(). It performs the agent-id
+	 * lookup and delegates deletion to Connections::revoke(), returning the
+	 * boolean result. Cap/nonce enforcement and the redirect stay in the HTTP
+	 * handler so tests can call this seam directly without triggering exit.
+	 *
+	 * @since  1.9.0
+	 *
+	 * @param  string $uuid UUID of the Application Password to delete.
+	 * @return bool True when the credential was deleted, false otherwise.
+	 */
+	public function do_revoke( $uuid ) {
+		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+
+		if ( $agent_id <= 0 || '' === $uuid ) {
+			return false;
+		}
+
+		return ( new Connections() )->revoke( $agent_id, $uuid );
+	}
+
+	/**
 	 * Handle a revoke (disconnect) form submission.
 	 *
-	 * Validates capabilities and nonce, revokes the Application Password
-	 * identified by the posted UUID, then redirects back to the page with a
-	 * success query parameter.
+	 * Validates capabilities and nonce, delegates the credential deletion to
+	 * do_revoke(), then redirects back to the page with a success query parameter.
 	 *
 	 * @since 1.9.0
 	 */
@@ -281,12 +303,9 @@ class Connect_Page {
 
 		check_admin_referer( self::ACTION_REVOKE );
 
-		$uuid     = isset( $_POST['uuid'] ) ? sanitize_text_field( wp_unslash( $_POST['uuid'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above.
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$uuid = isset( $_POST['uuid'] ) ? sanitize_text_field( wp_unslash( $_POST['uuid'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above.
 
-		if ( $agent_id > 0 && '' !== $uuid ) {
-			( new Connections() )->revoke( $agent_id, $uuid );
-		}
+		$this->do_revoke( $uuid );
 
 		wp_safe_redirect(
 			add_query_arg(
