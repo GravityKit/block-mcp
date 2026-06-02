@@ -73,6 +73,23 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * build() must return WP_Error with code 'mcpb_server_missing' when the
+	 * server bundle path does not exist or is not readable.
+	 *
+	 * Without this guard, ZipArchive::addFile() silently returns false for a
+	 * missing file, producing a manifest-only zip that streams as a successful
+	 * download. Claude Desktop then fails to launch `node server/index.cjs`
+	 * with no user-visible error — a silent dead-end that defeats the
+	 * one-click install promise.
+	 */
+	public function test_build_returns_wp_error_when_server_bundle_missing() {
+		$result = ( new MCPB_Generator() )->build( $this->creds(), '/nonexistent/path/index.cjs' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'mcpb_server_missing', $result->get_error_code() );
+	}
+
+	/**
 	 * build() must produce a valid zip archive containing manifest.json
 	 * (with name 'block-mcp') and the MCP server binary at the path
 	 * server/index.cjs that Claude Desktop expects at launch.

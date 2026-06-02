@@ -119,20 +119,54 @@ class MCPB_Generator {
 	 * The caller is responsible for deleting it after the HTTP response has
 	 * been sent (e.g. via register_shutdown_function + unlink).
 	 *
+	 * Returns WP_Error when the server bundle is absent or unreadable, when the
+	 * zip file cannot be created, or when either entry cannot be written into
+	 * the archive. Callers must check is_wp_error() before treating the return
+	 * value as a path.
+	 *
 	 * @since 1.9.0
 	 *
 	 * @param array<string,string> $creds       Credential set — passed through to manifest().
 	 * @param string               $server_path Absolute path to the pre-built MCP server bundle
 	 *                                          (assets/mcp-server/index.cjs inside the plugin dir).
-	 * @return string Absolute path to the generated .mcpb temp file.
+	 * @return string|\WP_Error Absolute path to the generated .mcpb temp file, or WP_Error on failure.
 	 */
 	public function build( array $creds, $server_path ) {
+		if ( ! is_readable( $server_path ) ) {
+			return new \WP_Error(
+				'mcpb_server_missing',
+				__( 'The Block MCP server bundle is missing. Rebuild the plugin (npm run build) so assets/mcp-server/index.cjs is present.', 'gk-block-api' )
+			);
+		}
+
 		$path = wp_tempnam( 'block-mcp.mcpb' );
 
 		$zip = new \ZipArchive();
-		$zip->open( $path, \ZipArchive::OVERWRITE );
-		$zip->addFromString( 'manifest.json', (string) wp_json_encode( $this->manifest( $creds ) ) );
-		$zip->addFile( $server_path, 'server/index.cjs' );
+		if ( true !== $zip->open( $path, \ZipArchive::OVERWRITE ) ) {
+			return new \WP_Error(
+				'mcpb_zip_open_failed',
+				__( 'Could not create the installer file.', 'gk-block-api' )
+			);
+		}
+
+		if ( false === $zip->addFromString( 'manifest.json', (string) wp_json_encode( $this->manifest( $creds ) ) ) ) {
+			$zip->close();
+			wp_delete_file( $path );
+			return new \WP_Error(
+				'mcpb_manifest_add_failed',
+				__( 'Could not write the manifest into the installer.', 'gk-block-api' )
+			);
+		}
+
+		if ( ! $zip->addFile( $server_path, 'server/index.cjs' ) ) {
+			$zip->close();
+			wp_delete_file( $path );
+			return new \WP_Error(
+				'mcpb_server_add_failed',
+				__( 'Could not bundle the server into the installer.', 'gk-block-api' )
+			);
+		}
+
 		$zip->close();
 
 		return $path;

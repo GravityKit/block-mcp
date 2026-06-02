@@ -139,6 +139,9 @@ class Connect_Page {
 		);
 
 		$path = ( new MCPB_Generator() )->build( $creds, $server_path );
+		if ( is_wp_error( $path ) ) {
+			return $path;
+		}
 
 		$host     = (string) wp_parse_url( home_url(), PHP_URL_HOST );
 		$filename = 'block-mcp-' . ( $host ? $host : 'WordPress' ) . '.mcpb';
