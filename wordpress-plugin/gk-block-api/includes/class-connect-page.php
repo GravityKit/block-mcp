@@ -4,13 +4,18 @@
  *
  * Orchestrates the full connect flow: provisioning the agent service account,
  * minting an Application Password, and streaming a pre-configured .mcpb
- * bundle to the browser. Also renders the active-connections list and handles
- * individual revoke requests.
+ * bundle to the browser, or generating a ready-to-paste setup artifact for
+ * clients that do not support .mcpb installers (Claude Code, Cursor,
+ * ChatGPT Desktop, and a generic "let my AI set it up" prompt path).
  *
- * The testable core is prepare_installer() — it assembles the bundle creds and
- * calls into Agent_Provisioner, App_Password_Issuer, and MCPB_Generator. All
- * admin-menu registration and HTTP-streaming logic delegates here but is kept
- * as thin as possible so the seam stays unit-testable.
+ * The testable cores are:
+ *  - provision_credentials() — shared credential path: ensure agent, issue password, return array.
+ *  - prepare_installer()     — build the .mcpb bundle for Claude Desktop (calls provision_credentials()).
+ *  - setup_artifact()        — assemble the ready-to-paste text/JSON/bash snippet.
+ *  - connection_state()      — determines which render branch to show.
+ *
+ * Admin-menu registration, HTTP streaming, and the redirect-then-render
+ * pattern stay as thin as possible so the seams above stay unit-testable.
  *
  * @package GravityKit\BlockAPI
  * @since   1.9.0
@@ -31,7 +36,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Connect_Page {
 
 	/**
-	 * Form action for the connect (download bundle) handler.
+	 * Form action for the connect (download bundle / generate config) handler.
 	 *
 	 * @since 1.9.0
 	 * @var string
@@ -55,10 +60,10 @@ class Connect_Page {
 	const PAGE_SLUG = 'gk-block-api-connect';
 
 	/**
-	 * Transient key prefix for one-time paste-mode passwords.
+	 * Transient key prefix for one-time paste-mode passwords and setup artifacts.
 	 *
 	 * The full key is this prefix + the current user ID. The transient expires
-	 * in 5 minutes — long enough for the download + page reload, short enough
+	 * in 5 minutes — long enough for the redirect + page reload, short enough
 	 * to minimise the window a password sits in the options table.
 	 *
 	 * @since 1.9.0
@@ -67,12 +72,51 @@ class Connect_Page {
 	const PASTE_TRANSIENT_PREFIX = 'gk_block_api_paste_pw_';
 
 	/**
+	 * Provision the agent service account and mint a fresh Application Password.
+	 *
+	 * This is the shared credential-provisioning seam used by both
+	 * prepare_installer() (for the .mcpb path) and handle_connect() (for the
+	 * artifact path). It runs the full ensure → issue pipeline and returns the
+	 * raw credential set so each caller can consume it in its own way.
+	 *
+	 * @since  1.10.0
+	 *
+	 * @param  string $client Display name for the connecting client (e.g. 'Claude Code').
+	 * @return array|\WP_Error {
+	 *     On success, a credential array ready for callers to use.
+	 *
+	 *     @type string $url      Untrailed home_url() base.
+	 *     @type string $user     Agent user login.
+	 *     @type string $password One-time plaintext Application Password.
+	 *     @type string $uuid     UUID of the minted Application Password.
+	 * }
+	 */
+	public function provision_credentials( $client ) {
+		$agent = ( new Agent_Provisioner() )->ensure();
+		if ( is_wp_error( $agent ) ) {
+			return $agent;
+		}
+
+		$issued = ( new App_Password_Issuer() )->issue( $agent, 'Block MCP — ' . $client );
+		if ( is_wp_error( $issued ) ) {
+			return $issued;
+		}
+
+		$agent_user = get_user_by( 'id', $agent );
+
+		return array(
+			'url'      => untrailingslashit( home_url() ),
+			'user'     => $agent_user ? $agent_user->user_login : Agent_Provisioner::LOGIN,
+			'password' => $issued['password'],
+			'uuid'     => $issued['uuid'],
+		);
+	}
+
+	/**
 	 * Provision the agent, mint a credential, and build a .mcpb bundle.
 	 *
-	 * This is the testable seam for the connect flow. All decisions — which
-	 * URL to embed, whether to prefill or blank the password — happen here.
-	 * The HTTP streaming / cleanup happens in handle_connect(), keeping I/O
-	 * out of this method.
+	 * Calls provision_credentials() then builds the .mcpb from the returned
+	 * creds, keeping the .mcpb path unchanged for the Claude Desktop flow.
 	 *
 	 * @since  1.9.0
 	 *
@@ -93,20 +137,10 @@ class Connect_Page {
 			$server_path = GK_BLOCK_API_PLUGIN_DIR . 'assets/mcp-server/index.cjs';
 		}
 
-		// Provision (or resolve) the agent service account.
-		$agent = ( new Agent_Provisioner() )->ensure();
-		if ( is_wp_error( $agent ) ) {
-			return $agent;
+		$creds = $this->provision_credentials( $client );
+		if ( is_wp_error( $creds ) ) {
+			return $creds;
 		}
-
-		// Mint an Application Password for this client.
-		$issued = ( new App_Password_Issuer() )->issue( $agent, 'Block MCP — ' . $client );
-		if ( is_wp_error( $issued ) ) {
-			return $issued;
-		}
-
-		$issued_plaintext = $issued['password'];
-		$issued_uuid      = $issued['uuid'];
 
 		// Determine secret-at-rest mode. 'prefill' embeds the password in the
 		// bundle so Claude Desktop pre-fills it on import. 'paste' leaves the
@@ -128,17 +162,14 @@ class Connect_Page {
 		 */
 		$mode = (string) apply_filters( 'gk_block_api_secret_at_rest_mode', $default_mode );
 
-		// Build credentials for the bundle generator.
-		$agent_user = get_user_by( 'id', $agent );
-
-		$creds = array(
-			'url'      => untrailingslashit( home_url() ),
-			'user'     => $agent_user ? $agent_user->user_login : Agent_Provisioner::LOGIN,
-			'password' => ( 'paste' === $mode ) ? '' : $issued_plaintext,
+		$bundle_creds = array(
+			'url'      => $creds['url'],
+			'user'     => $creds['user'],
+			'password' => ( 'paste' === $mode ) ? '' : $creds['password'],
 			'client'   => $client,
 		);
 
-		$path = ( new MCPB_Generator() )->build( $creds, $server_path );
+		$path = ( new MCPB_Generator() )->build( $bundle_creds, $server_path );
 		if ( is_wp_error( $path ) ) {
 			return $path;
 		}
@@ -149,10 +180,130 @@ class Connect_Page {
 		return array(
 			'path'     => $path,
 			'filename' => $filename,
-			'uuid'     => $issued_uuid,
+			'uuid'     => $creds['uuid'],
 			'mode'     => $mode,
-			'password' => ( 'paste' === $mode ) ? $issued_plaintext : '',
+			'password' => ( 'paste' === $mode ) ? $creds['password'] : '',
 		);
+	}
+
+	/**
+	 * Placeholder string used in artifact bodies in place of the real password.
+	 *
+	 * The actual Application Password must never appear inside a copy-pasteable
+	 * command, JSON snippet, or AI prompt because it would land in shell history
+	 * or a chat transcript. Callers embed this constant; render_artifact_card()
+	 * shows the real secret in a separate "Copy password" control so the user
+	 * fills it in as a deliberate manual step.
+	 *
+	 * @since 1.10.0
+	 * @var string
+	 */
+	const PW_PLACEHOLDER = '<paste your application password here>';
+
+	/**
+	 * Build the ready-to-paste setup artifact for a given client.
+	 *
+	 * Returns a label, language hint, and raw body string. The body contains
+	 * PW_PLACEHOLDER instead of the real password so copying it into a terminal
+	 * or AI chat does not leak the secret into shell history or a chat transcript.
+	 * The actual password is surfaced in a separate readonly field by
+	 * render_artifact_card().
+	 *
+	 * The body is RAW (not HTML-escaped). Callers that write it to HTML must
+	 * escape it at output time — render_artifact_card() uses esc_textarea() on
+	 * the textarea value and esc_html() on the label.
+	 *
+	 * TODO: replace the manual placeholder step with a one-time-code redemption
+	 * flow once a secure /redeem endpoint is implemented. The placeholder seam
+	 * is the hook: clients will swap PW_PLACEHOLDER for the redeemed secret
+	 * automatically, removing the copy-paste step entirely.
+	 *
+	 * @since  1.10.0
+	 *
+	 * @param  string $client One of: 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt'.
+	 * @param  array  $creds  Credential array from provision_credentials():
+	 *                        { url, user, password, uuid }.
+	 * @return array {
+	 *     @type string $label    Short description shown above the textarea (HTML-safe).
+	 *     @type string $language Syntax hint ('bash', 'json', 'text').
+	 *     @type string $body     Raw ready-to-paste text with PW_PLACEHOLDER. Must be
+	 *                            escaped by the caller before writing to HTML output.
+	 * }
+	 */
+	public function setup_artifact( $client, array $creds ) {
+		$url  = $creds['url'];
+		$user = $creds['user'];
+
+		switch ( $client ) {
+			case 'Claude Code':
+				return array(
+					'label'    => esc_html__( 'Run this command in your terminal (replace the placeholder with your password below):', 'gk-block-api' ),
+					'language' => 'bash',
+					'body'     => "claude mcp add block-mcp \\\n" .
+						"  --env WORDPRESS_URL={$url} \\\n" .
+						"  --env WORDPRESS_USER={$user} \\\n" .
+						'  --env WORDPRESS_APP_PASSWORD="' . self::PW_PLACEHOLDER . "\" \\\n" .
+						'  -- npx -y @gravitykit/block-mcp',
+				);
+
+			case 'Cursor':
+				return array(
+					'label'    => esc_html__( 'Add this to ~/.cursor/mcp.json (or your project .cursor/mcp.json) and replace the placeholder with your password below:', 'gk-block-api' ),
+					'language' => 'json',
+					'body'     => (string) wp_json_encode(
+						array(
+							'mcpServers' => array(
+								'block-mcp' => array(
+									'command' => 'npx',
+									'args'    => array( '-y', '@gravitykit/block-mcp' ),
+									'env'     => array(
+										'WORDPRESS_URL'  => $url,
+										'WORDPRESS_USER' => $user,
+										'WORDPRESS_APP_PASSWORD' => self::PW_PLACEHOLDER,
+									),
+								),
+							),
+						),
+						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+					),
+				);
+
+			case 'ChatGPT Desktop':
+				return array(
+					'label'    => esc_html__( 'Add this to your MCP client config file and replace the placeholder with your password below:', 'gk-block-api' ),
+					'language' => 'json',
+					'body'     => (string) wp_json_encode(
+						array(
+							'mcpServers' => array(
+								'block-mcp' => array(
+									'command' => 'npx',
+									'args'    => array( '-y', '@gravitykit/block-mcp' ),
+									'env'     => array(
+										'WORDPRESS_URL'  => $url,
+										'WORDPRESS_USER' => $user,
+										'WORDPRESS_APP_PASSWORD' => self::PW_PLACEHOLDER,
+									),
+								),
+							),
+						),
+						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+					),
+				);
+
+			case 'ai-prompt':
+			default:
+				return array(
+					'label'    => esc_html__( 'Paste this prompt into your AI assistant (replace the placeholder with your password below):', 'gk-block-api' ),
+					'language' => 'text',
+					'body'     =>
+						"Set up the GravityKit Block MCP server so you can edit my WordPress site's content.\n\n" .
+						"Install the MCP server \"@gravitykit/block-mcp\" in my MCP client config with these environment variables:\n" .
+						"  WORDPRESS_URL={$url}\n" .
+						"  WORDPRESS_USER={$user}\n" .
+						'  WORDPRESS_APP_PASSWORD=' . self::PW_PLACEHOLDER . "\n\n" .
+						'Use `claude mcp add` (or edit the mcp.json) to register it as "block-mcp", then connect and confirm you can read the blocks on one of my pages.',
+				);
+		}
 	}
 
 	/**
@@ -192,11 +343,17 @@ class Connect_Page {
 	}
 
 	/**
-	 * Handle the connect form submission: build and stream the .mcpb bundle.
+	 * Handle the connect form submission.
 	 *
-	 * Validates capabilities and nonce, calls prepare_installer(), then streams
-	 * the temp file as an octet-stream download. The try/finally block ensures
-	 * the temp file is deleted even if streaming raises an exception.
+	 * For Claude Desktop: builds and streams the .mcpb bundle as an octet-stream
+	 * download (unchanged behaviour).
+	 *
+	 * For Claude Code, Cursor, ChatGPT Desktop, and ai-prompt: provisions
+	 * credentials, stashes the client + credential set in the per-user transient,
+	 * then redirects back to the settings page with ?setup=1 so render_section()
+	 * can display the artifact once.
+	 *
+	 * For 'other': redirects back with ?other=1 so the "coming soon" note is shown.
 	 *
 	 * @since 1.9.0
 	 */
@@ -215,6 +372,54 @@ class Connect_Page {
 			$client = 'Claude Desktop';
 		}
 
+		// Artifact-path clients: provision creds, stash, redirect.
+		$artifact_clients = array( 'Claude Code', 'Cursor', 'ChatGPT Desktop', 'ai-prompt' );
+		if ( in_array( $client, $artifact_clients, true ) ) {
+			$creds = $this->provision_credentials( $client );
+
+			if ( is_wp_error( $creds ) ) {
+				wp_die( esc_html( $creds->get_error_message() ) );
+			}
+
+			$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
+			set_transient(
+				$transient_key,
+				array(
+					'client' => $client,
+					'creds'  => $creds,
+				),
+				5 * MINUTE_IN_SECONDS
+			);
+
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page'  => Settings_Page::PAGE_SLUG,
+						'tab'   => 'connect',
+						'setup' => '1',
+					),
+					admin_url( 'options-general.php' )
+				)
+			);
+			exit;
+		}
+
+		// 'other' client: redirect with a note flag, no provisioning.
+		if ( 'other' === $client ) {
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page'  => Settings_Page::PAGE_SLUG,
+						'tab'   => 'connect',
+						'other' => '1',
+					),
+					admin_url( 'options-general.php' )
+				)
+			);
+			exit;
+		}
+
+		// Default: Claude Desktop — stream the .mcpb bundle.
 		$r = $this->prepare_installer( $client );
 
 		if ( is_wp_error( $r ) ) {
@@ -316,8 +521,13 @@ class Connect_Page {
 	 * Settings_Page so this section can live inside a tab without double-wrapping.
 	 *
 	 * Branches on connection_state(): shows an HTTPS requirement notice, a
-	 * connect form with client picker and post-download next-steps, or an
+	 * connect form with client picker and post-setup artifact display, or an
 	 * active-connections list with per-connection revoke buttons.
+	 *
+	 * When the setup transient is present (written by handle_connect() and read
+	 * here exactly once), the artifact for the chosen client is displayed in a
+	 * readonly textarea with a Copy button. The transient is cleared after this
+	 * single render so the credential is not shown again on subsequent page loads.
 	 *
 	 * All selectors are scoped under .gk-connect to avoid leaking into the
 	 * rest of wp-admin.
@@ -327,12 +537,26 @@ class Connect_Page {
 	public function render_section() {
 		$state = $this->connection_state();
 
-		// One-time paste-mode password surfaced from a prior connect download.
+		// One-time paste-mode password or setup artifact surfaced from a prior
+		// connect form submission via the per-user transient.
 		$paste_pw      = '';
+		$setup_data    = null;
 		$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
-		$stored_pw     = get_transient( $transient_key );
-		if ( is_string( $stored_pw ) && '' !== $stored_pw ) {
-			$paste_pw = $stored_pw;
+		$stored        = get_transient( $transient_key );
+
+		if ( is_string( $stored ) && '' !== $stored ) {
+			// Legacy scalar path: Claude Desktop paste-mode password.
+			$paste_pw = $stored;
+			delete_transient( $transient_key );
+		} elseif ( is_array( $stored ) && isset( $stored['client'], $stored['creds'] ) ) {
+			// Artifact path: Claude Code / Cursor / ChatGPT Desktop / ai-prompt.
+			// The plaintext password is surfaced in a dedicated field, not embedded
+			// in the artifact body, so it stays out of shell history and chat transcripts.
+			$setup_data = array(
+				'client'   => $stored['client'],
+				'artifact' => $this->setup_artifact( $stored['client'], $stored['creds'] ),
+				'password' => $stored['creds']['password'],
+			);
 			delete_transient( $transient_key );
 		}
 
@@ -364,6 +588,10 @@ class Connect_Page {
 				</p>
 				<p><?php esc_html_e( 'Copy this password and paste it into the Application Password field when you open the downloaded file. It will not be shown again.', 'gk-block-api' ); ?></p>
 			</div>
+		<?php endif; ?>
+
+		<?php if ( null !== $setup_data ) : ?>
+			<?php $this->render_artifact_card( $setup_data['client'], $setup_data['artifact'], $setup_data['password'] ); ?>
 		<?php endif; ?>
 
 		<div class="gk-connect__card">
@@ -448,19 +676,190 @@ class Connect_Page {
 	}
 
 	/**
-	 * Render the client-picker form that triggers a bundle download.
+	 * Render the setup-artifact card shown after a successful non-.mcpb connect.
+	 *
+	 * Displays two controls:
+	 *
+	 * 1. A readonly textarea with the ready-to-paste command, JSON snippet, or AI
+	 *    prompt. The body uses PW_PLACEHOLDER instead of the real secret so copying
+	 *    the textarea into a terminal or AI chat does not leak the password into
+	 *    shell history or a chat transcript.
+	 *
+	 * 2. A separate "Your application password" readonly field + "Copy password"
+	 *    button. This is where the actual one-time secret is surfaced, with a
+	 *    "shown once" notice. The user copies it independently and substitutes it
+	 *    for the placeholder in the artifact above.
+	 *
+	 * The password is never echoed anywhere outside the dedicated password field.
+	 *
+	 * @since 1.10.0
+	 *
+	 * @param string $client   Client name (e.g. 'Claude Code').
+	 * @param array  $artifact Return value of setup_artifact().
+	 * @param string $password Plaintext Application Password (shown once).
+	 * @return void
+	 */
+	private function render_artifact_card( $client, array $artifact, $password = '' ) {
+		?>
+		<div class="gk-connect__artifact-card">
+			<h3 class="gk-connect__artifact-heading">
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %s: AI client name e.g. "Claude Code" */
+						__( '%s setup', 'gk-block-api' ),
+						$client
+					)
+				);
+				?>
+			</h3>
+
+			<p class="gk-connect__artifact-label"><?php echo $artifact['label']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- already escaped in setup_artifact(). ?></p>
+			<div class="gk-connect__artifact-copy-wrap">
+				<textarea
+					class="gk-connect__artifact-textarea"
+					readonly
+					rows="8"
+					data-language="<?php echo esc_attr( $artifact['language'] ); ?>"
+				><?php echo esc_textarea( $artifact['body'] ); ?></textarea>
+				<button type="button" class="gk-connect__artifact-copy-btn button" data-target="artifact"><?php esc_html_e( 'Copy', 'gk-block-api' ); ?></button>
+			</div>
+
+			<?php if ( '' !== $password ) : ?>
+			<div class="gk-connect__artifact-pw-block">
+				<p class="gk-connect__artifact-pw-label">
+					<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong>
+					<?php esc_html_e( 'Copy it now and replace the placeholder above. It will not be shown again.', 'gk-block-api' ); ?>
+				</p>
+				<div class="gk-connect__artifact-copy-wrap">
+					<input
+						class="gk-connect__artifact-pw-input"
+						type="text"
+						readonly
+						value="<?php echo esc_attr( $password ); ?>"
+					/>
+					<button type="button" class="gk-connect__artifact-pw-copy-btn button" data-target="password"><?php esc_html_e( 'Copy password', 'gk-block-api' ); ?></button>
+				</div>
+			</div>
+			<?php endif; ?>
+		</div>
+
+		<style>
+		.gk-connect__artifact-card {
+			background: #fff;
+			border: 1px solid #e0e0e0;
+			border-left: 4px solid var(--wp-admin-theme-color, #2271b1);
+			border-radius: 4px;
+			padding: 16px 20px;
+			max-width: 800px;
+			margin-bottom: 20px;
+		}
+		.gk-connect__artifact-heading {
+			font-size: 1em;
+			font-weight: 600;
+			color: #1e1e1e;
+			margin: 0 0 8px;
+		}
+		.gk-connect__artifact-label {
+			font-size: .9375em;
+			color: #1e1e1e;
+			margin: 0 0 6px;
+		}
+		.gk-connect__artifact-copy-wrap {
+			display: flex;
+			gap: 8px;
+			align-items: flex-start;
+		}
+		.gk-connect__artifact-textarea {
+			flex: 1;
+			font-family: monospace;
+			font-size: .875em;
+			resize: vertical;
+			background: #f6f7f7;
+			border: 1px solid #c3c4c7;
+			border-radius: 2px;
+			padding: 8px;
+			color: #1e1e1e;
+		}
+		.gk-connect__artifact-copy-btn,
+		.gk-connect__artifact-pw-copy-btn {
+			flex-shrink: 0;
+		}
+		.gk-connect__artifact-pw-block {
+			margin-top: 16px;
+			padding-top: 14px;
+			border-top: 1px solid #f0f0f1;
+		}
+		.gk-connect__artifact-pw-label {
+			font-size: .875em;
+			color: #1e1e1e;
+			margin: 0 0 8px;
+		}
+		.gk-connect__artifact-pw-input {
+			flex: 1;
+			font-family: monospace;
+			font-size: .875em;
+			background: #fff8e5;
+			border: 1px solid #dba617;
+			border-radius: 2px;
+			padding: 6px 8px;
+			color: #1e1e1e;
+			user-select: all;
+		}
+		</style>
+
+		<script>
+		(function () {
+			var card = document.querySelector( '.gk-connect__artifact-card' );
+			if ( ! card ) return;
+
+			function makeCopyHandler( inputEl, btn, defaultLabel ) {
+				btn.addEventListener( 'click', function () {
+					var text = inputEl.tagName === 'TEXTAREA' ? inputEl.value : inputEl.value;
+					if ( navigator.clipboard && navigator.clipboard.writeText ) {
+						navigator.clipboard.writeText( text ).then( function () {
+							btn.textContent = '<?php echo esc_js( __( 'Copied!', 'gk-block-api' ) ); ?>';
+							setTimeout( function () { btn.textContent = defaultLabel; }, 2000 );
+						} );
+					} else {
+						inputEl.select();
+						document.execCommand( 'copy' );
+					}
+				} );
+			}
+
+			var artifactTextarea = card.querySelector( '.gk-connect__artifact-textarea' );
+			var artifactCopyBtn  = card.querySelector( '.gk-connect__artifact-copy-btn' );
+			if ( artifactTextarea && artifactCopyBtn ) {
+				makeCopyHandler( artifactTextarea, artifactCopyBtn, '<?php echo esc_js( __( 'Copy', 'gk-block-api' ) ); ?>' );
+			}
+
+			var pwInput   = card.querySelector( '.gk-connect__artifact-pw-input' );
+			var pwCopyBtn = card.querySelector( '.gk-connect__artifact-pw-copy-btn' );
+			if ( pwInput && pwCopyBtn ) {
+				makeCopyHandler( pwInput, pwCopyBtn, '<?php echo esc_js( __( 'Copy password', 'gk-block-api' ) ); ?>' );
+			}
+		} )();
+		</script>
+		<?php
+	}
+
+	/**
+	 * Render the client-picker form that triggers a bundle download or artifact generation.
 	 *
 	 * The picker is a fieldset of radio cards so keyboard navigation, screen
 	 * readers, and pointer devices all work with standard browser behaviour.
-	 * The 'other' card reveals a support note; the submit button label updates
-	 * to reflect the selected client.
+	 * Six clients are offered: Claude Desktop (.mcpb download), Claude Code,
+	 * Cursor, ChatGPT Desktop, an "ai-prompt" path, and an "other" fallback.
+	 * The "Let my AI set it up" card is visually prominent with an accent
+	 * left-border modifier so it is an obvious choice for users who are already
+	 * in an AI session.
 	 *
 	 * All selectors are scoped under .gk-connect to prevent leaking into
 	 * the rest of wp-admin. The design follows the WordPress block-editor /
 	 *
 	 * @wordpress/components visual language: white card surfaces on the gray
-	 * admin background, accent-color via --wp-admin-theme-color, and
-	 * component-style button and selectable-card treatments.
+	 * admin background, accent-color via --wp-admin-theme-color.
 	 *
 	 * @since 1.9.0
 	 */
@@ -504,9 +903,9 @@ class Connect_Page {
 
 		/* ── Radio card group ──────────────────────────────────────────────── */
 		.gk-radio-card-group {
-			display: flex;
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 			gap: 12px;
-			flex-wrap: wrap;
 			margin: 8px 0 16px;
 		}
 		.gk-radio-card {
@@ -518,8 +917,6 @@ class Connect_Page {
 			border-radius: 4px;
 			padding: 14px 16px;
 			cursor: pointer;
-			min-width: 240px;
-			flex: 1;
 			transition: border-color .1s, box-shadow .1s;
 		}
 		.gk-radio-card:hover {
@@ -535,6 +932,16 @@ class Connect_Page {
 			box-shadow: 0 0 0 1px var(--wp-admin-theme-color, #2271b1);
 			background: #fff;
 		}
+
+		/* ── "Let my AI set it up" accent card ─────────────────────────────── */
+		.gk-radio-card.is-ai {
+			border-left: 4px solid var(--wp-admin-theme-color, #2271b1);
+		}
+		.gk-radio-card.is-ai:has(input:checked),
+		.gk-radio-card.is-ai.is-selected {
+			background: #f0f6fc;
+		}
+
 		.gk-radio-card__radio {
 			margin-top: 3px;
 			flex-shrink: 0;
@@ -581,7 +988,7 @@ class Connect_Page {
 			box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px var(--wp-admin-theme-color, #2271b1);
 		}
 
-		/* ── "After you download" inner panel ──────────────────────────────── */
+		/* ── "After you download/set up" inner panel ───────────────────────── */
 		.gk-connect__next-steps {
 			background: #fff;
 			border: 1px solid #e0e0e0;
@@ -689,7 +1096,7 @@ class Connect_Page {
 
 				<div class="gk-radio-card-group" role="radiogroup">
 
-					<label class="gk-radio-card is-selected" id="gk-card-claude">
+					<label class="gk-radio-card is-selected" id="gk-card-claude-desktop">
 						<input
 							class="gk-radio-card__radio"
 							type="radio"
@@ -703,6 +1110,58 @@ class Connect_Page {
 						</span>
 					</label>
 
+					<label class="gk-radio-card" id="gk-card-claude-code">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="Claude Code"
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( 'Claude Code', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( "Anthropic's terminal coding agent.", 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-radio-card" id="gk-card-cursor">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="Cursor"
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( 'Cursor', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'AI code editor.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-radio-card" id="gk-card-chatgpt">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="ChatGPT Desktop"
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( 'ChatGPT Desktop', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'OpenAI desktop app.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-radio-card is-ai" id="gk-card-ai-prompt">
+						<input
+							class="gk-radio-card__radio"
+							type="radio"
+							name="client"
+							value="ai-prompt"
+						/>
+						<span class="gk-radio-card__body">
+							<span class="gk-radio-card__title"><?php esc_html_e( 'Let my AI set it up for me', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'Copy a prompt and let your AI assistant configure it.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
 					<label class="gk-radio-card" id="gk-card-other">
 						<input
 							class="gk-radio-card__radio"
@@ -712,7 +1171,7 @@ class Connect_Page {
 						/>
 						<span class="gk-radio-card__body">
 							<span class="gk-radio-card__title"><?php esc_html_e( "Something else / I'm not sure", 'gk-block-api' ); ?></span>
-							<span class="gk-radio-card__desc"><?php esc_html_e( 'ChatGPT, a web app, or not sure yet.', 'gk-block-api' ); ?></span>
+							<span class="gk-radio-card__desc"><?php esc_html_e( 'Web apps, or not sure yet.', 'gk-block-api' ); ?></span>
 						</span>
 					</label>
 
@@ -734,12 +1193,20 @@ class Connect_Page {
 
 			<script>
 			(function () {
-				var cards  = document.querySelectorAll( '.gk-radio-card' );
 				var radios = document.querySelectorAll( 'input[name="client"]' );
 				var note   = document.getElementById( 'gk-block-api-other-note' );
 				var btn    = document.getElementById( 'submit' );
 
 				if ( ! radios.length ) return;
+
+				var labels = {
+					'Claude Desktop' : '<?php echo esc_js( __( 'Download installer', 'gk-block-api' ) ); ?>',
+					'Claude Code'    : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'Cursor'         : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'ChatGPT Desktop': '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
+					'ai-prompt'      : '<?php echo esc_js( __( 'Copy AI setup prompt', 'gk-block-api' ) ); ?>',
+					'other'          : '<?php echo esc_js( __( 'Choose an app above', 'gk-block-api' ) ); ?>'
+				};
 
 				function updateState() {
 					var checkedVal = '';
@@ -758,9 +1225,8 @@ class Connect_Page {
 					}
 
 					if ( btn ) {
-						btn.value = ( 'other' === checkedVal )
-							? btn.getAttribute( 'data-label-other' )
-							: btn.getAttribute( 'data-label-default' );
+						var label = labels[ checkedVal ] || labels[ 'Claude Desktop' ];
+						btn.value = label;
 					}
 				}
 
@@ -768,16 +1234,11 @@ class Connect_Page {
 					r.addEventListener( 'change', updateState );
 				} );
 
-				if ( btn ) {
-					btn.setAttribute( 'data-label-default', btn.value );
-					btn.setAttribute( 'data-label-other',   btn.getAttribute( 'data-other-label' ) || btn.value );
-				}
-
 				updateState();
 			} )();
 			</script>
 
-			<?php submit_button( __( 'Connect Claude Desktop', 'gk-block-api' ), 'primary', 'submit', true ); ?>
+			<?php submit_button( __( 'Download installer', 'gk-block-api' ), 'primary', 'submit', true ); ?>
 		</form>
 		<?php
 	}

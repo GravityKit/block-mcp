@@ -1,29 +1,39 @@
 <?php
 /**
- * Connect_Page: provision-mint-build and connection-state contracts.
+ * Connect_Page: provision-mint-build, connection-state, artifact, and render contracts.
  *
  * The Connect_Page orchestrates the full connect flow: provisioning the agent
- * service account, minting an Application Password, and building a pre-filled
- * .mcpb bundle. These tests pin the testable seam — prepare_installer() and
- * connection_state() — without exercising the HTTP-streaming or admin-menu
+ * service account, minting an Application Password, and either building a
+ * pre-filled .mcpb bundle (Claude Desktop) or producing a ready-to-paste
+ * setup artifact (Claude Code, Cursor, ChatGPT Desktop, ai-prompt).
+ *
+ * These tests pin the testable seams — provision_credentials(),
+ * prepare_installer(), setup_artifact(), connection_state(), and
+ * render_section() — without exercising the HTTP-streaming or admin-menu
  * registration paths, which have no testable surface in the unit harness.
  *
  * Contracts pinned here:
  *
- *  - prepare_installer() provisions the agent user, mints exactly one
- *    Application Password, and returns a bundle array with the expected keys.
+ *  - provision_credentials() provisions the agent user, mints exactly one
+ *    Application Password, and returns url/user/password/uuid.
+ *  - provision_credentials() returns WP_Error when a non-agent user owns
+ *    the block-mcp login (propagated from Agent_Provisioner::ensure()).
+ *  - prepare_installer() calls provision_credentials() and builds the .mcpb
+ *    from the returned creds; the .mcpb path is unchanged.
+ *  - setup_artifact() returns correct bash/json/text bodies for each client.
  *  - The manifest inside the .mcpb zip carries the home_url() base (not
  *    site_url()) so subdirectory installs produce working credentials.
  *  - When Application Passwords are unavailable, prepare_installer() returns
  *    WP_Error without minting any credential.
  *  - When a non-agent user already owns the block-mcp login,
- *    prepare_installer() propagates WP_Error from Agent_Provisioner::ensure()
- *    without minting any credential on that user.
+ *    prepare_installer() propagates WP_Error without minting any credential.
  *  - connection_state() correctly reports 'needs_https', 'ready', and
  *    'connected' for the three reachable branches.
  *  - The gk_block_api_secret_at_rest_mode filter in 'paste' mode causes
  *    prepare_installer() to omit the password from the manifest default and
  *    return the plaintext separately.
+ *  - render_section() in the 'ready' state outputs all six client radio cards
+ *    with the correct values, Claude Desktop checked by default.
  *
  * @package GravityKit\BlockAPI\Tests\Connect
  */
@@ -35,7 +45,7 @@ use GravityKit\BlockAPI\Connect_Page;
 use GravityKit\BlockAPI\Connections;
 
 /**
- * Tests for Connect_Page::prepare_installer() and Connect_Page::connection_state().
+ * Tests for Connect_Page.
  *
  * @covers \GravityKit\BlockAPI\Connect_Page
  */
@@ -71,6 +81,65 @@ class ConnectPageTest extends WP_UnitTestCase {
 		delete_option( 'gk_block_api_agent_user_id' );
 
 		parent::tear_down();
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// provision_credentials() — new shared seam.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * provision_credentials() must provision the agent user, mint exactly one
+	 * Application Password, and return an array with url/user/password/uuid.
+	 *
+	 * The url must be untrailed home_url(), not site_url(), so that subdirectory
+	 * installs produce working REST credentials.
+	 */
+	public function test_provision_credentials_returns_url_user_password_uuid() {
+		$page  = new Connect_Page();
+		$creds = $page->provision_credentials( 'Claude Code' );
+
+		$this->assertIsArray( $creds, 'provision_credentials() must return an array on success' );
+		$this->assertArrayHasKey( 'url', $creds );
+		$this->assertArrayHasKey( 'user', $creds );
+		$this->assertArrayHasKey( 'password', $creds );
+		$this->assertArrayHasKey( 'uuid', $creds );
+
+		$this->assertSame( untrailingslashit( home_url() ), $creds['url'], 'url must be untrailed home_url()' );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'], 'user must be the agent login' );
+		$this->assertNotEmpty( $creds['password'], 'password must be non-empty' );
+		$this->assertNotEmpty( $creds['uuid'], 'uuid must be non-empty' );
+
+		// Exactly one Application Password must have been minted.
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+		$passwords = WP_Application_Passwords::get_user_application_passwords( $agent->ID );
+		$this->assertCount( 1, $passwords );
+	}
+
+	/**
+	 * provision_credentials() must return WP_Error('agent_login_taken') when a
+	 * non-agent user already owns the block-mcp login, and must not mint any
+	 * Application Password on the conflicting user.
+	 *
+	 * This is the guard against silently adopting a human account that happens to
+	 * share the service-account login name.
+	 */
+	public function test_provision_credentials_returns_wp_error_when_login_taken_by_nonagent() {
+		$conflict_id = self::factory()->user->create(
+			array(
+				'user_login' => Agent_Provisioner::LOGIN,
+				'role'       => 'subscriber',
+			)
+		);
+
+		$page   = new Connect_Page();
+		$result = $page->provision_credentials( 'Claude Code' );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'agent_login_taken', $result->get_error_code() );
+
+		$passwords = WP_Application_Passwords::get_user_application_passwords( $conflict_id );
+		$this->assertEmpty( $passwords, 'No password must be minted on the conflicting user' );
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -234,6 +303,134 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'mcpb_server_missing', $result->get_error_code() );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// setup_artifact() — per-client bodies.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * setup_artifact() for 'Claude Code' must return a bash snippet containing
+	 * `claude mcp add`, the site URL, and WORDPRESS_APP_PASSWORD with the
+	 * placeholder — never the real password.
+	 *
+	 * The real secret must not appear in the artifact body because it would land
+	 * in shell history when the user pastes the command into a terminal. It is
+	 * surfaced separately by render_artifact_card() in a dedicated password field.
+	 */
+	public function test_setup_artifact_claude_code_contains_placeholder_not_password() {
+		$page  = new Connect_Page();
+		$creds = array(
+			'url'      => 'https://example.com',
+			'user'     => 'block-mcp',
+			'password' => 'testpass123',
+			'uuid'     => 'test-uuid',
+		);
+
+		$artifact = $page->setup_artifact( 'Claude Code', $creds );
+
+		$this->assertSame( 'bash', $artifact['language'] );
+		// The body is raw (not HTML-escaped); esc_textarea() is applied at render time.
+		$this->assertStringContainsString( 'claude mcp add', $artifact['body'], 'body must contain claude mcp add command' );
+		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
+		$this->assertStringContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringContainsString( '@gravitykit/block-mcp', $artifact['body'], 'body must reference the npm package' );
+		$this->assertStringContainsString( Connect_Page::PW_PLACEHOLDER, $artifact['body'], 'body must contain the placeholder' );
+		$this->assertStringNotContainsString( 'testpass123', $artifact['body'], 'body must NOT contain the real password' );
+	}
+
+	/**
+	 * setup_artifact() for 'Cursor' must return valid JSON containing mcpServers
+	 * with a block-mcp entry carrying the site URL and user, but using the
+	 * placeholder for WORDPRESS_APP_PASSWORD — never the real password.
+	 *
+	 * Embedding the real secret in the JSON snippet would expose it if the user
+	 * pastes the snippet into an AI chat or commits the config file to source control.
+	 */
+	public function test_setup_artifact_cursor_is_valid_json_with_placeholder_not_password() {
+		$page  = new Connect_Page();
+		$creds = array(
+			'url'      => 'https://example.com',
+			'user'     => 'block-mcp',
+			'password' => 'cursorpass',
+			'uuid'     => 'test-uuid',
+		);
+
+		$artifact = $page->setup_artifact( 'Cursor', $creds );
+
+		$this->assertSame( 'json', $artifact['language'] );
+
+		// The body is raw JSON (not HTML-escaped); decode directly.
+		$decoded = json_decode( $artifact['body'], true );
+		$this->assertNotNull( $decoded, 'body must be valid JSON' );
+		$this->assertArrayHasKey( 'mcpServers', $decoded );
+		$this->assertArrayHasKey( 'block-mcp', $decoded['mcpServers'] );
+
+		$server = $decoded['mcpServers']['block-mcp'];
+		$this->assertSame( 'https://example.com', $server['env']['WORDPRESS_URL'] );
+		$this->assertSame( Connect_Page::PW_PLACEHOLDER, $server['env']['WORDPRESS_APP_PASSWORD'], 'WORDPRESS_APP_PASSWORD must be the placeholder, not the real secret' );
+		$this->assertStringNotContainsString( 'cursorpass', $artifact['body'], 'body must NOT contain the real password' );
+	}
+
+	/**
+	 * setup_artifact() for 'ChatGPT Desktop' must return valid JSON containing
+	 * mcpServers with a block-mcp entry using the placeholder for
+	 * WORDPRESS_APP_PASSWORD — same contract as Cursor.
+	 *
+	 * The snippet lands in a config file the user may share or version-control,
+	 * so the real secret must never appear there.
+	 */
+	public function test_setup_artifact_chatgpt_desktop_is_valid_json_with_placeholder_not_password() {
+		$page  = new Connect_Page();
+		$creds = array(
+			'url'      => 'https://example.com',
+			'user'     => 'block-mcp',
+			'password' => 'chatgptpass',
+			'uuid'     => 'test-uuid',
+		);
+
+		$artifact = $page->setup_artifact( 'ChatGPT Desktop', $creds );
+
+		$this->assertSame( 'json', $artifact['language'] );
+
+		// The body is raw JSON (not HTML-escaped); decode directly.
+		$decoded = json_decode( $artifact['body'], true );
+		$this->assertNotNull( $decoded, 'body must be valid JSON' );
+		$this->assertArrayHasKey( 'mcpServers', $decoded );
+		$this->assertArrayHasKey( 'block-mcp', $decoded['mcpServers'] );
+
+		$server = $decoded['mcpServers']['block-mcp'];
+		$this->assertSame( 'https://example.com', $server['env']['WORDPRESS_URL'] );
+		$this->assertSame( Connect_Page::PW_PLACEHOLDER, $server['env']['WORDPRESS_APP_PASSWORD'], 'WORDPRESS_APP_PASSWORD must be the placeholder, not the real secret' );
+		$this->assertStringNotContainsString( 'chatgptpass', $artifact['body'], 'body must NOT contain the real password' );
+	}
+
+	/**
+	 * setup_artifact() for 'ai-prompt' must return a plain-text body containing
+	 * the site URL, WORDPRESS_APP_PASSWORD, and the "block-mcp" server name with
+	 * the placeholder — never the real password.
+	 *
+	 * The prompt is pasted into an AI chat transcript. Including the real secret
+	 * there would expose it to the AI provider's servers and the chat history.
+	 */
+	public function test_setup_artifact_ai_prompt_contains_placeholder_not_password() {
+		$page  = new Connect_Page();
+		$creds = array(
+			'url'      => 'https://example.com',
+			'user'     => 'block-mcp',
+			'password' => 'promptpass',
+			'uuid'     => 'test-uuid',
+		);
+
+		$artifact = $page->setup_artifact( 'ai-prompt', $creds );
+
+		// The body is raw (not HTML-escaped); esc_textarea() is applied at render time.
+		$this->assertSame( 'text', $artifact['language'] );
+		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
+		$this->assertStringContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must contain WORDPRESS_APP_PASSWORD' );
+		$this->assertStringContainsString( 'block-mcp', $artifact['body'], 'body must reference the block-mcp server name' );
+		$this->assertStringContainsString( Connect_Page::PW_PLACEHOLDER, $artifact['body'], 'body must contain the placeholder' );
+		$this->assertStringNotContainsString( 'promptpass', $artifact['body'], 'body must NOT contain the real password' );
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -422,20 +619,19 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 	/**
 	 * render_section() in the 'ready' state must output the after-download
-	 * guidance block and both client-picker radio cards (Claude Desktop and the
-	 * "Something else" fallback), with the Claude Desktop radio checked by default.
+	 * guidance block and all six client-picker radio cards with correct values,
+	 * with Claude Desktop checked by default.
 	 *
-	 * The picker was converted from a <select> to a fieldset of radio cards so
-	 * keyboard navigation and screen readers work with native browser behaviour.
-	 * This test pins the P0 deliverables for the ready/pre-connection state: the
-	 * next-steps panel, both radio inputs with name="client", both option labels,
-	 * and the default-checked state on the Claude Desktop card.
+	 * The six required cards are: Claude Desktop, Claude Code, Cursor,
+	 * ChatGPT Desktop, ai-prompt, and other. The "Let my AI set it up" card
+	 * must carry the is-ai class so it is visually prominent. The Claude Desktop
+	 * radio must be checked by default.
 	 *
 	 * The modern block-editor restyling wraps all output in <div class="gk-connect">
 	 * and nests the content inside <div class="gk-connect__card"> so all CSS
 	 * selectors are scoped and the card container is present.
 	 */
-	public function test_render_section_shows_next_steps_and_picker_ready_state() {
+	public function test_render_section_shows_next_steps_and_all_six_picker_cards_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
@@ -455,13 +651,24 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
 		$this->assertStringContainsString( 'name="client"', $html, 'Radio inputs must carry name="client"' );
 
-		// Both option labels must be present.
-		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop radio card label must be present' );
-		$this->assertStringContainsString( 'Something else', $html, '"Something else" radio card label must be present' );
-
-		// Both option values must be present.
+		// All six client values must be present.
 		$this->assertStringContainsString( 'value="Claude Desktop"', $html, 'Claude Desktop radio value must be present' );
+		$this->assertStringContainsString( 'value="Claude Code"', $html, 'Claude Code radio value must be present' );
+		$this->assertStringContainsString( 'value="Cursor"', $html, 'Cursor radio value must be present' );
+		$this->assertStringContainsString( 'value="ChatGPT Desktop"', $html, 'ChatGPT Desktop radio value must be present' );
+		$this->assertStringContainsString( 'value="ai-prompt"', $html, '"ai-prompt" radio value must be present' );
 		$this->assertStringContainsString( 'value="other"', $html, '"other" radio value must be present' );
+
+		// Card labels must be present.
+		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop card label must be present' );
+		$this->assertStringContainsString( 'Claude Code', $html, 'Claude Code card label must be present' );
+		$this->assertStringContainsString( 'Cursor', $html, 'Cursor card label must be present' );
+		$this->assertStringContainsString( 'ChatGPT Desktop', $html, 'ChatGPT Desktop card label must be present' );
+		$this->assertStringContainsString( 'Let my AI set it up', $html, '"Let my AI" card label must be present' );
+		$this->assertStringContainsString( 'Something else', $html, '"Something else" card label must be present' );
+
+		// The "Let my AI" card must carry the is-ai accent class.
+		$this->assertStringContainsString( 'is-ai', $html, '"Let my AI" card must carry is-ai class' );
 
 		// The Claude Desktop radio must be checked by default.
 		$this->assertMatchesRegularExpression(
@@ -470,7 +677,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 			'Claude Desktop radio must be checked by default'
 		);
 
-		// A <select> must NOT be present — the picker is now radio cards.
+		// A <select> must NOT be present — the picker is radio cards.
 		$this->assertStringNotContainsString( '<select', $html, 'A <select> must not be present; picker uses radio cards' );
 	}
 
@@ -502,5 +709,81 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( "You&#039;re connected", $html, "Connected state marker must be present" );
 		$this->assertStringContainsString( 'Disconnect', $html, 'Disconnect control must be present for active connection' );
 		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must still be present in connected state' );
+	}
+
+	/**
+	 * render_section() after a non-.mcpb connect must surface the real password
+	 * ONLY in the dedicated password field, never embedded in the artifact textarea.
+	 *
+	 * The artifact textarea uses PW_PLACEHOLDER so copying it into a terminal or
+	 * AI chat does not leak the secret into shell history or a chat transcript.
+	 * The actual one-time password appears in a separate readonly input so the
+	 * user substitutes it as a deliberate step.
+	 *
+	 * This test simulates the post-redirect render by writing the transient
+	 * directly, then asserting:
+	 *  - the artifact textarea contains the placeholder, not the real password.
+	 *  - the real password appears in the separate password input (value="…").
+	 *  - the "Copy password" button is present.
+	 *  - the "shown once" notice text is present.
+	 */
+	public function test_render_section_artifact_card_shows_password_separately_not_in_artifact() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		// Simulate the transient written by handle_connect() after provisioning.
+		$fake_password = 'S3cr3tPassw0rd!';
+		$transient_key = Connect_Page::PASTE_TRANSIENT_PREFIX . $admin_id;
+		set_transient(
+			$transient_key,
+			array(
+				'client' => 'Claude Code',
+				'creds'  => array(
+					'url'      => 'https://example.com',
+					'user'     => 'block-mcp',
+					'password' => $fake_password,
+					'uuid'     => 'fake-uuid',
+				),
+			),
+			5 * MINUTE_IN_SECONDS
+		);
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		// The body is escaped via esc_textarea() at render time, so '<' becomes '&lt;'.
+		$this->assertStringContainsString(
+			esc_textarea( Connect_Page::PW_PLACEHOLDER ),
+			$html,
+			'Artifact textarea must contain PW_PLACEHOLDER (HTML-encoded by esc_textarea)'
+		);
+
+		// The real password must appear in the dedicated password input field.
+		$this->assertStringContainsString(
+			'value="' . esc_attr( $fake_password ) . '"',
+			$html,
+			'Real password must appear in the dedicated password input'
+		);
+
+		// The "Copy password" button must be present.
+		$this->assertStringContainsString( 'Copy password', $html, '"Copy password" button must be present' );
+
+		// The "shown once" notice must be present.
+		$this->assertStringContainsString( 'shown once', $html, '"Shown once" notice must be present' );
+
+		// The real password must NOT appear inside the artifact textarea value.
+		// We detect this by checking that the password does not appear between the
+		// opening <textarea … > tag and the closing </textarea> tag.
+		$textarea_start = strpos( $html, 'gk-connect__artifact-textarea' );
+		$textarea_end   = strpos( $html, '</textarea>', $textarea_start );
+		$textarea_body  = substr( $html, $textarea_start, $textarea_end - $textarea_start );
+		$this->assertStringNotContainsString(
+			$fake_password,
+			$textarea_body,
+			'Real password must NOT appear inside the artifact textarea'
+		);
 	}
 }
