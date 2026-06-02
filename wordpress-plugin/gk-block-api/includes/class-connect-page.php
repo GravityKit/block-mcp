@@ -112,7 +112,7 @@ class Connect_Page {
 		// bundle so Claude Desktop pre-fills it on import. 'paste' leaves the
 		// bundle's password field blank and returns the plaintext to the UI,
 		// trading convenience for keeping the secret out of the download.
-		$force_paste = ( defined( 'GK_BLOCK_API_FORCE_PASTE_SECRET' ) && GK_BLOCK_API_FORCE_PASTE_SECRET ) ? 'paste' : 'prefill';
+		$default_mode = ( defined( 'GK_BLOCK_API_FORCE_PASTE_SECRET' ) && GK_BLOCK_API_FORCE_PASTE_SECRET ) ? 'paste' : 'prefill';
 
 		/**
 		 * Filters the secret-at-rest mode for .mcpb bundle generation.
@@ -126,7 +126,7 @@ class Connect_Page {
 		 *
 		 * @param string $mode 'prefill'|'paste'.
 		 */
-		$mode = (string) apply_filters( 'gk_block_api_secret_at_rest_mode', $force_paste );
+		$mode = (string) apply_filters( 'gk_block_api_secret_at_rest_mode', $default_mode );
 
 		// Build credentials for the bundle generator.
 		$agent_user = get_user_by( 'id', $agent );
@@ -247,6 +247,14 @@ class Connect_Page {
 
 		try {
 			readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
+		} catch ( \Throwable $e ) {
+			// Only surface an error page if nothing has been streamed yet —
+			// once octet-stream + Content-Length headers are out, the response
+			// body is committed and WordPress's HTML error handler would
+			// corrupt the partial download.
+			if ( ! headers_sent() ) {
+				wp_die( esc_html__( 'An error occurred while preparing your download.', 'gk-block-api' ) );
+			}
 		} finally {
 			wp_delete_file( $path );
 		}
@@ -366,7 +374,7 @@ class Connect_Page {
 			<?php else : ?>
 
 				<?php if ( 'connected' === $state ) : ?>
-					<p><strong><?php esc_html_e( '✅ You\'re connected', 'gk-block-api' ); ?></strong></p>
+					<p><strong>✅ <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
 				<?php endif; ?>
 
 				<?php $this->render_connect_form(); ?>
