@@ -404,6 +404,47 @@ class Settings_Page {
 				body.settings_page_gk-block-api-settings #wpbody-content {
 					padding-bottom: 24px;
 				}
+
+				/* Modern components-style tabs (underline indicator) in place of
+				   the classic gray boxed nav-tabs. Body-class scoped so core
+				   nav-tab styling elsewhere is untouched; the prefix raises
+				   specificity above core's single-class rules. */
+				.settings_page_gk-block-api-settings .nav-tab-wrapper {
+					display: flex;
+					gap: 4px;
+					margin: 0 0 24px;
+					padding: 0;
+					border-bottom: 1px solid #e0e0e0;
+				}
+				.settings_page_gk-block-api-settings .nav-tab {
+					margin: 0;
+					padding: 12px 16px;
+					border: 0;
+					border-radius: 0;
+					background: transparent;
+					box-shadow: none;
+					color: #50575e;
+					font-size: 14px;
+					font-weight: 500;
+					line-height: 1.4;
+				}
+				.settings_page_gk-block-api-settings .nav-tab:hover {
+					background: transparent;
+					color: var(--wp-admin-theme-color, #2271b1);
+					box-shadow: none;
+				}
+				.settings_page_gk-block-api-settings .nav-tab:focus-visible {
+					outline: 2px solid var(--wp-admin-theme-color, #2271b1);
+					outline-offset: -2px;
+					box-shadow: none;
+				}
+				.settings_page_gk-block-api-settings .nav-tab-active,
+				.settings_page_gk-block-api-settings .nav-tab-active:hover,
+				.settings_page_gk-block-api-settings .nav-tab-active:focus {
+					background: transparent;
+					color: var(--wp-admin-theme-color, #2271b1);
+					box-shadow: inset 0 -2px 0 0 var(--wp-admin-theme-color, #2271b1);
+				}
 			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 
