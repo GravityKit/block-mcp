@@ -822,6 +822,31 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * Wrapping markup uses <div class="gk-connect"> + <div class="gk-connect__card">
 	 * so all CSS selectors are scoped.
 	 */
+	/**
+	 * The picker JS must defer initialization until the DOM is ready.
+	 *
+	 * Regression: the inline <script> was emitted before the radio inputs in
+	 * the document, so its querySelectorAll('input[name="client"]') returned an
+	 * empty NodeList and the IIFE bailed at `if ( ! radios.length ) return;`.
+	 * That silently killed ALL picker interactivity — the submit-button label,
+	 * the "other" note, and the per-client next-steps toggle never updated on
+	 * selection (only the CSS :has() selection ring kept working). The fix wraps
+	 * the body in init() behind a DOMContentLoaded gate so element/script order
+	 * can't break it. This pins that the deferred-init guard is present.
+	 */
+	public function test_render_section_picker_script_defers_init_until_dom_ready() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'function init()', $html, 'Picker JS must define a deferred init().' );
+		$this->assertStringContainsString( 'DOMContentLoaded', $html, 'Picker JS must defer init until the DOM is ready so it runs after the radios exist.' );
+	}
+
 	public function test_render_section_shows_next_steps_and_all_six_picker_cards_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );

@@ -1343,6 +1343,7 @@ class Connect_Page {
 
 			<script>
 			(function () {
+				function init() {
 				var radios    = document.querySelectorAll( 'input[name="client"]' );
 				var note      = document.getElementById( 'gk-block-api-other-note' );
 				var btn       = document.getElementById( 'submit' );
@@ -1393,6 +1394,12 @@ class Connect_Page {
 				} );
 
 				updateState();
+				}
+				if ( 'loading' === document.readyState ) {
+					document.addEventListener( 'DOMContentLoaded', init );
+				} else {
+					init();
+				}
 			} )();
 			</script>
 
@@ -1508,7 +1515,6 @@ class Connect_Page {
 			case self::CLIENT_CLAUDE_CODE:
 			case self::CLIENT_CURSOR:
 			case self::CLIENT_CHATGPT:
-				$label = $this->client_label( $slug );
 				?>
 				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
 				<ol>
