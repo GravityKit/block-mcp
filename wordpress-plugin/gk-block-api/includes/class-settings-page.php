@@ -386,13 +386,52 @@ class Settings_Page {
 		$dual_count   = isset( $_GET['dual'] ) ? absint( wp_unslash( $_GET['dual'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$reset_flag   = isset( $_GET['reset'] ) ? absint( wp_unslash( $_GET['reset'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
+		// Read the active tab. Defaults to 'connect' so the onboarding section
+		// loads first. This is a read-only UI flag from our own links.
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'connect'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 
-			<?php if ( $scanned ) : ?>
-				<div class="notice notice-success is-dismissible"><p>
+			<h2 class="nav-tab-wrapper">
+				<a href="
 				<?php
+				echo esc_url(
+					add_query_arg(
+						array(
+							'page' => self::PAGE_SLUG,
+							'tab'  => 'connect',
+						),
+						admin_url( 'options-general.php' )
+					)
+				);
+				?>
+							" class="nav-tab<?php echo 'connect' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Connect', 'gk-block-api' ); ?></a>
+				<a href="
+				<?php
+				echo esc_url(
+					add_query_arg(
+						array(
+							'page' => self::PAGE_SLUG,
+							'tab'  => 'policy',
+						),
+						admin_url( 'options-general.php' )
+					)
+				);
+				?>
+							" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Block policy', 'gk-block-api' ); ?></a>
+			</h2>
+
+			<?php if ( 'connect' === $tab ) : ?>
+
+				<?php ( new Connect_Page() )->render_section(); ?>
+
+			<?php else : ?>
+
+				<?php if ( $scanned ) : ?>
+				<div class="notice notice-success is-dismissible"><p>
+					<?php
 					echo esc_html(
 						sprintf(
 							/* translators: 1: total unique blocks, 2: dual-storage count */
@@ -401,10 +440,10 @@ class Settings_Page {
 							$dual_count
 						)
 					);
-				?>
+					?>
 				</p></div>
 			<?php endif; ?>
-			<?php if ( $reset_flag ) : ?>
+				<?php if ( $reset_flag ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings reset to defaults.', 'gk-block-api' ); ?></p></div>
 			<?php endif; ?>
 
@@ -424,13 +463,13 @@ class Settings_Page {
 				}
 			</style>
 
-			<?php
-			/*
-			 * Live region for screen-reader announcements when the auto-grow
-			 * JS appends a new blank row. Visually hidden via WP's standard
-			 * .screen-reader-text class.
-			 */
-			?>
+				<?php
+				/*
+				* Live region for screen-reader announcements when the auto-grow
+				* JS appends a new blank row. Visually hidden via WP's standard
+				* .screen-reader-text class.
+				*/
+				?>
 			<div id="gk-block-api-live" class="screen-reader-text" role="status" aria-live="polite" aria-atomic="true"></div>
 
 			<datalist id="gk-block-names">
@@ -717,9 +756,9 @@ class Settings_Page {
 
 			<h2><?php esc_html_e( 'Storage-mode scan', 'gk-block-api' ); ?></h2>
 			<p class="description"><?php esc_html_e( 'Walks every published post and classifies each distinct block name as static / dynamic / dual. After running, get_page_blocks annotations and dual-storage enforcement use the live classification instead of the filter defaults. Slow on large sites.', 'gk-block-api' ); ?></p>
-			<?php if ( ! empty( $scan_results ) ) : ?>
+				<?php if ( ! empty( $scan_results ) ) : ?>
 				<p><strong>
-				<?php
+					<?php
 					echo esc_html(
 						sprintf(
 							/* translators: %d: number of distinct block names persisted */
@@ -727,7 +766,7 @@ class Settings_Page {
 							count( $scan_results )
 						)
 					);
-				?>
+					?>
 				</strong></p>
 			<?php endif; ?>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -809,6 +848,9 @@ class Settings_Page {
 				}
 			})();
 			</script>
+
+			<?php endif; // policy tab. ?>
+
 		</div>
 		<?php
 	}

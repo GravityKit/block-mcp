@@ -179,29 +179,16 @@ class Connect_Page {
 	}
 
 	/**
-	 * Register all admin hooks. Safe to call from plugins_loaded.
+	 * Register admin_post handlers for connect and revoke actions.
+	 *
+	 * The menu page is hosted by Settings_Page; only the form-action handlers
+	 * need to be wired here.
 	 *
 	 * @since 1.9.0
 	 */
 	public function register() {
-		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_post_' . self::ACTION_CONNECT, array( $this, 'handle_connect' ) );
 		add_action( 'admin_post_' . self::ACTION_REVOKE, array( $this, 'handle_revoke' ) );
-	}
-
-	/**
-	 * Register the admin submenu page under Settings.
-	 *
-	 * @since 1.9.0
-	 */
-	public function register_menu() {
-		add_options_page(
-			__( 'Connect an AI Assistant', 'gk-block-api' ),
-			__( 'AI Assistant', 'gk-block-api' ),
-			'manage_options',
-			self::PAGE_SLUG,
-			array( $this, 'render_page' )
-		);
 	}
 
 	/**
@@ -310,7 +297,8 @@ class Connect_Page {
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'page'    => self::PAGE_SLUG,
+					'page'    => Settings_Page::PAGE_SLUG,
+					'tab'     => 'connect',
 					'revoked' => '1',
 				),
 				admin_url( 'options-general.php' )
@@ -320,7 +308,12 @@ class Connect_Page {
 	}
 
 	/**
-	 * Render the Connect page.
+	 * Render the Connect onboarding section.
+	 *
+	 * Outputs only the Connect content — the heading, status notices, the client
+	 * picker form, the after-download next-steps panel, and the active-connections
+	 * table. The outer <div class="wrap"> and page <h1> are supplied by the host
+	 * Settings_Page so this section can live inside a tab without double-wrapping.
 	 *
 	 * Branches on connection_state(): shows an HTTPS requirement notice, a
 	 * connect form with client picker and post-download next-steps, or an
@@ -328,11 +321,7 @@ class Connect_Page {
 	 *
 	 * @since 1.9.0
 	 */
-	public function render_page() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to view this page.', 'gk-block-api' ), '', array( 'response' => 403 ) );
-		}
-
+	public function render_section() {
 		$state = $this->connection_state();
 
 		// One-time paste-mode password surfaced from a prior connect download.
@@ -356,96 +345,93 @@ class Connect_Page {
 		}
 
 		?>
-		<div class="wrap">
-			<h1><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h1>
+		<h2><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h2>
 
-			<?php if ( $revoked ) : ?>
-				<div class="notice notice-success is-dismissible">
-					<p><?php esc_html_e( 'Connection disconnected successfully.', 'gk-block-api' ); ?></p>
-				</div>
+		<?php if ( $revoked ) : ?>
+			<div class="notice notice-success is-dismissible">
+				<p><?php esc_html_e( 'Connection disconnected successfully.', 'gk-block-api' ); ?></p>
+			</div>
+		<?php endif; ?>
+
+		<?php if ( '' !== $paste_pw ) : ?>
+			<div class="notice notice-warning">
+				<p>
+					<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong><br />
+					<code style="font-size:1.1em; user-select:all;"><?php echo esc_html( $paste_pw ); ?></code>
+				</p>
+				<p><?php esc_html_e( 'Copy this password and paste it into the Application Password field when you open the downloaded file. It will not be shown again.', 'gk-block-api' ); ?></p>
+			</div>
+		<?php endif; ?>
+
+		<p>
+			<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you. Setup takes about a minute — no passwords to copy, no technical files to edit.', 'gk-block-api' ); ?>
+		</p>
+		<p>
+			<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
+		</p>
+
+		<?php if ( 'needs_https' === $state ) : ?>
+
+			<div class="notice notice-warning inline">
+				<p>
+					<strong><?php esc_html_e( 'HTTPS required', 'gk-block-api' ); ?></strong>
+				</p>
+				<p>
+					<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-api' ); ?>
+				</p>
+			</div>
+
+		<?php else : ?>
+
+			<?php if ( 'connected' === $state ) : ?>
+				<p><strong>✅ <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
 			<?php endif; ?>
 
-			<?php if ( '' !== $paste_pw ) : ?>
-				<div class="notice notice-warning">
-					<p>
-						<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong><br />
-						<code style="font-size:1.1em; user-select:all;"><?php echo esc_html( $paste_pw ); ?></code>
-					</p>
-					<p><?php esc_html_e( 'Copy this password and paste it into the Application Password field when you open the downloaded file. It will not be shown again.', 'gk-block-api' ); ?></p>
-				</div>
-			<?php endif; ?>
+			<?php $this->render_connect_form(); ?>
+			<?php $this->render_next_steps(); ?>
 
-			<p>
-				<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you. Setup takes about a minute — no passwords to copy, no technical files to edit.', 'gk-block-api' ); ?>
-			</p>
-			<p>
-				<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
-			</p>
-
-			<?php if ( 'needs_https' === $state ) : ?>
-
-				<div class="notice notice-warning inline">
-					<p>
-						<strong><?php esc_html_e( 'HTTPS required', 'gk-block-api' ); ?></strong>
-					</p>
-					<p>
-						<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-api' ); ?>
-					</p>
-				</div>
-
-			<?php else : ?>
-
-				<?php if ( 'connected' === $state ) : ?>
-					<p><strong>✅ <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
-				<?php endif; ?>
-
-				<?php $this->render_connect_form(); ?>
-				<?php $this->render_next_steps(); ?>
-
-				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
-					<hr />
-					<h2><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h2>
-					<p class="description">
-						<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
-					</p>
-					<table class="widefat striped" style="max-width: 800px;">
-						<thead>
+			<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
+				<hr />
+				<h2><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
+				</p>
+				<table class="widefat striped" style="max-width: 800px;">
+					<thead>
+						<tr>
+							<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
+							<th scope="col"></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $connections as $conn ) : ?>
 							<tr>
-								<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
-								<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
-								<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
-								<th scope="col"></th>
+								<td><?php echo esc_html( $conn['name'] ); ?></td>
+								<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
+								<td>
+									<?php
+									echo $conn['last_used']
+										? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
+										: esc_html__( 'Never', 'gk-block-api' );
+									?>
+								</td>
+								<td>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+										<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
+										<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
+										<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
+										<?php submit_button( __( 'Disconnect', 'gk-block-api' ), 'small delete', 'submit', false ); ?>
+									</form>
+								</td>
 							</tr>
-						</thead>
-						<tbody>
-							<?php foreach ( $connections as $conn ) : ?>
-								<tr>
-									<td><?php echo esc_html( $conn['name'] ); ?></td>
-									<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
-									<td>
-										<?php
-										echo $conn['last_used']
-											? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
-											: esc_html__( 'Never', 'gk-block-api' );
-										?>
-									</td>
-									<td>
-										<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-											<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
-											<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
-											<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
-											<?php submit_button( __( 'Disconnect', 'gk-block-api' ), 'small delete', 'submit', false ); ?>
-										</form>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						</tbody>
-					</table>
-				<?php endif; ?>
-
+						<?php endforeach; ?>
+					</tbody>
+				</table>
 			<?php endif; ?>
 
-		</div>
+		<?php endif; ?>
 		<?php
 	}
 

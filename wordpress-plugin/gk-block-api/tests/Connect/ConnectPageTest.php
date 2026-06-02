@@ -417,26 +417,28 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
-	// render_page() — output contracts.
+	// render_section() — output contracts.
 	// ──────────────────────────────────────────────────────────────────────
 
 	/**
-	 * render_page() in the 'ready' state must output the after-download
+	 * render_section() in the 'ready' state must output the after-download
 	 * guidance block and both client-picker options (Claude Desktop and the
 	 * "Something else" fallback).
 	 *
 	 * This pins the P0 deliverables for the ready/pre-connection state: the
 	 * next-steps panel and the client picker must be present whenever the form
-	 * is rendered.
+	 * is rendered. The method outputs only the inner content (no wrapping
+	 * <div class="wrap"> or page <h1>) so it can be embedded in the host
+	 * Settings_Page tab without double-wrapping.
 	 */
-	public function test_render_page_shows_next_steps_and_picker_ready_state() {
+	public function test_render_section_shows_next_steps_and_picker_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
 		delete_option( 'gk_block_api_agent_user_id' );
 
 		ob_start();
-		( new Connect_Page() )->render_page();
+		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
 		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must be present' );
@@ -445,7 +447,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * render_page() in the 'connected' state must output the connected-state
+	 * render_section() in the 'connected' state must output the connected-state
 	 * markers ("You're connected") and a Disconnect control for each active
 	 * connection, in addition to the after-download guidance and client picker.
 	 *
@@ -453,7 +455,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * connection indicator and the revoke affordance must be rendered when at
 	 * least one credential is live.
 	 */
-	public function test_render_page_shows_connected_state_markers() {
+	public function test_render_section_shows_connected_state_markers() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
@@ -466,7 +468,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		);
 
 		ob_start();
-		( new Connect_Page() )->render_page();
+		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
 		$this->assertStringContainsString( "You&#039;re connected", $html, "Connected state marker must be present" );
