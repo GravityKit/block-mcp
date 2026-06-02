@@ -492,6 +492,15 @@ The plugin does not define custom action/filter hooks. It relies on these WordPr
 
 ## Development
 
+### Regression tests are mandatory
+
+**When a bug is found, a regression test MUST be created — one that fully exercises every aspect of the bug — before (or in the same commit as) the fix.** This is not optional and not a smoke test.
+
+- **Reproduce first, fix second.** Write the test so it FAILS against the buggy code with the actual symptom, then make it pass with the fix. A test that was green before the fix proves nothing.
+- **Prove it has teeth (mutation check).** The test must go red if the fix is reverted. Confirm it: temporarily undo the fix, watch the test fail, restore the fix. If reverting the fix leaves the test green, the test does not cover the bug — rewrite it.
+- **Exercise the real mechanism, not a proxy.** Drive the actual code path that broke (e.g. for an auth bug, run the real `authenticate` chain / a real `WP_REST_Request` as the affected user — not just a direct method call). Class-level unit tests can hide integration regressions: an Application-Password auth break once stayed green because no test exercised the live auth path. See `tests/Connect/AgentAuthTest.php` (auth chain) and `tests/Connect/AgentRestCapabilityTest.php` (end-to-end REST as the agent) for the pattern.
+- **Cover every facet the bug touched** — one assertion per affected dimension: each capability/post-type, single-site AND multisite, API AND interactive, each branch/input involved. A fix that touches N paths needs N covering assertions.
+
 ### Prerequisites
 
 - Node.js >= 20
@@ -606,6 +615,18 @@ If a version was bumped without a corresponding `readme.txt` entry (it happens �
 - **Block inventory scan is expensive**: `Block_Inventory::build_stats()` queries ALL published posts with `posts_per_page: -1` and parses every one. The 1-hour transient cache is important. Use `refresh: true` sparingly.
 
 - **Pattern reference counting uses LIKE**: `Pattern_Manager::count_pattern_references()` searches post_content with `LIKE '%<!-- wp:block {"ref":ID} /-->%'`. This is accurate but not indexed — avoid calling it on sites with tens of thousands of posts without the transient cache.
+
+### Authoring on the GravityKit `filter` theme (gravitykit.com)
+
+Content/styling traps when composing live gravitykit.com pages with these tools — not plugin internals. The principle behind all three: the product/`download` template is dark-first, and its styling is keyed to the section/column structure of the theme's product patterns. Lift a block out of that structure and its colors stop matching its background.
+
+- **Dark sections force white body text — any light background needs a light-mode wrapper.** On product/`download` pages the template colors body text white for the dark navy sections (`.site-wrapper { color: var(--wp--preset--color--white); }`). A block that paints its own *light* background — striped tables (`is-style-stripes`), price cards, light callouts — then renders white-on-light and is illegible. Fix: wrap that content in a section `core/group` carrying `is-style-filter-light-mode`. That class sets a dark text color on the group, which every descendant (table cells included) inherits, overriding the equal-specificity `.site-wrapper` rule. Rule of thumb: light-background content belongs inside an `is-style-filter-light-mode` section. (Seen on `/products/block-mcp/`: the comparison table's striped rows were white-on-light until its section got the class.)
+
+- **`is-style-highlight-column` is a dark-background *column* style — never on a group or a lone card.** In the price-cards pattern the "featured" plan is a `core/column` with `filter-product-price-card is-style-highlight-column`; the highlight style paints a dark/purple background to go *with* its white text. Put those classes on a `core/group`, or on a single card inside an `is-style-filter-light-mode` section, and you get the white text without the dark background → white-on-white. For one standalone card, use plain `filter-product-price-card` (dark text on a light card) and let the light-mode section supply the text color.
+
+- **Product pages lean on dynamic, EDD/data-bound `filter/*` blocks — match them, don't fake them with static blocks.** Pricing, star ratings, version/changelog, reviews, testimonial wall, and FAQ list are dynamic blocks bound to product data: `filter/purchase-product-options` (keyed to a `productID`), `filter/faqs-list` (keyed to a `faq-category` term), shortcodes like `[filter_edd_version_number]` / `[filter_product_star_rating]`. They render empty for a product with no EDD price/review/version data, and static substitutes (e.g. `core/details` for FAQs) get default WordPress styling that looks visibly off-brand next to the theme's rendered accordions. Prefer rebuilding the real dynamic block over a static look-alike.
+  - **Branded FAQ the right way.** Other products render FAQs with `filter/faqs-list` (52+ pages), wrapped in the `filter-have-more-questions-pattern` section → `filter/custom-background` (stars/radial) + gradient heading → `is-style-rainbow-color-border` card → `filter/faqs-list`. The entries are `faq` CPT posts (title = question, body = answer) assigned to a `faq-category` term; the block's `defaultCategoryID` (a **string**) points at that term ID. To stand up a new one: (1) create the term out-of-band — Block MCP's term tooling is **read-only**, so `wp term create faq-category "<Name>" --slug=<slug> --porcelain` returns the ID; (2) `create_post` each `faq` (post_type `faq`, status `publish`, `terms:{ "faq-category": [<id>] }`, `menu_order` to order); (3) insert the `filter/faqs-list` with `defaultCategoryID:"<id>"`. The `faq` posts are real published content (`/faq/<slug>/` URLs, FAQ schema) — fine, but a side effect to note.
+  - For a genuinely free / not-yet-in-EDD product, the pricing block has no `productID` to bind to — there a static `filter-product-price-card` ("$0 / open source" + GitHub CTA) is the correct substitute, since no dynamic equivalent exists.
 
 ## Related Resources
 

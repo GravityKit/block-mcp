@@ -465,6 +465,7 @@ Test code is the one place where a concrete namespace name appears in *fixture d
 
 ## Conventions
 
+- **Regression test required for every bug fix.** When a bug is found, create a test that fully exercises every aspect of it: write it so it FAILS against the buggy code (reproduces the real symptom), make it pass with the fix, and confirm it has teeth by reverting the fix and watching it go red. Exercise the real mechanism (the live `authenticate` chain / a real `WP_REST_Request`, not just a direct method call), and cover every facet the bug touched (each capability/post-type, single-site and multisite, API and interactive). See the repo-root `AGENTS.md` → "Regression tests are mandatory" and `tests/Connect/AgentAuthTest.php` / `AgentRestCapabilityTest.php`.
 - All classes use the `GravityKit\BlockAPI` namespace.
 - Class files follow `class-{lowercased-underscored-name}.php` naming.
 - Write operations always: check rate limit, validate post exists, validate block names against registry, check preference tiers, create revision, record rate limit.
