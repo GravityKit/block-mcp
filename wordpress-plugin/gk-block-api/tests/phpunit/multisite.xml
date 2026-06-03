@@ -19,4 +19,17 @@
             <directory>../Connect</directory>
         </testsuite>
     </testsuites>
+    <!--
+        This config runs ONLY the ms-required group — the tests whose contract is
+        multisite-specific. The rest of the suite runs single-site (tests/phpunit.xml)
+        where it is exhaustively covered. Restricting to ms-required also keeps
+        process-isolated tests (@runInSeparateProcess) out of the multisite run:
+        a child process re-installing the multisite environment over the parent's
+        open SQLite database deadlocks.
+    -->
+    <groups>
+        <include>
+            <group>ms-required</group>
+        </include>
+    </groups>
 </phpunit>

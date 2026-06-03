@@ -47,7 +47,12 @@
         "refresh-core-blocks-if-missing": "php scripts/ensure-core-blocks.php",
         "test": [
             "@refresh-core-blocks-if-missing",
-            "phpunit -c tests/phpunit.xml"
+            "phpunit -c tests/phpunit.xml",
+            "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "test:multisite": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/multisite.xml"
         ],
         "lint": "phpcs",
         "lint:fix": "phpcbf"

@@ -17,4 +17,15 @@
             <directory>Connect</directory>
         </testsuite>
     </testsuites>
+    <!--
+        Tests in the ms-required group need a multisite install and self-skip on
+        single-site. Exclude them here so the single-site run reports zero skips;
+        they run under tests/phpunit/multisite.xml (composer test:multisite, and
+        the ms-required slice appended to composer test).
+    -->
+    <groups>
+        <exclude>
+            <group>ms-required</group>
+        </exclude>
+    </groups>
 </phpunit>

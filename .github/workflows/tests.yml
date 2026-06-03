@@ -72,8 +72,15 @@ jobs:
       - name: Ensure SQLite drop-in is installed
         run: composer run-script install-sqlite-dropin
 
-      - name: Run PHPUnit
+      - name: Run PHPUnit (single-site)
         run: vendor/bin/phpunit -c tests/phpunit.xml --colors=never
+
+      # The ms-required group is excluded from the single-site config (it would
+      # self-skip there). The multisite config runs exactly that group under a
+      # real multisite install, so the multisite-only contracts (per-blog cap
+      # provisioning, per-blog agent purge) are exercised in CI, not skipped.
+      - name: Run PHPUnit (multisite — ms-required group)
+        run: vendor/bin/phpunit -c tests/phpunit/multisite.xml --colors=never
 
       # phpcs gate. We carry zero errors AND zero warnings on the includes/
       # tree (see phpcs.xml.dist); CI enforces that contract so the next PR
