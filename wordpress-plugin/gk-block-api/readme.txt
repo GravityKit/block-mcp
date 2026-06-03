@@ -101,7 +101,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 New "Connect" onboarding at Settings → Block MCP makes connecting an AI assistant a few clicks: a one-click Claude Desktop installer (.mcpb) or a browser-approve flow for Cursor / Claude Code / ChatGPT that writes the client config for you. A dedicated, minimal-capability service account is provisioned automatically, and its site-wide Application Password is delivered out-of-band — never in a redirect URL or your shell history — and any client config is written owner-only. Disconnect revokes a connection at any time.
 
 = 1.8.1 =
-Fixes a block-nesting bug: a container created empty via `insert_blocks` (for example an empty columns or group wrapper) and then filled with `edit_block_tree` `insert-child` could serialise its children as front-end siblings, leaving the wrapper visually empty. `insert-child` now nests correctly into self-closing wrappers.
+Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
 
 = 1.8.0 =
 Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
@@ -182,9 +182,11 @@ Connect an AI assistant to your site in a few clicks — no terminal, no hand-ed
 
 = 1.8.1 on May 22, 2026 =
 
+Fixes nested container blocks rendering their children as top-level siblings on the front end while looking correct in the editor. Pages built inside-out — adding columns first, then columns/column children, then content — now render with children correctly nested inside their wrappers.
+
 #### 🐛 Fixed
 
-* A container created empty via `insert_blocks` (for example an empty columns or group wrapper) and then filled with `edit_block_tree` `insert-child` could serialise its children as front-end siblings, leaving the wrapper visually empty. When `parse_blocks` read the empty wrapper's `innerContent` back as a single unsplit string, the child's null placeholder landed before the wrapper instead of inside it; `insert-child` now nests correctly into self-closing wrappers.
+* Nested layouts built via `insert-child` (columns/column, group, buttons, hero splits, and similar containers) now serialise with children inside their wrapper instead of as siblings outside it. The editor was always correct; only the front-end output was broken.
 
 = 1.8.0 on May 21, 2026 =
 
