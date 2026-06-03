@@ -38,14 +38,6 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 tests_add_filter(
 	'muplugins_loaded',
 	static function () use ( $plugin_root ): void {
-		// wp-phpunit empties $wp_theme_directories just before loading WordPress
-		// and only repopulates it from its bundled test-theme directory when that
-		// exists — the no-content build used here has none. Restore a real themes
-		// path so core theme-directory functions don't fire _doing_it_wrong.
-		if ( empty( $GLOBALS['wp_theme_directories'] ) ) {
-			$GLOBALS['wp_theme_directories'] = array( WP_CONTENT_DIR . '/themes' );
-		}
-
 		$load_yoast = '1' === getenv( 'GK_LOAD_YOAST' );
 		$yoast      = $plugin_root . '/vendor/wordpress/wordpress/wp-content/plugins/wordpress-seo/wp-seo.php';
 		if ( $load_yoast && is_file( $yoast ) ) {

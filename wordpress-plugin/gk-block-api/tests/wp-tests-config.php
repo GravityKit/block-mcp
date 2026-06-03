@@ -9,6 +9,22 @@
 
 $plugin_root = dirname( __DIR__ );
 
+// Register a real theme root before WordPress loads. The wp-phpunit install
+// subprocess (includes/install.php) loads this config and then wp-settings.php,
+// which fires after_setup_theme -> _add_default_theme_supports() ->
+// wp_is_block_theme() BEFORE it registers any test theme directory. The
+// no-content WordPress build ships no wp-content/themes, so without this the
+// global is empty there and wp_is_block_theme() trips its _doing_it_wrong guard
+// — fatal under CI's error_reporting=E_ALL inside process-isolated tests.
+// Pointing at the theme fixtures wp-phpunit ships (which include the
+// WP_DEFAULT_THEME 'default' theme) keeps the global non-empty and resolvable in
+// every process and subprocess. The normal wp-phpunit bootstrap repopulates this
+// the same way; this covers the install subprocess, which it does not.
+$tests_theme_root = realpath( $plugin_root . '/vendor/wp-phpunit/wp-phpunit/data/themedir1' );
+if ( false !== $tests_theme_root ) {
+	$GLOBALS['wp_theme_directories'] = array( $tests_theme_root );
+}
+
 define( 'ABSPATH',         $plugin_root . '/vendor/wordpress/wordpress/' );
 define( 'WP_DEFAULT_THEME', 'default' );
 define( 'WP_TESTS_DOMAIN', 'example.org' );
