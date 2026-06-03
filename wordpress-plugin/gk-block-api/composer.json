@@ -48,7 +48,12 @@
         "test": [
             "@refresh-core-blocks-if-missing",
             "phpunit -c tests/phpunit.xml",
+            "phpunit -c tests/phpunit/yoast.xml",
             "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "test:yoast": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/yoast.xml"
         ],
         "test:multisite": [
             "@refresh-core-blocks-if-missing",

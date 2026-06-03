@@ -1030,9 +1030,6 @@ class BlockCrudTest extends BlockApiTestCase {
 	 * @dataProvider provide_heading_levels
 	 */
 	public function test_round_trip_heading_levels( $level ) {
-		// See test_insert_blocks_rejects_heading_with_content_attr_but_no_inner_html
-		// — same pre-existing WP core schema notice on heading registration.
-		$this->setExpectedIncorrectUsage( 'rest_validate_value_from_schema' );
 		$tag = 'h' . $level;
 		$this->make_post( array() );
 		$this->crud->insert_blocks(
@@ -1106,7 +1103,6 @@ class BlockCrudTest extends BlockApiTestCase {
 	 * could mask a malformed sibling.
 	 */
 	public function test_round_trip_multiple_blocks_preserved_in_order() {
-		$this->setExpectedIncorrectUsage( 'rest_validate_value_from_schema' );
 		$this->make_post( array() );
 		$this->crud->insert_blocks(
 			$this->post_id,

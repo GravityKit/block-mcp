@@ -22,10 +22,17 @@
         single-site. Exclude them here so the single-site run reports zero skips;
         they run under tests/phpunit/multisite.xml (composer test:multisite, and
         the ms-required slice appended to composer test).
+
+        Tests in the yoast group require a loaded Yoast SEO plugin, which only
+        the dedicated tests/phpunit/yoast.xml run provides (it sets GK_LOAD_YOAST
+        so the bootstrap loads Yoast). Exclude them here so this run never loads
+        Yoast — keeping its DB migrations and wp_is_block_theme() call out of the
+        general suite's process-isolated children.
     -->
     <groups>
         <exclude>
             <group>ms-required</group>
+            <group>yoast</group>
         </exclude>
     </groups>
 </phpunit>

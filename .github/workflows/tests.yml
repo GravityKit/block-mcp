@@ -75,6 +75,14 @@ jobs:
       - name: Run PHPUnit (single-site)
         run: vendor/bin/phpunit -c tests/phpunit.xml --colors=never
 
+      # The yoast group is excluded from the single-site config (it needs a
+      # loaded Yoast SEO plugin). This config sets GK_LOAD_YOAST so the
+      # bootstrap loads Yoast and runs exactly that group — keeping Yoast's DB
+      # migrations and wp_is_block_theme() call out of the general suite's
+      # process-isolated children.
+      - name: Run PHPUnit (Yoast — yoast group)
+        run: vendor/bin/phpunit -c tests/phpunit/yoast.xml --colors=never
+
       # The ms-required group is excluded from the single-site config (it would
       # self-skip there). The multisite config runs exactly that group under a
       # real multisite install, so the multisite-only contracts (per-blog cap
