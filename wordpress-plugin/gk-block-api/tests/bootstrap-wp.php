@@ -44,34 +44,6 @@ tests_add_filter(
 	}
 );
 
-// wp-phpunit's bootstrap resets $wp_theme_directories and only repopulates it
-// from DIR_TESTDATA/themedir1 when that directory exists; if it is absent the
-// global stays empty, and WordPress 6.8+ then flags wp_is_block_theme() as
-// _doing_it_wrong — which fails the @runInSeparateProcess tests under
-// error_reporting=E_ALL. Ensure the directory exists before the bootstrap runs
-// so wp-phpunit registers it ahead of WP loading (and any wp_is_block_theme call).
-$gk_test_themedir = $_tests_dir . '/data/themedir1';
-if ( ! is_dir( $gk_test_themedir ) ) {
-	@mkdir( $gk_test_themedir, 0755, true ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged,WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
-}
-
-// TEMP DEBUG: only fires if the guard still trips on CI. Throws (instead of
-// writing to STDERR, which @runInSeparateProcess swallows) so the diagnostic
-// surfaces in the test failure message. Removed once CI is green.
-tests_add_filter(
-	'doing_it_wrong_run',
-	static function ( $function_name ) use ( $gk_test_themedir ) {
-		if ( 'wp_is_block_theme' === $function_name ) {
-			throw new \RuntimeException(
-				'[GKDBG] wp_is_block_theme _doing_it_wrong | themedir1_exists=' . ( is_dir( $gk_test_themedir ) ? '1' : '0' )
-				. ' | dirs=' . wp_json_encode( $GLOBALS['wp_theme_directories'] ?? null )
-				. ' | ' . wp_debug_backtrace_summary()
-			);
-		}
-	},
-	1
-);
-
 require $_tests_dir . '/includes/bootstrap.php';
 
 // Shared test base classes. Loaded AFTER wp-phpunit's bootstrap so

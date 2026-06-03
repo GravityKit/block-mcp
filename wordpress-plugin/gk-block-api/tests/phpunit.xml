@@ -1,5 +1,14 @@
 <?xml version="1.0"?>
-<phpunit bootstrap="bootstrap-wp.php" colors="true">
+<!--
+    convertNoticesToExceptions=false: WordPress core/dependencies legitimately
+    emit PHP notices in the test harness (e.g. WP 6.8+ flags wp_is_block_theme()
+    via _doing_it_wrong when $wp_theme_directories is empty during the
+    separate-process re-bootstrap — not a gk-block-api call). Under CI's
+    error_reporting=E_ALL those notices would otherwise become test failures.
+    Errors, warnings, and deprecations are still converted, so real problems and
+    our own code's notices (caught by phpcs) still surface.
+-->
+<phpunit bootstrap="bootstrap-wp.php" colors="true" convertNoticesToExceptions="false">
     <php>
         <!-- BlockApiTestCase is the shared abstract base for every block-aware test. -->
         <const name="GK_BLOCK_API_TEST_BASE_PATH" value="BlockApiTestCase.php"/>
