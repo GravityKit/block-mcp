@@ -55,13 +55,18 @@ if ( ! is_dir( $gk_test_themedir ) ) {
 	@mkdir( $gk_test_themedir, 0755, true ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged,WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 }
 
-// TEMP DEBUG: only fires if the guard still trips on CI; surfaces the theme-dir
-// state and the caller so the root cause is unambiguous. Removed once CI is green.
+// TEMP DEBUG: only fires if the guard still trips on CI. Throws (instead of
+// writing to STDERR, which @runInSeparateProcess swallows) so the diagnostic
+// surfaces in the test failure message. Removed once CI is green.
 tests_add_filter(
 	'doing_it_wrong_run',
 	static function ( $function_name ) use ( $gk_test_themedir ) {
 		if ( 'wp_is_block_theme' === $function_name ) {
-			fwrite( STDERR, "\n[GKDBG] wp_is_block_theme _doing_it_wrong | themedir1_exists=" . ( is_dir( $gk_test_themedir ) ? '1' : '0' ) . ' | dirs=' . wp_json_encode( $GLOBALS['wp_theme_directories'] ?? null ) . ' | ' . wp_debug_backtrace_summary() . "\n" );
+			throw new \RuntimeException(
+				'[GKDBG] wp_is_block_theme _doing_it_wrong | themedir1_exists=' . ( is_dir( $gk_test_themedir ) ? '1' : '0' )
+				. ' | dirs=' . wp_json_encode( $GLOBALS['wp_theme_directories'] ?? null )
+				. ' | ' . wp_debug_backtrace_summary()
+			);
 		}
 	},
 	1
