@@ -23,8 +23,8 @@
 * [How It Works](#how-it-works)
 * [Quick Start](#quick-start)
   * [1. Install the WordPress plugin](#1-install-the-wordpress-plugin)
-  * [2. Create an Application Password](#2-create-an-application-password)
-  * [3. Install and configure the MCP server](#3-install-and-configure-the-mcp-server)
+  * [2. Connect your AI assistant](#2-connect-your-ai-assistant)
+  * [3. Manual setup (advanced)](#3-manual-setup-advanced)
   * [4. (Optional) Tune the settings](#4-optional-tune-the-settings)
 * [MCP Tools](#mcp-tools)
 * [Stable Refs](#stable-refs)
@@ -193,7 +193,37 @@ Or copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` an
 wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip --activate
 ```
 
-### 2. Create an Application Password
+### 2. Connect your AI assistant
+
+The fastest path provisions everything for you — a dedicated `block-mcp` service
+account, a minimal-capability role, and an Application Password — from inside
+WordPress. Go to **Settings → AI Assistant → Connect** and pick your client.
+
+**Claude Desktop (one-click).** Download the generated `.mcpb` file and open it;
+Claude Desktop installs the server and stores the credential in your OS keychain.
+The `.mcpb` is self-contained — it bundles the server, so there's nothing else to
+install.
+
+**Cursor, Claude Code, ChatGPT Desktop (browser approve).** Run the connector and
+click **Approve** in the browser that opens:
+
+```bash
+npx -y @gravitykit/block-mcp connect --site https://example.com
+```
+
+It writes your client's MCP config for you (owner-only, mode `0600`), so the
+site-wide password never lands in your shell history or a hand-edited file. Add
+`--client cursor|claude-code|claude-desktop|print` to target a specific client.
+Each site you connect gets its own server entry, so one assistant can point at
+several sites.
+
+> **Runtime:** the common path runs the server with `npx -y @gravitykit/block-mcp`
+> — nothing to clone or build. The Claude Desktop `.mcpb` embeds the same bundle.
+
+### 3. Manual setup (advanced)
+
+Prefer to wire it up by hand? Create an Application Password and register the
+server yourself.
 
 In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
 
@@ -201,9 +231,8 @@ In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
 wp user application-password create <username> "Block MCP" --porcelain
 ```
 
-The user needs at minimum the `edit_posts` capability for any post you want to read or write.
-
-### 3. Install and configure the MCP server
+The user needs at minimum the `edit_posts` capability for any post you want to
+read or write. Then build and register the server:
 
 ```bash
 git clone https://github.com/GravityKit/block-mcp
@@ -233,7 +262,7 @@ Restart your MCP client. Run `npm run inspect` to test the tools interactively.
 
 ### 4. (Optional) Tune the settings
 
-When the plugin is active, an admin page appears at **Settings → Block MCP**. The defaults work out of the box, but it's worth a look — this is where you decide which blocks AI agents are allowed to write, what to suggest as replacements, and which post types `create_post` can target.
+When the plugin is active, an admin page appears at **Settings → AI Assistant**. The defaults work out of the box, but it's worth a look — this is where you decide which blocks AI agents are allowed to write, what to suggest as replacements, and which post types `create_post` can target.
 
 ![Namespace tier scores](docs/screenshots/settings-namespace-scores.png)
 
@@ -306,7 +335,7 @@ The first read of a post lazily assigns + persists refs via a direct DB write th
 
 ## Configuration
 
-Everything in this section is editable at **Settings → Block MCP** in WordPress admin. Defaults are sensible — none of this is required to get started.
+Everything in this section is editable at **Settings → AI Assistant** in WordPress admin. Defaults are sensible — none of this is required to get started.
 
 ### Namespace tier scores
 
@@ -431,7 +460,7 @@ An end-to-end smoke script is included under `scripts/` for live-WordPress valid
 
 **Dual-storage blocks**
 
-- A small set of blocks (notably `yoast/faq-block`) duplicate state across `attributes` *and* `innerHTML`. The API requires both fields together on update (`dual_storage_requires_both` error otherwise) and the dual-storage list is configurable at **Settings → Block MCP**.
+- A small set of blocks (notably `yoast/faq-block`) duplicate state across `attributes` *and* `innerHTML`. The API requires both fields together on update (`dual_storage_requires_both` error otherwise) and the dual-storage list is configurable at **Settings → AI Assistant**.
 
 **Block Bindings API**
 
@@ -452,7 +481,7 @@ An end-to-end smoke script is included under `scripts/` for live-WordPress valid
 
 - URL sideload is capped at **25 MB** and uses a 10 s timeout.
 - SSRF guard rejects RFC1918 / loopback / link-local / cloud-metadata (`169.254.0.0/16`) hosts before download. The block list is extensible via the `gk_block_api_url_sideload_blocked_ranges` filter.
-- Uploads can be disabled site-wide with the kill-switch at **Settings → Block MCP**.
+- Uploads can be disabled site-wide with the kill-switch at **Settings → AI Assistant**.
 
 **Render mode**
 
@@ -472,7 +501,7 @@ Every REST endpoint returns errors as JSON in the standard WordPress shape `{ co
 | `rest_cannot_publish` | `create_post` / `update_post` requested `publish` but caller lacks `publish_posts` | Lower status to `draft`/`pending`, or elevate the user |
 | `rest_cannot_upload` | `upload_media` called without `upload_files` cap | Elevate the user |
 | `rest_cannot_assign_author` | `create_post` / `update_post` set `author` to another user without `edit_others_posts` | Drop the `author` field or elevate |
-| `uploads_disabled` | Site admin flipped the uploads kill-switch off at Settings → Block MCP | Re-enable in admin or stop calling `upload_media` |
+| `uploads_disabled` | Site admin flipped the uploads kill-switch off at Settings → AI Assistant | Re-enable in admin or stop calling `upload_media` |
 
 ### Not found (HTTP 404)
 
