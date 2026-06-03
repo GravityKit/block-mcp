@@ -308,8 +308,15 @@ export function cursorConfigPath(): string {
 
 /**
  * Build the argv array for `claude mcp add` WITHOUT a shell.
- * The credential values are passed as discrete array elements so they
- * never appear in a shell command string and aren't captured by shell history.
+ *
+ * The credentials are discrete array elements (spawn with shell:false), so they
+ * are kept out of the shell command string and shell history. They are NOT
+ * fully hidden: `claude mcp add` accepts a secret only as an inline
+ * `-e KEY=value` argument (no environment-inheritance or stdin channel), so the
+ * app password is briefly visible in the child's process arguments
+ * (`ps aux` / `/proc/<pid>/cmdline`) for the duration of the one-shot spawn.
+ * That residual exposure is inherent to the `claude mcp add` interface; the
+ * config it then writes is owned and protected by Claude Code.
  */
 export function claudeCodeAddArgs(creds: Credentials): string[] {
   return [
