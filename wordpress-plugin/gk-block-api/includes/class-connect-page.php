@@ -235,6 +235,59 @@ class Connect_Page {
 	}
 
 	/**
+	 * Return the setup-guide URL shown as the "Need help?" link on the flow.
+	 *
+	 * Filterable so the documentation location can change without a release.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @return string Absolute URL to the Connect setup guide.
+	 */
+	private function help_url(): string {
+		/**
+		 * Filters the setup-guide URL shown on the Connect screen.
+		 *
+		 * @since 1.9.0
+		 *
+		 * @param string $url Absolute URL to the Connect setup documentation.
+		 */
+		return (string) apply_filters( 'gk_block_api_help_url', 'https://www.gravitykit.com/docs/connect-ai-assistant/' );
+	}
+
+	/**
+	 * Echo the persistent "Need help? View the setup guide" link.
+	 *
+	 * Shown on every state of the Connect flow and on the Approve screen so a
+	 * stuck beginner always has a documentation path, not just an email.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @return void
+	 */
+	private function render_help_link(): void {
+		?>
+		<p class="gk-connect__help description">
+			<?php
+			echo wp_kses(
+				sprintf(
+					/* translators: %s: setup-guide URL */
+					__( 'Need help? <a href="%s" target="_blank" rel="noopener noreferrer">View the setup guide</a>.', 'gk-block-api' ),
+					esc_url( $this->help_url() )
+				),
+				array(
+					'a' => array(
+						'href'   => array(),
+						'target' => array(),
+						'rel'    => array(),
+					),
+				)
+			);
+			?>
+		</p>
+		<?php
+	}
+
+	/**
 	 * Provision the agent service account and mint a fresh Application Password.
 	 *
 	 * This is the shared credential-provisioning seam used by both
@@ -1035,6 +1088,8 @@ class Connect_Page {
 
 			<?php endif; ?>
 
+			<?php $this->render_help_link(); ?>
+
 		</div><!-- /.gk-connect__card -->
 
 		</div><!-- /.gk-connect -->
@@ -1216,6 +1271,8 @@ class Connect_Page {
 					<?php esc_html_e( 'Cancel', 'gk-block-api' ); ?>
 				</a>
 			</p>
+
+			<?php $this->render_help_link(); ?>
 
 		</div><!-- /.gk-connect__card -->
 		</div><!-- /.gk-connect -->

@@ -1459,4 +1459,42 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( "know it worked", $html, 'the ready state must describe the success/connected confirmation' );
 	}
+
+	/**
+	 * [F8] A persistent 'View the setup guide' help link appears on the Connect
+	 * flow so a stuck beginner has somewhere to go besides email or Google.
+	 */
+	public function test_render_section_has_persistent_help_link() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'View the setup guide', $html, 'a persistent help link must be present on the Connect flow' );
+	}
+
+	/**
+	 * [F8] The browser-Approve screen also carries the help link, since a user
+	 * can get stuck there too.
+	 */
+	public function test_authorize_screen_has_help_link() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1';
+		$_GET['callback']     = 'http://127.0.0.1:51999/cb';
+		$_GET['state']        = 'demo';
+		$_GET['client']       = 'claude-code';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( 'View the setup guide', $html, 'the authorize screen must also carry the help link' );
+	}
 }
