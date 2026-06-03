@@ -139,4 +139,47 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'agent_login_taken', $result->get_error_code() );
 	}
+
+	/**
+	 * [MS1] On multisite, ensure() must grant the agent blog membership + the
+	 * agent role on EVERY blog it is provisioned on — not just the first.
+	 *
+	 * The agent user is network-global but capabilities are per-blog, so before
+	 * the fix ensure() returned early on blog B without granting caps there, and
+	 * the agent's REST writes 403'd on every blog except the one it was created
+	 * on. This provisions on the main blog, switches to a fresh sub-site,
+	 * provisions again, and asserts the agent is a member of B and can edit_posts
+	 * there.
+	 *
+	 * @group ms-required
+	 */
+	public function test_ensure_grants_role_on_each_multisite_blog() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Multisite-only test. Run with WP_TESTS_MULTISITE=1.' );
+		}
+
+		$agent_id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $agent_id );
+
+		$blog_id = self::factory()->blog->create();
+		$this->assertIsInt( $blog_id );
+
+		switch_to_blog( $blog_id );
+		try {
+			// Before the fix the agent has no membership/caps on this blog.
+			$same = ( new Agent_Provisioner() )->ensure();
+			$this->assertSame( $agent_id, $same, 'the same global agent user is reused on the sub-site' );
+
+			$this->assertTrue(
+				is_user_member_of_blog( $agent_id, $blog_id ),
+				'agent must be a member of the sub-site'
+			);
+			$this->assertTrue(
+				user_can( $agent_id, 'edit_posts' ),
+				'agent must have edit_posts on the sub-site so REST writes work there'
+			);
+		} finally {
+			restore_current_blog();
+		}
+	}
 }

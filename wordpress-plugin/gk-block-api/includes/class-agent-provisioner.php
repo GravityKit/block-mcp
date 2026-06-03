@@ -124,6 +124,11 @@ class Agent_Provisioner {
 	public function ensure() {
 		$login = apply_filters( 'gk_block_api_agent_login', self::LOGIN );
 
+		// Register the role (idempotent) up front so it exists on the CURRENT
+		// blog before we assign it — on multisite the global agent user may have
+		// been created on another blog, where this blog's role didn't yet exist.
+		$role = self::register_role();
+
 		$existing = get_user_by( 'login', $login );
 
 		if ( $existing instanceof \WP_User ) {
@@ -141,14 +146,16 @@ class Agent_Provisioner {
 				);
 			}
 
+			// The agent user is network-global, but capabilities are per-blog.
+			// Without this the agent has the role only on the blog it was first
+			// created on, so REST writes 403 on every other blog of a network.
+			$this->ensure_role_on_current_blog( $existing->ID, $role );
+
 			update_option( 'gk_block_api_agent_user_id', $existing->ID, false );
 			return $existing->ID;
 		}
 
-		// No existing user — register the role and create the account. Reuse
-		// the slug register_role() resolved so the filter is applied once.
-		$role = self::register_role();
-
+		// No existing user — create the account.
 		$host  = wp_parse_url( home_url(), PHP_URL_HOST );
 		$email = 'block-mcp@' . ( $host ? $host : 'localhost' );
 
@@ -167,9 +174,35 @@ class Agent_Provisioner {
 		}
 
 		update_user_meta( $user_id, self::META_FLAG, '1' );
+		$this->ensure_role_on_current_blog( $user_id, $role );
 		update_option( 'gk_block_api_agent_user_id', $user_id, false );
 
 		return $user_id;
+	}
+
+	/**
+	 * Ensure the agent has the agent role (and thus its caps) on the CURRENT blog.
+	 *
+	 * Capabilities live in per-blog usermeta, so a network-global agent user gets
+	 * caps only on the blog where it was first provisioned. On multisite, this
+	 * adds the user to the current blog with the role when it is not yet a member;
+	 * then (on any site type) it re-asserts the role so the caps exist. Idempotent.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param  int    $user_id Agent user ID.
+	 * @param  string $role    Agent role slug.
+	 * @return void
+	 */
+	private function ensure_role_on_current_blog( $user_id, $role ) {
+		if ( is_multisite() && ! is_user_member_of_blog( $user_id, get_current_blog_id() ) ) {
+			add_user_to_blog( get_current_blog_id(), $user_id, $role );
+		}
+
+		$user = get_user_by( 'id', $user_id );
+		if ( $user instanceof \WP_User && ! in_array( $role, (array) $user->roles, true ) ) {
+			$user->add_role( $role );
+		}
 	}
 
 	/**
