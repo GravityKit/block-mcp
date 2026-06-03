@@ -982,8 +982,8 @@ class Connect_Page {
 					<p class="gk-connect__connected-badge"><strong>&#x2705; <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
 				<?php endif; ?>
 
-				<?php $this->render_connect_form(); ?>
-				<?php $this->render_client_next_steps(); ?>
+				<?php $this->render_connect_form( $setup_client ); ?>
+				<?php $this->render_client_next_steps( $setup_client ); ?>
 
 				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
 					<div class="gk-connect__connections-card">
@@ -1237,9 +1237,19 @@ class Connect_Page {
 	 *
 	 * @since 1.9.0
 	 * @since 1.12.0 Radio values are stable slugs; labels come from clients().
+	 *
+	 * @param string $default_client Preselected client slug (the ?setup client);
+	 *                               empty selects the default Claude Desktop card.
+	 * @return void
 	 */
-	private function render_connect_form() {
+	private function render_connect_form( string $default_client = '' ) {
 		$clients = $this->clients();
+
+		// In ?setup=<client> mode the picker preselects that client so the radio,
+		// the is-selected card, and the visible next-steps panel all match the
+		// artifact shown above — otherwise the reload would reset to Claude
+		// Desktop and render two contradictory instruction panels at once.
+		$selected = ( '' !== $default_client ) ? $default_client : self::CLIENT_CLAUDE_DESKTOP;
 		?>
 		<style>
 		/* ── Outer card ────────────────────────────────────────────────────── */
@@ -1474,7 +1484,7 @@ class Connect_Page {
 
 					<?php foreach ( $clients as $slug => $meta ) : ?>
 					<label
-						class="gk-radio-card<?php echo ( self::CLIENT_CLAUDE_DESKTOP === $slug ) ? ' is-selected' : ''; ?><?php echo ( self::CLIENT_AI_PROMPT === $slug ) ? ' is-ai' : ''; ?>"
+						class="gk-radio-card<?php echo ( $selected === $slug ) ? ' is-selected' : ''; ?><?php echo ( self::CLIENT_AI_PROMPT === $slug ) ? ' is-ai' : ''; ?>"
 						id="<?php echo esc_attr( 'gk-card-' . $slug ); ?>"
 					>
 						<input
@@ -1482,7 +1492,7 @@ class Connect_Page {
 							type="radio"
 							name="client"
 							value="<?php echo esc_attr( $slug ); ?>"
-							<?php checked( self::CLIENT_CLAUDE_DESKTOP, $slug ); ?>
+							<?php checked( $selected, $slug ); ?>
 						/>
 						<span class="gk-radio-card__body">
 							<span class="gk-radio-card__title"><?php echo esc_html( $meta['label'] ); ?></span>
@@ -1589,8 +1599,12 @@ class Connect_Page {
 	 * the existing coming-soon note.
 	 *
 	 * @since 1.13.0
+	 *
+	 * @param string $default_client Preselected client slug whose panel is visible
+	 *                               on load; empty defaults to Claude Desktop.
+	 * @return void
 	 */
-	private function render_client_next_steps() {
+	private function render_client_next_steps( string $default_client = '' ) {
 		$clients = array(
 			self::CLIENT_CLAUDE_DESKTOP,
 			self::CLIENT_CLAUDE_CODE,
@@ -1600,8 +1614,13 @@ class Connect_Page {
 			self::CLIENT_OTHER,
 		);
 
+		// The default-visible panel matches the preselected client (the ?setup
+		// client when present, otherwise Claude Desktop) so it is consistent
+		// with the radio selection and the artifact shown above.
+		$selected = ( '' !== $default_client ) ? $default_client : self::CLIENT_CLAUDE_DESKTOP;
+
 		foreach ( $clients as $slug ) {
-			$is_default  = ( self::CLIENT_CLAUDE_DESKTOP === $slug );
+			$is_default  = ( $selected === $slug );
 			$hidden_attr = $is_default ? '' : ' style="display:none;"';
 			$aria_attr   = $is_default ? '' : ' aria-hidden="true"';
 			?>

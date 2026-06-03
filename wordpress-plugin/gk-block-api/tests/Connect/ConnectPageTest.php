@@ -1344,4 +1344,43 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		$this->assertTrue( true, 'unlink_temp_bundle must not raise on a missing path.' );
 	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// Beginner-usability fixes (Sarah persona review).
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * [F3] In ?setup=<client> mode, only the selected client's next-steps panel
+	 * shows — never the default Claude Desktop panel alongside the artifact.
+	 *
+	 * Regression: the post-submit reload to ?setup=claude-code rendered the
+	 * Claude Code command artifact AND re-rendered the picker with the radio
+	 * reset to claude-desktop, so the claude-desktop ".mcpb / After you
+	 * download" panel appeared below the Claude Code terminal command — two
+	 * contradictory instruction sets on one screen. The fix preselects the setup
+	 * client so the radio, the is-selected card, and the default-visible panel
+	 * all match the artifact.
+	 */
+	public function test_render_section_setup_mode_preselects_client_and_shows_single_panel() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		$_GET['setup'] = Connect_Page::CLIENT_CLAUDE_CODE;
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['setup'] );
+
+		// The selected client's radio is checked; Claude Desktop is not.
+		$this->assertSame( 1, preg_match( '/value="claude-code"\s*checked=/', $html ), 'claude-code radio must be checked in setup mode' );
+		$this->assertSame( 0, preg_match( '/value="claude-desktop"\s*checked=/', $html ), 'claude-desktop radio must NOT be checked in setup mode' );
+
+		// The Claude Desktop "After you download" panel must be hidden; the
+		// claude-code panel must be the visible one (one selection => one panel).
+		$this->assertSame( 1, preg_match( '/data-client="claude-desktop"[^>]*style="display:none;"/', $html ), 'claude-desktop next-steps must be hidden in setup=claude-code mode' );
+		$this->assertSame( 0, preg_match( '/data-client="claude-code"[^>]*style="display:none;"/', $html ), 'claude-code next-steps must be visible in setup=claude-code mode' );
+	}
 }
