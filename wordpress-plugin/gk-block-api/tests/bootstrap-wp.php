@@ -46,6 +46,20 @@ tests_add_filter(
 
 require $_tests_dir . '/includes/bootstrap.php';
 
+// WordPress 6.8+ flags wp_is_block_theme() as called incorrectly when
+// $wp_theme_directories is empty. wp-phpunit's bootstrap (above) resets that
+// global and only repopulates it from its bundled test theme directory when
+// that directory is present — in the no-content/dist test build it can be
+// absent, leaving the global empty. A test-only dependency then trips the guard
+// during the @runInSeparateProcess tests, and CI's error_reporting=E_ALL turns
+// the notice into a failure (the PHPUnit convert setting is not inherited by
+// separate-process children, so it cannot be suppressed there). gk-block-api
+// never calls wp_is_block_theme. Guarantee a non-empty value after the bootstrap;
+// WP_UnitTestCase does not reset this global, so it persists across the suite.
+if ( empty( $GLOBALS['wp_theme_directories'] ) ) {
+	$GLOBALS['wp_theme_directories'] = array( WP_CONTENT_DIR . '/themes' );
+}
+
 // Shared test base classes. Loaded AFTER wp-phpunit's bootstrap so
 // WP_UnitTestCase is defined. RestControllerTestCase extends
 // BlockApiTestCase, so order matters.
