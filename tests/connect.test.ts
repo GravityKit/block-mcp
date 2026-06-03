@@ -29,6 +29,7 @@ import {
   buildMcpEntry,
   parseExchangeResponse,
   defaultServerName,
+  isLoopbackOrDevHost,
 } from '../src/connect.js';
 import type { Credentials, McpConfig } from '../src/connect.js';
 
@@ -138,12 +139,37 @@ describe('normalizeSite', () => {
     expect(() => normalizeSite('ftp://example.com')).toThrow(/http.*https/i);
   });
 
-  it('accepts http scheme', () => {
-    expect(normalizeSite('http://example.com')).toBe('http://example.com');
+  it('accepts http scheme for a local/dev host', () => {
+    expect(normalizeSite('http://localhost:7701')).toBe('http://localhost:7701');
+    expect(normalizeSite('http://gkclone.orb.local')).toBe('http://gkclone.orb.local');
+    expect(normalizeSite('http://dev.test')).toBe('http://dev.test');
+  });
+
+  it('[SEC1] rejects plain http:// to a public host (credential would be cleartext)', () => {
+    expect(() => normalizeSite('http://example.com')).toThrow(/https/i);
+    expect(() => normalizeSite('http://www.gravitykit.com')).toThrow(/https/i);
+  });
+
+  it('[SEC1] accepts https:// to a public host', () => {
+    expect(normalizeSite('https://example.com')).toBe('https://example.com');
   });
 
   it('preserves path after host', () => {
     expect(normalizeSite('https://example.com/subpath/')).toBe('https://example.com/subpath');
+  });
+});
+
+describe('isLoopbackOrDevHost', () => {
+  it('is true for loopback and dev TLD hosts', () => {
+    for (const h of ['localhost', '127.0.0.1', '127.0.0.5', '::1', 'gkclone.orb.local', 'dev.test', 'foo.localhost']) {
+      expect(isLoopbackOrDevHost(h)).toBe(true);
+    }
+  });
+
+  it('is false for public hosts', () => {
+    for (const h of ['example.com', 'www.gravitykit.com', 'app.acme.io']) {
+      expect(isLoopbackOrDevHost(h)).toBe(false);
+    }
   });
 });
 

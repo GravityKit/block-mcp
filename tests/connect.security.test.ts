@@ -273,4 +273,20 @@ describe('[WP-F3] credential delivered via exchange, not the callback URL', () =
 
     await expect(exchangeCode('https://example.com', 'bad-code', fakeFetch)).rejects.toThrow();
   });
+
+  it('[CONN7] exchangeCode refuses redirects and bounds the request with an abort signal', async () => {
+    let init: { redirect?: string; signal?: unknown } | undefined;
+    const fakeFetch = (async (_url: string, opts: { redirect?: string; signal?: unknown }) => {
+      init = opts;
+      return { status: 200, json: async () => ({ success: true, data: { site: 's', user: 'u', password: 'p' } }) };
+    }) as unknown as typeof fetch;
+
+    await exchangeCode('https://example.com', CODE, fakeFetch);
+
+    // redirect:'error' stops the POSTed code being 30x-bounced to another origin.
+    expect(init!.redirect).toBe('error');
+    // a timeout-backed AbortSignal bounds a hung site.
+    expect(init!.signal).toBeDefined();
+    expect(init!.signal instanceof AbortSignal).toBe(true);
+  });
 });

@@ -171,13 +171,34 @@ export function defaultServerName(site: string): string {
 // ── Site URL normalisation ────────────────────────────────────────────────────
 
 /**
- * Normalise a site URL: strip trailing slashes, require an http/https scheme,
- * and reject characters a shell would treat as metacharacters.
+ * True for loopback / local-dev hostnames where plain http:// is acceptable.
  *
- * The site URL is later handed to the OS browser-open command. Parsing it with
- * `new URL()` (not just a prefix regex) and rejecting `[\s"'`<>|&^$\\]` keeps a
- * crafted --site from smuggling a second command on platforms whose opener
- * re-parses the argument. Throws a descriptive Error on any invalid input.
+ * The connector POSTs a single-use code to the site and gets the credential
+ * back in the response body, so the transport must be confidential for any
+ * non-local host. Loopback (127.0.0.1 / ::1 / localhost) and the dev TLDs
+ * `.local` / `.test` / `.localhost` are the only places plain http is allowed.
+ */
+export function isLoopbackOrDevHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') {
+    return true;
+  }
+  if (h.startsWith('127.')) {
+    return true;
+  }
+  return h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.test');
+}
+
+/**
+ * Normalise a site URL: strip trailing slashes, require an http/https scheme,
+ * reject shell metacharacters, and require https:// for any non-local host.
+ *
+ * The site URL is later handed to the OS browser-open command, so parsing it
+ * with `new URL()` and rejecting `[\s"'`<>|&^$\\]` keeps a crafted --site from
+ * smuggling a second command. And because the credential-bearing exchange runs
+ * against this host, plain http:// is refused for non-loopback/non-dev hosts so
+ * the code + returned password can't travel in cleartext. Throws a descriptive
+ * Error on any invalid input.
  */
 export function normalizeSite(raw: string): string {
   const trimmed = raw.replace(/\/+$/, '');
@@ -196,6 +217,14 @@ export function normalizeSite(raw: string): string {
   if (/[\s"'`<>|&^$\\]/.test(trimmed)) {
     throw new Error(
       `--site contains characters that are not allowed in a site URL: "${raw}"`
+    );
+  }
+
+  if (url.protocol === 'http:' && !isLoopbackOrDevHost(url.hostname)) {
+    throw new Error(
+      `--site must use https:// for a public host (got http://${url.hostname}). ` +
+        'Plain http would send your connection credential in cleartext. ' +
+        'Use https://, or a local host (localhost / *.local / *.test) for development.'
     );
   }
 
@@ -297,27 +326,45 @@ export function parseExchangeResponse(json: unknown): Credentials {
   return { site, user, password };
 }
 
+/** Default timeout (ms) for the credential-exchange request. */
+export const EXCHANGE_FETCH_TIMEOUT_MS = 15_000;
+
 /**
  * Exchange a single-use code for the credential set.
  *
  * POSTs the code to the site's `admin-post.php` exchange endpoint and returns
  * the credential once. The credential is delivered here, in a direct response
  * body — never in a URL — so it stays out of browser history and Referer
- * headers. `fetchFn` is injectable for testing.
+ * headers. The request rejects redirects (`redirect: 'error'`) so the POSTed
+ * code can't be 30x-bounced to another origin, and is bounded by a timeout so a
+ * hung site doesn't wedge the connector. `fetchFn` is injectable for testing.
  */
 export async function exchangeCode(
   site: string,
   code: string,
-  fetchFn: typeof fetch = fetch
+  fetchFn: typeof fetch = fetch,
+  timeoutMs: number = EXCHANGE_FETCH_TIMEOUT_MS
 ): Promise<Credentials> {
   const url = `${site}/wp-admin/admin-post.php`;
   const body = new URLSearchParams({ action: 'gk_block_api_exchange', code });
 
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetchFn(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      redirect: 'error',
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`Exchange failed: could not reach ${url} (${(err as Error).message}).`);
+  } finally {
+    clearTimeout(timer);
+  }
 
   let json: unknown;
   try {
@@ -565,11 +612,20 @@ export function browserOpenCommand(
 
 /**
  * Open a URL in the default browser using the platform-appropriate command.
- * Uses spawn (not exec/shell) to avoid shell escaping issues.
+ * Uses spawn (not exec/shell) to avoid shell escaping issues. A spawn failure
+ * (no opener on the box, command missing) emits an async 'error' event that
+ * would otherwise crash the connector; we catch it and fall back to printing
+ * the URL so the user can open it manually and the connect still completes.
  */
 export function openBrowser(url: string): void {
   const { cmd, args } = browserOpenCommand(url, process.platform);
-  cp.spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+  const child = cp.spawn(cmd, args, { detached: true, stdio: 'ignore' });
+  child.on('error', (e) => {
+    console.error(
+      `Could not open a browser automatically (${e.message}). Open this URL manually:\n\n  ${url}\n`
+    );
+  });
+  child.unref();
 }
 
 // ── HTML response ─────────────────────────────────────────────────────────────
@@ -630,12 +686,14 @@ export async function runConnect(
   const state = crypto.randomUUID();
 
   // ── 3. Start loopback server ───────────────────────────────────────────
+  // The callback promise is resolve-only: a malformed / wrong-state / stray
+  // request gets a 400 but does NOT settle it, so a probe or an attacker's
+  // forged callback can't kill the pending connect. Only a valid, state-matching
+  // callback resolves it; otherwise the timeout below fires.
   let resolveCallback!: (code: string) => void;
-  let rejectCallback!: (err: Error) => void;
 
-  const callbackPromise = new Promise<string>((resolve, reject) => {
+  const callbackPromise = new Promise<string>((resolve) => {
     resolveCallback = resolve;
-    rejectCallback = reject;
   });
 
   const server = http.createServer((req, res) => {
@@ -650,7 +708,7 @@ export async function runConnect(
     if (!result.ok) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(ERROR_HTML(result.reason));
-      rejectCallback(new Error(result.reason));
+      console.error(`Ignoring an invalid callback (${result.reason}); still waiting…`);
       return;
     }
 
@@ -687,12 +745,15 @@ export async function runConnect(
   console.error(`Waiting for approval (timeout ${timeoutMs / 1000}s)…`);
 
   // ── 5. Wait for callback with timeout ──────────────────────────────────
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(
+  // Keep the timer handle so we can clear it once a callback wins the race —
+  // otherwise the pending setTimeout keeps the event loop alive after success.
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
       () => reject(new Error(`Timed out after ${timeoutMs / 1000}s waiting for browser approval.`)),
       timeoutMs
-    )
-  );
+    );
+  });
 
   let code: string;
   try {
@@ -702,6 +763,7 @@ export async function runConnect(
     console.error(`Error: ${(err as Error).message}`);
     process.exit(1);
   } finally {
+    clearTimeout(timeoutHandle!);
     server.close();
   }
 

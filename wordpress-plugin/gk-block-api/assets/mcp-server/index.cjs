@@ -59234,6 +59234,16 @@ function defaultServerName(site) {
   const slug = host.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return slug ? `block-mcp-${slug}` : "block-mcp";
 }
+function isLoopbackOrDevHost(hostname3) {
+  const h2 = hostname3.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h2 === "localhost" || h2 === "127.0.0.1" || h2 === "::1") {
+    return true;
+  }
+  if (h2.startsWith("127.")) {
+    return true;
+  }
+  return h2.endsWith(".localhost") || h2.endsWith(".local") || h2.endsWith(".test");
+}
 function normalizeSite(raw2) {
   const trimmed = raw2.replace(/\/+$/, "");
   let url3;
@@ -59248,6 +59258,11 @@ function normalizeSite(raw2) {
   if (/[\s"'`<>|&^$\\]/.test(trimmed)) {
     throw new Error(
       `--site contains characters that are not allowed in a site URL: "${raw2}"`
+    );
+  }
+  if (url3.protocol === "http:" && !isLoopbackOrDevHost(url3.hostname)) {
+    throw new Error(
+      `--site must use https:// for a public host (got http://${url3.hostname}). Plain http would send your connection credential in cleartext. Use https://, or a local host (localhost / *.local / *.test) for development.`
     );
   }
   return trimmed;
@@ -59294,14 +59309,26 @@ function parseExchangeResponse(json2) {
   }
   return { site, user, password };
 }
-async function exchangeCode(site, code, fetchFn = fetch) {
+var EXCHANGE_FETCH_TIMEOUT_MS = 15e3;
+async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS) {
   const url3 = `${site}/wp-admin/admin-post.php`;
   const body3 = new URLSearchParams({ action: "gk_block_api_exchange", code });
-  const res = await fetchFn(url3, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body3.toString()
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetchFn(url3, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body3.toString(),
+      redirect: "error",
+      signal: controller.signal
+    });
+  } catch (err) {
+    throw new Error(`Exchange failed: could not reach ${url3} (${err.message}).`);
+  } finally {
+    clearTimeout(timer);
+  }
   let json2;
   try {
     json2 = await res.json();
@@ -59445,7 +59472,16 @@ function browserOpenCommand(url3, platform) {
 }
 function openBrowser(url3) {
   const { cmd, args } = browserOpenCommand(url3, process.platform);
-  cp2.spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+  const child = cp2.spawn(cmd, args, { detached: true, stdio: "ignore" });
+  child.on("error", (e) => {
+    console.error(
+      `Could not open a browser automatically (${e.message}). Open this URL manually:
+
+  ${url3}
+`
+    );
+  });
+  child.unref();
 }
 var SUCCESS_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -59478,10 +59514,8 @@ async function runConnect(argv, opts = {}) {
   }
   const state = crypto2.randomUUID();
   let resolveCallback;
-  let rejectCallback;
-  const callbackPromise = new Promise((resolve, reject) => {
+  const callbackPromise = new Promise((resolve) => {
     resolveCallback = resolve;
-    rejectCallback = reject;
   });
   const server = http3.createServer((req, res) => {
     if (!req.url?.startsWith("/callback")) {
@@ -59493,7 +59527,7 @@ async function runConnect(argv, opts = {}) {
     if (!result.ok) {
       res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
       res.end(ERROR_HTML(result.reason));
-      rejectCallback(new Error(result.reason));
+      console.error(`Ignoring an invalid callback (${result.reason}); still waiting\u2026`);
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -59525,12 +59559,13 @@ Open this URL in your browser to authorize:
 `);
   }
   console.error(`Waiting for approval (timeout ${timeoutMs / 1e3}s)\u2026`);
-  const timeoutPromise = new Promise(
-    (_3, reject) => setTimeout(
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_3, reject) => {
+    timeoutHandle = setTimeout(
       () => reject(new Error(`Timed out after ${timeoutMs / 1e3}s waiting for browser approval.`)),
       timeoutMs
-    )
-  );
+    );
+  });
   let code;
   try {
     code = await Promise.race([callbackPromise, timeoutPromise]);
@@ -59539,6 +59574,7 @@ Open this URL in your browser to authorize:
     console.error(`Error: ${err.message}`);
     process.exit(1);
   } finally {
+    clearTimeout(timeoutHandle);
     server.close();
   }
   console.error(`Approved. Retrieving credentials\u2026`);
