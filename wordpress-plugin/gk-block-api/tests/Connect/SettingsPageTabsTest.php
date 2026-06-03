@@ -133,10 +133,9 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * [F1] The admin submenu uses a plain "AI Assistant" label so a beginner can
-	 * find where to connect their AI, instead of scanning past "Block MCP".
+	 * The admin submenu uses the "Block MCP" brand label.
 	 */
-	public function test_register_menu_uses_plain_ai_assistant_label() {
+	public function test_register_menu_uses_block_mcp_label() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
@@ -154,6 +153,6 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 		}
 
 		$this->assertNotNull( $found, 'the settings submenu entry must be registered' );
-		$this->assertSame( 'AI Assistant', $found[0], 'menu title must be the plain "AI Assistant" label' );
+		$this->assertSame( 'Block MCP', $found[0], 'menu title must be the "Block MCP" brand label' );
 	}
 }

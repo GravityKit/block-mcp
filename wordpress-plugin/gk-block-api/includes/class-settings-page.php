@@ -71,9 +71,7 @@ class Settings_Page {
 	public function register_menu() {
 		add_options_page(
 			__( 'Block MCP', 'gk-block-api' ),
-			// Plain, discoverable menu label so a non-technical admin can find
-			// where to connect their AI; the brand stays in the page title + H1.
-			__( 'AI Assistant', 'gk-block-api' ),
+			__( 'Block MCP', 'gk-block-api' ),
 			'manage_options',
 			self::PAGE_SLUG,
 			array( $this, 'render_page' )
