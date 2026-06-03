@@ -1017,6 +1017,9 @@ class Connect_Page {
 			<p class="gk-connect__intro">
 				<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
 			</p>
+			<p class="gk-connect__intro description" style="color:#646970;">
+				<?php esc_html_e( "If you see other notices on this page, they're from your other plugins — not from this setup, and they won't affect connecting your AI assistant.", 'gk-block-api' ); ?>
+			</p>
 
 			<?php if ( 'needs_https' === $state ) : ?>
 

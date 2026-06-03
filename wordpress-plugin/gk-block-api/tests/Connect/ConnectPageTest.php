@@ -1525,4 +1525,25 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'as the Block MCP agent', $html, 'the "Block MCP agent" jargon phrasing must be replaced' );
 		$this->assertStringNotContainsString( 'sends a credential to the local app', $html, 'the "credential / local app" jargon phrasing must be replaced' );
 	}
+
+	/**
+	 * [F12] The Connect section reassures the user that unrelated admin notices
+	 * (from other plugins) are not part of, and don't affect, this setup.
+	 *
+	 * Sarah saw third-party notices and a red license banner (BetterDocs', not
+	 * ours) above the feature and feared she'd broken something. We can't
+	 * suppress other plugins' global notices, but our own surface can defuse the
+	 * fear. Phrased conditionally so it reads fine when no notices are present.
+	 */
+	public function test_render_section_reassures_about_unrelated_notices() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'from your other plugins', $html, 'the section must reassure that unrelated notices are not from this setup' );
+	}
 }
