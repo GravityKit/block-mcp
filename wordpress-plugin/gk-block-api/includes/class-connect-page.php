@@ -315,7 +315,7 @@ class Connect_Page {
 			return $agent;
 		}
 
-		$issued = ( new App_Password_Issuer() )->issue( $agent, 'Block MCP — ' . $client );
+		$issued = ( new App_Password_Issuer() )->issue( $agent, $this->connection_label( $client ) );
 		if ( is_wp_error( $issued ) ) {
 			return $issued;
 		}
@@ -328,6 +328,36 @@ class Connect_Page {
 			'password' => $issued['password'],
 			'uuid'     => $issued['uuid'],
 		);
+	}
+
+	/**
+	 * Build the Application Password label for a connection.
+	 *
+	 * On multisite the agent user — and therefore its Application Passwords — is
+	 * network-global, so every blog's connection list shows the same credentials.
+	 * Appending the originating site's address (host AND path, which distinguishes
+	 * both subdomain and subdirectory sub-sites) lets a network admin tell which
+	 * sub-site created each connection. List and revoke stay network-wide because
+	 * the credential itself is: hiding a connection per-blog would mask access it
+	 * actually grants. The label keeps the Connections::NAME_PREFIX so a connection
+	 * is still recognised and revocable.
+	 *
+	 * @since  1.9.0
+	 *
+	 * @param  string $client Human-readable client display name.
+	 * @return string Application Password label.
+	 */
+	private function connection_label( $client ) {
+		$label = 'Block MCP — ' . $client;
+
+		if ( is_multisite() ) {
+			$site     = (string) preg_replace( '#^https?://#', '', untrailingslashit( home_url() ) );
+			$has_site = '' !== $site;
+			$suffix   = $has_site ? $site : 'site #' . get_current_blog_id();
+			$label   .= ' (' . $suffix . ')';
+		}
+
+		return $label;
 	}
 
 	/**

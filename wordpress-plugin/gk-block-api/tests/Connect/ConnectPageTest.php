@@ -132,6 +132,82 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * On single-site, a connection's Application Password label is exactly
+	 * "Block MCP — <client>" with no site suffix.
+	 *
+	 * Pins that connection_label()'s multisite site-discriminator does not leak
+	 * into the single-site label — the common path stays unchanged.
+	 */
+	public function test_connection_label_has_no_site_suffix_on_single_site() {
+		if ( is_multisite() ) {
+			$this->markTestSkipped( 'Single-site label contract; the multisite suffix is covered separately.' );
+		}
+
+		$page = new Connect_Page();
+		$page->provision_credentials( 'Claude Desktop' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+		$passwords = WP_Application_Passwords::get_user_application_passwords( $agent->ID );
+		$this->assertCount( 1, $passwords );
+		$this->assertSame(
+			'Block MCP — Claude Desktop',
+			$passwords[0]['name'],
+			'single-site connection label must carry no site suffix'
+		);
+	}
+
+	/**
+	 * On multisite, the agent user and its Application Passwords are
+	 * network-global, so a connection minted on one sub-site appears in every
+	 * blog's list. connection_label() appends the originating site's address so
+	 * the two are distinguishable. This provisions on the main blog and on a fresh
+	 * sub-site against the SAME network agent, then asserts both connections are
+	 * listed and each label carries its own site address — proving the list is
+	 * honestly network-wide while still attributing each connection to its origin.
+	 *
+	 * @group ms-required
+	 */
+	public function test_connection_label_includes_site_address_on_multisite() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Multisite-only test. Run with WP_TESTS_MULTISITE=1.' );
+		}
+
+		$page = new Connect_Page();
+
+		// Main-blog connection.
+		$main_creds = $page->provision_credentials( 'Claude Desktop' );
+		$this->assertIsArray( $main_creds );
+		$main_site = (string) preg_replace( '#^https?://#', '', untrailingslashit( home_url() ) );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+
+		// Sub-site connection on the same network agent.
+		$blog_id = self::factory()->blog->create();
+		$this->assertIsInt( $blog_id );
+
+		switch_to_blog( $blog_id );
+		$sub_site = (string) preg_replace( '#^https?://#', '', untrailingslashit( home_url() ) );
+		try {
+			$sub_creds = $page->provision_credentials( 'Cursor' );
+			$this->assertIsArray( $sub_creds );
+		} finally {
+			restore_current_blog();
+		}
+
+		// The site addresses must differ, or the discriminator is pointless.
+		$this->assertNotSame( $main_site, $sub_site, 'main and sub-site addresses must differ' );
+
+		// Both connections live on the one network-global agent and are both listed.
+		$names = wp_list_pluck( ( new Connections() )->list( $agent->ID ), 'name', 'uuid' );
+		$this->assertArrayHasKey( $main_creds['uuid'], $names );
+		$this->assertArrayHasKey( $sub_creds['uuid'], $names );
+		$this->assertSame( 'Block MCP — Claude Desktop (' . $main_site . ')', $names[ $main_creds['uuid'] ] );
+		$this->assertSame( 'Block MCP — Cursor (' . $sub_site . ')', $names[ $sub_creds['uuid'] ] );
+	}
+
+	/**
 	 * provision_credentials() must return WP_Error('agent_login_taken') when a
 	 * non-agent user already owns the block-mcp login, and must not mint any
 	 * Application Password on the conflicting user.
