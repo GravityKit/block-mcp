@@ -30,21 +30,6 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 tests_add_filter(
 	'muplugins_loaded',
 	static function () use ( $plugin_root ): void {
-		// WordPress 6.8+ flags wp_is_block_theme() as "called incorrectly" when
-		// $wp_theme_directories is still empty (theme.php). A test-only dependency
-		// (Yoast, loaded below) calls it during plugin load — before wp-phpunit
-		// registers its test theme directory — and under error_reporting=E_ALL that
-		// E_USER notice fails the @runInSeparateProcess tests. The test build is a
-		// no-content WordPress, so WP_CONTENT_DIR/themes does not exist; register
-		// wp-phpunit's bundled test theme directory (which does exist, so the
-		// registration takes) up front to satisfy the guard. gk-block-api never
-		// calls wp_is_block_theme itself. register_theme_directory de-dupes, so
-		// wp-phpunit registering the same path later is a harmless no-op.
-		$test_theme_dir = $plugin_root . '/vendor/wp-phpunit/wp-phpunit/data/themedir1';
-		if ( function_exists( 'register_theme_directory' ) && is_dir( $test_theme_dir ) ) {
-			register_theme_directory( $test_theme_dir );
-		}
-
 		// Yoast is only needed for the single-site Yoast_Bridge integration tests.
 		// Skip it under multisite: that config runs only the ms-required group (no
 		// Yoast tests), and loading Yoast there triggers per-blog Yoast migrations
@@ -57,6 +42,29 @@ tests_add_filter(
 		}
 		require dirname( __DIR__ ) . '/gk-block-api.php';
 	}
+);
+
+// wp-phpunit's bootstrap resets $wp_theme_directories and only repopulates it
+// from DIR_TESTDATA/themedir1 when that directory exists; if it is absent the
+// global stays empty, and WordPress 6.8+ then flags wp_is_block_theme() as
+// _doing_it_wrong — which fails the @runInSeparateProcess tests under
+// error_reporting=E_ALL. Ensure the directory exists before the bootstrap runs
+// so wp-phpunit registers it ahead of WP loading (and any wp_is_block_theme call).
+$gk_test_themedir = $_tests_dir . '/data/themedir1';
+if ( ! is_dir( $gk_test_themedir ) ) {
+	@mkdir( $gk_test_themedir, 0755, true ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged,WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+}
+
+// TEMP DEBUG: only fires if the guard still trips on CI; surfaces the theme-dir
+// state and the caller so the root cause is unambiguous. Removed once CI is green.
+tests_add_filter(
+	'doing_it_wrong_run',
+	static function ( $function_name ) use ( $gk_test_themedir ) {
+		if ( 'wp_is_block_theme' === $function_name ) {
+			fwrite( STDERR, "\n[GKDBG] wp_is_block_theme _doing_it_wrong | themedir1_exists=" . ( is_dir( $gk_test_themedir ) ? '1' : '0' ) . ' | dirs=' . wp_json_encode( $GLOBALS['wp_theme_directories'] ?? null ) . ' | ' . wp_debug_backtrace_summary() . "\n" );
+		}
+	},
+	1
 );
 
 require $_tests_dir . '/includes/bootstrap.php';
