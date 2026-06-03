@@ -116,4 +116,44 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Namespace tier scores', $html, 'Namespace tier scores heading must appear on policy tab' );
 		$this->assertStringNotContainsString( 'Connect an AI Assistant', $html, 'Connect onboarding must NOT appear on policy tab' );
 	}
+
+	/**
+	 * [F1] The settings page glosses "MCP" in plain language so a non-technical
+	 * admin doesn't read it as a developer page on landing.
+	 */
+	public function test_render_page_glosses_mcp_jargon() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'Model Context Protocol', $html, 'the page must gloss MCP on first mention' );
+	}
+
+	/**
+	 * [F1] The admin submenu uses a plain "AI Assistant" label so a beginner can
+	 * find where to connect their AI, instead of scanning past "Block MCP".
+	 */
+	public function test_register_menu_uses_plain_ai_assistant_label() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		( new Settings_Page( new Block_Inventory() ) )->register_menu();
+
+		global $submenu;
+		$found = null;
+		if ( isset( $submenu['options-general.php'] ) ) {
+			foreach ( $submenu['options-general.php'] as $entry ) {
+				if ( isset( $entry[2] ) && Settings_Page::PAGE_SLUG === $entry[2] ) {
+					$found = $entry;
+					break;
+				}
+			}
+		}
+
+		$this->assertNotNull( $found, 'the settings submenu entry must be registered' );
+		$this->assertSame( 'AI Assistant', $found[0], 'menu title must be the plain "AI Assistant" label' );
+	}
 }

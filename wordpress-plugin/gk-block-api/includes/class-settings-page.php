@@ -71,7 +71,9 @@ class Settings_Page {
 	public function register_menu() {
 		add_options_page(
 			__( 'Block MCP', 'gk-block-api' ),
-			__( 'Block MCP', 'gk-block-api' ),
+			// Plain, discoverable menu label so a non-technical admin can find
+			// where to connect their AI; the brand stays in the page title + H1.
+			__( 'AI Assistant', 'gk-block-api' ),
 			'manage_options',
 			self::PAGE_SLUG,
 			array( $this, 'render_page' )
@@ -467,6 +469,9 @@ class Settings_Page {
 				}
 			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
+			<p class="description gk-block-api-subtitle" style="margin:4px 0 12px; max-width:800px;">
+				<?php esc_html_e( 'Connect AI assistants like Claude to edit your site — no code required. (MCP stands for Model Context Protocol, the technology that lets AI apps connect to your site.)', 'gk-block-api' ); ?>
+			</p>
 
 			<h2 class="nav-tab-wrapper">
 				<a href="
