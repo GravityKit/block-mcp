@@ -308,10 +308,24 @@ function readJsonFile(filePath: string, defaultValue: McpConfig): McpConfig {
   }
 }
 
-/** Write a JSON file, creating parent directories as needed. */
+/**
+ * Write a JSON file, creating parent directories as needed.
+ *
+ * The file embeds the WordPress Application Password in cleartext, so it is
+ * created owner-only (0600) under an owner-only parent directory (0700). The
+ * `mode` option only applies when the file/dir is newly created, so an
+ * explicit chmod also tightens a pre-existing loose-perm file. chmod is
+ * best-effort: on filesystems without POSIX modes it is a no-op and any
+ * error is ignored.
+ */
 function writeJsonFile(filePath: string, data: McpConfig): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    // POSIX file modes unavailable (e.g. Windows) — nothing to tighten.
+  }
 }
 
 /** Write to the Cursor MCP config, preserving existing servers. */
