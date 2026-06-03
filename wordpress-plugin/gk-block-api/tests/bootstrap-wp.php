@@ -30,6 +30,34 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 tests_add_filter(
 	'muplugins_loaded',
 	static function () use ( $plugin_root ): void {
+		// Ensure $wp_theme_directories is non-empty as early in the WordPress load
+		// as a hook allows. wp-phpunit's bootstrap empties it right before loading
+		// WordPress and only repopulates it from its bundled test theme directory
+		// when that exists — on the no-content/dist test build it can be absent,
+		// leaving the global empty. WordPress 6.8+ then flags wp_is_block_theme()
+		// via _doing_it_wrong during the @runInSeparateProcess tests, and CI's
+		// error_reporting=E_ALL turns that notice into a failure. muplugins_loaded
+		// fires before setup_theme/init (where the call originates) in every
+		// process, so setting it here keeps the guard satisfied. gk-block-api never
+		// calls wp_is_block_theme itself.
+		if ( empty( $GLOBALS['wp_theme_directories'] ) ) {
+			$GLOBALS['wp_theme_directories'] = array( WP_CONTENT_DIR . '/themes' );
+		}
+
+		// Belt-and-suspenders: if wp_is_block_theme() is still reached with an empty
+		// theme-directory list (e.g. a call earlier than this hook), suppress only
+		// that one incorrect-usage notice so it can't fail the test. Errors,
+		// warnings, deprecations, and every other incorrect-usage notice are
+		// unaffected.
+		add_filter(
+			'doing_it_wrong_trigger_error',
+			static function ( $trigger, $function_name = '' ) {
+				return ( 'wp_is_block_theme' === $function_name ) ? false : $trigger;
+			},
+			10,
+			2
+		);
+
 		// Yoast is only needed for the single-site Yoast_Bridge integration tests.
 		// Skip it under multisite: that config runs only the ms-required group (no
 		// Yoast tests), and loading Yoast there triggers per-blog Yoast migrations
