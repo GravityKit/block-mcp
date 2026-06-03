@@ -39774,6 +39774,9 @@ var package_default = {
   version: "1.8.0",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
+  bin: {
+    "block-mcp": "dist/index.cjs"
+  },
   type: "module",
   scripts: {
     build: "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs",
@@ -59224,12 +59227,12 @@ function parseConnectArgs(argv) {
 function defaultServerName(site) {
   let host;
   try {
-    host = new URL(site).hostname.toLowerCase();
+    host = new URL(site).host.toLowerCase();
   } catch {
     return "block-mcp";
   }
-  const label = host.replace(/^www\./, "").split(".")[0].replace(/[^a-z0-9-]/g, "");
-  return label ? `block-mcp-${label}` : "block-mcp";
+  const slug = host.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug ? `block-mcp-${slug}` : "block-mcp";
 }
 function normalizeSite(raw2) {
   const trimmed = raw2.replace(/\/+$/, "");

@@ -172,8 +172,8 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 		$zip = new ZipArchive();
 		$this->assertTrue( $zip->open( $path ) === true );
 		$manifest = json_decode( $zip->getFromName( 'manifest.json' ), true );
-		// creds() uses https://example.com → block-mcp-example.
-		$this->assertSame( 'block-mcp-example', $manifest['name'] );
+		// creds() uses https://example.com → block-mcp-example-com.
+		$this->assertSame( 'block-mcp-example-com', $manifest['name'] );
 		$this->assertNotFalse( $zip->locateName( 'server/index.cjs' ) );
 		$zip->close();
 
@@ -206,9 +206,9 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 			return $m['name'];
 		};
 
-		$this->assertSame( 'block-mcp-gravitykit', $name( 'https://www.gravitykit.com' ) );
-		$this->assertSame( 'block-mcp-dev', $name( 'https://dev.test' ) );
-		$this->assertSame( 'block-mcp-gkclone', $name( 'https://gkclone.orb.local' ) );
+		$this->assertSame( 'block-mcp-www-gravitykit-com', $name( 'https://www.gravitykit.com' ) );
+		$this->assertSame( 'block-mcp-dev-test', $name( 'https://dev.test' ) );
+		$this->assertSame( 'block-mcp-gkclone-orb-local', $name( 'https://gkclone.orb.local' ) );
 
 		// The whole point: distinct sites → distinct extension names.
 		$names = array(
@@ -217,6 +217,42 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 			$name( 'https://gkclone.orb.local' ),
 		);
 		$this->assertCount( 3, array_unique( $names ), 'each site must yield a unique manifest name' );
+	}
+
+	/**
+	 * The manifest name keeps subdomains, www, and ports distinct — never
+	 * collapsing two different hosts onto one Claude Desktop extension.
+	 *
+	 * www.X and X can be different sites; different subdomains are different
+	 * sites; same host on different ports are different sites. Each must yield
+	 * its own extension name.
+	 */
+	public function test_manifest_name_keeps_subdomains_www_and_ports_distinct() {
+		$gen  = new MCPB_Generator();
+		$name = static function ( $url ) use ( $gen ) {
+			$m = $gen->manifest(
+				array(
+					'url'      => $url,
+					'user'     => 'block-mcp',
+					'password' => 'pw',
+					'client'   => 'Claude Desktop app',
+				)
+			);
+			return $m['name'];
+		};
+
+		// www is NOT collapsed onto the apex.
+		$this->assertSame( 'block-mcp-www-example-com', $name( 'https://www.example.com' ) );
+		$this->assertSame( 'block-mcp-example-com', $name( 'https://example.com' ) );
+		$this->assertNotSame( $name( 'https://www.example.com' ), $name( 'https://example.com' ) );
+
+		// Different subdomains are distinct.
+		$this->assertSame( 'block-mcp-app-example-com', $name( 'https://app.example.com' ) );
+		$this->assertSame( 'block-mcp-staging-example-com', $name( 'https://staging.example.com' ) );
+
+		// Same host, different port → distinct.
+		$this->assertSame( 'block-mcp-localhost-7701', $name( 'http://localhost:7701' ) );
+		$this->assertNotSame( $name( 'http://localhost:7701' ), $name( 'http://localhost:8080' ) );
 	}
 
 	/**

@@ -37,9 +37,9 @@ const SITE_A: Credentials = { site: 'https://www.gravitykit.com', user: 'block-m
 const SITE_B: Credentials = { site: 'https://dev.test', user: 'block-mcp', password: 'pw-B-2222' };
 const SITE_C: Credentials = { site: 'https://gkclone.orb.local', user: 'block-mcp', password: 'pw-C-3333' };
 
-const NAME_A = 'block-mcp-gravitykit';
-const NAME_B = 'block-mcp-dev';
-const NAME_C = 'block-mcp-gkclone';
+const NAME_A = 'block-mcp-www-gravitykit-com';
+const NAME_B = 'block-mcp-dev-test';
+const NAME_C = 'block-mcp-gkclone-orb-local';
 
 const ORIGINAL_HOME = process.env.HOME;
 
@@ -74,18 +74,41 @@ describe('multi-site: default names are distinct per site', () => {
     expect([a, b, c]).toEqual([NAME_A, NAME_B, NAME_C]);
   });
 
-  it('strips www and lowercases so case/www variants map to the same name', () => {
-    expect(defaultServerName('https://WWW.GravityKit.com')).toBe(NAME_A);
-    expect(defaultServerName('https://gravitykit.com')).toBe(NAME_A);
+  it('lowercases the host but keeps www distinct from the apex', () => {
+    expect(defaultServerName('https://WWW.GravityKit.com')).toBe(NAME_A); // case-insensitive
+    expect(defaultServerName('https://gravitykit.com')).toBe('block-mcp-gravitykit-com');
+    expect(defaultServerName('https://www.gravitykit.com')).not.toBe(
+      defaultServerName('https://gravitykit.com')
+    );
   });
 
-  it('two sites that share a first label collide on the default name (use --name to disambiguate)', () => {
-    // Documents the one collision case: distinct sites, same leading label.
-    expect(defaultServerName('https://dev.test')).toBe('block-mcp-dev');
-    expect(defaultServerName('https://dev.example.com')).toBe('block-mcp-dev');
-    // --name resolves it.
-    expect(parseConnectArgs(['--site', 'https://dev.example.com', '--name', 'block-mcp-dev-example']).name)
-      .toBe('block-mcp-dev-example');
+  it('hosts that share a leading label do NOT collide (full host is used)', () => {
+    const names = [
+      defaultServerName('https://dev.test'),
+      defaultServerName('https://dev.local'),
+      defaultServerName('https://dev.example.com'),
+    ];
+    expect(names).toEqual(['block-mcp-dev-test', 'block-mcp-dev-local', 'block-mcp-dev-example-com']);
+    expect(new Set(names).size).toBe(3);
+  });
+
+  it('different subdomains of the same domain get distinct names', () => {
+    const names = [
+      defaultServerName('https://acme.com'),
+      defaultServerName('https://app.acme.com'),
+      defaultServerName('https://staging.acme.com'),
+    ];
+    expect(names).toEqual([
+      'block-mcp-acme-com',
+      'block-mcp-app-acme-com',
+      'block-mcp-staging-acme-com',
+    ]);
+    expect(new Set(names).size).toBe(3);
+  });
+
+  it('--name still overrides the derived name', () => {
+    expect(parseConnectArgs(['--site', 'https://app.acme.com', '--name', 'block-mcp-acme-staging']).name)
+      .toBe('block-mcp-acme-staging');
   });
 });
 
@@ -240,6 +263,23 @@ describe('multi-site: Claude Desktop config accumulates sites', () => {
     writeClaudeDesktopConfig(SITE_B, 'linux', NAME_B);
     const file = path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(isWin)('two subdomains of the same domain coexist as separate entries', () => {
+    const home = mkTmpHome();
+    const app: Credentials = { site: 'https://app.acme.com', user: 'block-mcp', password: 'pw-app' };
+    const stg: Credentials = { site: 'https://staging.acme.com', user: 'block-mcp', password: 'pw-stg' };
+    writeClaudeDesktopConfig(app, 'linux', defaultServerName(app.site));
+    writeClaudeDesktopConfig(stg, 'linux', defaultServerName(stg.site));
+
+    const cfg = readDesktop(home);
+    expect(Object.keys(cfg.mcpServers).sort()).toEqual(
+      ['block-mcp-app-acme-com', 'block-mcp-staging-acme-com'].sort()
+    );
+    expect(cfg.mcpServers['block-mcp-app-acme-com'].env.WORDPRESS_URL).toBe(app.site);
+    expect(cfg.mcpServers['block-mcp-staging-acme-com'].env.WORDPRESS_URL).toBe(stg.site);
+    expect(cfg.mcpServers['block-mcp-app-acme-com'].env.WORDPRESS_APP_PASSWORD).toBe('pw-app');
+    expect(cfg.mcpServers['block-mcp-staging-acme-com'].env.WORDPRESS_APP_PASSWORD).toBe('pw-stg');
   });
 });
 

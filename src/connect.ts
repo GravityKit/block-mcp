@@ -145,24 +145,27 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
 }
 
 /**
- * Derive a default MCP server name from a site URL: `block-mcp-<host-label>`.
+ * Derive a default MCP server name from a site URL: `block-mcp-<sanitized-host>`.
  *
- * Uses the host's first DNS label (after stripping a leading `www.`) so distinct
- * sites get distinct, readable names that coexist in one client config —
- * e.g. https://www.gravitykit.com → `block-mcp-gravitykit`, https://dev.test →
- * `block-mcp-dev`. Falls back to `block-mcp` when the site can't be parsed.
- * Override with `--name`.
+ * Uses the URL's full host authority — hostname AND any non-default port —
+ * verbatim, lowercased, with each run of non-alphanumerics collapsed to a
+ * single hyphen and stray hyphens trimmed. Nothing is stripped, truncated, or
+ * collapsed, so every distinct host gets a distinct name and no two sites
+ * silently share one entry: https://www.gravitykit.com → block-mcp-www-gravitykit-com
+ * (≠ https://gravitykit.com → block-mcp-gravitykit-com), https://dev.test →
+ * block-mcp-dev-test, http://localhost:7701 → block-mcp-localhost-7701. Falls
+ * back to `block-mcp` when the site has no parseable host. Override with `--name`.
  */
 export function defaultServerName(site: string): string {
   let host: string;
   try {
-    host = new URL(site).hostname.toLowerCase();
+    host = new URL(site).host.toLowerCase();
   } catch {
     return 'block-mcp';
   }
 
-  const label = host.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9-]/g, '');
-  return label ? `block-mcp-${label}` : 'block-mcp';
+  const slug = host.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return slug ? `block-mcp-${slug}` : 'block-mcp';
 }
 
 // ── Site URL normalisation ────────────────────────────────────────────────────

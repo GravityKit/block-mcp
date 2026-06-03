@@ -523,20 +523,51 @@ describe('password-never-logged invariant', () => {
 // ── Multi-site server naming (--name) ──────────────────────────────────────────
 
 describe('defaultServerName', () => {
-  it('derives block-mcp-<label> from the host, stripping www', () => {
-    expect(defaultServerName('https://www.gravitykit.com')).toBe('block-mcp-gravitykit');
+  it('derives block-mcp-<sanitized-host> from the full host', () => {
+    expect(defaultServerName('https://www.gravitykit.com')).toBe('block-mcp-www-gravitykit-com');
   });
 
-  it('uses the first label for a two-label dev host', () => {
-    expect(defaultServerName('https://dev.test')).toBe('block-mcp-dev');
+  it('keeps the whole host so dotted hosts stay distinct', () => {
+    expect(defaultServerName('https://dev.test')).toBe('block-mcp-dev-test');
+    expect(defaultServerName('https://gkclone.orb.local')).toBe('block-mcp-gkclone-orb-local');
   });
 
-  it('uses the first label for an OrbStack host', () => {
-    expect(defaultServerName('https://gkclone.orb.local')).toBe('block-mcp-gkclone');
+  it('does NOT collide hosts that share a leading label (dev.test vs dev.local)', () => {
+    const a = defaultServerName('https://dev.test');
+    const b = defaultServerName('https://dev.local');
+    expect(a).toBe('block-mcp-dev-test');
+    expect(b).toBe('block-mcp-dev-local');
+    expect(a).not.toBe(b);
   });
 
-  it('handles a host with a port', () => {
-    expect(defaultServerName('http://localhost:7701')).toBe('block-mcp-localhost');
+  it('does NOT collapse www — www.X and X are distinct hosts', () => {
+    expect(defaultServerName('https://www.gravitykit.com')).toBe('block-mcp-www-gravitykit-com');
+    expect(defaultServerName('https://gravitykit.com')).toBe('block-mcp-gravitykit-com');
+    expect(defaultServerName('https://www.gravitykit.com')).not.toBe(
+      defaultServerName('https://gravitykit.com')
+    );
+  });
+
+  it('keeps the port so same-host different-port sites stay distinct', () => {
+    expect(defaultServerName('http://localhost:7701')).toBe('block-mcp-localhost-7701');
+    expect(defaultServerName('http://dev.test:8080')).toBe('block-mcp-dev-test-8080');
+    expect(defaultServerName('http://dev.test:9090')).not.toBe(
+      defaultServerName('http://dev.test:8080')
+    );
+  });
+
+  it('collapses runs of non-alphanumerics and trims stray hyphens', () => {
+    expect(defaultServerName('https://my_site..example.com')).toBe('block-mcp-my-site-example-com');
+  });
+
+  it('keeps subdomains distinct (apex vs app vs staging)', () => {
+    const apex = defaultServerName('https://gravitykit.com');
+    const app = defaultServerName('https://app.gravitykit.com');
+    const staging = defaultServerName('https://staging.gravitykit.com');
+    expect(apex).toBe('block-mcp-gravitykit-com');
+    expect(app).toBe('block-mcp-app-gravitykit-com');
+    expect(staging).toBe('block-mcp-staging-gravitykit-com');
+    expect(new Set([apex, app, staging]).size).toBe(3);
   });
 
   it('falls back to block-mcp for an unparseable site', () => {
@@ -555,9 +586,9 @@ describe('--name argument', () => {
     expect(args.name).toBe('block-mcp-prod');
   });
 
-  it('defaults the name from the site host when --name is omitted', () => {
+  it('defaults the name from the full site host when --name is omitted', () => {
     const args = parseConnectArgs(['--site', 'https://www.gravitykit.com']);
-    expect(args.name).toBe('block-mcp-gravitykit');
+    expect(args.name).toBe('block-mcp-www-gravitykit-com');
   });
 });
 

@@ -134,13 +134,16 @@ class MCPB_Generator {
 	/**
 	 * Derive the MCP server / extension name from a site URL.
 	 *
-	 * Returns `block-mcp-<first-host-label>` (leading `www.` stripped, sanitised
-	 * to [a-z0-9-]) so distinct sites get distinct, readable names — the same
-	 * scheme the connector's defaultServerName() uses, keeping a site's name
-	 * consistent whether it is connected via .mcpb or the CLI. Falls back to
-	 * `block-mcp` when the URL has no host. Two sites that share a leading label
-	 * (e.g. dev.test and dev.example.com) collide; resolve that via the
-	 * `gk_block_api_mcpb_manifest` filter.
+	 * Returns `block-mcp-<sanitized-host>` using the URL's full host authority —
+	 * hostname AND any non-default port — verbatim: lowercased, with each run of
+	 * non-alphanumerics collapsed to a single hyphen and stray hyphens trimmed.
+	 * Nothing is stripped, truncated, or collapsed, so every distinct host gets a
+	 * distinct extension name and no two sites silently share one — including
+	 * www vs apex (www.X and X are different hosts) and different subdomains or
+	 * ports. This is the same scheme the connector's defaultServerName() uses, so
+	 * a site keeps a consistent name whether connected via .mcpb or the CLI.
+	 * Falls back to `block-mcp` when the URL has no host. Power users can still
+	 * override the name via the `gk_block_api_mcpb_manifest` filter.
 	 *
 	 * @since 1.9.0
 	 *
@@ -148,16 +151,20 @@ class MCPB_Generator {
 	 * @return string Extension/server name.
 	 */
 	protected function server_name( $url ) {
-		$host = $this->site_host( $url );
-		if ( '' === $host ) {
+		$parts = wp_parse_url( (string) $url );
+		if ( ! is_array( $parts ) || empty( $parts['host'] ) ) {
 			return 'block-mcp';
 		}
 
-		$host  = preg_replace( '/^www\./', '', $host );
-		$parts = explode( '.', $host );
-		$label = preg_replace( '/[^a-z0-9-]/', '', $parts[0] );
+		$authority = strtolower( $parts['host'] );
+		if ( isset( $parts['port'] ) ) {
+			$authority .= ':' . (int) $parts['port'];
+		}
 
-		return '' !== $label ? 'block-mcp-' . $label : 'block-mcp';
+		$slug = preg_replace( '/[^a-z0-9]+/', '-', $authority );
+		$slug = trim( (string) $slug, '-' );
+
+		return '' !== $slug ? 'block-mcp-' . $slug : 'block-mcp';
 	}
 
 	/**
