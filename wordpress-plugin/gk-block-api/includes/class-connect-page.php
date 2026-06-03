@@ -1502,26 +1502,12 @@ class Connect_Page {
 					<?php endforeach; ?>
 
 				</div>
-
-				<p class="description" id="gk-block-api-other-note" style="display:none; color:#646970; margin-top:4px;">
-					<?php
-					echo wp_kses(
-						sprintf(
-							/* translators: %s: mailto link */
-							__( 'Browser-based setup is coming soon. In the meantime, <a href="%s">contact support</a> or install Claude Desktop to get started.', 'gk-block-api' ),
-							'mailto:support@gravitykit.com'
-						),
-						array( 'a' => array( 'href' => array() ) )
-					);
-					?>
-				</p>
 			</fieldset>
 
 			<script>
 			(function () {
 				function init() {
 				var radios    = document.querySelectorAll( 'input[name="client"]' );
-				var note      = document.getElementById( 'gk-block-api-other-note' );
 				var btn       = document.getElementById( 'submit' );
 				var nextSteps = document.querySelectorAll( '.gk-connect__next-steps[data-client]' );
 
@@ -1547,10 +1533,6 @@ class Connect_Page {
 							if ( card ) card.classList.remove( 'is-selected' );
 						}
 					} );
-
-					if ( note ) {
-						note.style.display = ( '<?php echo esc_js( self::CLIENT_OTHER ); ?>' === checkedVal ) ? '' : 'none';
-					}
 
 					if ( btn ) {
 						var label = labels[ checkedVal ] || labels[ '<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>' ];
@@ -1738,12 +1720,51 @@ class Connect_Page {
 			case self::CLIENT_OTHER:
 			default:
 				?>
+				<h3><?php esc_html_e( 'Not sure which one you use?', 'gk-block-api' ); ?></h3>
+				<p><?php esc_html_e( 'Pick the option that sounds like you:', 'gk-block-api' ); ?></p>
+				<ul>
+					<li>
+						<?php
+						echo wp_kses(
+							sprintf(
+								/* translators: %s: download URL */
+								__( 'You chat with Claude in a web browser, or you\'re just getting started — install the free <a href="%s" target="_blank" rel="noopener noreferrer">Claude Desktop app</a>, then choose <strong>Claude Desktop app</strong> above. This is the easiest path for most people.', 'gk-block-api' ),
+								'https://claude.ai/download'
+							),
+							array(
+								'a'      => array(
+									'href'   => array(),
+									'target' => array(),
+									'rel'    => array(),
+								),
+								'strong' => array(),
+							)
+						);
+						?>
+					</li>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'You use ChatGPT — choose <strong>ChatGPT Desktop</strong> above.', 'gk-block-api' ),
+							array( 'strong' => array() )
+						);
+						?>
+					</li>
+					<li>
+						<?php
+						echo wp_kses(
+							__( 'A developer set you up with Cursor or Claude Code — choose that option above.', 'gk-block-api' ),
+							array( 'strong' => array() )
+						);
+						?>
+					</li>
+				</ul>
 				<p class="description">
 					<?php
 					echo wp_kses(
 						sprintf(
 							/* translators: %s: mailto link */
-							__( 'Browser-based setup is coming soon. In the meantime, <a href="%s">contact support</a> or install Claude Desktop to get started.', 'gk-block-api' ),
+							__( 'Still not sure? <a href="%s">Contact support</a> and we\'ll help you connect.', 'gk-block-api' ),
 							'mailto:support@gravitykit.com'
 						),
 						array( 'a' => array( 'href' => array() ) )

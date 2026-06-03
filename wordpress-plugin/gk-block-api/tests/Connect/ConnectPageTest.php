@@ -1383,4 +1383,32 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 1, preg_match( '/data-client="claude-desktop"[^>]*style="display:none;"/', $html ), 'claude-desktop next-steps must be hidden in setup=claude-code mode' );
 		$this->assertSame( 0, preg_match( '/data-client="claude-code"[^>]*style="display:none;"/', $html ), 'claude-code next-steps must be visible in setup=claude-code mode' );
 	}
+
+	/**
+	 * [F6][F7] The 'Something else / I'm not sure' path gives real guidance, not a
+	 * dead end, and the old 'coming soon' note is no longer duplicated.
+	 *
+	 * Regression: the uncertain-beginner card showed only 'Browser-based setup is
+	 * coming soon...' — and that sentence rendered twice (an inline note in the
+	 * fieldset plus a boxed callout), reading like a glitch. The fix replaces the
+	 * dead end with a decision helper that routes the user to the right app and
+	 * removes the duplicate inline note.
+	 */
+	public function test_render_section_other_path_gives_guidance_not_dead_end() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		// F7: the duplicate inline note element is gone and the dead-end copy is
+		// no longer present anywhere.
+		$this->assertStringNotContainsString( 'gk-block-api-other-note', $html, 'the duplicate inline other-note element must be removed' );
+		$this->assertStringNotContainsString( 'coming soon', $html, 'the coming-soon dead-end copy must be replaced with guidance' );
+
+		// F6: real guidance that routes the uncertain user to a working path.
+		$this->assertStringContainsString( 'Not sure which', $html, 'the other path must offer a decision helper' );
+	}
 }
