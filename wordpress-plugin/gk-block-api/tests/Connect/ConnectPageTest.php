@@ -1120,4 +1120,69 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'Connect an AI Assistant', $html, 'Normal connect UI heading must NOT appear in authorize mode' );
 		$this->assertStringNotContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"', $html, 'Client picker radios must NOT appear in authorize mode' );
 	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// [WP-F2] .mcpb temp-bundle cleanup survives a client-aborted download.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * The download handler must schedule an abort-safe cleanup of the bundle.
+	 *
+	 * In prefill mode the streamed .mcpb embeds the plaintext Application
+	 * Password. Cleanup was a streaming `finally { wp_delete_file() }`, but a
+	 * browser abort mid-readfile() (with ignore_user_abort false) terminates
+	 * the script before the finally runs, stranding the credential-bearing
+	 * bundle in the temp dir. The fix registers a shutdown function — which
+	 * fires on user-abort termination — to unlink the bundle. This pins that
+	 * the streaming path wires register_shutdown_function so the abort case is
+	 * covered; without it the temp file survives the abort.
+	 */
+	public function test_download_handler_registers_shutdown_cleanup_for_bundle() {
+		$ref  = new \ReflectionMethod( Connect_Page::class, 'handle_connect' );
+		$lines = file( $ref->getFileName() );
+		$body  = implode(
+			'',
+			array_slice( $lines, $ref->getStartLine() - 1, $ref->getEndLine() - $ref->getStartLine() + 1 )
+		);
+
+		$this->assertStringContainsString(
+			'register_shutdown_function',
+			$body,
+			'The .mcpb download must register a shutdown cleanup so a client abort cannot strand the credential-bearing temp file.'
+		);
+	}
+
+	/**
+	 * unlink_temp_bundle() must delete an existing credential-bearing bundle.
+	 *
+	 * This is the callback registered both in the streaming finally and as the
+	 * shutdown function; it must remove the temp file so the plaintext
+	 * credential does not persist on disk.
+	 */
+	public function test_unlink_temp_bundle_deletes_existing_file() {
+		$tmp = wp_tempnam( 'gk-mcpb-cleanup' );
+		file_put_contents( $tmp, 'credential-bearing-bundle' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$this->assertFileExists( $tmp );
+
+		$method = new \ReflectionMethod( Connect_Page::class, 'unlink_temp_bundle' );
+		$method->setAccessible( true );
+		$method->invoke( null, $tmp );
+
+		$this->assertFileDoesNotExist( $tmp );
+	}
+
+	/**
+	 * unlink_temp_bundle() must be a harmless no-op for an already-gone file.
+	 *
+	 * The streaming finally and the shutdown function can both fire for the
+	 * same bundle (success path), so a double unlink — or a path the OS already
+	 * swept — must not raise.
+	 */
+	public function test_unlink_temp_bundle_no_ops_on_missing_file() {
+		$method = new \ReflectionMethod( Connect_Page::class, 'unlink_temp_bundle' );
+		$method->setAccessible( true );
+		$method->invoke( null, '/nonexistent/gk-block-mcp-missing.mcpb' );
+
+		$this->assertTrue( true, 'unlink_temp_bundle must not raise on a missing path.' );
+	}
 }

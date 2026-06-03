@@ -544,6 +544,13 @@ class Connect_Page {
 
 		$path = $r['path'];
 
+		// The .mcpb embeds the plaintext credential in prefill mode. A browser
+		// abort mid-readfile() can terminate the script before the streaming
+		// finally runs, so also unlink the bundle on shutdown —
+		// register_shutdown_function fires on user-abort termination. A double
+		// unlink (finally + shutdown) is a harmless no-op.
+		register_shutdown_function( array( __CLASS__, 'unlink_temp_bundle' ), $path );
+
 		nocache_headers();
 		header( 'Content-Type: application/octet-stream' );
 		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $r['filename'] ) . '"' );
@@ -560,10 +567,32 @@ class Connect_Page {
 				wp_die( esc_html__( 'An error occurred while preparing your download.', 'gk-block-api' ) );
 			}
 		} finally {
-			wp_delete_file( $path );
+			self::unlink_temp_bundle( $path );
 		}
 
 		exit;
+	}
+
+	/**
+	 * Delete a generated .mcpb bundle temp file if it still exists.
+	 *
+	 * The prefill-mode bundle embeds the plaintext Application Password, so it
+	 * must not linger on disk. This is the cleanup used both by the streaming
+	 * finally and by the shutdown function registered before streaming (which
+	 * covers the client-abort case where the finally does not run). Deleting an
+	 * already-removed path is a harmless no-op, so the two callers can both
+	 * fire for the same bundle without error.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param string $path Absolute path to the temp bundle.
+	 *
+	 * @return void
+	 */
+	protected static function unlink_temp_bundle( $path ) {
+		if ( is_string( $path ) && '' !== $path && file_exists( $path ) ) {
+			wp_delete_file( $path );
+		}
 	}
 
 	/**
