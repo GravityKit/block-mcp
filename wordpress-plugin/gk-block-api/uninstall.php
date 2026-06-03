@@ -55,8 +55,11 @@ function gk_block_api_uninstall_blog() {
 	// Per-post rate-limit transients accumulate per write activity. Sweep
 	// the option table directly — there's no core helper for prefixed
 	// transient deletion. Also sweeps the per-IP `instr_rl_` rate-limit
-	// transients written by the public /instructions endpoint, and the
-	// one-time paste-mode passwords stashed by Connect_Page.
+	// transients written by the public /instructions endpoint, the one-time
+	// paste-mode passwords stashed by Connect_Page, and the single-use
+	// credential-exchange transients (`xchg_`) — which hold a live plaintext
+	// Application Password until redeemed or expired, so they must not survive
+	// uninstall.
 	global $wpdb;
 	$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		"DELETE FROM {$wpdb->options}
@@ -65,12 +68,23 @@ function gk_block_api_uninstall_blog() {
 			   OR option_name LIKE '_transient_gk_block_api_instr_rl_%'
 			   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'
 			   OR option_name LIKE '_transient_gk_block_api_paste_pw_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_paste_pw_%'"
+			   OR option_name LIKE '_transient_timeout_gk_block_api_paste_pw_%'
+			   OR option_name LIKE '_transient_gk_block_api_xchg_%'
+			   OR option_name LIKE '_transient_timeout_gk_block_api_xchg_%'"
 	);
 }
 
 if ( is_multisite() ) {
-	$blog_ids = get_sites( array( 'fields' => 'ids' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- local to uninstall script, not a global.
+	// number => 0 lifts the default 100-site cap so agent teardown runs on every
+	// blog of a large network (otherwise blogs 101+ keep the agent + its app
+	// passwords).
+	// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- local to uninstall script, not a global.
+	$blog_ids = get_sites(
+		array(
+			'fields' => 'ids',
+			'number' => 0,
+		)
+	);
 	foreach ( $blog_ids as $blog_id ) { // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- $blog_id is the multisite loop variable passed to switch_to_blog(); intentional WP multisite pattern.
 		switch_to_blog( $blog_id );
 		gk_block_api_uninstall_blog();

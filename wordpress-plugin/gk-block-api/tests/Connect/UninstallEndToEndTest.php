@@ -102,6 +102,11 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		// Plant the deactivation-notice transient to confirm it is swept.
 		set_transient( 'gk_block_api_deactivation_notice', 1, 5 * MINUTE_IN_SECONDS );
 
+		// [LC1] Plant a single-use exchange-code transient — it holds a live
+		// plaintext app password and must not survive uninstall.
+		$xchg_key = 'gk_block_api_xchg_' . hash( 'sha256', 'e2e-test-code' );
+		set_transient( $xchg_key, array( 'site' => 'https://x', 'user' => 'block-mcp', 'password' => 'live-secret' ), 120 );
+
 		// Define the constant uninstall.php requires before it will execute.
 		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 			define( 'WP_UNINSTALL_PLUGIN', 'gk-block-api/gk-block-api.php' );
@@ -124,6 +129,16 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$this->assertFalse(
 			(bool) get_transient( 'gk_block_api_deactivation_notice' ),
 			'gk_block_api_deactivation_notice transient must be deleted after uninstall.php'
+		);
+		// The sweep is a raw $wpdb DELETE (it bypasses the object cache), so assert
+		// the underlying option row is gone rather than via get_transient().
+		global $wpdb;
+		$xchg_row = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare( "SELECT option_id FROM {$wpdb->options} WHERE option_name = %s", '_transient_' . $xchg_key )
+		);
+		$this->assertNull(
+			$xchg_row,
+			'[LC1] exchange-code transients (holding a live password) must be swept by uninstall.php'
 		);
 
 		$after = WP_Application_Passwords::get_user_application_passwords( $agent_id );
