@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,7 @@ GK Block API provides a comprehensive REST API for reading, editing, and managin
 * **Block search** — Find blocks by name or text content within a page.
 * **Revision tracking** — Every write operation creates WordPress revisions with before/after IDs for easy rollback.
 * **Rate limiting** — Per-post write limits to prevent runaway automated edits.
+* **Connect onboarding** — A few-clicks flow (Settings → Block MCP → Connect) to connect an AI assistant: a one-click Claude Desktop installer (.mcpb) or a browser-approve flow that writes the client config for you, backed by a dedicated minimal-capability service account.
 * **Settings UI** — Admin page (Settings → Block MCP) for editing tier scores, replacement map, dual-storage list, and post-type allow-list.
 * **Post lifecycle tools** — Create and update posts, list taxonomy terms, upload media (with SSRF guard).
 * **Server-driven preference policy** — All namespace scoring is configurable per-site; nothing is hardcoded in the codebase.
@@ -64,9 +65,9 @@ GK Block API provides a comprehensive REST API for reading, editing, and managin
 
 1. Upload the `gk-block-api` folder to `/wp-content/plugins/`.
 2. Activate the plugin through the 'Plugins' menu in WordPress.
-3. (Optional) Visit Settings → Block MCP to review tier scores and the post-type allow-list.
-4. Create an Application Password for your API user (Users → Profile → Application Passwords).
-5. Authenticate REST requests using Basic Auth with the Application Password.
+3. Connect an AI assistant: Settings → Block MCP → Connect, pick your client, and follow the one-click (.mcpb) or browser-approve flow. This provisions a dedicated service account and its credential automatically.
+4. (Optional) Visit Settings → Block MCP to review tier scores and the post-type allow-list.
+5. To wire up the REST API by hand instead, create an Application Password (Users → Profile → Application Passwords) and authenticate with Basic Auth.
 
 == Frequently Asked Questions ==
 
@@ -95,6 +96,12 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 `uninstall.php` deletes all plugin options and transients (`gk_block_api_preferences`, `gk_block_api_post_types_allowlist`, `gk_block_api_storage_modes`, the manual dual-storage list, the inventory cache, and per-post rate-limit transients). Post content and revisions are not touched.
 
 == Upgrade Notice ==
+
+= 1.9.0 =
+New "Connect" onboarding at Settings → Block MCP makes connecting an AI assistant a few clicks: a one-click Claude Desktop installer (.mcpb) or a browser-approve flow for Cursor / Claude Code / ChatGPT that writes the client config for you. A dedicated, minimal-capability service account is provisioned automatically, and its site-wide Application Password is delivered out-of-band — never in a redirect URL or your shell history — and any client config is written owner-only. Disconnect revokes a connection at any time.
+
+= 1.8.1 =
+Fixes a block-nesting bug: a container created empty via `insert_blocks` (for example an empty columns or group wrapper) and then filled with `edit_block_tree` `insert-child` could serialise its children as front-end siblings, leaving the wrapper visually empty. `insert-child` now nests correctly into self-closing wrappers.
 
 = 1.8.0 =
 Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
@@ -133,6 +140,51 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 1.9.0 on June 3, 2026 =
+
+Connect an AI assistant to your site in a few clicks — no terminal, no hand-edited config files. A new onboarding flow at Settings → Block MCP provisions a dedicated, minimal-capability service account and connects your client for you.
+
+#### ✨ New
+
+* **Connect onboarding** (Settings → Block MCP → Connect): pick your client and connect in a few clicks.
+* **One-click Claude Desktop installer** — a generated `.mcpb` bundle with the credential pre-filled; Claude Desktop stores it in the OS keychain. Each site gets a distinct extension name (derived from its full host) so multiple sites coexist.
+* **Browser-Approve handoff** — an in-WordPress Approve screen mints the credential and hands it to a local connector over a loopback callback; the connector writes the MCP config for Cursor, Claude Code, or ChatGPT Desktop (or prints it).
+* **Bundled connector CLI** — `npx -y @gravitykit/block-mcp connect --site <url>` (with `--client` and `--name`); the same bundle backs both the npx path and the `.mcpb`.
+* **Dedicated service account** — a `block-mcp` user with a minimal `block_mcp_agent` role (edit/publish posts and pages; no `manage_options`, no deleting others' content). Interactive login is blocked; Application Password / REST / XML-RPC auth works normally.
+* **Active connections** — list every connection and Disconnect (revoke its Application Password) with one click.
+* **Setup-guide link** — a persistent "Need help? View the setup guide" link (filterable via `gk_block_api_help_url`).
+
+#### 🔒 Security
+
+* The site-wide Application Password is delivered out-of-band via a single-use, short-lived exchange code rather than in the redirect URL, so it stays out of browser history and Referer headers. The code is redeemed exactly once (then deleted), and the credential is keyed at rest by a hash of the code.
+* Client config files are written owner-only (mode `0600`); the password is redacted from stdout unless explicitly revealed.
+* The connector validates the `--site` URL (rejects shell metacharacters; requires HTTPS for non-local hosts), opens the browser without a shell on Windows, and bounds the exchange request with a timeout and no redirect-following.
+* The loopback callback ignores requests that don't match the expected one-time state instead of aborting the pending connect.
+
+#### ✨ Improved
+
+* Modern block-editor styling on the settings page, and plain-language Approve and next-steps screens tailored to the chosen client.
+* Multisite — the service account is granted its role on every blog it's used on (so REST writes work network-wide), and each connection is labelled with the sub-site it was created from.
+
+#### 🧹 Uninstall & lifecycle
+
+* Uninstall removes the service account and its credentials, removes the role, reassigns content the account authored to an administrator (rather than deleting it), and clears the single-use exchange data — on every blog of a multisite network.
+
+#### 🧪 Tests & CI
+
+* The multisite PHPUnit suite is wired into `composer test` and CI so multisite-only contracts run instead of being skipped (and a long-hanging multisite teardown test was fixed).
+* New guards: the plugin-embedded server bundle stays byte-identical to the built `dist/`; an end-to-end harness for the connector flow; the credential-exchange single-use contract at the HTTP boundary; `.mcpb` temp-bundle cleanup; and an npm publish-readiness gate.
+
+#### 💻 Developer Updates
+
+* The connector is distributed as `@gravitykit/block-mcp` on npm; `npx -y @gravitykit/block-mcp connect …` runs the onboarding. A Node.js 20+ preflight prints a clear upgrade message on older runtimes.
+
+= 1.8.1 on May 22, 2026 =
+
+#### 🐛 Fixed
+
+* A container created empty via `insert_blocks` (for example an empty columns or group wrapper) and then filled with `edit_block_tree` `insert-child` could serialise its children as front-end siblings, leaving the wrapper visually empty. When `parse_blocks` read the empty wrapper's `innerContent` back as a single unsplit string, the child's null placeholder landed before the wrapper instead of inside it; `insert-child` now nests correctly into self-closing wrappers.
 
 = 1.8.0 on May 21, 2026 =
 
