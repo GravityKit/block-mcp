@@ -30,6 +30,21 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 tests_add_filter(
 	'muplugins_loaded',
 	static function () use ( $plugin_root ): void {
+		// WordPress 6.8+ flags wp_is_block_theme() as "called incorrectly" when
+		// $wp_theme_directories is still empty (theme.php). A test-only dependency
+		// (Yoast, loaded below) calls it during plugin load — before wp-phpunit
+		// registers its test theme directory — and under error_reporting=E_ALL that
+		// E_USER notice fails the @runInSeparateProcess tests. The test build is a
+		// no-content WordPress, so WP_CONTENT_DIR/themes does not exist; register
+		// wp-phpunit's bundled test theme directory (which does exist, so the
+		// registration takes) up front to satisfy the guard. gk-block-api never
+		// calls wp_is_block_theme itself. register_theme_directory de-dupes, so
+		// wp-phpunit registering the same path later is a harmless no-op.
+		$test_theme_dir = $plugin_root . '/vendor/wp-phpunit/wp-phpunit/data/themedir1';
+		if ( function_exists( 'register_theme_directory' ) && is_dir( $test_theme_dir ) ) {
+			register_theme_directory( $test_theme_dir );
+		}
+
 		// Yoast is only needed for the single-site Yoast_Bridge integration tests.
 		// Skip it under multisite: that config runs only the ms-required group (no
 		// Yoast tests), and loading Yoast there triggers per-blog Yoast migrations
