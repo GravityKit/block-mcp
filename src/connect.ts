@@ -128,16 +128,34 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
 // ── Site URL normalisation ────────────────────────────────────────────────────
 
 /**
- * Normalise a site URL: strip trailing slashes, require http/https scheme.
- * Throws a descriptive Error if the scheme is missing.
+ * Normalise a site URL: strip trailing slashes, require an http/https scheme,
+ * and reject characters a shell would treat as metacharacters.
+ *
+ * The site URL is later handed to the OS browser-open command. Parsing it with
+ * `new URL()` (not just a prefix regex) and rejecting `[\s"'`<>|&^$\\]` keeps a
+ * crafted --site from smuggling a second command on platforms whose opener
+ * re-parses the argument. Throws a descriptive Error on any invalid input.
  */
 export function normalizeSite(raw: string): string {
   const trimmed = raw.replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(trimmed)) {
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`--site must start with http:// or https://. Got: "${raw}"`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`--site must start with http:// or https://. Got: "${raw}"`);
+  }
+
+  if (/[\s"'`<>|&^$\\]/.test(trimmed)) {
     throw new Error(
-      `--site must start with http:// or https://. Got: "${raw}"`
+      `--site contains characters that are not allowed in a site URL: "${raw}"`
     );
   }
+
   return trimmed;
 }
 
@@ -412,27 +430,34 @@ export function printConfig(creds: Credentials, reveal: boolean): void {
 // ── Browser opener ────────────────────────────────────────────────────────────
 
 /**
+ * Resolve the platform-appropriate command + argv to open a URL in the default
+ * browser. Pure (no side effects) so the argv can be asserted in tests.
+ *
+ * On Windows this uses `rundll32 url.dll,FileProtocolHandler <url>` rather than
+ * `cmd /c start`: cmd.exe re-parses `& | ^ < > "` as metacharacters, so a URL
+ * routed through it could smuggle a second command. rundll32 takes the URL as a
+ * single argument with no shell re-parsing.
+ */
+export function browserOpenCommand(
+  url: string,
+  platform: string
+): { cmd: string; args: string[] } {
+  switch (platform) {
+    case 'darwin':
+      return { cmd: 'open', args: [url] };
+    case 'win32':
+      return { cmd: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
+    default:
+      return { cmd: 'xdg-open', args: [url] };
+  }
+}
+
+/**
  * Open a URL in the default browser using the platform-appropriate command.
  * Uses spawn (not exec/shell) to avoid shell escaping issues.
  */
 export function openBrowser(url: string): void {
-  let cmd: string;
-  let args: string[];
-
-  switch (process.platform) {
-    case 'darwin':
-      cmd = 'open';
-      args = [url];
-      break;
-    case 'win32':
-      cmd = 'cmd';
-      args = ['/c', 'start', '', url];
-      break;
-    default:
-      cmd = 'xdg-open';
-      args = [url];
-  }
-
+  const { cmd, args } = browserOpenCommand(url, process.platform);
   cp.spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
 }
 

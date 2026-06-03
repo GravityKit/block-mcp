@@ -18,6 +18,8 @@ import {
   writeCursorConfig,
   parseConnectArgs,
   printConfig,
+  normalizeSite,
+  browserOpenCommand,
 } from '../src/connect.js';
 import type { Credentials } from '../src/connect.js';
 
@@ -148,5 +150,72 @@ describe('[CLI-F2] app password redacted from stdout by default', () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+// ── [CLI-F3] --site validation + Windows browser-open without cmd.exe ───────────
+//
+// normalizeSite previously checked only the http(s):// prefix, so a crafted
+// --site like "https://x/&calc.exe" reached cmd.exe's `start` on Windows, which
+// re-parses & | ^ < > " as metacharacters → argument/command injection. Fix is
+// two-pronged: reject shell metacharacters in --site, and open the browser on
+// Windows via rundll32 (no cmd.exe re-parsing) instead of `cmd /c start`.
+
+describe('[CLI-F3] --site rejects shell metacharacters', () => {
+  it('rejects an ampersand (cmd command separator)', () => {
+    expect(() => normalizeSite('https://x/&calc.exe')).toThrow();
+  });
+
+  it('rejects a pipe', () => {
+    expect(() => normalizeSite('https://example.com/|whoami')).toThrow();
+  });
+
+  it('rejects whitespace', () => {
+    expect(() => normalizeSite('https://example.com/ foo')).toThrow();
+  });
+
+  it('rejects a double quote', () => {
+    expect(() => normalizeSite('https://example.com/"x')).toThrow();
+  });
+
+  it('still accepts a clean https site URL', () => {
+    expect(normalizeSite('https://example.com')).toBe('https://example.com');
+  });
+
+  it('still accepts a clean site URL with a path', () => {
+    expect(normalizeSite('https://example.com/wp')).toBe('https://example.com/wp');
+  });
+});
+
+describe('[CLI-F3] Windows browser-open avoids cmd.exe', () => {
+  it('does not invoke cmd.exe on win32', () => {
+    expect(browserOpenCommand('https://example.com', 'win32').cmd).not.toBe('cmd');
+  });
+
+  it('does not pass the URL through `start` / `/c` on win32', () => {
+    const { args } = browserOpenCommand('https://example.com', 'win32');
+    expect(args).not.toContain('start');
+    expect(args).not.toContain('/c');
+  });
+
+  it('uses rundll32 FileProtocolHandler on win32', () => {
+    const { cmd, args } = browserOpenCommand('https://example.com', 'win32');
+    expect(cmd).toBe('rundll32');
+    expect(args[0]).toBe('url.dll,FileProtocolHandler');
+    expect(args).toContain('https://example.com');
+  });
+
+  it('uses open on darwin', () => {
+    expect(browserOpenCommand('https://example.com', 'darwin')).toEqual({
+      cmd: 'open',
+      args: ['https://example.com'],
+    });
+  });
+
+  it('uses xdg-open on linux', () => {
+    expect(browserOpenCommand('https://example.com', 'linux')).toEqual({
+      cmd: 'xdg-open',
+      args: ['https://example.com'],
+    });
   });
 });
