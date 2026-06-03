@@ -833,6 +833,36 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The generated .mcpb bundle embeds the plaintext Application Password, so it
+	 * must not linger on disk. unlink_temp_bundle() — called from the streaming
+	 * finally AND a shutdown function (the browser-abort case) — must delete the
+	 * bundle, and a second call on the already-removed path must be a harmless
+	 * no-op so both callers can fire for the same file. Empty / non-existent
+	 * paths must also be safe no-ops.
+	 */
+	public function test_unlink_temp_bundle_removes_credential_file_and_double_unlink_is_safe() {
+		$unlink = new \ReflectionMethod( Connect_Page::class, 'unlink_temp_bundle' );
+		$unlink->setAccessible( true );
+
+		$path = wp_tempnam( 'gk-block-api-mcpb-test' );
+		file_put_contents( $path, 'PK fake-mcpb-with-embedded-credential' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$this->assertFileExists( $path, 'precondition: the bundle exists before cleanup' );
+
+		$unlink->invoke( null, $path );
+		$this->assertFileDoesNotExist( $path, 'the credential-bearing bundle must be deleted' );
+
+		// Abort case: the finally and the shutdown function both fire for the same
+		// path. A second unlink of the already-removed file must not error.
+		$unlink->invoke( null, $path );
+		$this->assertFileDoesNotExist( $path );
+
+		// Empty and never-existed paths are harmless no-ops.
+		$unlink->invoke( null, '' );
+		$unlink->invoke( null, $path . '-never-existed' );
+		$this->assertTrue( true, 'no-op cleanup paths must not throw' );
+	}
+
+	/**
 	 * handle_authorize() with a non-loopback callback must reject the request
 	 * with wp_die() and must NOT mint any Application Password.
 	 *
