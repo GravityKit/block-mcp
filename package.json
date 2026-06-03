@@ -18,7 +18,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "eval": "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test"
   },
   "keywords": [
     "mcp",
@@ -30,6 +31,14 @@
   ],
   "author": "GravityKit",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GravityKit/block-mcp.git"
+  },
+  "homepage": "https://github.com/GravityKit/block-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/GravityKit/block-mcp/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.7.9",

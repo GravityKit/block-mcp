@@ -7,6 +7,12 @@
  * the package MUST declare a `bin`, ship the built `dist/`, and the built entry
  * must carry a node shebang. These guards pin that the package stays
  * npx-runnable so the distribution doesn't silently break.
+ *
+ * Three layers are pinned here: (1) npx-runnability (bin/dist/shebang); (2) the
+ * plugin-embedded server bundle stays byte-identical to dist/ so the Claude
+ * Desktop .mcpb and the npx path ship the same server; and (3) publish-readiness
+ * (scoped name + public access, semver, license, repository, prepublishOnly test
+ * gate, and the files[] entries actually existing on disk).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -16,9 +22,16 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as {
+  name?: string;
+  version?: string;
   bin?: string | Record<string, string>;
   files?: string[];
   main?: string;
+  license?: string;
+  repository?: { type?: string; url?: string } | string;
+  engines?: { node?: string };
+  publishConfig?: { access?: string };
+  scripts?: Record<string, string>;
 };
 
 describe('package is runnable via npx', () => {
@@ -61,5 +74,37 @@ describe('plugin-embedded server bundle stays in sync with dist', () => {
       asset.equals(dist),
       'assets/mcp-server/index.cjs is out of sync with dist/index.cjs — run `npm run build`',
     ).toBe(true);
+  });
+});
+
+describe('package is publish-ready to the npm registry', () => {
+  it('is the scoped @gravitykit package with public publish access', () => {
+    expect(pkg.name).toBe('@gravitykit/block-mcp');
+    // A scoped package defaults to a restricted (paid) publish; public access is
+    // required for `npm publish` to land it on the public registry.
+    expect(pkg.publishConfig?.access).toBe('public');
+  });
+
+  it('carries a semver version, a license, and an engines.node floor', () => {
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(pkg.license).toBeTruthy();
+    expect(pkg.engines?.node).toBeTruthy();
+  });
+
+  it('declares a repository so the npm page links back to the source', () => {
+    const url = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url;
+    expect(url).toContain('github.com/GravityKit/block-mcp');
+  });
+
+  it('runs the test suite before publishing (prepublishOnly gate)', () => {
+    expect(pkg.scripts?.prepublishOnly).toContain('test');
+  });
+
+  it('ships the files the published package needs and they exist on disk', () => {
+    expect(pkg.files).toContain('dist/');
+    for (const required of ['LICENSE', 'README.md']) {
+      expect(pkg.files).toContain(required);
+      expect(fs.existsSync(path.join(root, required)), `${required} is listed in files[] but missing`).toBe(true);
+    }
   });
 });
