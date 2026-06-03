@@ -142,6 +142,43 @@ class Connect_Page {
 	const PASTE_TRANSIENT_PREFIX = 'gk_block_api_paste_pw_';
 
 	/**
+	 * Form action for the connector credential-exchange handler.
+	 *
+	 * After Approve, the browser redirect carries only a single-use code; the
+	 * connector POSTs that code here to retrieve the credential set once. Wired
+	 * on both the logged-in and nopriv admin-post hooks because the connector is
+	 * an unauthenticated local process and the code itself is the bearer secret.
+	 *
+	 * @since 1.9.0
+	 * @var string
+	 */
+	const ACTION_EXCHANGE = 'gk_block_api_exchange';
+
+	/**
+	 * Transient key prefix for single-use credential exchange codes.
+	 *
+	 * The full key is this prefix + a SHA-256 hash of the code, so the raw code
+	 * lives only in the redirect/connector and a database read does not reveal
+	 * it. The stored value is the minted credential set.
+	 *
+	 * @since 1.9.0
+	 * @var string
+	 */
+	const EXCHANGE_TRANSIENT_PREFIX = 'gk_block_api_xchg_';
+
+	/**
+	 * Lifetime, in seconds, of a single-use credential exchange code.
+	 *
+	 * Long enough for the browser redirect + the connector's loopback round-trip
+	 * to the exchange endpoint, short enough to bound the window the credential
+	 * sits in the options table.
+	 *
+	 * @since 1.9.0
+	 * @var int
+	 */
+	const EXCHANGE_TTL = 120;
+
+	/**
 	 * Return the slug-keyed client metadata map.
 	 *
 	 * Each key is the stable, URL-safe slug used everywhere internally (form
@@ -457,6 +494,12 @@ class Connect_Page {
 		add_action( 'admin_post_' . self::ACTION_CONNECT, array( $this, 'handle_connect' ) );
 		add_action( 'admin_post_' . self::ACTION_AUTHORIZE, array( $this, 'handle_authorize' ) );
 		add_action( 'admin_post_' . self::ACTION_REVOKE, array( $this, 'handle_revoke' ) );
+
+		// The connector exchanges its single-use code for the credential. It is an
+		// unauthenticated local process, so the handler is wired on the nopriv hook
+		// too; the code itself is the bearer secret (single-use, short-TTL).
+		add_action( 'admin_post_' . self::ACTION_EXCHANGE, array( $this, 'handle_exchange' ) );
+		add_action( 'admin_post_nopriv_' . self::ACTION_EXCHANGE, array( $this, 'handle_exchange' ) );
 	}
 
 	/**
@@ -640,12 +683,17 @@ class Connect_Page {
 			wp_die( esc_html( $creds->get_error_message() ) );
 		}
 
+		// Deliver the credential out-of-band: store it under a single-use,
+		// short-TTL code and redirect only the code (never the password) to the
+		// loopback callback. The connector then POSTs the code to handle_exchange()
+		// to retrieve the credential once, keeping the site-wide password out of
+		// the redirect URL (browser history / Referer).
+		$code = $this->store_exchange_code( $creds );
+
 		$redirect = add_query_arg(
 			array(
-				'site'     => rawurlencode( $creds['url'] ),
-				'user'     => rawurlencode( $creds['user'] ),
-				'password' => rawurlencode( $creds['password'] ),
-				'state'    => rawurlencode( $state ),
+				'code'  => rawurlencode( $code ),
+				'state' => rawurlencode( $state ),
 			),
 			$callback
 		);
@@ -655,6 +703,95 @@ class Connect_Page {
 		// above already confirmed it is safe.
 		wp_redirect( $redirect ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
 		exit;
+	}
+
+	/**
+	 * Store a minted credential set under a single-use exchange code.
+	 *
+	 * Returns the raw code to embed in the loopback redirect. The credential is
+	 * stored in a short-TTL transient keyed by a SHA-256 hash of the code, so the
+	 * code is the only bearer of the credential and a database read does not
+	 * reveal it.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param  array $creds Minted credential set with url/user/password keys.
+	 * @return string The raw single-use exchange code.
+	 */
+	protected function store_exchange_code( array $creds ) {
+		$code = bin2hex( random_bytes( 32 ) );
+
+		set_transient(
+			self::EXCHANGE_TRANSIENT_PREFIX . hash( 'sha256', $code ),
+			array(
+				'site'     => isset( $creds['url'] ) ? $creds['url'] : '',
+				'user'     => isset( $creds['user'] ) ? $creds['user'] : '',
+				'password' => isset( $creds['password'] ) ? $creds['password'] : '',
+			),
+			self::EXCHANGE_TTL
+		);
+
+		return $code;
+	}
+
+	/**
+	 * Redeem a single-use exchange code, returning the stored credential once.
+	 *
+	 * Looks up the credential set stored by store_exchange_code(), deletes the
+	 * transient before returning so the code cannot be replayed, and returns the
+	 * creds — or null when the code is empty, unknown, or expired.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param  string $code Raw exchange code presented by the connector.
+	 * @return array|null Credential set with site/user/password keys, or null.
+	 */
+	protected function redeem_exchange_code( $code ) {
+		if ( ! is_string( $code ) || '' === $code ) {
+			return null;
+		}
+
+		$key    = self::EXCHANGE_TRANSIENT_PREFIX . hash( 'sha256', $code );
+		$stored = get_transient( $key );
+
+		if ( false === $stored || ! is_array( $stored ) ) {
+			return null;
+		}
+
+		// Single-use: delete before returning so a replay finds nothing.
+		delete_transient( $key );
+
+		return array(
+			'site'     => isset( $stored['site'] ) ? $stored['site'] : '',
+			'user'     => isset( $stored['user'] ) ? $stored['user'] : '',
+			'password' => isset( $stored['password'] ) ? $stored['password'] : '',
+		);
+	}
+
+	/**
+	 * Handle the connector's credential-exchange POST.
+	 *
+	 * The connector presents the single-use code it received on the loopback
+	 * callback; this returns the matching credential set once as JSON and deletes
+	 * the code so it cannot be replayed. The code is the bearer secret (there is
+	 * no WordPress session), so no nonce is required and the handler is reachable
+	 * on the nopriv admin-post hook.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @return void
+	 */
+	public function handle_exchange() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- the single-use exchange code IS the bearer credential; there is no WordPress session to protect with a nonce.
+		$code = isset( $_POST['code'] ) ? sanitize_text_field( wp_unslash( $_POST['code'] ) ) : '';
+
+		$creds = $this->redeem_exchange_code( $code );
+
+		if ( null === $creds ) {
+			wp_send_json_error( array( 'message' => 'Invalid or expired code.' ), 400 );
+		}
+
+		wp_send_json_success( $creds );
 	}
 
 	/**

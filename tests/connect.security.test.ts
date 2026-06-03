@@ -20,6 +20,8 @@ import {
   printConfig,
   normalizeSite,
   browserOpenCommand,
+  handleCallback,
+  exchangeCode,
 } from '../src/connect.js';
 import type { Credentials } from '../src/connect.js';
 
@@ -217,5 +219,58 @@ describe('[CLI-F3] Windows browser-open avoids cmd.exe', () => {
       cmd: 'xdg-open',
       args: ['https://example.com'],
     });
+  });
+});
+
+// ── [WP-F3] Credential is exchanged out-of-band, never carried in the URL ───────
+//
+// The minted password is a site-wide, non-expiring credential. Previously it
+// was delivered to the loopback callback in the redirect URL query string,
+// landing in browser history and exposed via Referer. The callback now carries
+// only a single-use code; the connector POSTs that code to the exchange
+// endpoint and receives the credential in the response body. Pins that the
+// callback surfaces no credential and that exchangeCode reads it from the body.
+
+describe('[WP-F3] credential delivered via exchange, not the callback URL', () => {
+  const STATE = 'state-token-xyz';
+  const CODE = 'deadbeefcafef00d1122334455667788';
+
+  it('the loopback callback carries no password — only the code', () => {
+    const url = `/callback?code=${CODE}&state=${STATE}&password=should-be-ignored`;
+    const result = handleCallback(url, STATE);
+    expect(result.ok).toBe(true);
+    // Even if a password param were present, handleCallback must not surface it.
+    expect(JSON.stringify(result)).not.toContain('should-be-ignored');
+    expect(result.ok && result.code).toBe(CODE);
+  });
+
+  it('exchangeCode POSTs the code to admin-post.php and returns the body credential', async () => {
+    let posted: { url: string; body: string } | null = null;
+    const fakeFetch = (async (url: string, init: { body: string }) => {
+      posted = { url, body: init.body };
+      return {
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { site: 'https://example.com', user: 'block-mcp', password: 'exchanged-secret' },
+        }),
+      };
+    }) as unknown as typeof fetch;
+
+    const creds = await exchangeCode('https://example.com', CODE, fakeFetch);
+
+    expect(creds.password).toBe('exchanged-secret');
+    expect(posted!.url).toContain('/wp-admin/admin-post.php');
+    expect(posted!.body).toContain('action=gk_block_api_exchange');
+    expect(posted!.body).toContain(`code=${CODE}`);
+  });
+
+  it('exchangeCode throws when the site rejects the code', async () => {
+    const fakeFetch = (async () => ({
+      status: 400,
+      json: async () => ({ success: false, data: { message: 'Invalid or expired code.' } }),
+    })) as unknown as typeof fetch;
+
+    await expect(exchangeCode('https://example.com', 'bad-code', fakeFetch)).rejects.toThrow();
   });
 });

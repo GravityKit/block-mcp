@@ -190,7 +190,7 @@ export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
 
 export interface CallbackResult {
   ok: true;
-  creds: Credentials;
+  code: string;
 }
 
 export interface CallbackError {
@@ -200,7 +200,10 @@ export interface CallbackError {
 
 /**
  * Parse and validate the loopback callback URL.
- * Verifies CSRF state, returns creds or an error descriptor.
+ *
+ * Verifies the CSRF state and extracts the single-use exchange code. The
+ * callback never carries the credential itself — only the code, which the
+ * caller then exchanges for the credential over a direct request to the site.
  */
 export function handleCallback(
   reqUrl: string,
@@ -219,22 +222,68 @@ export function handleCallback(
     return { ok: false, reason: 'State mismatch — possible CSRF. Connection rejected.' };
   }
 
-  const site = parsed.searchParams.get('site');
-  const user = parsed.searchParams.get('user');
-  const password = parsed.searchParams.get('password');
-
-  if (!site || !user || !password) {
-    return { ok: false, reason: 'Callback missing required parameters (site, user, password).' };
+  const code = parsed.searchParams.get('code');
+  if (!code) {
+    return { ok: false, reason: 'Callback missing the exchange code.' };
   }
 
-  return {
-    ok: true,
-    creds: {
-      site: decodeURIComponent(site),
-      user: decodeURIComponent(user),
-      password: decodeURIComponent(password),
-    },
-  };
+  return { ok: true, code };
+}
+
+// ── Credential exchange ───────────────────────────────────────────────────────
+
+/**
+ * Parse the exchange endpoint's JSON response into a Credentials object.
+ *
+ * The endpoint replies with the WordPress `wp_send_json_success` envelope
+ * `{ success: true, data: { site, user, password } }`. Throws a descriptive
+ * Error on any other shape or a missing field.
+ */
+export function parseExchangeResponse(json: unknown): Credentials {
+  const root = json as { success?: unknown; data?: unknown } | null;
+  if (!root || typeof root !== 'object' || root.success !== true || typeof root.data !== 'object' || root.data === null) {
+    throw new Error('Exchange failed: the site did not return a valid credential response.');
+  }
+
+  const data = root.data as { site?: unknown; user?: unknown; password?: unknown };
+  const { site, user, password } = data;
+  if (typeof site !== 'string' || typeof user !== 'string' || typeof password !== 'string' || !site || !user || !password) {
+    throw new Error('Exchange response is missing the site, user, or password.');
+  }
+
+  return { site, user, password };
+}
+
+/**
+ * Exchange a single-use code for the credential set.
+ *
+ * POSTs the code to the site's `admin-post.php` exchange endpoint and returns
+ * the credential once. The credential is delivered here, in a direct response
+ * body — never in a URL — so it stays out of browser history and Referer
+ * headers. `fetchFn` is injectable for testing.
+ */
+export async function exchangeCode(
+  site: string,
+  code: string,
+  fetchFn: typeof fetch = fetch
+): Promise<Credentials> {
+  const url = `${site}/wp-admin/admin-post.php`;
+  const body = new URLSearchParams({ action: 'gk_block_api_exchange', code });
+
+  const res = await fetchFn(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}).`);
+  }
+
+  return parseExchangeResponse(json);
 }
 
 // ── MCP config builders ───────────────────────────────────────────────────────
@@ -526,10 +575,10 @@ export async function runConnect(
   const state = crypto.randomUUID();
 
   // ── 3. Start loopback server ───────────────────────────────────────────
-  let resolveCallback!: (creds: Credentials) => void;
+  let resolveCallback!: (code: string) => void;
   let rejectCallback!: (err: Error) => void;
 
-  const callbackPromise = new Promise<Credentials>((resolve, reject) => {
+  const callbackPromise = new Promise<string>((resolve, reject) => {
     resolveCallback = resolve;
     rejectCallback = reject;
   });
@@ -552,7 +601,7 @@ export async function runConnect(
 
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(SUCCESS_HTML);
-    resolveCallback(result.creds);
+    resolveCallback(result.code);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -590,9 +639,9 @@ export async function runConnect(
     )
   );
 
-  let creds: Credentials;
+  let code: string;
   try {
-    creds = await Promise.race([callbackPromise, timeoutPromise]);
+    code = await Promise.race([callbackPromise, timeoutPromise]);
   } catch (err) {
     server.close();
     console.error(`Error: ${(err as Error).message}`);
@@ -601,7 +650,19 @@ export async function runConnect(
     server.close();
   }
 
-  // ── 6. Write config ─────────────────────────────────────────────────────
+  // ── 6. Exchange the single-use code for the credential ──────────────────
+  // The callback delivered only a code; the credential itself comes back in
+  // this direct response body, never in a URL.
+  console.error(`Approved. Retrieving credentials…`);
+  let creds: Credentials;
+  try {
+    creds = await exchangeCode(args.site, code);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  // ── 7. Write config ─────────────────────────────────────────────────────
   try {
     switch (args.client) {
       case 'cursor':

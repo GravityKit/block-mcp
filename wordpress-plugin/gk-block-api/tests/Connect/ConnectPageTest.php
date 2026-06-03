@@ -463,8 +463,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 	/**
 	 * handle_authorize() with a valid loopback callback must mint exactly one
-	 * Application Password and redirect the credential to the callback URL with
-	 * site/user/password/state query parameters.
+	 * Application Password and redirect a single-use exchange CODE (not the
+	 * credential itself) to the callback URL, with the state echoed back.
+	 *
+	 * [WP-F3] The site-wide password must NOT appear in the redirect URL — it is
+	 * delivered out-of-band via the exchange endpoint. This pins that the
+	 * redirect carries code + state and no password/user/site.
 	 *
 	 * We hook wp_redirect to capture the redirect target and throw a catchable
 	 * marker so the handler's exit() does not terminate the test process.
@@ -510,16 +514,171 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 51791, $parts['port'], 'redirect must target the correct loopback port' );
 
 		parse_str( $parts['query'], $qs );
-		$this->assertNotEmpty( $qs['password'], 'redirect must carry a password query param' );
-		$this->assertNotEmpty( $qs['user'], 'redirect must carry a user query param' );
-		$this->assertNotEmpty( $qs['site'], 'redirect must carry a site query param' );
+		$this->assertNotEmpty( $qs['code'], 'redirect must carry a single-use exchange code' );
 		$this->assertSame( 'test-state-token', $qs['state'], 'redirect must echo back the state token' );
+		$this->assertArrayNotHasKey( 'password', $qs, 'redirect must NOT carry the password (delivered via exchange)' );
+		$this->assertArrayNotHasKey( 'user', $qs, 'redirect must NOT carry the user' );
+		$this->assertArrayNotHasKey( 'site', $qs, 'redirect must NOT carry the site' );
 
 		// Exactly one Application Password must have been minted.
 		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
 		$this->assertInstanceOf( WP_User::class, $agent );
 		$passwords = WP_Application_Passwords::get_user_application_passwords( $agent->ID );
 		$this->assertCount( 1, $passwords, 'exactly one Application Password must be minted' );
+	}
+
+	/**
+	 * [WP-F3] The minted password must never appear in the redirect URL string.
+	 *
+	 * Belt-and-suspenders for the credential-in-URL finding: even if a future
+	 * change re-added a credential param, the raw password string must not be
+	 * present anywhere in the redirect location. We capture the redirect and the
+	 * minted password (read back from the agent) and assert the URL excludes it.
+	 */
+	public function test_handle_authorize_redirect_never_contains_the_password() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51792/cb';
+		$_POST['state']       = 'state-xyz';
+		$_POST['client']      = 'block-mcp';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$captured_redirect = null;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+
+		remove_all_filters( 'wp_redirect' );
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		// Redeem the code from the redirect to learn the password that was stored,
+		// then assert that password never appeared in the redirect URL itself.
+		$parts = wp_parse_url( $captured_redirect );
+		parse_str( $parts['query'], $qs );
+
+		$page   = new Connect_Page();
+		$redeem = new \ReflectionMethod( Connect_Page::class, 'redeem_exchange_code' );
+		$redeem->setAccessible( true );
+		$creds = $redeem->invoke( $page, rawurldecode( $qs['code'] ) );
+
+		$this->assertIsArray( $creds, 'the exchange code must redeem to a credential set' );
+		$this->assertNotEmpty( $creds['password'], 'redeemed credentials must include the password' );
+		$this->assertStringNotContainsString(
+			$creds['password'],
+			(string) $captured_redirect,
+			'the minted password must never appear in the redirect URL'
+		);
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// [WP-F3] Single-use credential exchange code.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * store_exchange_code() then redeem_exchange_code() round-trips the creds.
+	 *
+	 * The connector receives only the code on the loopback callback, then POSTs
+	 * it to the exchange endpoint to retrieve the credential set once.
+	 */
+	public function test_exchange_code_round_trips_credentials() {
+		$page  = new Connect_Page();
+		$store = new \ReflectionMethod( Connect_Page::class, 'store_exchange_code' );
+		$store->setAccessible( true );
+		$redeem = new \ReflectionMethod( Connect_Page::class, 'redeem_exchange_code' );
+		$redeem->setAccessible( true );
+
+		$code = $store->invoke(
+			$page,
+			array(
+				'url'      => 'https://example.com',
+				'user'     => 'block-mcp',
+				'password' => 'minted secret 9876',
+				'uuid'     => 'abc',
+			)
+		);
+
+		$this->assertNotEmpty( $code, 'store_exchange_code() must return a non-empty code' );
+
+		$creds = $redeem->invoke( $page, $code );
+		$this->assertSame( 'https://example.com', $creds['site'] );
+		$this->assertSame( 'block-mcp', $creds['user'] );
+		$this->assertSame( 'minted secret 9876', $creds['password'] );
+	}
+
+	/**
+	 * An exchange code must be single-use: a second redeem returns null.
+	 *
+	 * Pins the replay guard — once the connector has exchanged the code, it is
+	 * deleted and cannot be redeemed again.
+	 */
+	public function test_exchange_code_is_single_use() {
+		$page  = new Connect_Page();
+		$store = new \ReflectionMethod( Connect_Page::class, 'store_exchange_code' );
+		$store->setAccessible( true );
+		$redeem = new \ReflectionMethod( Connect_Page::class, 'redeem_exchange_code' );
+		$redeem->setAccessible( true );
+
+		$code = $store->invoke(
+			$page,
+			array(
+				'url'      => 'https://example.com',
+				'user'     => 'block-mcp',
+				'password' => 'one time only',
+				'uuid'     => 'abc',
+			)
+		);
+
+		$first = $redeem->invoke( $page, $code );
+		$this->assertIsArray( $first, 'first redeem must succeed' );
+
+		$second = $redeem->invoke( $page, $code );
+		$this->assertNull( $second, 'a redeemed code must not be reusable' );
+	}
+
+	/**
+	 * redeem_exchange_code() returns null for an unknown or empty code.
+	 */
+	public function test_exchange_code_rejects_unknown_code() {
+		$page   = new Connect_Page();
+		$redeem = new \ReflectionMethod( Connect_Page::class, 'redeem_exchange_code' );
+		$redeem->setAccessible( true );
+
+		$this->assertNull( $redeem->invoke( $page, 'never-issued-code' ), 'unknown code must redeem to null' );
+		$this->assertNull( $redeem->invoke( $page, '' ), 'empty code must redeem to null' );
+	}
+
+	/**
+	 * register() must wire the exchange handler on both the logged-in and the
+	 * nopriv admin-post hooks — the connector is an unauthenticated local
+	 * process, so the code itself is the bearer credential.
+	 */
+	public function test_register_wires_exchange_handler_for_nopriv() {
+		$page = new Connect_Page();
+		$page->register();
+
+		$this->assertNotFalse(
+			has_action( 'admin_post_nopriv_' . Connect_Page::ACTION_EXCHANGE, array( $page, 'handle_exchange' ) ),
+			'exchange handler must be wired on the nopriv admin-post hook'
+		);
+		$this->assertNotFalse(
+			has_action( 'admin_post_' . Connect_Page::ACTION_EXCHANGE, array( $page, 'handle_exchange' ) ),
+			'exchange handler must be wired on the logged-in admin-post hook'
+		);
 	}
 
 	/**

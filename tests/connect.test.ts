@@ -11,7 +11,8 @@
  *   - mergeMcpServers / cursorConfig: correct shape, preserves existing servers
  *   - claudeDesktopConfigPath: per-platform paths
  *   - claudeCodeAddArgs: argv contains env pairs, uses no shell, password present in args
- *   - handleCallback: accepts matching state, returns creds; rejects mismatched state (CSRF guard)
+ *   - handleCallback: accepts matching state, returns the exchange code; rejects mismatched state (CSRF guard)
+ *   - parseExchangeResponse: unwraps the success envelope; throws on bad/incomplete shapes
  *   - Password-never-logged: the success log path does not include the password
  */
 
@@ -26,6 +27,7 @@ import {
   claudeCodeAddArgs,
   handleCallback,
   buildMcpEntry,
+  parseExchangeResponse,
 } from '../src/connect.js';
 import type { Credentials, McpConfig } from '../src/connect.js';
 
@@ -390,30 +392,23 @@ describe('claudeCodeAddArgs', () => {
 
 describe('handleCallback', () => {
   const STATE = 'abc-123-uuid';
-  const GOOD_URL =
-    `/callback?site=${encodeURIComponent('https://example.com')}` +
-    `&user=${encodeURIComponent('admin')}` +
-    `&password=${encodeURIComponent('secret pw')}` +
-    `&state=${STATE}`;
+  const CODE = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const GOOD_URL = `/callback?code=${CODE}&state=${STATE}`;
 
-  it('returns ok:true with creds for matching state', () => {
+  it('returns ok:true for matching state', () => {
     const result = handleCallback(GOOD_URL, STATE);
     expect(result.ok).toBe(true);
   });
 
-  it('returns the site credential', () => {
+  it('returns the exchange code', () => {
     const result = handleCallback(GOOD_URL, STATE);
-    expect(result.ok && result.creds.site).toBe('https://example.com');
+    expect(result.ok && result.code).toBe(CODE);
   });
 
-  it('returns the user credential', () => {
+  it('does not surface a credential on the callback (code only)', () => {
     const result = handleCallback(GOOD_URL, STATE);
-    expect(result.ok && result.creds.user).toBe('admin');
-  });
-
-  it('returns the password credential', () => {
-    const result = handleCallback(GOOD_URL, STATE);
-    expect(result.ok && result.creds.password).toBe('secret pw');
+    // The post-WP-F3 callback carries no site/user/password — only the code.
+    expect(result.ok && 'creds' in result).toBe(false);
   });
 
   it('rejects mismatched state (CSRF guard)', () => {
@@ -427,45 +422,63 @@ describe('handleCallback', () => {
   });
 
   it('rejects missing state param', () => {
-    const noState = `/callback?site=https%3A%2F%2Fexample.com&user=admin&password=secret`;
+    const noState = `/callback?code=${CODE}`;
     const result = handleCallback(noState, STATE);
     expect(result.ok).toBe(false);
   });
 
   it('rejects empty state param', () => {
-    const emptyState = `/callback?site=https%3A%2F%2Fexample.com&user=admin&password=secret&state=`;
+    const emptyState = `/callback?code=${CODE}&state=`;
     const result = handleCallback(emptyState, STATE);
     expect(result.ok).toBe(false);
   });
 
-  it('rejects callback missing password', () => {
-    const noPass = `/callback?site=https%3A%2F%2Fexample.com&user=admin&state=${STATE}`;
-    const result = handleCallback(noPass, STATE);
-    expect(result.ok).toBe(false);
-  });
-
-  it('rejects callback missing user', () => {
-    const noUser = `/callback?site=https%3A%2F%2Fexample.com&password=secret&state=${STATE}`;
-    const result = handleCallback(noUser, STATE);
+  it('rejects callback missing the code', () => {
+    const noCode = `/callback?state=${STATE}`;
+    const result = handleCallback(noCode, STATE);
     expect(result.ok).toBe(false);
   });
 
   it('accepts full URL form (not just path)', () => {
-    const fullUrl =
-      `http://127.0.0.1:9999/callback?site=${encodeURIComponent('https://example.com')}` +
-      `&user=admin&password=secret&state=${STATE}`;
+    const fullUrl = `http://127.0.0.1:9999/callback?code=${CODE}&state=${STATE}`;
     const result = handleCallback(fullUrl, STATE);
-    expect(result.ok).toBe(true);
+    expect(result.ok && result.code).toBe(CODE);
+  });
+});
+
+// ── parseExchangeResponse ─────────────────────────────────────────────────────
+
+describe('parseExchangeResponse', () => {
+  const OK = {
+    success: true,
+    data: { site: 'https://example.com', user: 'block-mcp', password: 'secret pw' },
+  };
+
+  it('returns the credentials from a success envelope', () => {
+    expect(parseExchangeResponse(OK)).toEqual({
+      site: 'https://example.com',
+      user: 'block-mcp',
+      password: 'secret pw',
+    });
   });
 
-  it('decodes URL-encoded credentials', () => {
-    // password with spaces and special chars
-    const specialUrl =
-      `/callback?site=${encodeURIComponent('https://example.com')}` +
-      `&user=admin&password=${encodeURIComponent('p@ss w0rd!')}` +
-      `&state=${STATE}`;
-    const result = handleCallback(specialUrl, STATE);
-    expect(result.ok && result.creds.password).toBe('p@ss w0rd!');
+  it('throws on a success:false envelope', () => {
+    expect(() => parseExchangeResponse({ success: false, data: { message: 'bad' } })).toThrow();
+  });
+
+  it('throws when data is missing', () => {
+    expect(() => parseExchangeResponse({ success: true })).toThrow();
+  });
+
+  it('throws when the password field is missing', () => {
+    expect(() =>
+      parseExchangeResponse({ success: true, data: { site: 'x', user: 'y' } })
+    ).toThrow();
+  });
+
+  it('throws on a non-object response', () => {
+    expect(() => parseExchangeResponse(null)).toThrow();
+    expect(() => parseExchangeResponse('nope')).toThrow();
   });
 });
 

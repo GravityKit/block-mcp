@@ -59161,6 +59161,7 @@ function parseConnectArgs(argv) {
   let client = "print";
   let port = null;
   let open = true;
+  let reveal = false;
   for (let i2 = 0; i2 < argv.length; i2++) {
     const arg = argv[i2];
     if (arg === "--site") {
@@ -59180,6 +59181,9 @@ function parseConnectArgs(argv) {
         );
       }
       client = val;
+      if (val === "print") {
+        reveal = true;
+      }
     } else if (arg === "--port") {
       const raw2 = argv[++i2];
       const n = parseInt(raw2, 10);
@@ -59189,10 +59193,15 @@ function parseConnectArgs(argv) {
       port = n;
     } else if (arg === "--no-open") {
       open = false;
+    } else if (arg === "--reveal") {
+      reveal = true;
     } else if (arg.startsWith("--site=")) {
       site = arg.slice("--site=".length);
     } else if (arg.startsWith("--client=")) {
       client = arg.slice("--client=".length);
+      if (client === "print") {
+        reveal = true;
+      }
     } else if (arg.startsWith("--port=")) {
       const n = parseInt(arg.slice("--port=".length), 10);
       if (isNaN(n) || n < 1 || n > 65535) {
@@ -59204,13 +59213,22 @@ function parseConnectArgs(argv) {
   if (!site) {
     throw new Error("--site <url> is required. Example: --site https://example.com");
   }
-  return { site, client, port, open };
+  return { site, client, port, open, reveal };
 }
 function normalizeSite(raw2) {
   const trimmed = raw2.replace(/\/+$/, "");
-  if (!/^https?:\/\//i.test(trimmed)) {
+  let url3;
+  try {
+    url3 = new URL(trimmed);
+  } catch {
+    throw new Error(`--site must start with http:// or https://. Got: "${raw2}"`);
+  }
+  if (url3.protocol !== "http:" && url3.protocol !== "https:") {
+    throw new Error(`--site must start with http:// or https://. Got: "${raw2}"`);
+  }
+  if (/[\s"'`<>|&^$\\]/.test(trimmed)) {
     throw new Error(
-      `--site must start with http:// or https://. Got: "${raw2}"`
+      `--site contains characters that are not allowed in a site URL: "${raw2}"`
     );
   }
   return trimmed;
@@ -59239,20 +59257,39 @@ function handleCallback(reqUrl, expectedState) {
   if (!state || state !== expectedState) {
     return { ok: false, reason: "State mismatch \u2014 possible CSRF. Connection rejected." };
   }
-  const site = parsed.searchParams.get("site");
-  const user = parsed.searchParams.get("user");
-  const password = parsed.searchParams.get("password");
-  if (!site || !user || !password) {
-    return { ok: false, reason: "Callback missing required parameters (site, user, password)." };
+  const code = parsed.searchParams.get("code");
+  if (!code) {
+    return { ok: false, reason: "Callback missing the exchange code." };
   }
-  return {
-    ok: true,
-    creds: {
-      site: decodeURIComponent(site),
-      user: decodeURIComponent(user),
-      password: decodeURIComponent(password)
-    }
-  };
+  return { ok: true, code };
+}
+function parseExchangeResponse(json2) {
+  const root2 = json2;
+  if (!root2 || typeof root2 !== "object" || root2.success !== true || typeof root2.data !== "object" || root2.data === null) {
+    throw new Error("Exchange failed: the site did not return a valid credential response.");
+  }
+  const data = root2.data;
+  const { site, user, password } = data;
+  if (typeof site !== "string" || typeof user !== "string" || typeof password !== "string" || !site || !user || !password) {
+    throw new Error("Exchange response is missing the site, user, or password.");
+  }
+  return { site, user, password };
+}
+async function exchangeCode(site, code, fetchFn = fetch) {
+  const url3 = `${site}/wp-admin/admin-post.php`;
+  const body3 = new URLSearchParams({ action: "gk_block_api_exchange", code });
+  const res = await fetchFn(url3, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body3.toString()
+  });
+  let json2;
+  try {
+    json2 = await res.json();
+  } catch {
+    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}).`);
+  }
+  return parseExchangeResponse(json2);
 }
 function buildMcpEntry(creds) {
   return {
@@ -59323,8 +59360,12 @@ function readJsonFile(filePath, defaultValue) {
   }
 }
 function writeJsonFile(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 448 });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", { encoding: "utf8", mode: 384 });
+  try {
+    fs.chmodSync(filePath, 384);
+  } catch {
+  }
 }
 function writeCursorConfig(creds) {
   const configPath = cursorConfigPath();
@@ -59357,8 +59398,9 @@ function runClaudeCodeAdd(creds) {
     return { success: false, error: err.message };
   }
 }
-function printConfig(creds) {
-  const entry = buildMcpEntry(creds);
+function printConfig(creds, reveal) {
+  const shown = reveal ? creds : { ...creds, password: "<hidden \u2014 re-run with --reveal to print it>" };
+  const entry = buildMcpEntry(shown);
   const block = { mcpServers: { "block-mcp": entry } };
   console.log("\nAdd this to your MCP client config:\n");
   console.log(JSON.stringify(block, null, 2));
@@ -59366,23 +59408,24 @@ function printConfig(creds) {
     "\nFor Claude Desktop: paste into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)"
   );
   console.log("For Cursor: paste into ~/.cursor/mcp.json\n");
+  if (!reveal) {
+    console.log(
+      "The app password was hidden. Re-run with --reveal (or --client print) to print it.\n"
+    );
+  }
+}
+function browserOpenCommand(url3, platform) {
+  switch (platform) {
+    case "darwin":
+      return { cmd: "open", args: [url3] };
+    case "win32":
+      return { cmd: "rundll32", args: ["url.dll,FileProtocolHandler", url3] };
+    default:
+      return { cmd: "xdg-open", args: [url3] };
+  }
 }
 function openBrowser(url3) {
-  let cmd;
-  let args;
-  switch (process.platform) {
-    case "darwin":
-      cmd = "open";
-      args = [url3];
-      break;
-    case "win32":
-      cmd = "cmd";
-      args = ["/c", "start", "", url3];
-      break;
-    default:
-      cmd = "xdg-open";
-      args = [url3];
-  }
+  const { cmd, args } = browserOpenCommand(url3, process.platform);
   cp2.spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 var SUCCESS_HTML = `<!DOCTYPE html>
@@ -59436,7 +59479,7 @@ async function runConnect(argv, opts = {}) {
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(SUCCESS_HTML);
-    resolveCallback(result.creds);
+    resolveCallback(result.code);
   });
   await new Promise((resolve, reject) => {
     const listenPort = args.port ?? 0;
@@ -59469,15 +59512,23 @@ Open this URL in your browser to authorize:
       timeoutMs
     )
   );
-  let creds;
+  let code;
   try {
-    creds = await Promise.race([callbackPromise, timeoutPromise]);
+    code = await Promise.race([callbackPromise, timeoutPromise]);
   } catch (err) {
     server.close();
     console.error(`Error: ${err.message}`);
     process.exit(1);
   } finally {
     server.close();
+  }
+  console.error(`Approved. Retrieving credentials\u2026`);
+  let creds;
+  try {
+    creds = await exchangeCode(args.site, code);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
   }
   try {
     switch (args.client) {
@@ -59511,7 +59562,7 @@ Warning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`
 Fall back \u2014 add this to your Claude Code MCP config manually:`);
-          printConfig(creds);
+          printConfig(creds, true);
         }
         break;
       }
@@ -59519,12 +59570,12 @@ Fall back \u2014 add this to your Claude Code MCP config manually:`);
         console.log(`
 \u2713 Authorized! Paste the following into ChatGPT Desktop's MCP config:
 `);
-        printConfig(creds);
+        printConfig(creds, true);
         break;
       }
       case "print":
       default:
-        printConfig(creds);
+        printConfig(creds, args.reveal);
         break;
     }
   } catch (err) {
