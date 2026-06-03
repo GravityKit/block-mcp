@@ -758,6 +758,81 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The public handle_exchange() seam — the actual nopriv POST handler the
+	 * connector hits — must return the stored credential exactly once as JSON
+	 * success, then reject a replay of the same code with JSON error.
+	 *
+	 * The store/redeem helpers are unit-tested above via reflection; this drives
+	 * the real $_POST → redeem → wp_send_json path end-to-end so the bearer-code
+	 * contract is pinned at the HTTP boundary, not just the internal seam.
+	 */
+	public function test_handle_exchange_returns_credentials_once_then_rejects_replay() {
+		$page  = new Connect_Page();
+		$store = new \ReflectionMethod( Connect_Page::class, 'store_exchange_code' );
+		$store->setAccessible( true );
+		$code = $store->invoke(
+			$page,
+			array( 'url' => 'https://example.com', 'user' => 'block-mcp', 'password' => 'live-secret' )
+		);
+
+		$_POST['code'] = $code;
+		try {
+			$first = $this->capture_exchange_json( $page );
+			$this->assertTrue( $first['success'], 'first exchange must succeed' );
+			$this->assertSame( 'live-secret', $first['data']['password'], 'first exchange returns the stored password once' );
+			$this->assertSame( 'https://example.com', $first['data']['site'] );
+
+			$second = $this->capture_exchange_json( $page );
+			$this->assertFalse( $second['success'], 'a replay of the consumed code must be rejected' );
+		} finally {
+			unset( $_POST['code'] );
+		}
+	}
+
+	/**
+	 * Invoke handle_exchange() and decode the JSON it emits.
+	 *
+	 * wp_send_json_* echoes the body and then terminates the request. In a normal
+	 * (non-AJAX) request it calls die() outright, which would kill the test
+	 * process; flip wp_doing_ajax true so it routes through wp_die() instead, and
+	 * install a wp_die handler that throws so the echo can be captured. This is
+	 * the same shape WP_Ajax_UnitTestCase uses for JSON handlers.
+	 *
+	 * @param  Connect_Page $page Page whose handle_exchange() to invoke.
+	 * @return array Decoded JSON response.
+	 */
+	private function capture_exchange_json( Connect_Page $page ): array {
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+
+		ob_start();
+		try {
+			$page->handle_exchange();
+		} catch ( \WPDieException $e ) {
+			// Expected: wp_send_json_* echoes the body then wp_die()s.
+			unset( $e );
+		} finally {
+			$out = (string) ob_get_clean();
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+		}
+
+		return (array) json_decode( $out, true );
+	}
+
+	/**
+	 * wp_die handler that throws instead of terminating, so a wp_send_json call
+	 * can be exercised under test. Returned as the 'wp_die_ajax_handler' callable.
+	 *
+	 * @return callable
+	 */
+	public function throwing_die_handler(): callable {
+		return static function ( $message = '' ): void {
+			throw new \WPDieException( is_scalar( $message ) ? (string) $message : '' );
+		};
+	}
+
+	/**
 	 * handle_authorize() with a non-loopback callback must reject the request
 	 * with wp_die() and must NOT mint any Application Password.
 	 *
