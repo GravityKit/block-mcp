@@ -1237,14 +1237,14 @@ class Connect_Page {
 		<div class="gk-connect">
 		<div class="gk-connect__card">
 
-			<h2 class="gk-connect__heading"><?php esc_html_e( 'Authorize a connection', 'gk-block-api' ); ?></h2>
+			<h2 class="gk-connect__heading"><?php esc_html_e( 'Allow your AI app to connect?', 'gk-block-api' ); ?></h2>
 
 			<p>
 				<?php
 				echo wp_kses(
 					sprintf(
-						/* translators: 1: site name, 2: client label */
-						__( 'A local application on this computer is asking to connect to <strong>%1$s</strong> as the Block MCP agent (<code>%2$s</code>).', 'gk-block-api' ),
+						/* translators: 1: site name, 2: client identifier */
+						__( 'Your AI app (<code>%2$s</code>) on this computer is asking for permission to edit pages and posts on <strong>%1$s</strong>.', 'gk-block-api' ),
 						esc_html( $site_name ),
 						esc_html( $client )
 					),
@@ -1255,7 +1255,7 @@ class Connect_Page {
 				);
 				?>
 			</p>
-			<p><?php esc_html_e( 'Approving creates or reuses the dedicated block-mcp account and sends a credential to the local app. You can revoke it anytime from this page.', 'gk-block-api' ); ?></p>
+			<p><?php esc_html_e( 'Click Approve to allow it. This creates a dedicated, limited account just for your AI app and securely sends it a connection key — there\'s no password for you to copy. You can remove this access anytime from this page.', 'gk-block-api' ); ?></p>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action"   value="<?php echo esc_attr( self::ACTION_AUTHORIZE ); ?>" />

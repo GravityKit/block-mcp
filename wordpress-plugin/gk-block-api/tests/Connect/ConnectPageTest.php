@@ -1251,9 +1251,9 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * render_section() with ?gk_authorize set must render the Approve screen,
 	 * not the normal connect UI.
 	 *
-	 * The Approve screen must include the heading "Authorize a connection", an
-	 * Approve submit button, and a Cancel link. The normal client-picker form
-	 * must NOT appear.
+	 * The Approve screen must include the plain-language heading, an Approve
+	 * submit button, and a Cancel link. The normal client-picker form must NOT
+	 * appear.
 	 */
 	public function test_render_section_gk_authorize_shows_approve_screen() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -1270,7 +1270,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
 
-		$this->assertStringContainsString( 'Authorize a connection', $html, 'Authorize heading must be present' );
+		$this->assertStringContainsString( 'Allow your AI app to connect', $html, 'Plain-language authorize heading must be present' );
 		$this->assertStringContainsString( 'Approve', $html, 'Approve button must be present' );
 		$this->assertStringContainsString( 'Cancel', $html, 'Cancel link must be present' );
 		$this->assertStringContainsString( Connect_Page::ACTION_AUTHORIZE, $html, 'Form action must reference the authorize action' );
@@ -1496,5 +1496,33 @@ class ConnectPageTest extends WP_UnitTestCase {
 		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
 
 		$this->assertStringContainsString( 'View the setup guide', $html, 'the authorize screen must also carry the help link' );
+	}
+
+	/**
+	 * [F11] The Approve screen explains, in plain language, what the user is
+	 * allowing — not 'Block MCP agent / credential / local application' jargon.
+	 */
+	public function test_authorize_screen_uses_plain_language() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1';
+		$_GET['callback']     = 'http://127.0.0.1:51999/cb';
+		$_GET['state']        = 'demo';
+		$_GET['client']       = 'claude-code';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		// Plain language present.
+		$this->assertStringContainsString( 'permission to edit pages and posts', $html, 'must say what permission is granted in plain words' );
+		$this->assertStringContainsString( 'remove this access anytime', $html, 'must reassure the access is revocable' );
+
+		// Old jargon phrasing gone.
+		$this->assertStringNotContainsString( 'as the Block MCP agent', $html, 'the "Block MCP agent" jargon phrasing must be replaced' );
+		$this->assertStringNotContainsString( 'sends a credential to the local app', $html, 'the "credential / local app" jargon phrasing must be replaced' );
 	}
 }
