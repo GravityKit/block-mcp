@@ -39789,7 +39789,8 @@ var package_default = {
     "test:integration": "vitest run --config vitest.integration.config.ts",
     eval: "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
-    prepare: "npm run build"
+    prepare: "npm run build",
+    prepublishOnly: "npm test"
   },
   keywords: [
     "mcp",
@@ -39801,6 +39802,14 @@ var package_default = {
   ],
   author: "GravityKit",
   license: "MIT",
+  repository: {
+    type: "git",
+    url: "git+https://github.com/GravityKit/block-mcp.git"
+  },
+  homepage: "https://github.com/GravityKit/block-mcp#readme",
+  bugs: {
+    url: "https://github.com/GravityKit/block-mcp/issues"
+  },
   dependencies: {
     "@modelcontextprotocol/sdk": "^1.0.0",
     axios: "^1.7.9",
@@ -59851,6 +59860,13 @@ First tool call: get_page_blocks({ url: ${JSON.stringify(url3)}, summary_only: t
   });
 }
 async function main2() {
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  if (Number.isFinite(nodeMajor) && nodeMajor < 20) {
+    console.error(
+      `Block MCP requires Node.js 20 or newer \u2014 you are running ${process.version}. Please upgrade Node.js and try again: https://nodejs.org/`
+    );
+    process.exit(1);
+  }
   if (process.argv[2] === "connect") {
     await runConnect(process.argv.slice(3));
     process.exit(0);

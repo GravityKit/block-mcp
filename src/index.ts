@@ -374,6 +374,19 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ============================================
 
 async function main(): Promise<void> {
+  // ── Node version preflight ──────────────────────────────────────────────
+  // engines.node already warns at install time, but a non-technical user who
+  // runs the connector anyway should get a clear, actionable message rather than
+  // a cryptic runtime crash on an unsupported Node.
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  if (Number.isFinite(nodeMajor) && nodeMajor < 20) {
+    console.error(
+      `Block MCP requires Node.js 20 or newer — you are running ${process.version}. ` +
+        'Please upgrade Node.js and try again: https://nodejs.org/'
+    );
+    process.exit(1);
+  }
+
   // ── connect sub-command ─────────────────────────────────────────────────
   // Checked first so `npx @gravitykit/block-mcp connect` works without the
   // WORDPRESS_* env vars that the MCP server requires.
