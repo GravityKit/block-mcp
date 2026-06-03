@@ -5,8 +5,8 @@
  * the browser, waits for the admin to click Approve, then writes the chosen
  * AI client's MCP config with the returned credentials.
  *
- * The app password is NEVER logged to stdout (only inside the explicit
- * `--client print` path, which the user opted into).
+ * The app password is only written to stdout when the user explicitly opts in
+ * via `--reveal` or `--client print`. The default invocation redacts it.
  */
 
 import * as http from 'node:http';
@@ -30,6 +30,12 @@ export interface ConnectArgs {
   client: ClientTarget;
   port: number | null;
   open: boolean;
+  /**
+   * Opt-in to printing the cleartext app password to stdout. False by default
+   * so the secret stays out of shell scrollback / CI logs; set by `--reveal`
+   * or by an explicit `--client print`.
+   */
+  reveal: boolean;
 }
 
 export interface Credentials {
@@ -59,6 +65,7 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
   let client: ClientTarget = 'print';
   let port: number | null = null;
   let open = true;
+  let reveal = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -79,6 +86,11 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
         );
       }
       client = val;
+      // An explicit `--client print` is itself an opt-in to reveal the secret;
+      // the implicit default 'print' does not reveal.
+      if (val === 'print') {
+        reveal = true;
+      }
     } else if (arg === '--port') {
       const raw = argv[++i];
       const n = parseInt(raw, 10);
@@ -88,10 +100,15 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
       port = n;
     } else if (arg === '--no-open') {
       open = false;
+    } else if (arg === '--reveal') {
+      reveal = true;
     } else if (arg.startsWith('--site=')) {
       site = arg.slice('--site='.length);
     } else if (arg.startsWith('--client=')) {
       client = arg.slice('--client='.length) as ClientTarget;
+      if (client === 'print') {
+        reveal = true;
+      }
     } else if (arg.startsWith('--port=')) {
       const n = parseInt(arg.slice('--port='.length), 10);
       if (isNaN(n) || n < 1 || n > 65535) {
@@ -105,7 +122,7 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
     throw new Error('--site <url> is required. Example: --site https://example.com');
   }
 
-  return { site, client, port, open };
+  return { site, client, port, open, reveal };
 }
 
 // ── Site URL normalisation ────────────────────────────────────────────────────
@@ -366,9 +383,18 @@ export function runClaudeCodeAdd(creds: Credentials): { success: boolean; error?
   }
 }
 
-/** Print the mcpServers JSON block for manual paste. */
-export function printConfig(creds: Credentials): void {
-  const entry = buildMcpEntry(creds);
+/**
+ * Print the mcpServers JSON block for manual paste.
+ *
+ * The cleartext app password is printed only when `reveal` is true (explicit
+ * `--reveal` / `--client print`). Otherwise it is replaced with a placeholder
+ * so the secret never lands in stdout / shell scrollback / CI logs.
+ */
+export function printConfig(creds: Credentials, reveal: boolean): void {
+  const shown: Credentials = reveal
+    ? creds
+    : { ...creds, password: '<hidden — re-run with --reveal to print it>' };
+  const entry = buildMcpEntry(shown);
   const block: McpConfig = { mcpServers: { 'block-mcp': entry } };
   console.log('\nAdd this to your MCP client config:\n');
   console.log(JSON.stringify(block, null, 2));
@@ -376,6 +402,11 @@ export function printConfig(creds: Credentials): void {
     '\nFor Claude Desktop: paste into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)'
   );
   console.log('For Cursor: paste into ~/.cursor/mcp.json\n');
+  if (!reveal) {
+    console.log(
+      'The app password was hidden. Re-run with --reveal (or --client print) to print it.\n'
+    );
+  }
 }
 
 // ── Browser opener ────────────────────────────────────────────────────────────
@@ -565,22 +596,23 @@ export async function runConnect(
             `\nWarning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`\nFall back — add this to your Claude Code MCP config manually:`);
-          printConfig(creds);
+          // Explicit fallback for a client the user chose: the secret is needed.
+          printConfig(creds, true);
         }
         break;
       }
 
       case 'chatgpt-desktop': {
         // ChatGPT Desktop does not have a standardised config path yet.
-        // Print the JSON block so the user can paste it.
+        // Print the JSON block so the user can paste it (secret needed here).
         console.log(`\n✓ Authorized! Paste the following into ChatGPT Desktop's MCP config:\n`);
-        printConfig(creds);
+        printConfig(creds, true);
         break;
       }
 
       case 'print':
       default:
-        printConfig(creds);
+        printConfig(creds, args.reveal);
         break;
     }
   } catch (err) {

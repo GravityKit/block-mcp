@@ -9,11 +9,16 @@
  * underlying chmod is a no-op.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { writeClaudeDesktopConfig, writeCursorConfig } from '../src/connect.js';
+import {
+  writeClaudeDesktopConfig,
+  writeCursorConfig,
+  parseConnectArgs,
+  printConfig,
+} from '../src/connect.js';
 import type { Credentials } from '../src/connect.js';
 
 const CREDS: Credentials = {
@@ -98,5 +103,50 @@ describe('[CLI-F1] config files written owner-only', () => {
 
     const file = path.join(home, '.cursor', 'mcp.json');
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+});
+
+// ── [CLI-F2] App password must not print to stdout by default ──────────────────
+//
+// The bare `connect --site …` invocation defaulted to print mode, dumping the
+// cleartext password to stdout (shell scrollback, tmux/script buffers, CI
+// logs). The secret must be redacted unless the user explicitly opts in via
+// `--reveal` or `--client print`. Pins the default-redaction and both opt-ins.
+
+describe('[CLI-F2] app password redacted from stdout by default', () => {
+  const SITE = 'https://example.com';
+
+  it('default invocation does not opt into revealing the secret', () => {
+    expect(parseConnectArgs(['--site', SITE]).reveal).toBe(false);
+  });
+
+  it('--reveal opts into revealing the secret', () => {
+    expect(parseConnectArgs(['--site', SITE, '--reveal']).reveal).toBe(true);
+  });
+
+  it('explicit --client print opts into revealing the secret', () => {
+    expect(parseConnectArgs(['--site', SITE, '--client', 'print']).reveal).toBe(true);
+  });
+
+  it('printConfig redacts the password when reveal is false', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      printConfig(CREDS, false);
+      const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(out).not.toContain(CREDS.password);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('printConfig prints the password when reveal is true', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      printConfig(CREDS, true);
+      const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(out).toContain(CREDS.password);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
