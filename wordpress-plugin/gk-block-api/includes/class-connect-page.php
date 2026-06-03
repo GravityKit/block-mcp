@@ -985,6 +985,12 @@ class Connect_Page {
 				<?php $this->render_connect_form( $setup_client ); ?>
 				<?php $this->render_client_next_steps( $setup_client ); ?>
 
+				<?php if ( 'connected' !== $state ) : ?>
+					<p class="gk-connect__success-hint description">
+						<?php esc_html_e( 'When setup finishes, a green "Connected" status appears here with a Disconnect button — that\'s how you\'ll know it worked.', 'gk-block-api' ); ?>
+					</p>
+				<?php endif; ?>
+
 				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
 					<div class="gk-connect__connections-card">
 						<h3 class="gk-connect__connections-heading"><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h3>
@@ -1658,7 +1664,7 @@ class Connect_Page {
 					<li>
 						<?php
 						echo wp_kses(
-							__( 'Open the downloaded file (it\'s named like <code>block-mcp-yoursite.mcpb</code>) by double-clicking it.', 'gk-block-api' ),
+							__( 'Double-click the downloaded file — a Claude Desktop setup file named like <code>block-mcp-yoursite.mcpb</code>. It\'s safe, and double-clicking opens it directly in Claude Desktop. (If your computer asks what to open it with, choose Claude.)', 'gk-block-api' ),
 							array( 'code' => array() )
 						);
 						?>
@@ -1696,6 +1702,9 @@ class Connect_Page {
 					<li><?php esc_html_e( "You'll get a one-line command to run in your terminal — a browser window opens, you click Approve, and the connection finishes automatically.", 'gk-block-api' ); ?></li>
 					<li><strong><?php esc_html_e( 'No password to copy.', 'gk-block-api' ); ?></strong></li>
 				</ol>
+				<p class="description">
+					<?php esc_html_e( 'This option is for developer tools that use a command line (the Terminal). Not sure what a terminal is? Choose "Claude Desktop app" or "Let my AI set it up for me" above instead — no terminal needed.', 'gk-block-api' ); ?>
+				</p>
 				<?php
 				break;
 

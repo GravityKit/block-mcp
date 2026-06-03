@@ -1411,4 +1411,52 @@ class ConnectPageTest extends WP_UnitTestCase {
 		// F6: real guidance that routes the uncertain user to a working path.
 		$this->assertStringContainsString( 'Not sure which', $html, 'the other path must offer a decision helper' );
 	}
+
+	/**
+	 * [F4] The Claude Desktop step explains what a .mcpb file is, so a beginner
+	 * who's never seen the extension isn't stranded.
+	 */
+	public function test_render_section_glosses_mcpb_file() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'Claude Desktop setup file', $html, 'the .mcpb step must explain what the file is in plain words' );
+	}
+
+	/**
+	 * [F5] The command-line (Claude Code / Cursor / ChatGPT) path gives a
+	 * non-developer a plain-language escape hatch instead of a bare npx command.
+	 */
+	public function test_render_section_cli_path_offers_escape_hatch() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'Not sure what a terminal', $html, 'the command-line path must offer a non-developer escape hatch' );
+	}
+
+	/**
+	 * [F10] The ready state tells the user what a successful connection looks
+	 * like, so they know whether setup worked.
+	 */
+	public function test_render_section_ready_state_describes_success_status() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		delete_option( 'gk_block_api_agent_user_id' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( "know it worked", $html, 'the ready state must describe the success/connected confirmation' );
+	}
 }
