@@ -54,10 +54,16 @@ class MCPB_Generator {
 	 * @return array<string,mixed> Manifest array ready for wp_json_encode().
 	 */
 	public function manifest( array $creds ) {
+		$host = $this->site_host( isset( $creds['url'] ) ? $creds['url'] : '' );
+
 		$manifest = array(
 			'manifest_version' => '0.3',
-			'name'             => 'block-mcp',
-			'display_name'     => 'Block MCP — ' . $creds['client'],
+			// Per-site name so each site installs as a DISTINCT Claude Desktop
+			// extension (Claude Desktop keys extensions by manifest name; a fixed
+			// name would make a second site's .mcpb replace the first). Mirrors
+			// the connector's server name, block-mcp-<host-label>.
+			'name'             => $this->server_name( isset( $creds['url'] ) ? $creds['url'] : '' ),
+			'display_name'     => 'Block MCP — ' . ( '' !== $host ? $host : $creds['client'] ),
 			'version'          => GK_BLOCK_API_VERSION,
 			'description'      => 'Block-level WordPress CRUD for AI agents. Pre-configured for ' . $creds['url'] . '.',
 			'author'           => array(
@@ -110,6 +116,48 @@ class MCPB_Generator {
 		 * @param array<string,string> $creds    The credentials used to build it.
 		 */
 		return apply_filters( 'gk_block_api_mcpb_manifest', $manifest, $creds );
+	}
+
+	/**
+	 * Return the host of a site URL, or '' when it has none.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param  string $url Site URL.
+	 * @return string Lowercased host, or '' if the URL has no parseable host.
+	 */
+	protected function site_host( $url ) {
+		$host = wp_parse_url( (string) $url, PHP_URL_HOST );
+		return ( is_string( $host ) && '' !== $host ) ? strtolower( $host ) : '';
+	}
+
+	/**
+	 * Derive the MCP server / extension name from a site URL.
+	 *
+	 * Returns `block-mcp-<first-host-label>` (leading `www.` stripped, sanitised
+	 * to [a-z0-9-]) so distinct sites get distinct, readable names — the same
+	 * scheme the connector's defaultServerName() uses, keeping a site's name
+	 * consistent whether it is connected via .mcpb or the CLI. Falls back to
+	 * `block-mcp` when the URL has no host. Two sites that share a leading label
+	 * (e.g. dev.test and dev.example.com) collide; resolve that via the
+	 * `gk_block_api_mcpb_manifest` filter.
+	 *
+	 * @since 1.9.0
+	 *
+	 * @param  string $url Site URL.
+	 * @return string Extension/server name.
+	 */
+	protected function server_name( $url ) {
+		$host = $this->site_host( $url );
+		if ( '' === $host ) {
+			return 'block-mcp';
+		}
+
+		$host  = preg_replace( '/^www\./', '', $host );
+		$parts = explode( '.', $host );
+		$label = preg_replace( '/[^a-z0-9-]/', '', $parts[0] );
+
+		return '' !== $label ? 'block-mcp-' . $label : 'block-mcp';
 	}
 
 	/**

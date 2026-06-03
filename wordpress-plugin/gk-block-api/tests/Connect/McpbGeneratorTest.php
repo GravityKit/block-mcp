@@ -156,7 +156,7 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 
 	/**
 	 * build() must produce a valid zip archive containing manifest.json
-	 * (with name 'block-mcp') and the MCP server binary at the path
+	 * (with a per-site name) and the MCP server binary at the path
 	 * server/index.cjs that Claude Desktop expects at launch.
 	 *
 	 * The method returns the path to the generated temp file; callers are
@@ -172,11 +172,81 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 		$zip = new ZipArchive();
 		$this->assertTrue( $zip->open( $path ) === true );
 		$manifest = json_decode( $zip->getFromName( 'manifest.json' ), true );
-		$this->assertSame( 'block-mcp', $manifest['name'] );
+		// creds() uses https://example.com → block-mcp-example.
+		$this->assertSame( 'block-mcp-example', $manifest['name'] );
 		$this->assertNotFalse( $zip->locateName( 'server/index.cjs' ) );
 		$zip->close();
 
 		unlink( $path );
 		unlink( $server_fixture );
+	}
+
+	/**
+	 * The manifest name must be derived from the site host so each site installs
+	 * as a DISTINCT Claude Desktop extension that coexists.
+	 *
+	 * Claude Desktop identifies an installed extension by its manifest `name`.
+	 * A fixed name ('block-mcp') meant a second site's .mcpb replaced the first.
+	 * The name now mirrors the connector's server name — block-mcp-<host-label>
+	 * (www stripped, lowercased) — so www.gravitykit.com, dev.test, and
+	 * gkclone.orb.local become three different extensions.
+	 */
+	public function test_manifest_name_is_derived_per_site() {
+		$gen = new MCPB_Generator();
+
+		$name = static function ( $url ) use ( $gen ) {
+			$m = $gen->manifest(
+				array(
+					'url'      => $url,
+					'user'     => 'block-mcp',
+					'password' => 'pw',
+					'client'   => 'Claude Desktop app',
+				)
+			);
+			return $m['name'];
+		};
+
+		$this->assertSame( 'block-mcp-gravitykit', $name( 'https://www.gravitykit.com' ) );
+		$this->assertSame( 'block-mcp-dev', $name( 'https://dev.test' ) );
+		$this->assertSame( 'block-mcp-gkclone', $name( 'https://gkclone.orb.local' ) );
+
+		// The whole point: distinct sites → distinct extension names.
+		$names = array(
+			$name( 'https://www.gravitykit.com' ),
+			$name( 'https://dev.test' ),
+			$name( 'https://gkclone.orb.local' ),
+		);
+		$this->assertCount( 3, array_unique( $names ), 'each site must yield a unique manifest name' );
+	}
+
+	/**
+	 * The manifest name falls back to 'block-mcp' when the URL has no host.
+	 */
+	public function test_manifest_name_falls_back_when_url_has_no_host() {
+		$m = ( new MCPB_Generator() )->manifest(
+			array(
+				'url'      => 'not-a-url',
+				'user'     => 'block-mcp',
+				'password' => 'pw',
+				'client'   => 'Claude Desktop app',
+			)
+		);
+		$this->assertSame( 'block-mcp', $m['name'] );
+	}
+
+	/**
+	 * The display_name shows the site host so a multi-site Claude Desktop
+	 * extension list distinguishes each connection at a glance.
+	 */
+	public function test_manifest_display_name_shows_the_site_host() {
+		$m = ( new MCPB_Generator() )->manifest(
+			array(
+				'url'      => 'https://www.gravitykit.com',
+				'user'     => 'block-mcp',
+				'password' => 'pw',
+				'client'   => 'Claude Desktop app',
+			)
+		);
+		$this->assertStringContainsString( 'www.gravitykit.com', $m['display_name'] );
 	}
 }
