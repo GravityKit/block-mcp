@@ -112,6 +112,18 @@ jobs:
 
       - run: npm run build
 
+      # The committed dist/index.cjs and the plugin-embedded copy
+      # (assets/mcp-server/index.cjs, written by postbuild) are shipped
+      # artifacts. A fresh build off the locked esbuild must reproduce them
+      # byte-for-byte; a diff means a source change was committed without
+      # rebuilding, so npx users and Claude Desktop users would run different
+      # server versions. Fail the build instead of shipping a stale bundle.
+      - name: Verify committed bundles are up to date
+        run: |
+          git diff --exit-code -- dist/index.cjs \
+            wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs \
+            || { echo "::error::dist/index.cjs or the embedded copy is stale — run 'npm run build' and commit the result."; exit 1; }
+
   ts-integration:
     name: TypeScript MCP server (integration — live WP)
     runs-on: ubuntu-latest

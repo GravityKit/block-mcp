@@ -42,3 +42,24 @@ describe('package is runnable via npx', () => {
     expect(dist.startsWith('#!/usr/bin/env node')).toBe(true);
   });
 });
+
+describe('plugin-embedded server bundle stays in sync with dist', () => {
+  const distPath = path.join(root, 'dist/index.cjs');
+  const assetPath = path.join(root, 'wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs');
+
+  it('the embedded connector bundle is byte-identical to dist/index.cjs', () => {
+    // postbuild (scripts/copy-server-bundle.sh) copies dist/index.cjs into the
+    // plugin so the .mcpb generator embeds the SAME server the npx path runs.
+    // If the two drift, Claude Desktop one-click users get a stale connector
+    // while npx users get the current one. Pin byte-equality so a build that
+    // skipped the copy — or a hand-edit of either copy — fails here.
+    expect(fs.existsSync(distPath), 'dist/index.cjs must be built and committed').toBe(true);
+    expect(fs.existsSync(assetPath), 'assets/mcp-server/index.cjs must be committed').toBe(true);
+    const dist = fs.readFileSync(distPath);
+    const asset = fs.readFileSync(assetPath);
+    expect(
+      asset.equals(dist),
+      'assets/mcp-server/index.cjs is out of sync with dist/index.cjs — run `npm run build`',
+    ).toBe(true);
+  });
+});
