@@ -80,9 +80,13 @@ class Connections {
 	/**
 	 * Revoke a single Block MCP Application Password by UUID.
 	 *
-	 * Delegates deletion to WP_Application_Passwords::delete_application_password()
-	 * and returns true when core confirms the entry was removed. Returns false
-	 * when core returns a WP_Error (e.g. the UUID does not exist for this user).
+	 * Only deletes credentials this plugin manages: the named entry must exist
+	 * for the user AND its name must begin with NAME_PREFIX — the same scope
+	 * list() enforces. This keeps a crafted or stale UUID from removing an
+	 * unrelated Application Password if this method is ever called against a
+	 * user that also holds non-Block MCP credentials. Returns true only when
+	 * core confirms the entry was removed; false when the UUID is unknown, the
+	 * credential is out of scope, or core returns a WP_Error.
 	 *
 	 * @since  1.9.0
 	 *
@@ -91,6 +95,13 @@ class Connections {
 	 * @return bool True on successful deletion, false otherwise.
 	 */
 	public function revoke( $user_id, $uuid ) {
+		$item       = \WP_Application_Passwords::get_user_application_password( $user_id, $uuid );
+		$is_managed = is_array( $item ) && isset( $item['name'] ) && strpos( $item['name'], self::NAME_PREFIX ) === 0;
+
+		if ( ! $is_managed ) {
+			return false;
+		}
+
 		$result = \WP_Application_Passwords::delete_application_password( $user_id, $uuid );
 		return ! is_wp_error( $result ) && $result;
 	}

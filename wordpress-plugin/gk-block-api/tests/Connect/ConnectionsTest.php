@@ -105,4 +105,28 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$this->assertCount( 1, $remaining, 'Seeded password must be untouched' );
 		$this->assertSame( $uuid, $remaining[0]['uuid'] );
 	}
+
+	/**
+	 * [WP-F10] revoke() must refuse to delete an Application Password whose name
+	 * does not begin with the Block MCP prefix, even when the UUID is valid for
+	 * the user.
+	 *
+	 * list() scopes to NAME_PREFIX, but revoke() previously deleted by
+	 * (user_id, uuid) without that check — so a crafted UUID could remove an
+	 * unrelated credential if this method were ever called against a user that
+	 * also holds non-Block MCP passwords. The fix re-checks the prefix before
+	 * deleting. This pins both halves: revoke() returns false AND the unrelated
+	 * password is left intact.
+	 */
+	public function test_revoke_refuses_non_block_mcp_password() {
+		$other = $this->seed( 'WooCommerce Mobile App' ); // not a Block MCP connection
+
+		$ok = ( new Connections() )->revoke( $this->user_id, $other );
+
+		$this->assertFalse( $ok, 'revoke() must not delete a credential outside the Block MCP prefix' );
+
+		$remaining = \WP_Application_Passwords::get_user_application_passwords( $this->user_id );
+		$this->assertCount( 1, $remaining, 'the unrelated password must remain' );
+		$this->assertSame( $other, $remaining[0]['uuid'] );
+	}
 }
