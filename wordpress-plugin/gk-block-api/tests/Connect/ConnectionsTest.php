@@ -129,4 +129,26 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$this->assertCount( 1, $remaining, 'the unrelated password must remain' );
 		$this->assertSame( $other, $remaining[0]['uuid'] );
 	}
+
+	/**
+	 * [WP-F10] revoke() must refuse a name that merely CONTAINS 'Block MCP' but
+	 * does not START with it.
+	 *
+	 * This pins the strpos( $name, NAME_PREFIX ) === 0 boundary. The sibling
+	 * test above (a name with no prefix at all) passes even under a looser
+	 * "contains" check (strpos !== false), so it cannot catch a regression that
+	 * swaps === 0 for !== false. This one can: 'My Block MCP Helper' contains the
+	 * prefix at offset 3, so a contains-check would wrongly delete it.
+	 */
+	public function test_revoke_refuses_name_containing_prefix_not_at_start() {
+		$other = $this->seed( 'My Block MCP Helper' ); // contains 'Block MCP', but not as a prefix
+
+		$ok = ( new Connections() )->revoke( $this->user_id, $other );
+
+		$this->assertFalse( $ok, 'a name where the prefix is not at position 0 must be refused' );
+
+		$remaining = \WP_Application_Passwords::get_user_application_passwords( $this->user_id );
+		$this->assertCount( 1, $remaining, 'the password must remain' );
+		$this->assertSame( $other, $remaining[0]['uuid'] );
+	}
 }
