@@ -28,6 +28,7 @@ import {
   handleCallback,
   buildMcpEntry,
   parseExchangeResponse,
+  defaultServerName,
 } from '../src/connect.js';
 import type { Credentials, McpConfig } from '../src/connect.js';
 
@@ -516,5 +517,79 @@ describe('password-never-logged invariant', () => {
     if (!result.ok) {
       expect(result.reason).not.toContain('stolen');
     }
+  });
+});
+
+// ── Multi-site server naming (--name) ──────────────────────────────────────────
+
+describe('defaultServerName', () => {
+  it('derives block-mcp-<label> from the host, stripping www', () => {
+    expect(defaultServerName('https://www.gravitykit.com')).toBe('block-mcp-gravitykit');
+  });
+
+  it('uses the first label for a two-label dev host', () => {
+    expect(defaultServerName('https://dev.test')).toBe('block-mcp-dev');
+  });
+
+  it('uses the first label for an OrbStack host', () => {
+    expect(defaultServerName('https://gkclone.orb.local')).toBe('block-mcp-gkclone');
+  });
+
+  it('handles a host with a port', () => {
+    expect(defaultServerName('http://localhost:7701')).toBe('block-mcp-localhost');
+  });
+
+  it('falls back to block-mcp for an unparseable site', () => {
+    expect(defaultServerName('not a url')).toBe('block-mcp');
+  });
+});
+
+describe('--name argument', () => {
+  it('parses --name <value>', () => {
+    const args = parseConnectArgs(['--site', 'https://example.com', '--name', 'block-mcp-prod']);
+    expect(args.name).toBe('block-mcp-prod');
+  });
+
+  it('parses --name=value form', () => {
+    const args = parseConnectArgs(['--site=https://example.com', '--name=block-mcp-prod']);
+    expect(args.name).toBe('block-mcp-prod');
+  });
+
+  it('defaults the name from the site host when --name is omitted', () => {
+    const args = parseConnectArgs(['--site', 'https://www.gravitykit.com']);
+    expect(args.name).toBe('block-mcp-gravitykit');
+  });
+});
+
+describe('multi-site config (named servers coexist)', () => {
+  it('mergeMcpServers writes under the given name', () => {
+    const result = mergeMcpServers({ mcpServers: {} }, CREDS, 'block-mcp-prod');
+    expect(result.mcpServers['block-mcp-prod']).toBeDefined();
+    expect(result.mcpServers['block-mcp-prod'].env.WORDPRESS_URL).toBe(CREDS.site);
+  });
+
+  it('does NOT overwrite a different site already configured under another name', () => {
+    const existing: McpConfig = {
+      mcpServers: {
+        'block-mcp-dev': { command: 'npx', args: ['-y', '@gravitykit/block-mcp'], env: { WORDPRESS_URL: 'https://dev.test' } },
+      },
+    };
+    const result = mergeMcpServers(existing, CREDS, 'block-mcp-prod');
+    // Both sites must be present — the whole point of named servers.
+    expect(result.mcpServers['block-mcp-dev']).toBeDefined();
+    expect(result.mcpServers['block-mcp-dev'].env.WORDPRESS_URL).toBe('https://dev.test');
+    expect(result.mcpServers['block-mcp-prod']).toBeDefined();
+  });
+
+  it('still defaults to the block-mcp key when no name is given', () => {
+    expect(mergeMcpServers({ mcpServers: {} }, CREDS).mcpServers['block-mcp']).toBeDefined();
+  });
+
+  it('claudeCodeAddArgs registers under the given server name', () => {
+    expect(claudeCodeAddArgs(CREDS, 'block-mcp-prod')[2]).toBe('block-mcp-prod');
+  });
+
+  it('claudeCodeAddArgs still defaults to block-mcp', () => {
+    expect(claudeCodeAddArgs(CREDS)[2]).toBe('block-mcp');
   });
 });

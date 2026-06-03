@@ -59162,6 +59162,7 @@ function parseConnectArgs(argv) {
   let port = null;
   let open = true;
   let reveal = false;
+  let name;
   for (let i2 = 0; i2 < argv.length; i2++) {
     const arg = argv[i2];
     if (arg === "--site") {
@@ -59195,6 +59196,10 @@ function parseConnectArgs(argv) {
       open = false;
     } else if (arg === "--reveal") {
       reveal = true;
+    } else if (arg === "--name") {
+      name = argv[++i2];
+    } else if (arg.startsWith("--name=")) {
+      name = arg.slice("--name=".length);
     } else if (arg.startsWith("--site=")) {
       site = arg.slice("--site=".length);
     } else if (arg.startsWith("--client=")) {
@@ -59213,7 +59218,18 @@ function parseConnectArgs(argv) {
   if (!site) {
     throw new Error("--site <url> is required. Example: --site https://example.com");
   }
-  return { site, client, port, open, reveal };
+  const resolvedName = name && name.trim() !== "" ? name.trim() : defaultServerName(site);
+  return { site, client, port, open, reveal, name: resolvedName };
+}
+function defaultServerName(site) {
+  let host;
+  try {
+    host = new URL(site).hostname.toLowerCase();
+  } catch {
+    return "block-mcp";
+  }
+  const label = host.replace(/^www\./, "").split(".")[0].replace(/[^a-z0-9-]/g, "");
+  return label ? `block-mcp-${label}` : "block-mcp";
 }
 function normalizeSite(raw2) {
   const trimmed = raw2.replace(/\/+$/, "");
@@ -59302,12 +59318,12 @@ function buildMcpEntry(creds) {
     }
   };
 }
-function mergeMcpServers(existing, creds) {
+function mergeMcpServers(existing, creds, name = "block-mcp") {
   return {
     ...existing,
     mcpServers: {
       ...existing.mcpServers,
-      "block-mcp": buildMcpEntry(creds)
+      [name]: buildMcpEntry(creds)
     }
   };
 }
@@ -59332,11 +59348,11 @@ function claudeDesktopConfigPath(platform) {
 function cursorConfigPath() {
   return path.join(os.homedir(), ".cursor", "mcp.json");
 }
-function claudeCodeAddArgs(creds) {
+function claudeCodeAddArgs(creds, name = "block-mcp") {
   return [
     "mcp",
     "add",
-    "block-mcp",
+    name,
     "--scope",
     "user",
     "--env",
@@ -59367,20 +59383,20 @@ function writeJsonFile(filePath, data) {
   } catch {
   }
 }
-function writeCursorConfig(creds) {
+function writeCursorConfig(creds, name = "block-mcp") {
   const configPath = cursorConfigPath();
   const existing = readJsonFile(configPath, { mcpServers: {} });
-  const updated = mergeMcpServers(existing, creds);
+  const updated = mergeMcpServers(existing, creds, name);
   writeJsonFile(configPath, updated);
 }
-function writeClaudeDesktopConfig(creds, platform = process.platform) {
+function writeClaudeDesktopConfig(creds, platform = process.platform, name = "block-mcp") {
   const configPath = claudeDesktopConfigPath(platform);
   const existing = readJsonFile(configPath, { mcpServers: {} });
-  const updated = mergeMcpServers(existing, creds);
+  const updated = mergeMcpServers(existing, creds, name);
   writeJsonFile(configPath, updated);
 }
-function runClaudeCodeAdd(creds) {
-  const args = claudeCodeAddArgs(creds);
+function runClaudeCodeAdd(creds, name = "block-mcp") {
+  const args = claudeCodeAddArgs(creds, name);
   try {
     const result = cp2.spawnSync("claude", args, {
       stdio: "inherit",
@@ -59398,10 +59414,10 @@ function runClaudeCodeAdd(creds) {
     return { success: false, error: err.message };
   }
 }
-function printConfig(creds, reveal) {
+function printConfig(creds, reveal, name = "block-mcp") {
   const shown = reveal ? creds : { ...creds, password: "<hidden \u2014 re-run with --reveal to print it>" };
   const entry = buildMcpEntry(shown);
-  const block = { mcpServers: { "block-mcp": entry } };
+  const block = { mcpServers: { [name]: entry } };
   console.log("\nAdd this to your MCP client config:\n");
   console.log(JSON.stringify(block, null, 2));
   console.log(
@@ -59533,26 +59549,26 @@ Open this URL in your browser to authorize:
   try {
     switch (args.client) {
       case "cursor":
-        writeCursorConfig(creds);
+        writeCursorConfig(creds, args.name);
         console.log(`
-\u2713 Connected! Wrote block-mcp to ~/.cursor/mcp.json`);
+\u2713 Connected! Wrote "${args.name}" to ~/.cursor/mcp.json`);
         console.log(`  Site: ${creds.site}  User: ${creds.user}`);
         console.log(`  Restart Cursor to pick up the new server.
 `);
         break;
       case "claude-desktop":
-        writeClaudeDesktopConfig(creds, platform);
+        writeClaudeDesktopConfig(creds, platform, args.name);
         console.log(`
-\u2713 Connected! Wrote block-mcp to ${claudeDesktopConfigPath(platform)}`);
+\u2713 Connected! Wrote "${args.name}" to ${claudeDesktopConfigPath(platform)}`);
         console.log(`  Site: ${creds.site}  User: ${creds.user}`);
         console.log(`  Restart Claude Desktop to pick up the new server.
 `);
         break;
       case "claude-code": {
-        const result = runClaudeCodeAdd(creds);
+        const result = runClaudeCodeAdd(creds, args.name);
         if (result.success) {
           console.log(`
-\u2713 Connected! Registered block-mcp via 'claude mcp add'.`);
+\u2713 Connected! Registered "${args.name}" via 'claude mcp add'.`);
           console.log(`  Site: ${creds.site}  User: ${creds.user}
 `);
         } else {
@@ -59562,7 +59578,7 @@ Warning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`
 Fall back \u2014 add this to your Claude Code MCP config manually:`);
-          printConfig(creds, true);
+          printConfig(creds, true, args.name);
         }
         break;
       }
@@ -59570,12 +59586,12 @@ Fall back \u2014 add this to your Claude Code MCP config manually:`);
         console.log(`
 \u2713 Authorized! Paste the following into ChatGPT Desktop's MCP config:
 `);
-        printConfig(creds, true);
+        printConfig(creds, true, args.name);
         break;
       }
       case "print":
       default:
-        printConfig(creds, args.reveal);
+        printConfig(creds, args.reveal, args.name);
         break;
     }
   } catch (err) {

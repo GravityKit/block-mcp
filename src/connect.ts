@@ -7,6 +7,12 @@
  *
  * The app password is only written to stdout when the user explicitly opts in
  * via `--reveal` or `--client print`. The default invocation redacts it.
+ *
+ * Each connection is registered under an MCP server name so several sites can
+ * coexist in one client config. The name defaults to a host-derived
+ * `block-mcp-<host-label>` (e.g. block-mcp-gravitykit) and can be overridden
+ * with `--name`. Connecting a second site adds a new entry rather than
+ * overwriting the first.
  */
 
 import * as http from 'node:http';
@@ -36,6 +42,12 @@ export interface ConnectArgs {
    * or by an explicit `--client print`.
    */
   reveal: boolean;
+  /**
+   * MCP server name this connection is registered under. Lets several sites
+   * coexist in one client config instead of overwriting a single entry. Set by
+   * `--name`; defaults to a host-derived `block-mcp-<host-label>`.
+   */
+  name: string;
 }
 
 export interface Credentials {
@@ -66,6 +78,7 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
   let port: number | null = null;
   let open = true;
   let reveal = false;
+  let name: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -102,6 +115,10 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
       open = false;
     } else if (arg === '--reveal') {
       reveal = true;
+    } else if (arg === '--name') {
+      name = argv[++i];
+    } else if (arg.startsWith('--name=')) {
+      name = arg.slice('--name='.length);
     } else if (arg.startsWith('--site=')) {
       site = arg.slice('--site='.length);
     } else if (arg.startsWith('--client=')) {
@@ -122,7 +139,30 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
     throw new Error('--site <url> is required. Example: --site https://example.com');
   }
 
-  return { site, client, port, open, reveal };
+  const resolvedName = name && name.trim() !== '' ? name.trim() : defaultServerName(site);
+
+  return { site, client, port, open, reveal, name: resolvedName };
+}
+
+/**
+ * Derive a default MCP server name from a site URL: `block-mcp-<host-label>`.
+ *
+ * Uses the host's first DNS label (after stripping a leading `www.`) so distinct
+ * sites get distinct, readable names that coexist in one client config —
+ * e.g. https://www.gravitykit.com → `block-mcp-gravitykit`, https://dev.test →
+ * `block-mcp-dev`. Falls back to `block-mcp` when the site can't be parsed.
+ * Override with `--name`.
+ */
+export function defaultServerName(site: string): string {
+  let host: string;
+  try {
+    host = new URL(site).hostname.toLowerCase();
+  } catch {
+    return 'block-mcp';
+  }
+
+  const label = host.replace(/^www\./, '').split('.')[0].replace(/[^a-z0-9-]/g, '');
+  return label ? `block-mcp-${label}` : 'block-mcp';
 }
 
 // ── Site URL normalisation ────────────────────────────────────────────────────
@@ -301,23 +341,28 @@ export function buildMcpEntry(creds: Credentials): McpServerEntry {
   };
 }
 
-/** Merge a block-mcp entry into an existing mcpServers config object. */
+/**
+ * Merge a block-mcp entry into an existing mcpServers config object under the
+ * given server name. Existing servers (including other sites registered under
+ * different names) are preserved, so several sites coexist in one config.
+ */
 export function mergeMcpServers(
   existing: McpConfig,
-  creds: Credentials
+  creds: Credentials,
+  name: string = 'block-mcp'
 ): McpConfig {
   return {
     ...existing,
     mcpServers: {
       ...existing.mcpServers,
-      'block-mcp': buildMcpEntry(creds),
+      [name]: buildMcpEntry(creds),
     },
   };
 }
 
 /** Build the full cursor config object (for unit testing). */
-export function cursorConfig(creds: Credentials): McpConfig {
-  return mergeMcpServers({ mcpServers: {} }, creds);
+export function cursorConfig(creds: Credentials, name: string = 'block-mcp'): McpConfig {
+  return mergeMcpServers({ mcpServers: {} }, creds, name);
 }
 
 // ── Platform-specific config paths ───────────────────────────────────────────
@@ -367,11 +412,11 @@ export function cursorConfigPath(): string {
  * That residual exposure is inherent to the `claude mcp add` interface; the
  * config it then writes is owned and protected by Claude Code.
  */
-export function claudeCodeAddArgs(creds: Credentials): string[] {
+export function claudeCodeAddArgs(creds: Credentials, name: string = 'block-mcp'): string[] {
   return [
     'mcp',
     'add',
-    'block-mcp',
+    name,
     '--scope',
     'user',
     '--env',
@@ -420,24 +465,31 @@ function writeJsonFile(filePath: string, data: McpConfig): void {
 }
 
 /** Write to the Cursor MCP config, preserving existing servers. */
-export function writeCursorConfig(creds: Credentials): void {
+export function writeCursorConfig(creds: Credentials, name: string = 'block-mcp'): void {
   const configPath = cursorConfigPath();
   const existing = readJsonFile(configPath, { mcpServers: {} });
-  const updated = mergeMcpServers(existing, creds);
+  const updated = mergeMcpServers(existing, creds, name);
   writeJsonFile(configPath, updated);
 }
 
 /** Write to the Claude Desktop config, preserving existing servers. */
-export function writeClaudeDesktopConfig(creds: Credentials, platform: string = process.platform): void {
+export function writeClaudeDesktopConfig(
+  creds: Credentials,
+  platform: string = process.platform,
+  name: string = 'block-mcp'
+): void {
   const configPath = claudeDesktopConfigPath(platform);
   const existing = readJsonFile(configPath, { mcpServers: {} });
-  const updated = mergeMcpServers(existing, creds);
+  const updated = mergeMcpServers(existing, creds, name);
   writeJsonFile(configPath, updated);
 }
 
 /** Run `claude mcp add` via spawnSync (no shell — args array only). */
-export function runClaudeCodeAdd(creds: Credentials): { success: boolean; error?: string } {
-  const args = claudeCodeAddArgs(creds);
+export function runClaudeCodeAdd(
+  creds: Credentials,
+  name: string = 'block-mcp'
+): { success: boolean; error?: string } {
+  const args = claudeCodeAddArgs(creds, name);
   try {
     const result = cp.spawnSync('claude', args, {
       stdio: 'inherit',
@@ -464,12 +516,12 @@ export function runClaudeCodeAdd(creds: Credentials): { success: boolean; error?
  * `--reveal` / `--client print`). Otherwise it is replaced with a placeholder
  * so the secret never lands in stdout / shell scrollback / CI logs.
  */
-export function printConfig(creds: Credentials, reveal: boolean): void {
+export function printConfig(creds: Credentials, reveal: boolean, name: string = 'block-mcp'): void {
   const shown: Credentials = reveal
     ? creds
     : { ...creds, password: '<hidden — re-run with --reveal to print it>' };
   const entry = buildMcpEntry(shown);
-  const block: McpConfig = { mcpServers: { 'block-mcp': entry } };
+  const block: McpConfig = { mcpServers: { [name]: entry } };
   console.log('\nAdd this to your MCP client config:\n');
   console.log(JSON.stringify(block, null, 2));
   console.log(
@@ -666,23 +718,23 @@ export async function runConnect(
   try {
     switch (args.client) {
       case 'cursor':
-        writeCursorConfig(creds);
-        console.log(`\n✓ Connected! Wrote block-mcp to ~/.cursor/mcp.json`);
+        writeCursorConfig(creds, args.name);
+        console.log(`\n✓ Connected! Wrote "${args.name}" to ~/.cursor/mcp.json`);
         console.log(`  Site: ${creds.site}  User: ${creds.user}`);
         console.log(`  Restart Cursor to pick up the new server.\n`);
         break;
 
       case 'claude-desktop':
-        writeClaudeDesktopConfig(creds, platform);
-        console.log(`\n✓ Connected! Wrote block-mcp to ${claudeDesktopConfigPath(platform)}`);
+        writeClaudeDesktopConfig(creds, platform, args.name);
+        console.log(`\n✓ Connected! Wrote "${args.name}" to ${claudeDesktopConfigPath(platform)}`);
         console.log(`  Site: ${creds.site}  User: ${creds.user}`);
         console.log(`  Restart Claude Desktop to pick up the new server.\n`);
         break;
 
       case 'claude-code': {
-        const result = runClaudeCodeAdd(creds);
+        const result = runClaudeCodeAdd(creds, args.name);
         if (result.success) {
-          console.log(`\n✓ Connected! Registered block-mcp via 'claude mcp add'.`);
+          console.log(`\n✓ Connected! Registered "${args.name}" via 'claude mcp add'.`);
           console.log(`  Site: ${creds.site}  User: ${creds.user}\n`);
         } else {
           console.error(
@@ -690,7 +742,7 @@ export async function runConnect(
           );
           console.log(`\nFall back — add this to your Claude Code MCP config manually:`);
           // Explicit fallback for a client the user chose: the secret is needed.
-          printConfig(creds, true);
+          printConfig(creds, true, args.name);
         }
         break;
       }
@@ -699,13 +751,13 @@ export async function runConnect(
         // ChatGPT Desktop does not have a standardised config path yet.
         // Print the JSON block so the user can paste it (secret needed here).
         console.log(`\n✓ Authorized! Paste the following into ChatGPT Desktop's MCP config:\n`);
-        printConfig(creds, true);
+        printConfig(creds, true, args.name);
         break;
       }
 
       case 'print':
       default:
-        printConfig(creds, args.reveal);
+        printConfig(creds, args.reveal, args.name);
         break;
     }
   } catch (err) {
