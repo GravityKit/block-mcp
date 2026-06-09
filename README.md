@@ -233,8 +233,9 @@ In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
 wp user application-password create <username> "Block MCP" --porcelain
 ```
 
-The user needs at minimum the `edit_posts` capability for any post you want to
-read or write. Then build and register the server:
+Read endpoints require the `edit_posts` capability; write endpoints require
+`edit_post` on the specific post being changed. Then build and register the
+server:
 
 ```bash
 git clone https://github.com/GravityKit/block-mcp
