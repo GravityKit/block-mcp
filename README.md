@@ -34,6 +34,8 @@
   * [Blocks that store data in two places](#blocks-that-store-data-in-two-places)
   * [Post types AI agents can create](#post-types-ai-agents-can-create)
   * [Storage-mode scan + reset](#storage-mode-scan--reset)
+* [Security](#security)
+  * [Seal mode (Claude Desktop)](#seal-mode-claude-desktop)
 * [Examples](#examples)
 * [Testing](#testing)
 * [Requirements](#requirements)
@@ -373,6 +375,30 @@ Restrict `create_post` to specific post types. Leave everything unchecked to all
 The scan walks every published post and classifies each distinct block as static / dynamic / dual, replacing the filter defaults with live data from your site. Slow on large sites; the result is cached. The Reset button below it clears every option this plugin owns and restores hard-coded defaults.
 
 ![Storage scan and reset](docs/screenshots/settings-scan-reset.png)
+
+## Security
+
+Block MCP gives an AI assistant exactly the access it needs to edit content — and nothing more.
+
+- **A separate, limited account.** Connecting creates a dedicated account just for the assistant. It can write and edit your posts, pages, and media, but it can't change site settings, delete other people's content, or sign in to your dashboard — and disconnecting it removes all of that access at once. (You can connect through your own account instead; it's clearly marked as the higher-access option, and a site owner can turn that option off entirely.)
+- **Your password stays private.** It's never shown in a web address or saved to your browser history, and the connection is set up locally on your own computer. Any config files written are readable only by you.
+- **Stored secrets are encrypted.** Any credential held between setup steps is encrypted (AES‑256‑GCM) before it's saved, and cleared once it's used — never kept as plain text.
+- **The assistant can't inject code.** Everything it writes is sanitized, so it can't slip scripts or trackers into your pages.
+
+### Seal mode (Claude Desktop)
+
+The one-click Claude Desktop installer can either include your credential or leave it out:
+
+| Mode | What happens |
+|---|---|
+| `prefill` *(default)* | The installer includes the password, so setup is one click; Claude Desktop saves it to your OS keychain. |
+| `paste` | The installer leaves the password out — you paste it in yourself, so it never lands in a downloaded file. |
+
+Developers can force paste mode with a filter, or by defining `GK_BLOCK_API_FORCE_PASTE_SECRET` as `true` in `wp-config.php`:
+
+```php
+add_filter( 'gk/block-mcp/credential/seal-mode', fn() => 'paste' );
+```
 
 ## Examples
 
