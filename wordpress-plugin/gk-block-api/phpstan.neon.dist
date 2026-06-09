@@ -34,4 +34,11 @@ parameters:
 		- vendor/*
 		- dist/*
 
+	ignoreErrors:
+		# Dynamic WordPress-core admin includes — `require_once ABSPATH . 'wp-admin/includes/*.php'`
+		# (file/media/image for uploads; user/ms for agent teardown). Each is guarded
+		# at runtime (e.g. is_dir( ABSPATH . 'wp-admin' )); the literal path can't be
+		# resolved statically against the placeholder ABSPATH in phpstan-bootstrap.php.
+		- identifier: requireOnce.fileNotFound
+
 	treatPhpDocTypesAsCertain: false

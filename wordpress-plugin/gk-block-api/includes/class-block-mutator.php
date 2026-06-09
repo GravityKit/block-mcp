@@ -934,9 +934,7 @@ class Block_Mutator {
 				'revision_id'        => null,
 			);
 
-			if ( null !== $result_block ) {
-				$response['block'] = $result_block;
-			}
+			$response['block'] = $result_block;
 
 			return $response;
 		}
@@ -959,9 +957,7 @@ class Block_Mutator {
 			'revision_id'        => $result['revision_id'],
 		);
 
-		if ( null !== $result_block ) {
-			$response['block'] = $result_block;
-		}
+		$response['block'] = $result_block;
 
 		return $response;
 	}

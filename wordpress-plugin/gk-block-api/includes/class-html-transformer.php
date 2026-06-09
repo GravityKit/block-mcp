@@ -148,8 +148,8 @@ class HTML_Transformer {
 				$processor = new \WP_HTML_Tag_Processor( $html );
 
 				while ( $processor->next_tag() ) {
-					// Filter by allowed tags if specified.
-					if ( null !== $tags && ! in_array( strtolower( $processor->get_tag() ), $tags, true ) ) {
+					// Restrict to the transform's allowed tags.
+					if ( ! in_array( strtolower( $processor->get_tag() ), $tags, true ) ) {
 						continue;
 					}
 

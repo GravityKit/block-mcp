@@ -631,7 +631,7 @@ class Block_Writer {
 			array(
 				'status'                  => 400,
 				'block'                   => $block_name,
-				'source_bound_attributes' => array_values( $missing ),
+				'source_bound_attributes' => $missing,
 			)
 		);
 	}
@@ -848,7 +848,7 @@ class Block_Writer {
 		$this->record_rate_limit( $post_id, 'write' );
 
 		$block_data = apply_filters(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			array(
 				'index'      => $index,
 				'name'       => $block['blockName'],
@@ -1092,7 +1092,7 @@ class Block_Writer {
 			$this->apply_block_update_in_place( $block_ref, $r['attributes'], $r['innerHTML'] );
 
 			$block_data = apply_filters(
-				'gk_block_api_format_block',
+				'gk/block-mcp/block/format',
 				array(
 					'index'      => $r['flat_index'],
 					'name'       => isset( $block_ref['blockName'] ) ? $block_ref['blockName'] : '',
