@@ -1914,4 +1914,45 @@ class BlockCrudTest extends BlockApiTestCase {
 
 		wp_delete_post( $pattern_id, true );
 	}
+
+	// ── gk/block-mcp/block/refs-persisted action ───────────────────────
+
+	/**
+	 * gk/block-mcp/block/refs-persisted fires once, with the post ID, after fresh
+	 * gk_ref UUIDs are written to a post.
+	 *
+	 * persist_ref_assignments() writes the ref-stamped content straight to the DB
+	 * via $wpdb->update (no save_post hook, no revision), so secondary caches keyed
+	 * on post_content — search indexes, CDN edge caches, page-builder CSS — get no
+	 * core signal to invalidate. The action is the only invalidation hook for that
+	 * direct write. This exercises the REAL trigger: a post whose blocks lack
+	 * gk_ref, read through the Block_CRUD facade (get_blocks), which lazy-assigns
+	 * refs and persists them — and asserts the action fired exactly once carrying
+	 * the correct post ID.
+	 */
+	public function test_refs_persisted_action_fires_after_ref_write() {
+		// A block with no attrs.metadata.gk_ref, so the lazy reader must assign one.
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>needs a ref</p>' ) ) );
+
+		$fired   = array();
+		$capture = static function ( $post_id ) use ( &$fired ) {
+			$fired[] = $post_id;
+		};
+		add_action( 'gk/block-mcp/block/refs-persisted', $capture );
+
+		// Real trigger: reading through the facade lazy-assigns + persists the ref.
+		$blocks = $this->crud->get_blocks( $this->post_id );
+
+		remove_action( 'gk/block-mcp/block/refs-persisted', $capture );
+
+		// Precondition: a ref really was written (otherwise the action would not
+		// fire and the test would prove nothing).
+		$this->assertNotEmpty( $blocks[0]['ref'], 'the reader must have assigned a ref' );
+		$persisted = $this->current_blocks();
+		$this->assertNotEmpty( $persisted[0]['attrs']['metadata']['gk_ref'], 'the ref must be persisted to post_content' );
+
+		// The action fired exactly once, with the post that received the refs.
+		$this->assertCount( 1, $fired, 'refs-persisted must fire exactly once for the ref write' );
+		$this->assertSame( $this->post_id, $fired[0], 'refs-persisted must carry the post ID that received the refs' );
+	}
 }

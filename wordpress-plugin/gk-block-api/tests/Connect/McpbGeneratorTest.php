@@ -307,4 +307,40 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 		);
 		$this->assertStringContainsString( 'www.gravitykit.com', $m['display_name'] );
 	}
+
+	/**
+	 * The gk/block-mcp/mcpb/manifest filter can mutate the generated manifest, and
+	 * receives the credential set as its second argument.
+	 *
+	 * manifest() returns apply_filters( 'gk/block-mcp/mcpb/manifest', $manifest,
+	 * $creds ), so an operator can rename the extension, add metadata, or adjust
+	 * user_config for a managed deployment. This pins that a filter both sees the
+	 * built array (it can change a value) and can inject a brand-new key, and that
+	 * the creds passed to manifest() reach the filter — so callers that key off the
+	 * credentials (e.g. per-site naming overrides) work.
+	 */
+	public function test_mcpb_manifest_filter_can_mutate_manifest() {
+		$received_creds = null;
+
+		$filter = static function ( $manifest, $creds ) use ( &$received_creds ) {
+			$received_creds            = $creds;
+			$manifest['name']          = 'sentinel-name';
+			$manifest['x_gk_sentinel'] = 'injected';
+			return $manifest;
+		};
+		add_filter( 'gk/block-mcp/mcpb/manifest', $filter, 10, 2 );
+
+		$m = ( new MCPB_Generator() )->manifest( $this->creds() );
+
+		remove_filter( 'gk/block-mcp/mcpb/manifest', $filter, 10 );
+
+		// The filter both changed an existing value and injected a brand-new key.
+		$this->assertSame( 'sentinel-name', $m['name'], 'the filter must be able to change a manifest value' );
+		$this->assertArrayHasKey( 'x_gk_sentinel', $m, 'the filter must be able to inject a new manifest key' );
+		$this->assertSame( 'injected', $m['x_gk_sentinel'] );
+
+		// The credential set passed to manifest() must reach the filter.
+		$this->assertIsArray( $received_creds, 'the filter must receive the creds argument' );
+		$this->assertSame( $this->creds()['url'], $received_creds['url'], 'the filter must receive the same creds passed to manifest()' );
+	}
 }

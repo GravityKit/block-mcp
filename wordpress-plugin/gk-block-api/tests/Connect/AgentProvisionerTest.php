@@ -41,14 +41,18 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		// Remove any agent user created during the test.
-		$user = get_user_by( 'login', Agent_Provisioner::LOGIN );
-		if ( $user ) {
-			wp_delete_user( $user->ID );
+		// Remove any agent user created during the test, under the default login
+		// and under any custom login a gk/block-mcp/agent/login filter test installed.
+		foreach ( array( Agent_Provisioner::LOGIN, 'my-custom-agent' ) as $login ) {
+			$user = get_user_by( 'login', $login );
+			if ( $user ) {
+				wp_delete_user( $user->ID );
+			}
 		}
 		remove_role( Agent_Provisioner::ROLE );
 		delete_option( 'gk_block_api_agent_user_id' );
 		remove_all_filters( 'authenticate' );
+		remove_all_filters( 'gk/block-mcp/agent/login' );
 		parent::tear_down();
 	}
 
@@ -138,6 +142,32 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		$result = ( new Agent_Provisioner() )->ensure();
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'agent_login_taken', $result->get_error_code() );
+	}
+
+	/**
+	 * The gk/block-mcp/agent/login filter overrides the service-account login.
+	 *
+	 * ensure() resolves the login through gk/block-mcp/agent/login before locating
+	 * or creating the user, so a host that already has (or wants) a 'block-mcp' user
+	 * for something else can point the agent at a different login. This pins that the
+	 * filtered value is what actually lands as the created user's user_login — not
+	 * the LOGIN constant.
+	 */
+	public function test_agent_login_filter_overrides_service_account_login() {
+		$custom = static function () {
+			return 'my-custom-agent';
+		};
+		add_filter( 'gk/block-mcp/agent/login', $custom );
+
+		$id = ( new Agent_Provisioner() )->ensure();
+
+		remove_filter( 'gk/block-mcp/agent/login', $custom );
+
+		$this->assertIsInt( $id );
+		$user = get_user_by( 'id', $id );
+		$this->assertInstanceOf( WP_User::class, $user );
+		$this->assertSame( 'my-custom-agent', $user->user_login, 'ensure() must create the agent under the filtered login' );
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'the default login must not be created when the filter overrides it' );
 	}
 
 	/**
