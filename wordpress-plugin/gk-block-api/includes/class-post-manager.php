@@ -52,14 +52,14 @@ class Post_Manager {
 	 * trashing routes through `update_post( status: 'trash' )`, which only
 	 * needs `edit_post` (the agent has it). This toggle is the application-level
 	 * gate that keeps that path closed until a site owner opts in. Filterable
-	 * via `gk_block_api_allow_trash` for programmatic control.
+	 * via `gk/block-mcp/post/allow-trash` for programmatic control.
 	 *
 	 * @return bool
 	 */
 	public static function trashing_enabled() {
 		$enabled = (bool) get_option( self::ALLOW_TRASH_OPTION, false );
 
-		return (bool) apply_filters( 'gk_block_api_allow_trash', $enabled );
+		return (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $enabled );
 	}
 
 	/**
@@ -235,27 +235,6 @@ class Post_Manager {
 				}
 			}
 			$postarr['post_author'] = $author_id;
-		} else {
-			// No explicit author: honor the connection's "show as me" byline choice
-			// when it's safe to. The agent must be allowed to assign authorship to
-			// others, and the credited human must be able to author this post type.
-			// Otherwise fall through to the default (the agent) as author.
-			$byline_user = Connections::author_to_credit();
-			if ( $byline_user ) {
-				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
-					? $pt_object->cap->edit_others_posts
-					: 'edit_others_posts';
-				$author_cap = ( $pt_object && isset( $pt_object->cap->edit_posts ) )
-					? $pt_object->cap->edit_posts
-					: 'edit_posts';
-
-				$agent_can_assign = current_user_can( $others_cap );
-				$human_can_author = user_can( $byline_user, $author_cap );
-
-				if ( $agent_can_assign && $human_can_author ) {
-					$postarr['post_author'] = $byline_user;
-				}
-			}
 		}
 		if ( isset( $args['featured_media'] ) ) {
 			$fm = (int) $args['featured_media'];
@@ -602,8 +581,8 @@ class Post_Manager {
 	 * Returns a WP_Error on first hard rejection (legacy tier); accumulates
 	 * non-fatal warnings into the passed-by-reference array.
 	 *
-	 * @param array             $blocks   Block defs in API shape.
-	 * @param array<int, mixed> $warnings Warning accumulator.
+	 * @param array $blocks   Block defs in API shape.
+	 * @param array $warnings Warning accumulator.
 	 *
 	 * @return null|\WP_Error
 	 */

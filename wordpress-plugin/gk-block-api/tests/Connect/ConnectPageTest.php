@@ -35,7 +35,7 @@
  *    prepare_installer() propagates WP_Error without minting any credential.
  *  - connection_state() correctly reports 'needs_https', 'ready', and
  *    'connected' for the three reachable branches.
- *  - The gk_block_api_secret_at_rest_mode filter in 'paste' mode causes
+ *  - The gk/block-mcp/credential/seal-mode filter in 'paste' mode causes
  *    prepare_installer() to omit the password from the manifest default and
  *    return the plaintext separately.
  *  - render_section() in the 'ready' state outputs all six client radio cards
@@ -80,7 +80,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	public function tear_down() {
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		remove_filter( 'wp_is_application_passwords_available', '__return_false' );
-		remove_all_filters( 'gk_block_api_secret_at_rest_mode' );
+		remove_all_filters( 'gk/block-mcp/credential/seal-mode' );
 		remove_all_filters( 'home_url' );
 		remove_all_filters( 'wp_redirect' );
 		remove_all_filters( 'wp_die_handler' );
@@ -132,10 +132,11 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Default identity ('agent') mints on the agent and records a neutral byline:
-	 * the approving human is captured for the audit trail, author_mode stays 'agent'.
+	 * Default identity ('agent') mints on the dedicated agent account and records
+	 * the host + approver for the audit trail (no byline state — that subsystem was
+	 * removed with the agent_as_me identity).
 	 */
-	public function test_provision_credentials_agent_records_agent_byline() {
+	public function test_provision_credentials_agent_mints_on_agent() {
 		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin );
 
@@ -147,16 +148,15 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
 		$meta  = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
-		$this->assertSame( 'agent', $meta['author_mode'] );
 		$this->assertSame( (int) $agent->ID, (int) $meta['user_id'] );
 		$this->assertSame( $admin, (int) $meta['created_by'] );
 	}
 
 	/**
-	 * 'agent_as_me' still mints on the agent (same limited account) but records the
-	 * byline as the approving human, so created posts are credited to them.
+	 * The removed 'agent_as_me' identity — and any other unrecognised value — falls
+	 * back to the dedicated agent account, never the approving user.
 	 */
-	public function test_provision_credentials_agent_as_me_records_me_byline() {
+	public function test_provision_credentials_unknown_identity_falls_back_to_agent() {
 		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin );
 
@@ -164,13 +164,8 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$creds = $page->provision_credentials( 'Cursor', 'agent_as_me' );
 
 		$this->assertIsArray( $creds );
-		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'], 'agent_as_me still mints on the agent' );
-
-		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
-		$meta  = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
-		$this->assertSame( 'me', $meta['author_mode'] );
-		$this->assertSame( (int) $agent->ID, (int) $meta['user_id'] );
-		$this->assertSame( $admin, (int) $meta['created_by'] );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'], 'unknown identity must mint on the agent, not the user' );
+		$this->assertCount( 0, WP_Application_Passwords::get_user_application_passwords( $admin ), 'no credential may be minted on the approving user' );
 	}
 
 	/**
@@ -196,7 +191,25 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$meta = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
 		$this->assertSame( $admin, (int) $meta['user_id'] );
 		$this->assertSame( $admin, (int) $meta['created_by'] );
-		$this->assertSame( 'me', $meta['author_mode'] );
+	}
+
+	/**
+	 * The gk/block-mcp/identity/allow-self filter (false) clamps a 'self' request
+	 * back to the dedicated agent account, so an operator can forbid full-account
+	 * credentials. No credential may be minted on the approving user.
+	 */
+	public function test_self_identity_disabled_by_filter_clamps_to_agent() {
+		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin );
+
+		add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+		$page  = new Connect_Page();
+		$creds = $page->provision_credentials( 'Cursor', 'self' );
+		remove_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+
+		$this->assertIsArray( $creds );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'], 'self must clamp to the agent when the filter forbids it' );
+		$this->assertCount( 0, WP_Application_Passwords::get_user_application_passwords( $admin ), 'no credential may be minted on the user when self is disabled' );
 	}
 
 	/**
@@ -729,6 +742,129 @@ class ConnectPageTest extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * handle_authorize() with identity=self mints the Application Password on the
+	 * APPROVING admin — not the dedicated agent — so the AI app acts with that
+	 * person's full capabilities.
+	 *
+	 * This drives the real browser-Approve handler (nonce + manage_options +
+	 * loopback callback + redirect) with $_POST['identity']='self', the path the
+	 * Approve screen's "Your own account" radio submits. It pins the higher-blast-
+	 * radius end-to-end seam: exactly one credential lands on the current admin and
+	 * the block-mcp service account is never provisioned. The provision-level
+	 * equivalent (test_provision_credentials_self_mints_on_current_user) does not
+	 * exercise the HTTP handler that reads and forwards the identity field.
+	 */
+	public function test_handle_authorize_self_mints_on_approving_user() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51793/cb';
+		$_POST['state']       = 'self-state-token';
+		$_POST['client']      = 'block-mcp';
+		$_POST['identity']    = 'self';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$captured_redirect = null;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+
+		remove_all_filters( 'wp_redirect' );
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['identity'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
+
+		// The credential lives on the approving admin — exactly one — and the agent
+		// service account was never provisioned on the self path.
+		$this->assertCount(
+			1,
+			WP_Application_Passwords::get_user_application_passwords( $admin_id ),
+			'identity=self must mint exactly one Application Password on the approving user'
+		);
+		$this->assertFalse(
+			get_user_by( 'login', Agent_Provisioner::LOGIN ),
+			'identity=self must not provision the dedicated agent service account'
+		);
+	}
+
+	/**
+	 * handle_authorize() with identity=self is clamped back to the dedicated agent
+	 * when gk/block-mcp/identity/allow-self returns false.
+	 *
+	 * An operator (or managed host) can forbid full-account credentials with the
+	 * filter. With it disabled, a self request from the Approve handler must mint on
+	 * the limited block-mcp agent instead — never on the approving admin — so the
+	 * server-side clamp holds even if a client POSTs identity=self directly. Pins
+	 * the clamp at the HTTP boundary, not just inside provision_credentials().
+	 */
+	public function test_handle_authorize_self_clamped_to_agent_when_filter_disabled() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51794/cb';
+		$_POST['state']       = 'clamp-state-token';
+		$_POST['client']      = 'block-mcp';
+		$_POST['identity']    = 'self';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+
+		$captured_redirect = null;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+
+		remove_all_filters( 'wp_redirect' );
+		remove_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['identity'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
+
+		// The clamp moved the mint to the agent: the agent exists with exactly one
+		// credential, and the approving admin holds none.
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent, 'the clamp must provision the dedicated agent' );
+		$this->assertCount(
+			1,
+			WP_Application_Passwords::get_user_application_passwords( $agent->ID ),
+			'the clamped credential must be minted on the agent'
+		);
+		$this->assertCount(
+			0,
+			WP_Application_Passwords::get_user_application_passwords( $admin_id ),
+			'no credential may be minted on the approving user when self is disabled'
+		);
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// [WP-F3] Single-use credential exchange code.
 	// ──────────────────────────────────────────────────────────────────────
@@ -1185,7 +1321,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	// ──────────────────────────────────────────────────────────────────────
 
 	/**
-	 * When the gk_block_api_secret_at_rest_mode filter returns 'paste', the
+	 * When the gk/block-mcp/credential/seal-mode filter returns 'paste', the
 	 * built bundle must carry an empty string for wordpress_app_password.default
 	 * (so the installer does not pre-fill the field) and the return array must
 	 * carry the plaintext password separately for the UI to display once.
@@ -1195,7 +1331,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 */
 	public function test_secret_at_rest_filter_paste_mode_omits_password_default() {
 		add_filter(
-			'gk_block_api_secret_at_rest_mode',
+			'gk/block-mcp/credential/seal-mode',
 			static function () {
 				return 'paste';
 			}
@@ -1663,6 +1799,57 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"', $html, 'Client picker radios must NOT appear in authorize mode' );
 	}
 
+	/**
+	 * The Approve screen offers the higher-risk "Your own account" option with its
+	 * acknowledgment gate, and the removed agent_as_me option must be gone.
+	 */
+	public function test_authorize_screen_offers_self_with_acknowledgment_gate() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( 'value="self"', $html, 'the self identity option must be offered' );
+		$this->assertStringContainsString( 'name="self_ack"', $html, 'the self acknowledgment checkbox must be present' );
+		$this->assertStringNotContainsString( 'value="agent_as_me"', $html, 'the removed agent_as_me option must NOT appear' );
+	}
+
+	/**
+	 * The gk/block-mcp/identity/allow-self filter (false) removes the self option
+	 * and its acknowledgment gate from the Approve screen entirely, while the rest
+	 * of the screen still renders.
+	 */
+	public function test_authorize_screen_omits_self_when_filter_disables_it() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
+
+		add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+		remove_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( 'Allow your AI app to connect', $html, 'the Approve screen must still render' );
+		$this->assertStringNotContainsString( 'value="self"', $html, 'the self option must be hidden when the filter forbids it' );
+		$this->assertStringNotContainsString( 'name="self_ack"', $html, 'the acknowledgment gate must be hidden when self is forbidden' );
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// [WP-F2] .mcpb temp-bundle cleanup survives a client-aborted download.
 	// ──────────────────────────────────────────────────────────────────────
@@ -1924,15 +2111,13 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The Active connections list has a dedicated "Account" column that names the
-	 * connection type, separate from "Approved by".
+	 * The Active connections list has a dedicated "Account" column, separate from
+	 * "Approved by".
 	 *
-	 * Regression: the connection type used to be crammed into the "Approved by"
-	 * column as subtext ("Shown as author"), which read ambiguously — was the
-	 * name the account, the approver, or the author? For a "shown as you"
-	 * connection the Account column must say the AI uses the dedicated "Block MCP"
-	 * account and posts as the approver, while "Approved by" carries just the
-	 * audit name. The old conflated subtext must be gone.
+	 * For an agent-hosted connection the Account column names the dedicated
+	 * "Block MCP" account as a "Limited account"; the approver's name lives only in
+	 * the "Approved by" column. The old conflated "Shown as author" subtext and the
+	 * byline "Posts as <name>" line were removed with the agent_as_me identity.
 	 */
 	public function test_active_connections_account_column_names_the_connection_type() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator', 'display_name' => 'Screenshot Admin' ) );
@@ -1947,20 +2132,21 @@ class ConnectPageTest extends WP_UnitTestCase {
 		);
 		\GravityKit\BlockAPI\Connections::record_meta(
 			$created[1]['uuid'],
-			array( 'user_id' => $agent_id, 'created_by' => $admin_id, 'author_mode' => 'me' )
+			array( 'user_id' => $agent_id, 'created_by' => $admin_id )
 		);
 
 		ob_start();
 		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
-		// New Account column header + the agent-account identity + the byline note.
+		// Account column header + the agent-account identity label.
 		$this->assertStringContainsString( 'Account', $html, 'the Account column header must be present' );
-		$this->assertStringContainsString( 'Posts as Screenshot Admin', $html, 'the Account column names the byline for a "shown as you" connection' );
-		// Approved-by audit still shows the approver name.
+		$this->assertStringContainsString( 'Limited account', $html, 'the Account column must label the agent connection as a limited account' );
+		// Approved-by audit shows the approver name.
 		$this->assertStringContainsString( 'Screenshot Admin', $html );
-		// The old conflated subtext must be gone.
-		$this->assertStringNotContainsString( 'Shown as author', $html, 'the ambiguous "Shown as author" subtext must be replaced by the Account column' );
+		// The removed byline subtexts must be gone.
+		$this->assertStringNotContainsString( 'Shown as author', $html );
+		$this->assertStringNotContainsString( 'Posts as', $html, 'the removed byline subtext must not appear' );
 	}
 
 }

@@ -704,7 +704,7 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The `gk_block_api_allow_trash` filter can force trashing on even when the
+	 * The `gk/block-mcp/post/allow-trash` filter can force trashing on even when the
 	 * stored option is off — programmatic control for site owners who'd rather
 	 * gate this in code than in the UI.
 	 */
@@ -714,13 +714,13 @@ class PostManagerTest extends WP_UnitTestCase {
 		$force = static function () {
 			return true;
 		};
-		add_filter( 'gk_block_api_allow_trash', $force );
+		add_filter( 'gk/block-mcp/post/allow-trash', $force );
 
 		$this->assertTrue( Post_Manager::trashing_enabled() );
 		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 
-		remove_filter( 'gk_block_api_allow_trash', $force );
+		remove_filter( 'gk/block-mcp/post/allow-trash', $force );
 
 		$this->assertIsArray( $result );
 		$this->assertSame( 'trash', get_post( $id )->post_status );
@@ -737,92 +737,117 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertFalse( Post_Manager::trashing_enabled() );
 	}
 
-	// ── create_post: byline (show as me) ─────────────────────────────
+	// ── self identity (full-caps user): plugin-level guards still apply ─
 
 	/**
-	 * When the request's connection opted into "show as me", a created post is
-	 * authored by the approving human — provided the acting account may assign
-	 * authorship and that human can author the type.
+	 * The trash gate is application-level, not capability-based: it must block
+	 * an administrator too.
 	 *
-	 * The current actor (an editor) has edit_others_posts; the credited human is
-	 * an author who can author posts. Simulates the authenticated request by
-	 * setting the app-password UUID the resolver reads.
+	 * In the `self` identity the credential is minted on the approving user, so
+	 * the AI app acts with that person's full caps — including `delete_*`. The
+	 * documented safety contract is that the `gk/block-mcp/post/allow-trash` gate
+	 * (`class-post-manager.php`) still returns `trash_disabled` (403) for that
+	 * user when the toggle is off, before any cap check. Without this, a `self`
+	 * admin could trash content through the Block MCP tools by default. The
+	 * existing trash-disabled test runs as an editor (which lacks `delete_*`
+	 * anyway, so it cannot prove the gate is independent of caps); this pins the
+	 * gate-vs-caps separation with a user who DOES hold delete capabilities.
 	 */
-	public function test_create_post_byline_credits_human_when_show_as_me() {
-		$human = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-byline', array( 'created_by' => $human, 'author_mode' => 'me' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-byline';
+	public function test_update_post_trash_disabled_blocks_admin_self_credential() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$this->assertTrue( current_user_can( 'delete_others_posts' ), 'precondition: admin holds delete caps' );
 
-		$result = $this->pm->create_post( array( 'title' => 'Credited' ) );
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 
-		$this->assertIsArray( $result );
-		$this->assertSame( $human, (int) get_post( $result['id'] )->post_author );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
+		$this->assertSame( 'publish', get_post( $id )->post_status, 'a full-caps user must not trash while the gate is off' );
 	}
 
 	/**
-	 * A connection that authors as the agent does NOT remap the author: the post
-	 * is authored by the acting account (the default), not anyone recorded in meta.
+	 * The post-type allow-list is application-level, not capability-based: it
+	 * must reject a disallowed type even for an administrator.
+	 *
+	 * In the `self` identity the acting user has full caps and could create any
+	 * post type via core. The documented safety contract is that
+	 * `Post_Manager::create_post()` rejects types outside
+	 * `gk_block_api_post_types_allowlist` with `invalid_post_type`
+	 * (`class-post-manager.php`) BEFORE the capability check — so the allow-list
+	 * constrains a `self` admin too. The existing allow-list test runs as an
+	 * editor; this pins the same gate for a user with full caps.
 	 */
-	public function test_create_post_byline_defaults_to_agent_when_mode_agent() {
-		$human = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-agent', array( 'created_by' => $human, 'author_mode' => 'agent' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-agent';
+	public function test_create_post_allowlist_blocks_admin_self_credential() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, array( 'post' ) );
 
-		$result = $this->pm->create_post( array( 'title' => 'Neutral' ) );
+		$result = $this->pm->create_post( array( 'title' => 'X', 'post_type' => 'page' ) );
+
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, false );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_post_type', $result->get_error_code() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
+	}
+
+	// ── create_post: author assignment ───────────────────────────────
+
+	/**
+	 * Connection meta never drives post_author. The byline subsystem was removed
+	 * with the agent_as_me identity, so even when a credential's meta names an
+	 * approving human, a created post stays authored by the acting account.
+	 *
+	 * Regression pin: setting the authenticated app-password UUID + recording meta
+	 * for it must NOT remap authorship to the recorded human.
+	 */
+	public function test_create_post_does_not_remap_author_from_connection_meta() {
+		$human = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-meta', array( 'created_by' => $human, 'user_id' => $human ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-meta';
+
+		$result = $this->pm->create_post( array( 'title' => 'No remap' ) );
 
 		$this->assertIsArray( $result );
 		$this->assertSame( get_current_user_id(), (int) get_post( $result['id'] )->post_author );
 	}
 
 	/**
-	 * With no Application Password on the request (e.g. cookie auth), the byline
-	 * resolver is inert and the post is authored by the acting account.
+	 * An explicit `author` argument sets post_author when the acting account may
+	 * assign authorship — the create tool's own author-assignment path, kept after
+	 * the connection byline was removed.
 	 */
-	public function test_create_post_byline_ignored_without_request_password() {
-		$human = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-me', array( 'created_by' => $human, 'author_mode' => 'me' ) );
-		unset( $GLOBALS['wp_rest_application_password_uuid'] );
-
-		$result = $this->pm->create_post( array( 'title' => 'No PW' ) );
-
-		$this->assertIsArray( $result );
-		$this->assertSame( get_current_user_id(), (int) get_post( $result['id'] )->post_author );
-	}
-
-	/**
-	 * The byline is gated on the acting account being able to assign authorship.
-	 * An author (no edit_others_posts) connecting with "show as me" pointed at a
-	 * different user keeps authorship on themselves — no silent escalation of the
-	 * post to another person.
-	 */
-	public function test_create_post_byline_skipped_when_actor_cannot_assign_authorship() {
-		$actor = self::factory()->user->create( array( 'role' => 'author' ) );
-		wp_set_current_user( $actor );
-
-		$other = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-me', array( 'created_by' => $other, 'author_mode' => 'me' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
-
-		$result = $this->pm->create_post( array( 'title' => 'Locked' ) );
-
-		$this->assertIsArray( $result );
-		$this->assertSame( $actor, (int) get_post( $result['id'] )->post_author );
-	}
-
-	/**
-	 * An explicit `author` argument wins over the connection byline — the
-	 * resolver only fills in authorship when the caller didn't specify one.
-	 */
-	public function test_create_post_explicit_author_takes_precedence_over_byline() {
+	public function test_create_post_honors_explicit_author_argument() {
 		$explicit = self::factory()->user->create( array( 'role' => 'author' ) );
-		$byline   = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-me', array( 'created_by' => $byline, 'author_mode' => 'me' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
 
 		$result = $this->pm->create_post( array( 'title' => 'Explicit', 'author' => $explicit ) );
 
 		$this->assertIsArray( $result );
 		$this->assertSame( $explicit, (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * Assigning authorship to a DIFFERENT user is gated on edit_others_posts.
+	 *
+	 * The explicit-`author` branch of create_post() lets the acting account stamp
+	 * post_author, but only when it may edit others' content. An author-role actor
+	 * holds edit_posts (it can create its own content) yet lacks edit_others_posts,
+	 * so naming a second user as the author must be refused with
+	 * rest_cannot_assign_author (403) — otherwise a low-privilege actor could
+	 * attribute content to anyone. This pins the denial half of the contract; the
+	 * allowed half is covered by test_create_post_honors_explicit_author_argument.
+	 */
+	public function test_create_post_explicit_author_denied_when_actor_cannot_assign_authorship() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'author' ) ) );
+		$this->assertTrue( current_user_can( 'edit_posts' ), 'precondition: actor can create its own posts' );
+		$this->assertFalse( current_user_can( 'edit_others_posts' ), 'precondition: actor cannot assign authorship to others' );
+
+		$other  = self::factory()->user->create( array( 'role' => 'author' ) );
+		$result = $this->pm->create_post( array( 'title' => 'X', 'author' => $other ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_assign_author', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
 	}
 
 	// ── future status requires future date ───────────────────────────

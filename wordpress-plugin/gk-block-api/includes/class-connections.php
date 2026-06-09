@@ -40,11 +40,10 @@ class Connections {
 	const NAME_PREFIX = 'Block MCP';
 
 	/**
-	 * Option that records the two facts core's Application Password store can't:
-	 * who approved each connection and whether it authors content as the agent
-	 * or as that person.
+	 * Option that records the facts core's Application Password store can't: which
+	 * user holds each connection's credential and who approved it.
 	 *
-	 * Keyed by Application Password UUID → { created_by, author_mode, created_at }.
+	 * Keyed by Application Password UUID → { user_id, created_by, created_at }.
 	 * Stored as a network option so it stays consistent with the network-wide
 	 * connection list on multisite; on single-site it transparently falls back
 	 * to wp_options. The credential list itself still derives from core — this
@@ -56,14 +55,14 @@ class Connections {
 	const META_OPTION = 'gk_block_api_connection_meta';
 
 	/**
-	 * Record the approving human and the byline choice for a minted credential.
+	 * Record the approving human and host account for a minted credential.
 	 *
 	 * Merges into any existing entry so partial updates don't clobber siblings.
 	 *
 	 * @since 2.0.0
 	 *
 	 * @param string $uuid Application Password UUID the credential was minted as.
-	 * @param array  $meta { @type int $created_by, @type string $author_mode, @type int $created_at }.
+	 * @param array  $meta { @type int $user_id, @type int $created_by, @type int $created_at }.
 	 * @return void
 	 */
 	public static function record_meta( $uuid, array $meta ) {
@@ -121,41 +120,6 @@ class Connections {
 	}
 
 	/**
-	 * The human user ID to credit as author for content created on the current
-	 * REST request — or null when the connection authors as the agent.
-	 *
-	 * Reads the Application Password used to authenticate this request, looks up
-	 * the connection's recorded byline choice, and returns the approving human's
-	 * ID only when that connection opted into "show as me" and the person still
-	 * exists. Returns null otherwise (no credential, unknown connection, agent
-	 * byline, or deleted user) so callers fall back to the agent as author.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return int|null
-	 */
-	public static function author_to_credit() {
-		if ( ! function_exists( 'rest_get_authenticated_app_password' ) ) {
-			return null;
-		}
-		$uuid = rest_get_authenticated_app_password();
-		if ( ! $uuid ) {
-			return null;
-		}
-		$meta = self::get_meta( $uuid );
-		$mode = is_array( $meta ) && isset( $meta['author_mode'] ) ? $meta['author_mode'] : 'agent';
-		if ( 'me' !== $mode ) {
-			return null;
-		}
-		$human = is_array( $meta ) && isset( $meta['created_by'] ) ? (int) $meta['created_by'] : 0;
-		if ( $human <= 0 ) {
-			return null;
-		}
-		$user = get_user_by( 'id', $human );
-		return $user ? $human : null;
-	}
-
-	/**
 	 * Return all Block MCP Application Passwords for the given user.
 	 *
 	 * Iterates the user's Application Passwords and keeps only those whose
@@ -190,7 +154,6 @@ class Connections {
 				'created'      => (int) $item['created'],
 				'last_used'    => isset( $item['last_used'] ) ? (int) $item['last_used'] : null,
 				'created_by'   => is_array( $meta ) && isset( $meta['created_by'] ) ? (int) $meta['created_by'] : null,
-				'author_mode'  => is_array( $meta ) && isset( $meta['author_mode'] ) ? (string) $meta['author_mode'] : 'agent',
 				'host_user_id' => (int) $user_id,
 				'own_account'  => false,
 			);
@@ -235,7 +198,6 @@ class Connections {
 				'created'      => (int) $item['created'],
 				'last_used'    => isset( $item['last_used'] ) ? (int) $item['last_used'] : null,
 				'created_by'   => isset( $meta['created_by'] ) ? (int) $meta['created_by'] : null,
-				'author_mode'  => isset( $meta['author_mode'] ) ? (string) $meta['author_mode'] : 'me',
 				'host_user_id' => $host,
 				'own_account'  => true,
 			);

@@ -176,11 +176,11 @@ class ConnectionsTest extends WP_UnitTestCase {
 	 * returns null.
 	 */
 	public function test_record_and_get_meta_round_trips() {
-		Connections::record_meta( 'uuid-1', array( 'created_by' => 7, 'author_mode' => 'me', 'created_at' => 123 ) );
+		Connections::record_meta( 'uuid-1', array( 'created_by' => 7, 'user_id' => 9, 'created_at' => 123 ) );
 
 		$meta = Connections::get_meta( 'uuid-1' );
 		$this->assertSame( 7, $meta['created_by'] );
-		$this->assertSame( 'me', $meta['author_mode'] );
+		$this->assertSame( 9, $meta['user_id'] );
 		$this->assertSame( 123, $meta['created_at'] );
 		$this->assertNull( Connections::get_meta( 'no-such-uuid' ) );
 	}
@@ -190,12 +190,12 @@ class ConnectionsTest extends WP_UnitTestCase {
 	 * rather than replacing it, so a partial update can't drop sibling fields.
 	 */
 	public function test_record_meta_merges_into_existing() {
-		Connections::record_meta( 'uuid-1', array( 'created_by' => 7, 'author_mode' => 'agent' ) );
-		Connections::record_meta( 'uuid-1', array( 'author_mode' => 'me' ) );
+		Connections::record_meta( 'uuid-1', array( 'created_by' => 7 ) );
+		Connections::record_meta( 'uuid-1', array( 'user_id' => 9 ) );
 
 		$meta = Connections::get_meta( 'uuid-1' );
 		$this->assertSame( 7, $meta['created_by'], 'created_by must survive the partial update' );
-		$this->assertSame( 'me', $meta['author_mode'] );
+		$this->assertSame( 9, $meta['user_id'] );
 	}
 
 	/**
@@ -212,17 +212,16 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * list() joins the recorded meta onto each row: created_by, author_mode, and
+	 * list() joins the recorded meta onto each row: created_by and
 	 * own_account=false for agent-hosted credentials.
 	 */
 	public function test_list_includes_recorded_meta() {
 		$uuid = $this->seed( 'Block MCP — Cursor' );
-		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id, 'author_mode' => 'me', 'user_id' => $this->user_id ) );
+		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id, 'user_id' => $this->user_id ) );
 
 		$rows = ( new Connections() )->list( $this->user_id );
 		$this->assertCount( 1, $rows );
 		$this->assertSame( $this->user_id, $rows[0]['created_by'] );
-		$this->assertSame( 'me', $rows[0]['author_mode'] );
 		$this->assertFalse( $rows[0]['own_account'] );
 		$this->assertSame( $this->user_id, $rows[0]['host_user_id'] );
 	}
@@ -233,55 +232,11 @@ class ConnectionsTest extends WP_UnitTestCase {
 	 */
 	public function test_revoke_forgets_meta() {
 		$uuid = $this->seed( 'Block MCP — Cursor' );
-		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id, 'author_mode' => 'me' ) );
+		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id ) );
 
 		( new Connections() )->revoke( $this->user_id, $uuid );
 
 		$this->assertNull( Connections::get_meta( $uuid ) );
-	}
-
-	/**
-	 * author_to_credit() returns null when no Application Password authenticated
-	 * the request (e.g. cookie auth or an unauthenticated call).
-	 */
-	public function test_author_to_credit_null_without_request_password() {
-		unset( $GLOBALS['wp_rest_application_password_uuid'] );
-		$this->assertNull( Connections::author_to_credit() );
-	}
-
-	/**
-	 * author_to_credit() returns null for a connection that authors as the agent,
-	 * even when the request used its credential.
-	 */
-	public function test_author_to_credit_null_for_agent_byline() {
-		Connections::record_meta( 'uuid-agent', array( 'created_by' => $this->user_id, 'author_mode' => 'agent' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-agent';
-
-		$this->assertNull( Connections::author_to_credit() );
-	}
-
-	/**
-	 * author_to_credit() returns the approving human's ID for a "show as me"
-	 * connection, keyed by the credential that authenticated the request.
-	 */
-	public function test_author_to_credit_returns_human_for_me_byline() {
-		Connections::record_meta( 'uuid-me', array( 'created_by' => $this->user_id, 'author_mode' => 'me' ) );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
-
-		$this->assertSame( $this->user_id, Connections::author_to_credit() );
-	}
-
-	/**
-	 * author_to_credit() returns null when the recorded human no longer exists,
-	 * so create_post falls back to the agent rather than a dangling author ID.
-	 */
-	public function test_author_to_credit_null_when_recorded_user_deleted() {
-		$ghost = self::factory()->user->create( array( 'role' => 'author' ) );
-		Connections::record_meta( 'uuid-ghost', array( 'created_by' => $ghost, 'author_mode' => 'me' ) );
-		wp_delete_user( $ghost );
-		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-ghost';
-
-		$this->assertNull( Connections::author_to_credit() );
 	}
 
 	/**
@@ -293,11 +248,11 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$human    = $this->user_id;
 
 		$self_uuid = $this->seed_for( $human, 'Block MCP — Cursor' );
-		Connections::record_meta( $self_uuid, array( 'created_by' => $human, 'author_mode' => 'me', 'user_id' => $human ) );
+		Connections::record_meta( $self_uuid, array( 'created_by' => $human, 'user_id' => $human ) );
 
 		// An agent-hosted entry must NOT appear in the self-hosted list.
 		$agent_uuid = $this->seed_for( $agent_id, 'Block MCP — Claude Desktop' );
-		Connections::record_meta( $agent_uuid, array( 'created_by' => $human, 'author_mode' => 'agent', 'user_id' => $agent_id ) );
+		Connections::record_meta( $agent_uuid, array( 'created_by' => $human, 'user_id' => $agent_id ) );
 
 		$rows = ( new Connections() )->list_self_hosted( $agent_id );
 
@@ -317,7 +272,7 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$human    = $this->user_id;
 
 		$uuid = $this->seed_for( $human, 'Block MCP — Cursor' );
-		Connections::record_meta( $uuid, array( 'user_id' => $human, 'created_by' => $human, 'author_mode' => 'me' ) );
+		Connections::record_meta( $uuid, array( 'user_id' => $human, 'created_by' => $human ) );
 
 		$ok = ( new Connections() )->revoke_by_uuid( $uuid, $agent_id );
 

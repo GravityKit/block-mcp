@@ -346,4 +346,62 @@ class AgentRestCapabilityTest extends RestControllerTestCase {
 			)
 		);
 	}
+
+	/**
+	 * A 'self'-shaped credential reaches a manage_options-gated core route that the
+	 * agent is 403'd from — the contract that makes 'self' the higher-risk identity.
+	 *
+	 * In the 'self' identity the Application Password is minted on the approving
+	 * human (here a full administrator), so an authenticated request carries that
+	 * person's complete capabilities — including manage_options. The sibling test
+	 * test_agent_is_forbidden_from_manage_options_route_via_rest proves the limited
+	 * agent gets 401/403 on GET /wp/v2/settings; this proves the SAME route returns
+	 * 200 under a self credential, pinning the elevated blast radius end-to-end.
+	 *
+	 * This reuses this file's auth-injection harness: present the minted password as
+	 * HTTP Basic auth, force application_password_is_api_request, set REMOTE_ADDR
+	 * (load-bearing — a prior full-suite test can unset it, which the app-password
+	 * usage recorder needs), and null $GLOBALS['current_user'] so the REST permission
+	 * check re-determines identity from the credential rather than a manual login.
+	 */
+	public function test_self_credential_reaches_manage_options_route_via_rest(): void {
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+
+		// The 'self' shape: a fresh administrator who holds manage_options, minting
+		// their own Application Password (NOT the limited agent).
+		$self_admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$self_user  = get_user_by( 'id', $self_admin );
+		$this->assertInstanceOf( \WP_User::class, $self_user );
+		$this->assertTrue( user_can( $self_admin, 'manage_options' ), 'precondition: the self user holds manage_options' );
+
+		$created   = \WP_Application_Passwords::create_new_application_password(
+			$self_admin,
+			array( 'name' => 'Block MCP — Claude Code' )
+		);
+		$plaintext = $created[0];
+
+		// Present the credential as HTTP Basic auth and clear the current user so the
+		// REST permission check re-determines identity from it.
+		add_filter( 'application_password_is_api_request', '__return_true' );
+		$_SERVER['PHP_AUTH_USER'] = $self_user->user_login;
+		$_SERVER['PHP_AUTH_PW']   = $plaintext;
+		$_SERVER['REMOTE_ADDR']   = '127.0.0.1';
+		$GLOBALS['current_user']  = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- force determine_current_user to re-run from the credential.
+
+		$request  = new \WP_REST_Request( 'GET', '/wp/v2/settings' );
+		$response = $this->dispatch( $request );
+
+		$resolved = get_current_user_id();
+
+		unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] );
+		remove_all_filters( 'application_password_is_api_request' );
+		remove_all_filters( 'wp_is_application_passwords_available' );
+
+		$this->assertSame( $self_admin, $resolved, 'the self credential must resolve the request to the approving admin' );
+		$this->assertSame(
+			200,
+			$response->get_status(),
+			'a self credential (full admin caps) must reach the manage_options-gated /wp/v2/settings route the agent is 403\'d from'
+		);
+	}
 }

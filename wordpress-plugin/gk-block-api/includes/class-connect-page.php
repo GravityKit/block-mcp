@@ -287,14 +287,7 @@ class Connect_Page {
 	 * @return string Absolute URL to the Connect setup guide.
 	 */
 	private function help_url(): string {
-		/**
-		 * Filters the setup-guide URL shown on the Connect screen.
-		 *
-		 * @since 2.0.0
-		 *
-		 * @param string $url Absolute URL to the Connect setup documentation.
-		 */
-		return (string) apply_filters( 'gk_block_api_help_url', 'https://www.gravitykit.com/docs/connect-ai-assistant/' );
+		return 'https://www.gravitykit.com/docs/connect-ai-assistant/';
 	}
 
 	/**
@@ -338,21 +331,22 @@ class Connect_Page {
 	 *
 	 * This is the shared credential-provisioning seam used by both
 	 * prepare_installer() (for the .mcpb path) and handle_connect() (for the
-	 * artifact path). For the 'agent' and 'agent_as_me' identities it ensures the
-	 * dedicated agent account and mints on it; for 'self' it mints on the
-	 * approving user instead. Records the connection meta (host, approver, byline)
-	 * and returns the raw credential set so each caller can consume it.
+	 * artifact path). For the 'agent' identity it ensures the dedicated agent
+	 * account and mints on it; for 'self' it mints on the approving user instead.
+	 * Records the connection meta (host, approver) and returns the raw credential
+	 * set so each caller can consume it.
 	 *
 	 * @since  2.0.0
 	 *
 	 * @param  string $client   Human-readable display name for the connecting client
 	 *                          (e.g. the return value of client_label()). Used only as
 	 *                          the Application Password label — never matched or branched on.
-	 * @param  string $identity Which account holds the credential and how content is
-	 *                          authored: 'agent' (dedicated account, neutral byline),
-	 *                          'agent_as_me' (dedicated account, approver byline), or
-	 *                          'self' (the approving user's own account). Anything else
-	 *                          falls back to 'agent'.
+	 * @param  string $identity Which account holds the credential: 'agent' (the
+	 *                          dedicated limited account) or 'self' (the approving
+	 *                          user's own account, full capabilities). Anything else
+	 *                          — and 'self' when disabled via the
+	 *                          gk/block-mcp/identity/allow-self filter — falls back
+	 *                          to 'agent'.
 	 * @return array|\WP_Error {
 	 *     On success, a credential array ready for callers to use.
 	 *
@@ -363,8 +357,25 @@ class Connect_Page {
 	 * }
 	 */
 	public function provision_credentials( $client, $identity = 'agent' ) {
-		$identity = in_array( $identity, array( 'agent', 'agent_as_me', 'self' ), true ) ? $identity : 'agent';
-		$human    = get_current_user_id();
+		$identity = in_array( $identity, array( 'agent', 'self' ), true ) ? $identity : 'agent';
+
+		/**
+		 * Filters whether the high-risk "self" identity (mint the credential on the
+		 * approving user's own account, with their full capabilities) may be used.
+		 *
+		 * Returning false removes the option from the Approve screen and clamps any
+		 * 'self' request back to the dedicated limited agent account, so an operator
+		 * or managed host can forbid full-account credentials entirely.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param bool $allowed Whether 'self' is offered. Default true.
+		 */
+		if ( 'self' === $identity && ! apply_filters( 'gk/block-mcp/identity/allow-self', true ) ) {
+			$identity = 'agent';
+		}
+
+		$human = get_current_user_id();
 
 		if ( 'self' === $identity ) {
 			// Own-account: mint the credential on the approving user, so the AI app
@@ -386,19 +397,15 @@ class Connect_Page {
 			return $issued;
 		}
 
-		// Record which account holds the credential, who approved it, and the
-		// byline. get_current_user_id() is the approving human — provision runs
-		// inside their authenticated admin request. 'self' authors as the person
-		// inherently; 'agent_as_me' opts the agent into crediting them; plain
-		// 'agent' stays neutral.
-		$author_mode = ( 'agent' === $identity ) ? 'agent' : 'me';
+		// Record which account holds the credential and who approved it.
+		// get_current_user_id() is the approving human — provision runs inside
+		// their authenticated admin request.
 		Connections::record_meta(
 			$issued['uuid'],
 			array(
-				'user_id'     => $target_user,
-				'created_by'  => $human,
-				'author_mode' => $author_mode,
-				'created_at'  => time(),
+				'user_id'    => $target_user,
+				'created_by' => $human,
+				'created_at' => time(),
 			)
 		);
 
@@ -492,7 +499,7 @@ class Connect_Page {
 		 *
 		 * @param string $mode 'prefill'|'paste'.
 		 */
-		$mode = (string) apply_filters( 'gk_block_api_secret_at_rest_mode', $default_mode );
+		$mode = (string) apply_filters( 'gk/block-mcp/credential/seal-mode', $default_mode );
 
 		$bundle_creds = array(
 			'url'      => $creds['url'],
@@ -1586,7 +1593,6 @@ class Connect_Page {
 							$approver      = ! empty( $conn['created_by'] ) ? get_userdata( $conn['created_by'] ) : null;
 							$approver_name = $approver ? $approver->display_name : '—';
 							$is_own        = ! empty( $conn['own_account'] );
-							$shows_author  = ! $is_own && $approver && isset( $conn['author_mode'] ) && 'me' === $conn['author_mode'];
 							?>
 							<tr>
 								<td><?php echo esc_html( $conn['name'] ); ?></td>
@@ -1596,16 +1602,7 @@ class Connect_Page {
 										<span class="description" style="display:block; color:#8a6d00;"><?php esc_html_e( 'Full access', 'gk-block-api' ); ?></span>
 									<?php else : ?>
 										<?php esc_html_e( 'Block MCP', 'gk-block-api' ); ?>
-										<?php if ( $shows_author ) : ?>
-											<span class="description" style="display:block;">
-												<?php
-												/* translators: %s: the approving user's display name. */
-												printf( esc_html__( 'Posts as %s', 'gk-block-api' ), esc_html( $approver_name ) );
-												?>
-											</span>
-										<?php else : ?>
-											<span class="description" style="display:block;"><?php esc_html_e( 'Limited account', 'gk-block-api' ); ?></span>
-										<?php endif; ?>
+										<span class="description" style="display:block;"><?php esc_html_e( 'Limited account', 'gk-block-api' ); ?></span>
 									<?php endif; ?>
 								</td>
 								<td><?php echo esc_html( $approver_name ); ?></td>
@@ -1836,7 +1833,7 @@ class Connect_Page {
 				);
 				?>
 			</p>
-			<p><?php esc_html_e( 'Click Approve to allow it. You can remove this access anytime from the Block MCP settings page.', 'gk-block-api' ); ?></p>
+			<p><?php esc_html_e( 'Approving creates an Application Password that your AI app uses to connect. You can remove this access anytime from the Block MCP settings page.', 'gk-block-api' ); ?></p>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action"   value="<?php echo esc_attr( self::ACTION_AUTHORIZE ); ?>" />
@@ -1910,6 +1907,14 @@ class Connect_Page {
 						text-align: center;
 						margin: 20px 0 4px;
 					}
+					.gk-block-api-connect__self-ack {
+						margin: 0 0 16px;
+						padding: 10px 14px;
+						background: #fcf0f1;
+						border-left: 3px solid #b32d2e;
+					}
+					.gk-block-api-connect__self-ack label { display: flex; gap: 8px; align-items: flex-start; }
+					.gk-block-api-connect__self-ack input { margin-top: 3px; }
 				</style>
 				<fieldset class="gk-block-api-connect__identity">
 					<legend class="gk-block-api-connect__identity-legend"><?php esc_html_e( 'How should the AI app act on your site?', 'gk-block-api' ); ?></legend>
@@ -1925,22 +1930,8 @@ class Connect_Page {
 						</span>
 					</label>
 
-					<label class="gk-block-api-connect__identity-option">
-						<input type="radio" name="identity" value="agent_as_me" />
-						<span class="gk-block-api-connect__identity-body">
-							<span class="gk-block-api-connect__identity-title">
-								<?php
-								printf(
-									/* translators: %s: the approving user's display name */
-									esc_html__( 'Block MCP account, shown as you (%s)', 'gk-block-api' ),
-									esc_html( $current_display_name )
-								);
-								?>
-							</span>
-							<span class="description"><?php esc_html_e( 'A limited account just for your AI app, but new posts show you as the author instead of "Block MCP". The edit history still records Block MCP.', 'gk-block-api' ); ?></span>
-						</span>
-					</label>
-
+					<?php $self_allowed = (bool) apply_filters( 'gk/block-mcp/identity/allow-self', true ); ?>
+					<?php if ( $self_allowed ) : ?>
 					<label class="gk-block-api-connect__identity-option gk-block-api-connect__identity-option--risky">
 						<input type="radio" name="identity" value="self" />
 						<span class="gk-block-api-connect__identity-body">
@@ -1957,7 +1948,7 @@ class Connect_Page {
 								<?php
 									printf(
 										/* translators: 1: opening <strong> tag, 2: closing </strong> tag */
-										esc_html__( '%1$sHigher risk:%2$s gives the AI app the full capabilities your account has, including changing site settings and deleting content. Only choose this if you understand the risk.', 'gk-block-api' ),
+										esc_html__( '%1$sHigher risk:%2$s creates an Application Password on your own account, giving the AI app the same full access you have — including changing site settings and deleting any content. Only choose this if you understand the risk.', 'gk-block-api' ),
 										'<strong>',
 										'</strong>'
 									);
@@ -1965,13 +1956,45 @@ class Connect_Page {
 							</span>
 						</span>
 					</label>
+					<?php endif; ?>
 				</fieldset>
+				<?php if ( $self_allowed ) : ?>
+				<div class="gk-block-api-connect__self-ack" id="gk-block-api-connect__self-ack" hidden>
+					<label>
+						<input type="checkbox" name="self_ack" id="gk-block-api-connect__self-ack-check" />
+						<?php esc_html_e( 'I understand this creates an Application Password with my account\'s full access.', 'gk-block-api' ); ?>
+					</label>
+				</div>
+				<?php endif; ?>
 				<div class="gk-block-api-connect__actions">
 					<?php submit_button( __( 'Approve', 'gk-block-api' ), 'primary', 'submit', false ); ?>
 					<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Settings_Page::PAGE_SLUG . '&tab=connect' ) ); ?>" class="button button-link-delete">
 						<?php esc_html_e( 'Cancel', 'gk-block-api' ); ?>
 					</a>
 				</div>
+				<?php if ( $self_allowed ) : ?>
+				<script>
+				( function () {
+					var script = document.currentScript;
+					var form   = script ? script.closest( 'form' ) : null;
+					if ( ! form ) { return; }
+					var ackRow    = form.querySelector( '#gk-block-api-connect__self-ack' );
+					var ackCheck  = form.querySelector( '#gk-block-api-connect__self-ack-check' );
+					var submitBtn = form.querySelector( '#submit' );
+					if ( ! ackRow || ! ackCheck || ! submitBtn ) { return; }
+					function sync() {
+						var selected = form.querySelector( 'input[name="identity"]:checked' );
+						var isSelf   = !! selected && 'self' === selected.value;
+						var blocked  = isSelf && ! ackCheck.checked;
+						ackRow.hidden = ! isSelf;
+						submitBtn.disabled = blocked;
+						submitBtn.setAttribute( 'aria-disabled', blocked ? 'true' : 'false' );
+					}
+					form.addEventListener( 'change', sync );
+					sync();
+				} )();
+				</script>
+				<?php endif; ?>
 			</form>
 
 			<?php $this->render_help_link(); ?>
