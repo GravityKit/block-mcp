@@ -915,6 +915,10 @@ class Connect_Page {
 		// the redirect URL (browser history / Referer).
 		$code = $this->store_exchange_code( $creds );
 
+		// add_query_arg() does NOT encode the new values it adds — it expects the
+		// caller to pre-encode them (it only re-encodes params already present in
+		// the URL). rawurlencode() is therefore required so a code/state with a
+		// query-significant char (&, #, +) can't corrupt the redirect target.
 		$redirect = add_query_arg(
 			array(
 				'code'  => rawurlencode( $code ),
@@ -1249,7 +1253,7 @@ class Connect_Page {
 		$creds = $this->redeem_exchange_code( $code );
 
 		if ( null === $creds ) {
-			wp_send_json_error( array( 'message' => 'Invalid or expired code.' ), 400 );
+			wp_send_json_error( array( 'message' => __( 'Invalid or expired code.', 'gk-block-api' ) ), 400 );
 		}
 
 		wp_send_json_success( $creds );
@@ -1308,7 +1312,7 @@ class Connect_Page {
 		$creds = $this->redeem_exchange_code( (string) $request->get_param( 'code' ) );
 
 		if ( null === $creds ) {
-			return new \WP_Error( 'invalid_code', 'Invalid or expired code.', array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_code', __( 'Invalid or expired code.', 'gk-block-api' ), array( 'status' => 400 ) );
 		}
 
 		return new \WP_REST_Response(

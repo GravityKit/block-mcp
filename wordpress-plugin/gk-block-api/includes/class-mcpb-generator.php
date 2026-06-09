@@ -242,7 +242,22 @@ class MCPB_Generator {
 			);
 		}
 
-		if ( false === $zip->addFromString( 'manifest.json', (string) wp_json_encode( $this->manifest( $creds ) ) ) ) {
+		$json = wp_json_encode( $this->manifest( $creds ) );
+
+		if ( false === $json ) {
+			$zip->close();
+			wp_delete_file( $path );
+			return new \WP_Error(
+				'mcpb_manifest_encode_failed',
+				sprintf(
+					/* translators: %s: JSON encoding error message. */
+					__( 'Could not encode the installer manifest: %s', 'gk-block-api' ),
+					json_last_error_msg()
+				)
+			);
+		}
+
+		if ( false === $zip->addFromString( 'manifest.json', $json ) ) {
 			$zip->close();
 			wp_delete_file( $path );
 			return new \WP_Error(

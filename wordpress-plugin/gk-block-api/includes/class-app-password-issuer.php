@@ -46,6 +46,9 @@ class App_Password_Issuer {
 	 * }
 	 */
 	public function issue( $user_id, $label ) {
+		$user_id = absint( $user_id );
+		$label   = sanitize_text_field( $label );
+
 		$user = get_user_by( 'id', $user_id );
 
 		if ( ! $user || ! wp_is_application_passwords_available_for_user( $user ) ) {

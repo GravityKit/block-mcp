@@ -61,6 +61,22 @@ class AppPasswordIssuerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * issue() coerces a non-canonical user id through absint() at the boundary.
+	 *
+	 * A numeric-string id with trailing junk (e.g. "5abc") must resolve to the
+	 * same user as the bare int, proving the id is normalized before
+	 * get_user_by()/create_new_application_password() rather than passed raw.
+	 */
+	public function test_issue_normalizes_user_id_with_absint() {
+		$result = ( new App_Password_Issuer() )->issue( (string) $this->user_id . 'abc', 'Block MCP' );
+		$this->assertIsArray( $result );
+
+		$items = \WP_Application_Passwords::get_user_application_passwords( $this->user_id );
+		$this->assertCount( 1, $items );
+		$this->assertSame( 'Block MCP', $items[0]['name'] );
+	}
+
+	/**
 	 * When Application Passwords are unavailable (e.g. non-HTTPS environment),
 	 * issue() must return WP_Error with code 'app_passwords_unavailable' rather
 	 * than attempting to create a credential on an unsupported installation.

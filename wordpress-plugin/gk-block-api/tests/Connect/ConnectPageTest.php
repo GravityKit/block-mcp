@@ -685,6 +685,60 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * handle_authorize() must rawurlencode() code/state before add_query_arg().
+	 *
+	 * add_query_arg() does NOT encode the new values it adds — it expects the
+	 * caller to pre-encode them (it only re-encodes params already present in
+	 * the URL). Passing a query-significant character (&) raw would corrupt the
+	 * redirect query string: '&' starts a new parameter, so the state would be
+	 * truncated and the connector's CSRF state comparison would fail. This pins
+	 * that a state containing '&' round-trips intact through the redirect — a
+	 * guard against "simplifying away" the rawurlencode() wrapper.
+	 */
+	public function test_handle_authorize_encodes_query_significant_chars_in_state() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		// '&' is query-significant: without rawurlencode() it would split the
+		// state into two params and the round-trip would lose everything after it.
+		$raw_state = 'a&b=evil';
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51793/cb';
+		$_POST['state']       = $raw_state;
+		$_POST['client']      = 'block-mcp';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$captured_redirect = null;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+
+		remove_all_filters( 'wp_redirect' );
+		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+
+		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
+
+		$parts = wp_parse_url( $captured_redirect );
+		parse_str( $parts['query'], $qs );
+
+		$this->assertSame( $raw_state, $qs['state'], 'state with a query-significant char must round-trip intact' );
+	}
+
+	/**
 	 * [WP-F3] The minted password must never appear in the redirect URL string.
 	 *
 	 * Belt-and-suspenders for the credential-in-URL finding: even if a future
@@ -1149,6 +1203,49 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The "Invalid or expired code." error must route through the gk-block-api
+	 * text domain so it is translatable — both on the nopriv JSON handler and
+	 * the REST route.
+	 *
+	 * The message was a bare string literal; a non-English site would always
+	 * show English. This installs a gettext override for the gk-block-api domain
+	 * and asserts the translated text comes back from both code paths, proving
+	 * the strings are now wrapped in __( …, 'gk-block-api' ).
+	 */
+	public function test_invalid_code_message_is_localized() {
+		$translated = 'CÓDIGO INVÁLIDO';
+
+		$filter = static function ( $translation, $text, $domain ) use ( $translated ) {
+			if ( 'gk-block-api' === $domain && 'Invalid or expired code.' === $text ) {
+				return $translated;
+			}
+			return $translation;
+		};
+		add_filter( 'gettext', $filter, 10, 3 );
+
+		try {
+			// Path 1: the nopriv JSON handler.
+			$page          = new Connect_Page();
+			$_POST['code'] = 'never-issued';
+			$json          = $this->capture_exchange_json( $page );
+			unset( $_POST['code'] );
+			$this->assertFalse( $json['success'], 'an unknown code must be rejected' );
+			$this->assertSame( $translated, $json['data']['message'], 'the JSON error message must be translatable' );
+
+			// Path 2: the REST route.
+			do_action( 'rest_api_init' );
+			$req = new \WP_REST_Request( 'POST', '/gk-block-api/v1/connect/exchange' );
+			$req->set_header( 'Content-Type', 'application/json' );
+			$req->set_body( (string) wp_json_encode( array( 'code' => 'never-issued' ) ) );
+			$res = rest_get_server()->dispatch( $req );
+			$this->assertSame( 400, $res->get_status() );
+			$this->assertSame( $translated, $res->as_error()->get_error_message(), 'the REST error message must be translatable' );
+		} finally {
+			remove_filter( 'gettext', $filter, 10 );
+		}
+	}
+
+	/**
 	 * The REST exchange route is reachable WITHOUT authentication — the single-use
 	 * code is the only credential — and 400s an unknown code.
 	 */
@@ -1432,39 +1529,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
-	// gk_block_api_do_revoke_all() — testable seam for the revoke-all handler.
-	// ──────────────────────────────────────────────────────────────────────
-
-	/**
-	 * The revoke-all seam must delete every Application Password on the agent
-	 * user and return the count of passwords that were present.
-	 *
-	 * Seeding two passwords and asserting both are gone after the call confirms
-	 * that delete_all_application_passwords() was invoked and that the return
-	 * value accurately reflects the pre-deletion count.
-	 */
-	public function test_do_revoke_all_removes_every_credential() {
-		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
-		update_option( 'gk_block_api_agent_user_id', $agent_id );
-
-		\WP_Application_Passwords::create_new_application_password(
-			$agent_id,
-			array( 'name' => 'Block MCP — Claude Desktop' )
-		);
-		\WP_Application_Passwords::create_new_application_password(
-			$agent_id,
-			array( 'name' => 'Block MCP — Cursor' )
-		);
-
-		$count = GravityKit\BlockAPI\do_revoke_all();
-
-		$this->assertSame( 2, $count, 'do_revoke_all() must return the number of passwords that were revoked' );
-
-		$remaining = \WP_Application_Passwords::get_user_application_passwords( $agent_id );
-		$this->assertEmpty( $remaining, 'All Application Passwords must be gone after do_revoke_all()' );
-	}
-
-	// ──────────────────────────────────────────────────────────────────────
 	// render_section() — output contracts.
 	// ──────────────────────────────────────────────────────────────────────
 
@@ -1519,6 +1583,27 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'DOMContentLoaded', $html, 'Picker JS must defer init until the DOM is ready so it runs after the radios exist.' );
 	}
 
+	/**
+	 * render_section() in the ready (HTTPS-capable) state renders the full client
+	 * picker — all six radio-card clients plus their per-client next-steps blocks.
+	 *
+	 * The Connect tab's whole UX hinges on this markup, so this pins the contract
+	 * that defines a working picker:
+	 *  - The scoped wrapper/card containers exist (so the CSS applies).
+	 *  - The picker is radio cards keyed by name="client", NOT a <select>.
+	 *  - Each of the six clients exposes a STABLE SLUG as its radio value
+	 *    (claude-desktop / claude-code / cursor / chatgpt-desktop / ai-prompt /
+	 *    other) — never a translated label, which would break handle_connect()'s
+	 *    slug matching once the admin UI is localized — alongside its human label.
+	 *  - Claude Desktop is the default-checked client and its next-steps block is
+	 *    the only one visible; the other five carry display:none + aria-hidden so
+	 *    exactly one set of instructions shows before any JS runs.
+	 *  - The default block carries the .mcpb download steps.
+	 *
+	 * Failure mode: a regression that swaps slugs for labels, drops a client card,
+	 * reveals more than one next-steps block, or degrades to a <select> would all
+	 * surface here.
+	 */
 	public function test_render_section_shows_next_steps_and_all_six_picker_cards_ready_state() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );

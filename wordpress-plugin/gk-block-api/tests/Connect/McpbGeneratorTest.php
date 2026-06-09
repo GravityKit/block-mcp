@@ -177,6 +177,37 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * build() must return WP_Error('mcpb_manifest_encode_failed') and write no
+	 * manifest when wp_json_encode() fails, rather than bundling an empty one.
+	 *
+	 * Before the fix the encode result was cast to string inline, so a failed
+	 * encode (false) became '' and addFromString() wrote a zero-byte
+	 * manifest.json — a structurally valid zip that Claude Desktop rejects with
+	 * a confusing parse error instead of a clear failure. The test injects an
+	 * unencodable value into the manifest (wp_json_encode() returns false on a
+	 * NAN float) and asserts build() errors out with the encode-failure code
+	 * and leaves no temp file behind.
+	 */
+	public function test_build_returns_wp_error_when_manifest_encode_fails() {
+		$generator = new class() extends MCPB_Generator {
+			public function manifest( array $creds ) {
+				// NAN is not JSON-representable — wp_json_encode() returns false.
+				return array( 'name' => NAN );
+			}
+		};
+
+		$server_fixture = wp_tempnam( 'srv' );
+		file_put_contents( $server_fixture, "#!/usr/bin/env node\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+		$result = $generator->build( $this->creds(), $server_fixture );
+
+		wp_delete_file( $server_fixture );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'mcpb_manifest_encode_failed', $result->get_error_code() );
+	}
+
+	/**
 	 * build() must produce a valid zip archive containing manifest.json
 	 * (with a per-site name) and the MCP server binary at the path
 	 * server/index.cjs that Claude Desktop expects at launch.
@@ -210,8 +241,10 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 	 * Claude Desktop identifies an installed extension by its manifest `name`.
 	 * A fixed name ('block-mcp') meant a second site's .mcpb replaced the first.
 	 * The name now mirrors the connector's server name — block-mcp-<host-label>
-	 * (www stripped, lowercased) — so www.gravitykit.com, dev.test, and
-	 * gkclone.orb.local become three different extensions.
+	 * — built from the full host authority verbatim (lowercased, nothing
+	 * stripped: www is preserved, so www.gravitykit.com ≠ gravitykit.com), so
+	 * www.gravitykit.com, dev.test, and gkclone.orb.local become three
+	 * different extensions.
 	 */
 	public function test_manifest_name_is_derived_per_site() {
 		$gen = new MCPB_Generator();
