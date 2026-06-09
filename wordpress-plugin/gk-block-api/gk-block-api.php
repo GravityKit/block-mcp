@@ -3,7 +3,7 @@
  * Plugin Name: GK Block API
  * Plugin URI: https://www.gravitykit.com
  * Description: REST API for block-level CRUD operations with smart preferences for AI agents.
- * Version: 1.8.1
+ * Version: 2.0.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GK_BLOCK_API_VERSION', '1.8.1' );
+define( 'GK_BLOCK_API_VERSION', '2.0.0' );
 define( 'GK_BLOCK_API_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -87,7 +87,7 @@ const CURRENT_DB_VERSION = '1.4.2';
  * was added for (WP P1-3).
  */
 function register_global_filters() {
-	add_filter( 'gk_block_api_dual_storage_blocks', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
+	add_filter( 'gk/block-mcp/block/dual-storage', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
 
 	// Block-type integrations — each file registers its own gk_block_api_* filters.
 	// (array) cast guards against glob() returning false on permission errors or
@@ -98,7 +98,7 @@ function register_global_filters() {
 	}
 
 	// Block-type enrichers — one class per block-name namespace, each calling
-	// add_filter on gk_block_api_format_block. Pattern modeled on Automattic's
+	// add_filter on gk/block-mcp/block/format. Pattern modeled on Automattic's
 	// vip-block-data-api block-additions/ directory. Each file ends with
 	// `Foo_Enricher::init();` to self-register the filter.
 	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
@@ -158,6 +158,13 @@ function init_rest_api() {
 		// is active; absent Yoast, this is a no-op. Lives in its own class so
 		// gk-block-api stays self-contained — no mu-plugin or theme dependency.
 		( new Yoast_Bridge() )->register_routes();
+
+		// Connector credential-exchange route. Registered here (rest_api_init, NOT
+		// the admin-only settings bootstrap) so it answers the connector's
+		// logged-out POST. REST is used instead of admin-post.php because
+		// admin-post.php is routinely 30x'd by canonical/SSL/Redirection/security
+		// rules before the handler runs; /wp-json/ escapes those.
+		( new Connect_Page() )->register_rest_routes();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'GK Block API init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
@@ -181,6 +188,9 @@ function init_settings_page() {
 	try {
 		$settings = new Settings_Page( new Block_Inventory() );
 		$settings->register();
+
+		$connect = new Connect_Page();
+		$connect->register();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'GK Block API settings init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
@@ -188,6 +198,26 @@ function init_settings_page() {
 	}
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
+
+/**
+ * Agent identity bootstrap.
+ *
+ * Registers the minimal block_mcp_agent role on every request so it
+ * survives multi-site role-table resets or environments where the
+ * activation hook did not run (e.g. direct file drops, must-use setups).
+ * Also installs the authenticate filter that blocks interactive login for
+ * the service account.
+ *
+ * @since 2.0.0
+ */
+function init_agent() {
+	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
+	// Priority 30 ensures the block fires after wp_authenticate_username_password
+	// (priority 20) so it intercepts both wrong-password WP_Error results and
+	// correctly-authenticated WP_User objects for the service account.
+	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 30, 3 );
+}
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
 
 /**
  * WP-CLI bootstrap. Required for any CLI command — `rest_api_init` does
@@ -226,5 +256,7 @@ function on_activation() {
 		delete_transient( Block_Inventory::CACHE_KEY );
 		update_option( DB_VERSION_OPTION, CURRENT_DB_VERSION, false );
 	}
+
+	Agent_Provisioner::register_role();
 }
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\on_activation' );

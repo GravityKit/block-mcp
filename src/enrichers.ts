@@ -13,8 +13,32 @@
  *   registerBlockEnricher('my-plugin/snippet', async (block) => { ... });
  */
 
-import { createHighlighter, createCssVariablesTheme } from 'shiki';
-import type { HighlighterGeneric, BundledLanguage, BundledTheme } from 'shiki';
+// Fine-grained Shiki: importing from 'shiki' inlines the full bundle (~200
+// grammars + the oniguruma WASM, ~11 MB). We only highlight the curated set
+// below, so we pull Shiki's core, the WASM-free JavaScript regex engine, and
+// just those grammars statically — bundling only what we use keeps dist/ small
+// and self-contained (the same bundle ships in the .mcpb, which has no node_modules).
+import { createHighlighterCore, createCssVariablesTheme } from 'shiki/core';
+import type { HighlighterCore } from 'shiki/core';
+import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
+import lang_php from '@shikijs/langs/php';
+import lang_javascript from '@shikijs/langs/javascript';
+import lang_typescript from '@shikijs/langs/typescript';
+import lang_css from '@shikijs/langs/css';
+import lang_html from '@shikijs/langs/html';
+import lang_json from '@shikijs/langs/json';
+import lang_xml from '@shikijs/langs/xml';
+import lang_sql from '@shikijs/langs/sql';
+import lang_bash from '@shikijs/langs/bash';
+import lang_shell from '@shikijs/langs/shell';
+import lang_python from '@shikijs/langs/python';
+import lang_ruby from '@shikijs/langs/ruby';
+import lang_yaml from '@shikijs/langs/yaml';
+import lang_markdown from '@shikijs/langs/markdown';
+import lang_ini from '@shikijs/langs/ini';
+import lang_diff from '@shikijs/langs/diff';
+import lang_dockerfile from '@shikijs/langs/dockerfile';
+import lang_nginx from '@shikijs/langs/nginx';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -87,23 +111,32 @@ export async function enrichBlocks(blocks: BlockDef[]): Promise<BlockDef[]> {
 
 // ── Shiki singleton ───────────────────────────────────────────────────────────
 
-// Base list of Shiki grammars loaded into every highlighter instance.
-// Extend via the BLOCK_MCP_SHIKI_LANGS env var: a comma-separated list of
-// any Shiki bundled grammar (e.g. "rust,go,kotlin"). Unknown / misspelt
-// names are dropped silently by Shiki at load time.
-const BASE_LANGS = [
-  'php', 'javascript', 'typescript', 'css', 'html', 'json', 'xml',
-  'sql', 'bash', 'shell', 'python', 'ruby', 'yaml', 'markdown',
-  'ini', 'diff', 'dockerfile', 'nginx',
-] as const;
-
-function resolveSupportedLangs(): string[] {
-  const extra = (process.env.BLOCK_MCP_SHIKI_LANGS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0 && /^[a-z0-9._+-]+$/.test(s));
-  return [...new Set<string>([...BASE_LANGS, ...extra])];
-}
+// The curated Shiki grammars bundled into the highlighter — only these are
+// inlined (see the static imports at the top of the file). Loading a grammar
+// also pulls in its embedded sub-grammars (e.g. php → html/css/js/sql), so the
+// effective coverage is wider than the list. Any language not covered here
+// falls back to plaintext in shikiHighlight(). Adding a language is a two-line
+// change: `import lang_x from '@shikijs/langs/x'` above, then add it here.
+const SHIKI_LANGS = [
+  lang_php,
+  lang_javascript,
+  lang_typescript,
+  lang_css,
+  lang_html,
+  lang_json,
+  lang_xml,
+  lang_sql,
+  lang_bash,
+  lang_shell,
+  lang_python,
+  lang_ruby,
+  lang_yaml,
+  lang_markdown,
+  lang_ini,
+  lang_diff,
+  lang_dockerfile,
+  lang_nginx,
+];
 
 // Singleton promise (not bare references): on a page with N code blocks,
 // enrichBlocks() fires N concurrent calls into Promise.all. The original
@@ -112,7 +145,7 @@ function resolveSupportedLangs(): string[] {
 // passed the guard, blowing up the non-null assertion downstream.
 // A single in-flight promise dedupes the work and serialises field reads.
 let _hlPromise: Promise<{
-  hl: HighlighterGeneric<BundledLanguage, BundledTheme>;
+  hl: HighlighterCore;
   langs: Set<string>;
 }> | null = null;
 
@@ -120,10 +153,11 @@ async function getHighlighter() {
   if (_hlPromise) return _hlPromise;
   _hlPromise = (async () => {
     const theme = createCssVariablesTheme({ name: 'css-variables', variablePrefix: '--shiki-' });
-    const hl = await createHighlighter({
+    const hl = await createHighlighterCore({
       themes: [theme],
-      langs: resolveSupportedLangs(),
-    }) as HighlighterGeneric<BundledLanguage, BundledTheme>;
+      langs: SHIKI_LANGS,
+      engine: createJavaScriptRegexEngine({ forgiving: true }),
+    });
     return { hl, langs: new Set(hl.getLoadedLanguages()) };
   })();
   return _hlPromise;

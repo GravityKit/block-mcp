@@ -73,27 +73,18 @@ class Block_Writer {
 	private $transformer;
 
 	/**
-	 * Site-wide block inventory.
-	 *
-	 * @var Block_Inventory
-	 */
-	private $inventory;
-
-	/**
 	 * Constructor.
 	 *
 	 * @param Block_CRUD       $crud        Owning CRUD instance for shared utilities.
 	 * @param Preferences      $preferences Preferences instance.
 	 * @param Block_Safety     $safety      Block safety checker.
 	 * @param HTML_Transformer $transformer HTML transformer.
-	 * @param Block_Inventory  $inventory   Block inventory.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
 		$this->safety      = $safety;
 		$this->transformer = $transformer;
-		$this->inventory   = $inventory;
 	}
 
 	// -------------------------------------------------------------------------
@@ -640,7 +631,7 @@ class Block_Writer {
 			array(
 				'status'                  => 400,
 				'block'                   => $block_name,
-				'source_bound_attributes' => array_values( $missing ),
+				'source_bound_attributes' => $missing,
 			)
 		);
 	}
@@ -856,8 +847,9 @@ class Block_Writer {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
+		// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 		$block_data = apply_filters(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			array(
 				'index'      => $index,
 				'name'       => $block['blockName'],
@@ -1100,8 +1092,9 @@ class Block_Writer {
 			$block_ref = &$this->crud->get_block_by_path( $blocks, $r['path'] );
 			$this->apply_block_update_in_place( $block_ref, $r['attributes'], $r['innerHTML'] );
 
+			// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 			$block_data = apply_filters(
-				'gk_block_api_format_block',
+				'gk/block-mcp/block/format',
 				array(
 					'index'      => $r['flat_index'],
 					'name'       => isset( $block_ref['blockName'] ) ? $block_ref['blockName'] : '',

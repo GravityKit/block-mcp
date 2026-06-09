@@ -480,7 +480,7 @@ class Block_Mutator {
 
 				$result_block = array(
 					'name'       => $wrapper_name,
-					'attributes' => isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : $wrapper_attrs,
+					'attributes' => $parent[ $target_index ]['attrs'],
 				);
 				if ( isset( $parent[ $target_index ]['attrs']['metadata']['gk_ref'] ) ) {
 					$result_block['ref'] = (string) $parent[ $target_index ]['attrs']['metadata']['gk_ref'];
@@ -571,7 +571,7 @@ class Block_Mutator {
 
 				if ( 'start' === $position ) {
 					array_unshift( $parent[ $target_index ]['innerBlocks'], $child_block );
-				} elseif ( 'end' === $position || null === $position ) {
+				} elseif ( 'end' === $position ) {
 					$parent[ $target_index ]['innerBlocks'][] = $child_block;
 				} else {
 					$pos = (int) $position;
@@ -628,7 +628,7 @@ class Block_Mutator {
 						}
 					}
 					array_splice( $ic, $insert_at, 0, array( null ) );
-				} elseif ( 'end' === $position || null === $position ) {
+				} elseif ( 'end' === $position ) {
 					// Insert before the last string entry (closing tag).
 					$insert_at = count( $ic );
 					for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
@@ -934,9 +934,7 @@ class Block_Mutator {
 				'revision_id'        => null,
 			);
 
-			if ( null !== $result_block ) {
-				$response['block'] = $result_block;
-			}
+			$response['block'] = $result_block;
 
 			return $response;
 		}
@@ -959,9 +957,7 @@ class Block_Mutator {
 			'revision_id'        => $result['revision_id'],
 		);
 
-		if ( null !== $result_block ) {
-			$response['block'] = $result_block;
-		}
+		$response['block'] = $result_block;
 
 		return $response;
 	}

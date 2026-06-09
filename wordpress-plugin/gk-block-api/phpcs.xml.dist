@@ -14,6 +14,9 @@
 	<exclude-pattern>*/languages/*</exclude-pattern>
 	<exclude-pattern>*/tests/*</exclude-pattern>
 	<exclude-pattern>*/scripts/*</exclude-pattern>
+	<!-- Static-analysis tooling (defines placeholder WP constants for PHPStan;
+	     not plugin runtime code, so the global-prefix rule doesn't apply). -->
+	<exclude-pattern>*/phpstan-bootstrap.php</exclude-pattern>
 
 	<!-- CLI defaults. -->
 	<arg name="basepath" value="."/>
@@ -59,7 +62,25 @@
 				<element value="gk_block_api"/>
 				<element value="GK_BLOCK_API"/>
 				<element value="GravityKit\BlockAPI"/>
+				<!-- Hooks follow the GravityKit gk/block-mcp/{domain}/{leaf}
+				     slash convention. This non-identifier value is used as a
+				     hook-name prefix only (PrefixAllGlobals keeps it off the
+				     function/constant/global symbol checks). -->
+				<element value="gk/block-mcp"/>
 			</property>
+		</properties>
+		<!-- "gk/block-mcp" is intentionally a hook-only prefix (it isn't a valid
+		     PHP symbol prefix); silence the advisory that it can't prefix
+		     functions/constants/globals. -->
+		<exclude name="WordPress.NamingConventions.PrefixAllGlobals.InvalidPrefixPassed"/>
+	</rule>
+
+	<!-- GravityKit hooks use slash + dash delimiters (gk/block-mcp/agent/caps,
+	     gk/block-mcp/media/sideload-blocked-ranges). Treat "/" and "-" as word
+	     separators so ValidHookName doesn't demand an all-underscore name. -->
+	<rule ref="WordPress.NamingConventions.ValidHookName">
+		<properties>
+			<property name="additionalWordDelimiters" value="/-"/>
 		</properties>
 	</rule>
 

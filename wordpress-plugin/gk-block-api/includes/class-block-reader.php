@@ -59,20 +59,6 @@ class Block_Reader {
 	private $preferences;
 
 	/**
-	 * Block safety checker.
-	 *
-	 * @var Block_Safety
-	 */
-	private $safety;
-
-	/**
-	 * HTML transformer.
-	 *
-	 * @var HTML_Transformer
-	 */
-	private $transformer;
-
-	/**
 	 * Site-wide block inventory.
 	 *
 	 * @var Block_Inventory
@@ -82,17 +68,13 @@ class Block_Reader {
 	/**
 	 * Constructor.
 	 *
-	 * @param Block_CRUD       $crud        Owning CRUD instance for shared utilities.
-	 * @param Preferences      $preferences Preferences instance.
-	 * @param Block_Safety     $safety      Block safety checker.
-	 * @param HTML_Transformer $transformer HTML transformer.
-	 * @param Block_Inventory  $inventory   Block inventory.
+	 * @param Block_CRUD      $crud        Owning CRUD instance for shared utilities.
+	 * @param Preferences     $preferences Preferences instance.
+	 * @param Block_Inventory $inventory   Block inventory.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Inventory $inventory ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
-		$this->safety      = $safety;
-		$this->transformer = $transformer;
 		$this->inventory   = $inventory;
 	}
 
@@ -428,7 +410,7 @@ class Block_Reader {
 
 			// Synced-pattern (core/block) `pattern_ref` expansion lives in the
 			// Core_Block_Enricher at includes/block-enrichers/class-core-block-enricher.php
-			// and fires via the gk_block_api_format_block filter below. The enricher
+			// and fires via the gk/block-mcp/block/format filter below. The enricher
 			// receives the parsed block + this Reader instance through filter context
 			// so it can recursively format the pattern's own block tree under render
 			// mode without touching this loop.
@@ -502,11 +484,9 @@ class Block_Reader {
 						}
 					}
 				} catch ( \Throwable $e ) {
-					// Render failed — skip silently.
-					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-						if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-							error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-						}
+					// Render failed — skip silently, leaving a breadcrumb when debugging.
+					if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+						error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 					}
 				}
 			}
@@ -529,17 +509,35 @@ class Block_Reader {
 			}
 
 			/**
-			 * Filter a formatted block before it is included in the response.
+			 * Shape what the AI sees for any block before it's returned.
 			 *
-			 * Use this to strip computed/derived fields (e.g. codeHTML, innerHTML)
-			 * from specific block types so agents never see large noise payloads,
-			 * or to enrich the block with metadata (e.g. attachment size for
-			 * core/image, pattern_ref for core/block).
+			 * This is the single most powerful extension point for tailoring how
+			 * the assistant perceives your content. Strip noisy computed fields so
+			 * the agent isn't drowned in markup, or enrich a block with the
+			 * context it actually needs to edit well — an image's dimensions, a
+			 * custom block's friendly label, a product block's price. It runs for
+			 * every block on read, so a tiny enricher can make a whole block type
+			 * far easier for the AI to reason about and safely modify.
 			 *
-			 * @param array  $data       Formatted block data.
+			 * The same filter also fires on the write path (in Block_Writer) so a
+			 * single enricher keeps reads and write-responses consistent; the
+			 * write path passes the block name but not the read-time context array.
+			 *
+			 * @since 2.0.0
+			 *
+			 * @example
+			 * // Drop heavy rendered HTML from a custom block so the AI sees only its attributes.
+			 * add_filter( 'gk/block-mcp/block/format', function ( $data, $block_name ) {
+			 *     if ( 'acme/chart' === $block_name ) {
+			 *         unset( $data['innerHTML'] );
+			 *     }
+			 *     return $data;
+			 * }, 10, 2 );
+			 *
+			 * @param array  $data       Formatted block data about to be returned.
 			 * @param string $block_name Fully-qualified block type name.
 			 * @param array  $context    {
-			 *     Additional context for enrichers that need it.
+			 *     Additional context for enrichers that need it (read path only).
 			 *
 			 *     @type array  $parsed_block Raw parse_blocks() entry for this block.
 			 *     @type bool   $render       Whether render-mode is active.
@@ -549,7 +547,7 @@ class Block_Reader {
 			 * }
 			 */
 			$data = apply_filters(
-				'gk_block_api_format_block',
+				'gk/block-mcp/block/format',
 				$data,
 				$block['blockName'],
 				array(

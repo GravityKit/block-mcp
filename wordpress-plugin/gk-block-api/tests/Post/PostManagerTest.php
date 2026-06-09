@@ -12,6 +12,7 @@
  */
 
 use GravityKit\BlockAPI\Post_Manager;
+use GravityKit\BlockAPI\Connections;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_CRUD;
 use GravityKit\BlockAPI\Block_Inventory;
@@ -39,6 +40,11 @@ class PostManagerTest extends WP_UnitTestCase {
 		$preferences = new Preferences();
 		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
 		$this->pm    = new Post_Manager( $block_crud );
+	}
+
+	public function tear_down(): void {
+		unset( $GLOBALS['wp_rest_application_password_uuid'] );
+		parent::tear_down();
 	}
 
 	// ── create_post: required + format ───────────────────────────────
@@ -564,7 +570,14 @@ class PostManagerTest extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * With the trash toggle enabled, status:trash moves the post to trash.
+	 *
+	 * Trashing is off by default (see the gate tests below); this exercises the
+	 * mechanism with the opt-in switched on.
+	 */
 	public function test_update_post_to_trash() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 		$this->assertIsArray( $result );
@@ -634,6 +647,7 @@ class PostManagerTest extends WP_UnitTestCase {
 	// ── update_post: mixed trash payload guard ───────────────────────
 
 	public function test_update_post_rejects_status_trash_with_title() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash', 'title' => 'New' ) );
 		$this->assertInstanceOf( \WP_Error::class, $result );
@@ -645,10 +659,195 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	public function test_update_post_status_trash_alone_is_allowed() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 		$this->assertIsArray( $result );
 		$this->assertSame( 'trash', get_post( $id )->post_status );
+	}
+
+	// ── update_post: trash toggle (off by default) ───────────────────
+
+	/**
+	 * Trashing is off by default: status:trash is rejected with `trash_disabled`
+	 * and the post is left untouched.
+	 *
+	 * The agent has no `delete_*` caps, but trashing routes through `update_post`
+	 * (gated only on `edit_post`, which the agent holds), so without this
+	 * application-level gate the assistant could trash content out of the box.
+	 * This pins the closed-by-default contract.
+	 */
+	public function test_update_post_trash_disabled_by_default_rejects() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
+		// The post must NOT have been trashed.
+		$this->assertSame( 'publish', get_post( $id )->post_status );
+	}
+
+	/**
+	 * The authorization gate fires before the mixed-payload correctness check:
+	 * when trashing is disabled, a trash+other-fields payload reports
+	 * `trash_disabled`, not `mixed_trash_payload`. Don't leak payload-shape
+	 * feedback for an operation that isn't permitted at all.
+	 */
+	public function test_update_post_trash_disabled_takes_precedence_over_mixed_payload() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash', 'title' => 'New' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$post = get_post( $id );
+		$this->assertSame( 'publish', $post->post_status );
+		$this->assertSame( 'Keep me', $post->post_title );
+	}
+
+	/**
+	 * The `gk/block-mcp/post/allow-trash` filter can force trashing on even when the
+	 * stored option is off — programmatic control for site owners who'd rather
+	 * gate this in code than in the UI.
+	 */
+	public function test_trashing_enabled_filter_can_force_enable() {
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+
+		$force = static function () {
+			return true;
+		};
+		add_filter( 'gk/block-mcp/post/allow-trash', $force );
+
+		$this->assertTrue( Post_Manager::trashing_enabled() );
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+
+		remove_filter( 'gk/block-mcp/post/allow-trash', $force );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 'trash', get_post( $id )->post_status );
+	}
+
+	/**
+	 * `trashing_enabled()` tracks the stored option: '1' → true, absent → false.
+	 */
+	public function test_trashing_enabled_reflects_stored_option() {
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
+		$this->assertTrue( Post_Manager::trashing_enabled() );
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '0' );
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+	}
+
+	// ── self identity (full-caps user): plugin-level guards still apply ─
+
+	/**
+	 * The trash gate is application-level, not capability-based: it must block
+	 * an administrator too.
+	 *
+	 * In the `self` identity the credential is minted on the approving user, so
+	 * the AI app acts with that person's full caps — including `delete_*`. The
+	 * documented safety contract is that the `gk/block-mcp/post/allow-trash` gate
+	 * (`class-post-manager.php`) still returns `trash_disabled` (403) for that
+	 * user when the toggle is off, before any cap check. Without this, a `self`
+	 * admin could trash content through the Block MCP tools by default. The
+	 * existing trash-disabled test runs as an editor (which lacks `delete_*`
+	 * anyway, so it cannot prove the gate is independent of caps); this pins the
+	 * gate-vs-caps separation with a user who DOES hold delete capabilities.
+	 */
+	public function test_update_post_trash_disabled_blocks_admin_self_credential() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		$this->assertTrue( current_user_can( 'delete_others_posts' ), 'precondition: admin holds delete caps' );
+
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
+		$this->assertSame( 'publish', get_post( $id )->post_status, 'a full-caps user must not trash while the gate is off' );
+	}
+
+	/**
+	 * The post-type allow-list is application-level, not capability-based: it
+	 * must reject a disallowed type even for an administrator.
+	 *
+	 * In the `self` identity the acting user has full caps and could create any
+	 * post type via core. The documented safety contract is that
+	 * `Post_Manager::create_post()` rejects types outside
+	 * `gk_block_api_post_types_allowlist` with `invalid_post_type`
+	 * (`class-post-manager.php`) BEFORE the capability check — so the allow-list
+	 * constrains a `self` admin too. The existing allow-list test runs as an
+	 * editor; this pins the same gate for a user with full caps.
+	 */
+	public function test_create_post_allowlist_blocks_admin_self_credential() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, array( 'post' ) );
+
+		$result = $this->pm->create_post( array( 'title' => 'X', 'post_type' => 'page' ) );
+
+		update_option( Post_Manager::POST_TYPES_ALLOWLIST_OPTION, false );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_post_type', $result->get_error_code() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
+	}
+
+	// ── create_post: author assignment ───────────────────────────────
+
+	/**
+	 * Connection meta never drives post_author. The byline subsystem was removed
+	 * with the agent_as_me identity, so even when a credential's meta names an
+	 * approving human, a created post stays authored by the acting account.
+	 *
+	 * Regression pin: setting the authenticated app-password UUID + recording meta
+	 * for it must NOT remap authorship to the recorded human.
+	 */
+	public function test_create_post_does_not_remap_author_from_connection_meta() {
+		$human = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-meta', array( 'created_by' => $human, 'user_id' => $human ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-meta';
+
+		$result = $this->pm->create_post( array( 'title' => 'No remap' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( get_current_user_id(), (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * An explicit `author` argument sets post_author when the acting account may
+	 * assign authorship — the create tool's own author-assignment path, kept after
+	 * the connection byline was removed.
+	 */
+	public function test_create_post_honors_explicit_author_argument() {
+		$explicit = self::factory()->user->create( array( 'role' => 'author' ) );
+
+		$result = $this->pm->create_post( array( 'title' => 'Explicit', 'author' => $explicit ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( $explicit, (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * Assigning authorship to a DIFFERENT user is gated on edit_others_posts.
+	 *
+	 * The explicit-`author` branch of create_post() lets the acting account stamp
+	 * post_author, but only when it may edit others' content. An author-role actor
+	 * holds edit_posts (it can create its own content) yet lacks edit_others_posts,
+	 * so naming a second user as the author must be refused with
+	 * rest_cannot_assign_author (403) — otherwise a low-privilege actor could
+	 * attribute content to anyone. This pins the denial half of the contract; the
+	 * allowed half is covered by test_create_post_honors_explicit_author_argument.
+	 */
+	public function test_create_post_explicit_author_denied_when_actor_cannot_assign_authorship() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'author' ) ) );
+		$this->assertTrue( current_user_can( 'edit_posts' ), 'precondition: actor can create its own posts' );
+		$this->assertFalse( current_user_can( 'edit_others_posts' ), 'precondition: actor cannot assign authorship to others' );
+
+		$other  = self::factory()->user->create( array( 'role' => 'author' ) );
+		$result = $this->pm->create_post( array( 'title' => 'X', 'author' => $other ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_assign_author', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
 	}
 
 	// ── future status requires future date ───────────────────────────

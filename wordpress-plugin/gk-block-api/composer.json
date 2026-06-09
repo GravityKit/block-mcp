@@ -10,7 +10,9 @@
         "composer/installers": "^2.2",
         "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
         "doctrine/instantiator": "^1.5",
+        "php-stubs/wordpress-stubs": "^6.7",
         "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^9.6",
         "roots/wordpress": "^6.7",
         "squizlabs/php_codesniffer": "^3.10",
@@ -47,10 +49,22 @@
         "refresh-core-blocks-if-missing": "php scripts/ensure-core-blocks.php",
         "test": [
             "@refresh-core-blocks-if-missing",
-            "phpunit -c tests/phpunit.xml"
+            "phpunit -c tests/phpunit.xml",
+            "phpunit -c tests/phpunit/yoast.xml",
+            "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "test:yoast": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/yoast.xml"
+        ],
+        "test:multisite": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/multisite.xml"
         ],
         "lint": "phpcs",
-        "lint:fix": "phpcbf"
+        "lint:fix": "phpcbf",
+        "analyze": "phpstan analyse",
+        "analyse": "phpstan analyse"
     },
     "config": {
         "allow-plugins": {

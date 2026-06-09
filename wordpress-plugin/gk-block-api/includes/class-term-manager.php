@@ -46,7 +46,7 @@ class Term_Manager {
 		// in that taxonomy to any edit_posts caller. Matches the
 		// invariant WordPress's own /wp/v2/taxonomies endpoint enforces.
 		//
-		// Override via the `gk_block_api_allow_taxonomy_in_terms` filter:
+		// Override via the `gk/block-mcp/term/allow-taxonomy` filter:
 		// agents editing a CPT with a deliberately-private taxonomy
 		// (workflow state, internal department) still need to discover
 		// term IDs to assign them — site admins can grant per-taxonomy
@@ -56,20 +56,30 @@ class Term_Manager {
 		$rest_listed = $tax_object && ! empty( $tax_object->show_in_rest );
 
 		/**
-		 * Filter whether a taxonomy is listable via /terms.
+		 * Decide which taxonomies the AI can browse terms from.
 		 *
-		 * Default: true iff the taxonomy's `show_in_rest` is true. Override
-		 * to permit a deliberately-internal taxonomy (one with show_in_rest
-		 * false) for the agent-editing use case without exposing it through
-		 * the rest of WordPress's REST surface. Return false to deny a
-		 * normally-listable taxonomy.
+		 * By default the assistant can only list terms from taxonomies you've
+		 * already exposed to the REST API — the same line WordPress draws for its
+		 * own endpoints, so private bookkeeping taxonomies stay private. Use this
+		 * filter to open a single deliberately-internal taxonomy (a workflow
+		 * status, an editorial desk) just for the agent, so it can assign those
+		 * terms — without flipping `show_in_rest` and exposing it everywhere. You
+		 * can also return false to hide a normally-listable taxonomy.
 		 *
-		 * @param bool                   $allow      Default decision.
-		 * @param string                 $taxonomy   Sanitized taxonomy slug.
-		 * @param \WP_Taxonomy|null|false $tax_object Taxonomy object (null/false if not registered).
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Let the assistant assign terms from a private "editorial_status" taxonomy.
+		 * add_filter( 'gk/block-mcp/term/allow-taxonomy', function ( $allow, $taxonomy ) {
+		 *     return 'editorial_status' === $taxonomy ? true : $allow;
+		 * }, 10, 2 );
+		 *
+		 * @param bool                    $allow      Whether the taxonomy is listable (defaults to its show_in_rest value).
+		 * @param string                  $taxonomy   Sanitized taxonomy slug.
+		 * @param \WP_Taxonomy|null|false $tax_object Taxonomy object, or null/false if not registered.
 		 */
 		$allow = apply_filters(
-			'gk_block_api_allow_taxonomy_in_terms',
+			'gk/block-mcp/term/allow-taxonomy',
 			$rest_listed,
 			$taxonomy,
 			$tax_object

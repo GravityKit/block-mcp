@@ -105,7 +105,7 @@ class Block_Inventory {
 	 *   must be kept in sync (e.g., yoast/faq-block.questions[]).
 	 *
 	 * Site admins can extend the dual-storage list via the
-	 * `gk_block_api_dual_storage_blocks` filter.
+	 * `gk/block-mcp/block/dual-storage` filter.
 	 *
 	 * @param string $block_name Fully-qualified block name.
 	 * @param bool   $is_dynamic Whether the registered block is server-rendered.
@@ -135,16 +135,28 @@ class Block_Inventory {
 		static $cache = null;
 		if ( null === $cache ) {
 			/**
-			 * Filter the list of block names treated as dual-storage.
+			 * Teach the editor about blocks that keep content in two places.
 			 *
-			 * Dual-storage blocks store the same content in both
-			 * `attributes` and `innerHTML` and require both to be kept
-			 * in sync. Used when the BLOCK-13 site-scan has not run yet.
+			 * Some blocks store the same content in both their `attributes` and
+			 * their rendered `innerHTML`, so editing one without the other leaves
+			 * the block out of sync and visibly broken. The plugin auto-detects
+			 * these once it has scanned your site, but until then it leans on this
+			 * starter list. Register a custom or third-party block here so agent
+			 * edits update both halves from day one — no waiting for the scan.
 			 *
-			 * @param string[] $dual_blocks Block names considered dual-storage.
+			 * @since 2.0.0
+			 *
+			 * @example
+			 * // Mark a custom block as dual-storage so edits stay in sync.
+			 * add_filter( 'gk/block-mcp/block/dual-storage', function ( $blocks ) {
+			 *     $blocks[] = 'acme/pricing-table';
+			 *     return $blocks;
+			 * } );
+			 *
+			 * @param string[] $dual_blocks Block names treated as dual-storage.
 			 */
 			$dual_blocks = (array) apply_filters(
-				'gk_block_api_dual_storage_blocks',
+				'gk/block-mcp/block/dual-storage',
 				array(
 					'yoast/faq-block',
 					'yoast/how-to-block',
@@ -169,7 +181,10 @@ class Block_Inventory {
 	 * subsequent calls to `is_block_dual_storage()` use the live data
 	 * instead of the filter defaults.
 	 *
-	 * @return array {
+	 * @return array|\WP_Error {
+	 *     On success, the scan summary; WP_Error('scan_rate_limited') when the
+	 *     rate-limit window has not yet elapsed and $force is false.
+	 *
 	 *     @type int   $scanned_posts Number of posts walked.
 	 *     @type int   $unique_blocks Count of distinct block names found.
 	 *     @type array $classification block_name => storage_mode.
@@ -688,18 +703,25 @@ class Block_Inventory {
 		$legacy      = array();
 
 		/**
-		 * Filters the maximum number of synced patterns scanned for legacy
-		 * block usage in one pass.
+		 * Set how many synced patterns the legacy-block audit scans at once.
 		 *
-		 * Each fetched pattern is parsed and walked to detect legacy-tier
-		 * blocks (`stackable/*`, `ugb/*`, `jetpack/*`, etc.), so peak memory
-		 * scales with the number returned. The default cap covers the
-		 * "typically dozens, occasionally hundreds" of user-created synced
-		 * patterns on real sites; raise only when a known site has more.
+		 * The plugin walks your synced patterns to flag any built from
+		 * legacy-tier blocks, which helps you spot what needs modernizing.
+		 * Because each pattern is parsed in memory, the scan is capped per pass.
+		 * Raise the cap on a large library so the audit reaches every pattern, or
+		 * lower it on a memory-constrained host to keep the scan light.
 		 *
-		 * @param int $limit Maximum synced patterns to scan. Default 500.
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Scan up to 2,000 synced patterns on a large site.
+		 * add_filter( 'gk/block-mcp/pattern/legacy-scan-limit', function () {
+		 *     return 2000;
+		 * } );
+		 *
+		 * @param int $limit Maximum number of synced patterns to scan in one pass. Default 500.
 		 */
-		$legacy_scan_limit = (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 );
+		$legacy_scan_limit = (int) apply_filters( 'gk/block-mcp/pattern/legacy-scan-limit', 500 );
 
 		$patterns = get_posts(
 			array(

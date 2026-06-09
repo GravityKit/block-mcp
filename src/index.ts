@@ -15,6 +15,11 @@
  * Connects to the gk-block-api WordPress plugin via REST API with
  * Application Password authentication.
  *
+ * Sub-commands:
+ *   connect  — Browser-Approve handoff: opens WP admin authorize URL in the
+ *              browser, receives credentials via loopback callback, writes the
+ *              chosen AI client's MCP config. Credentials are never logged.
+ *
  * @see AGENTS.md and docs/specs/ for architecture and endpoint documentation
  */
 
@@ -43,6 +48,7 @@ import { POST_TOOLS, handlePostTool } from './tools/posts.js';
 import { TERM_TOOLS, handleTermTool } from './tools/terms.js';
 import { MEDIA_TOOLS, handleMediaTool } from './tools/media.js';
 import { YOAST_TOOLS, handleYoastTool } from './tools/yoast.js';
+import { runConnect } from './connect.js';
 
 // Environment variables are passed by the parent process (Claude Code, Hermes, etc.)
 // No dotenv.config() needed — it breaks esbuild ESM bundles due to CJS dynamic require('fs').
@@ -66,38 +72,6 @@ function readEnv(primary: string, legacy: string): string | undefined {
   return undefined;
 }
 
-const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
-const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
-const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
-
-if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
-  console.error(
-    'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
-  );
-  process.exit(1);
-}
-
-const client = new WordPressBlockClient({
-  wordpress_url: WORDPRESS_URL,
-  auth: {
-    username: WORDPRESS_USER,
-    application_password: WORDPRESS_APP_PASSWORD,
-  },
-});
-
-// ============================================
-// MCP server construction is deferred to main() so the per-site
-// instructions addendum can be fetched from WordPress before the
-// `McpServer` constructor is called. Constructing once with the final
-// instructions string uses the SDK's public API; an earlier draft
-// mutated `server.server._instructions` post-construction, which
-// depended on a private SDK field and would silently degrade to
-// baseline-only if the field were ever renamed.
-//
-// The baseline string is imported from `./instructions.ts` and combined
-// with the remote addendum inside main(). All request handlers are
-// registered in `registerHandlers(server)` (defined below) which main()
-// calls after constructing the server.
 // ============================================
 // Aggregate all tool definitions
 // ============================================
@@ -226,7 +200,7 @@ How to behave:
 // `_instructions` field — see the construction note above).
 // ============================================
 
-function registerHandlers(server: McpServer): void {
+function registerHandlers(server: McpServer, client: WordPressBlockClient): void {
 
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
@@ -400,12 +374,53 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ============================================
 
 async function main(): Promise<void> {
+  // ── Node version preflight ──────────────────────────────────────────────
+  // engines.node already warns at install time, but a non-technical user who
+  // runs the connector anyway should get a clear, actionable message rather than
+  // a cryptic runtime crash on an unsupported Node.
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  if (Number.isFinite(nodeMajor) && nodeMajor < 20) {
+    console.error(
+      `Block MCP requires Node.js 20 or newer — you are running ${process.version}. ` +
+        'Please upgrade Node.js and try again: https://nodejs.org/'
+    );
+    process.exit(1);
+  }
+
+  // ── connect sub-command ─────────────────────────────────────────────────
+  // Checked first so `npx @gravitykit/block-mcp connect` works without the
+  // WORDPRESS_* env vars that the MCP server requires.
+  if (process.argv[2] === 'connect') {
+    await runConnect(process.argv.slice(3));
+    process.exit(0);
+  }
+
+  // ── env-var validation ──────────────────────────────────────────────────
+  const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
+  const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
+  const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
+
+  if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
+    console.error(
+      'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
+    );
+    process.exit(1);
+  }
+
+  const client = new WordPressBlockClient({
+    wordpress_url: WORDPRESS_URL,
+    auth: {
+      username: WORDPRESS_USER,
+      application_password: WORDPRESS_APP_PASSWORD,
+    },
+  });
+
   // Fetch the per-site instructions addendum BEFORE constructing the
   // server so the initialize handshake includes the combined string
   // from the start — no post-construction mutation of SDK internals.
   // `getInstructions` never throws: on any failure it logs to stderr
   // and returns the baseline only.
-  const instructions = await getInstructions(WORDPRESS_URL as string);
+  const instructions = await getInstructions(WORDPRESS_URL);
 
   const server = new McpServer(
     {
@@ -422,7 +437,7 @@ async function main(): Promise<void> {
     }
   );
 
-  registerHandlers(server);
+  registerHandlers(server, client);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

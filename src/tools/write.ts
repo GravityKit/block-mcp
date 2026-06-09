@@ -230,7 +230,7 @@ export const WRITE_TOOLS = [
     // idempotentHint is false: deleting at counter N twice removes a
     // *different* block the second time (indices shift after the first).
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Delete blocks' },
-    outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: 'number' } } },
+    outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, deleted_index: { type: 'number' }, deleted_count: { type: 'number' } } },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -271,7 +271,28 @@ export const WRITE_TOOLS = [
     // idempotentHint is false for the same reason as update_block: every
     // call creates a revision; history is observable.
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Rewrite the entire post' },
-    outputSchema: INSERTED_REFS_SCHEMA,
+    // PUT /posts/{id}/blocks returns a flat { blocks: [{ index, name, attributes }] }
+    // summary — not the { inserted: [...] } shape of the insert/replace tools.
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        blocks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              index:      { type: 'number' },
+              name:       { type: 'string' },
+              attributes: { type: 'object' },
+            },
+          },
+        },
+        warnings:           { type: 'array' },
+        before_revision_id: { type: 'number' },
+        revision_id:        { type: 'number' },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {

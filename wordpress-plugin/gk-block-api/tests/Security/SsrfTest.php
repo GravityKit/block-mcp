@@ -212,7 +212,7 @@ class SsrfTest extends WP_UnitTestCase {
 	// ── Filter-extensibility ──────────────────────────────────────
 
 	public function test_filter_can_block_additional_ipv4_range() {
-		add_filter( 'gk_block_api_url_sideload_blocked_ranges', static function ( $ranges ) {
+		add_filter( 'gk/block-mcp/media/sideload-blocked-ranges', static function ( $ranges ) {
 			$ranges[] = array( '203.0.113.0', '203.0.113.255' );
 			return $ranges;
 		} );
@@ -223,7 +223,7 @@ class SsrfTest extends WP_UnitTestCase {
 	}
 
 	public function test_filter_can_block_additional_ipv6_cidr() {
-		add_filter( 'gk_block_api_url_sideload_blocked_ipv6_cidrs', static function ( $cidrs ) {
+		add_filter( 'gk/block-mcp/media/sideload-blocked-ipv6-cidrs', static function ( $cidrs ) {
 			$cidrs[] = '2001:db8::/32';
 			return $cidrs;
 		} );

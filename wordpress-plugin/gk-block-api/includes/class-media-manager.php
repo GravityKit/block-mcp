@@ -34,7 +34,7 @@ class Media_Manager {
 	 * Reserved IP ranges to block on URL sideload (SSRF defense).
 	 * Includes link-local, loopback, multicast, RFC1918 private ranges,
 	 * and IPv6 unique-local + link-local. Overrideable by site admins
-	 * via the `gk_block_api_url_sideload_blocked_ranges` filter.
+	 * via the `gk/block-mcp/media/sideload-blocked-ranges` filter.
 	 */
 	const SSRF_BLOCKED_IPV4_RANGES = array(
 		array( '0.0.0.0', '0.255.255.255' ),       // "This network."
@@ -64,7 +64,7 @@ class Media_Manager {
 	 * read-only block surface in two ways:
 	 *
 	 *   1. Programmatic: `update_option( 'gk_block_api_uploads_enabled', false );`
-	 *   2. Filter:       `add_filter( 'gk_block_api_uploads_enabled', '__return_false' );`
+	 *   2. Filter:       `add_filter( 'gk/block-mcp/media/uploads-enabled', '__return_false' );`
 	 *
 	 * The filter wins over the option so emergencies (e.g., a
 	 * compromised API token) can be patched without writing to the DB.
@@ -80,14 +80,24 @@ class Media_Manager {
 		$raw     = get_option( self::UPLOADS_OPTION, '1' );
 		$enabled = ( '0' !== (string) $raw && false !== $raw );
 		/**
-		 * Filter: gk_block_api_uploads_enabled.
+		 * Flip the AI's media library access to read-only in one line.
 		 *
-		 * Last-mile override for the per-site uploads kill-switch. Return
-		 * false here to refuse every MCP upload regardless of the option.
+		 * There's a setting for this, but the filter is the emergency brake: it
+		 * wins over the stored option and needs no database write, so you can
+		 * shut off every MCP upload instantly — from code, a must-use plugin, or
+		 * an incident-response hook — the moment a token looks compromised or a
+		 * policy says "no agent-uploaded files." Return false to refuse all
+		 * uploads (multipart, URL sideload, and base64) with a clean 403.
 		 *
-		 * @param bool $enabled Current option value.
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Make the media library read-only for the AI agent.
+		 * add_filter( 'gk/block-mcp/media/uploads-enabled', '__return_false' );
+		 *
+		 * @param bool $enabled Whether uploads are currently allowed by the stored option.
 		 */
-		return (bool) apply_filters( 'gk_block_api_uploads_enabled', $enabled );
+		return (bool) apply_filters( 'gk/block-mcp/media/uploads-enabled', $enabled );
 	}
 
 	/**
@@ -214,40 +224,32 @@ class Media_Manager {
 		$default_overrides = array( 'test_form' => false );
 
 		/**
-		 * Filters the `wp_handle_upload()` overrides for the multipart
-		 * upload path on `POST /media`.
+		 * Fine-tune how WordPress handles an agent's multipart file upload.
 		 *
-		 * The overrides array is forwarded verbatim as the fourth
-		 * argument to `media_handle_upload()`, which passes it to
-		 * `wp_handle_upload()`, which finally hands it to
-		 * `_wp_handle_upload()`. Site administrators can use this filter
-		 * to relax the upload checks (e.g., disable `test_form`) or to
-		 * swap the action so `_wp_handle_upload()` uses
-		 * `is_readable()` instead of `is_uploaded_file()`.
+		 * Every file the agent uploads through `POST /media` is finally handed
+		 * to core's `wp_handle_upload()`, and this array is the control panel for
+		 * that step. Hook in when you need to bend the rules for a specific
+		 * deployment — relax a check, accept an extra MIME type, or route the
+		 * file through a different upload action. The value is forwarded verbatim
+		 * as the overrides argument to `media_handle_upload()`. Most sites should
+		 * leave the default `array( 'test_form' => false )` alone; if a filter
+		 * returns anything that isn't an array, the plugin safely falls back to
+		 * that default.
 		 *
-		 * The PHPUnit suite uses this filter to set
-		 * `'action' => 'wp_handle_sideload'`, allowing test fixtures —
-		 * which were never `$_FILES['…']` HTTP-POSTed — to reach the
-		 * rest of the upload pipeline.
+		 * @since 2.0.0
 		 *
-		 * Production callers should leave this filter alone; the
-		 * default `array( 'test_form' => false )` matches what every
-		 * site-side caller of `media_handle_upload()` receives.
+		 * @example
+		 * // Permit an extra file type for agent uploads.
+		 * add_filter( 'gk/block-mcp/media/upload-overrides', function ( $overrides, $field ) {
+		 *     $overrides['mimes'] = array( 'webp' => 'image/webp' );
+		 *     return $overrides;
+		 * }, 10, 2 );
 		 *
-		 * A non-array return value is treated as a misbehaving filter
-		 * and falls back to the default array — `media_handle_upload()`
-		 * iterates the overrides directly, so a non-array would crash
-		 * the upload path.
-		 *
-		 * @since 1.5.2
-		 *
-		 * @param array  $default_overrides Default overrides; always
-		 *                                  `array( 'test_form' => false )`.
-		 * @param string $field             The `$_FILES` key whose
-		 *                                  upload is being processed.
+		 * @param array  $default_overrides Overrides passed to media_handle_upload(). Default array( 'test_form' => false ).
+		 * @param string $field             The $_FILES key whose upload is being processed.
 		 */
 		$overrides = apply_filters(
-			'gk_block_api_media_upload_overrides',
+			'gk/block-mcp/media/upload-overrides',
 			$default_overrides,
 			$field
 		);
@@ -484,7 +486,7 @@ class Media_Manager {
 	 * `169.254.169.254`) and RFC1918 ranges are explicitly blocked.
 	 *
 	 * Site admins can extend the block list via the
-	 * `gk_block_api_url_sideload_blocked_ranges` filter (returns array of
+	 * `gk/block-mcp/media/sideload-blocked-ranges` filter (returns array of
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
 	 * @param string $url URL to validate against reserved IP ranges.
@@ -541,7 +543,30 @@ class Media_Manager {
 		// IPv4 ranges (filterable).
 		$v4_ranges = self::SSRF_BLOCKED_IPV4_RANGES;
 		if ( function_exists( 'apply_filters' ) ) {
-			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ranges', $v4_ranges );
+			/**
+			 * Adjust which IPv4 ranges are off-limits when sideloading from a URL.
+			 *
+			 * Before fetching any remote image, the plugin resolves the host and
+			 * refuses private, loopback, link-local, and other reserved IPv4
+			 * ranges — that's the SSRF guard that stops an agent from being
+			 * tricked into reading your internal network or cloud metadata
+			 * endpoint. Use this filter to lock things down even harder by adding
+			 * a corporate CIDR you never want fetched, or — carefully — to allow a
+			 * specific internal range you trust (for example, an on-LAN media
+			 * server). Each entry is a `[start, end]` pair of dotted-quad strings.
+			 *
+			 * @since 2.0.0
+			 *
+			 * @example
+			 * // Also block your office network from URL sideloads.
+			 * add_filter( 'gk/block-mcp/media/sideload-blocked-ranges', function ( $ranges ) {
+			 *     $ranges[] = array( '203.0.113.0', '203.0.113.255' );
+			 *     return $ranges;
+			 * } );
+			 *
+			 * @param array<int,array{0:string,1:string}> $v4_ranges Blocked IPv4 ranges as [start, end] dotted-quad pairs.
+			 */
+			$filtered = apply_filters( 'gk/block-mcp/media/sideload-blocked-ranges', $v4_ranges );
 			if ( is_array( $filtered ) ) {
 				$v4_ranges = $filtered;
 			}
@@ -588,7 +613,7 @@ class Media_Manager {
 		// 100::/64           discard-only
 		// 2001::/23          IETF protocol assignments
 		// ff00::/8           multicast
-		// Filterable via `gk_block_api_url_sideload_blocked_ipv6_cidrs`.
+		// Filterable via `gk/block-mcp/media/sideload-blocked-ipv6-cidrs`.
 		$v6_cidrs = array(
 			'::/128',
 			'::1/128',
@@ -600,7 +625,28 @@ class Media_Manager {
 			'ff00::/8',
 		);
 		if ( function_exists( 'apply_filters' ) ) {
-			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ipv6_cidrs', $v6_cidrs );
+			/**
+			 * Adjust which IPv6 ranges are off-limits when sideloading from a URL.
+			 *
+			 * The IPv6 companion to the SSRF guard: it blocks loopback,
+			 * unique-local, link-local, IPv4-mapped, and other reserved IPv6
+			 * space before any remote fetch, so a malicious URL can't reach your
+			 * internal services over IPv6. Add your own CIDRs to extend the block
+			 * list to ranges specific to your network. Values are standard CIDR
+			 * strings (e.g. `fc00::/7`).
+			 *
+			 * @since 2.0.0
+			 *
+			 * @example
+			 * // Block an additional internal IPv6 prefix.
+			 * add_filter( 'gk/block-mcp/media/sideload-blocked-ipv6-cidrs', function ( $cidrs ) {
+			 *     $cidrs[] = '2001:db8::/32';
+			 *     return $cidrs;
+			 * } );
+			 *
+			 * @param array<int,string> $v6_cidrs Blocked IPv6 ranges as CIDR strings.
+			 */
+			$filtered = apply_filters( 'gk/block-mcp/media/sideload-blocked-ipv6-cidrs', $v6_cidrs );
 			if ( is_array( $filtered ) ) {
 				$v6_cidrs = $filtered;
 			}

@@ -26,6 +26,9 @@ class Post_Manager {
 	/** Option name for the post-type allow-list (see spec §3.1). */
 	const POST_TYPES_ALLOWLIST_OPTION = 'gk_block_api_post_types_allowlist';
 
+	/** Option name for the "let the assistant move posts to trash" toggle. */
+	const ALLOW_TRASH_OPTION = 'gk_block_api_allow_trash';
+
 	/**
 	 * Block CRUD service instance.
 	 *
@@ -40,6 +43,43 @@ class Post_Manager {
 	 */
 	public function __construct( Block_CRUD $block_crud ) {
 		$this->block_crud = $block_crud;
+	}
+
+	/**
+	 * Whether the assistant is allowed to move posts to trash.
+	 *
+	 * Off by default: the dedicated agent has no `delete_*` capabilities, but
+	 * trashing routes through `update_post( status: 'trash' )`, which only
+	 * needs `edit_post` (the agent has it). This toggle is the application-level
+	 * gate that keeps that path closed until a site owner opts in. Filterable
+	 * via `gk/block-mcp/post/allow-trash` for programmatic control.
+	 *
+	 * @return bool
+	 */
+	public static function trashing_enabled() {
+		$enabled = (bool) get_option( self::ALLOW_TRASH_OPTION, false );
+
+		/**
+		 * Control whether the AI assistant may move posts to the trash.
+		 *
+		 * Trashing is off by default and the agent has no delete capability,
+		 * but moving a post to trash only needs edit access — so this is the
+		 * real gate. There's a checkbox for it in Settings; use the filter when
+		 * you'd rather decide in code, for example allowing the assistant to
+		 * tidy up only its own draft posts while keeping everything else
+		 * untouchable. Return true to permit trashing, false to forbid it.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Let the assistant trash posts only on the staging site.
+		 * add_filter( 'gk/block-mcp/post/allow-trash', function ( $enabled ) {
+		 *     return wp_get_environment_type() === 'staging' ? true : $enabled;
+		 * } );
+		 *
+		 * @param bool $enabled Whether trashing is currently allowed by the stored option.
+		 */
+		return (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $enabled );
 	}
 
 	/**
@@ -362,6 +402,13 @@ class Post_Manager {
 				}
 			}
 			if ( 'trash' === $new_status ) {
+				if ( ! self::trashing_enabled() ) {
+					return new \WP_Error(
+						'trash_disabled',
+						__( 'Moving posts to trash is turned off for the Block MCP. A site administrator can enable it under Block MCP → Settings.', 'gk-block-api' ),
+						array( 'status' => 403 )
+					);
+				}
 				// Reject trash-plus-other-fields: trashing is a status-only
 				// operation. Mixed payloads were silently mutating a trashed
 				// post's title/parent/etc. before this guard.
@@ -554,8 +601,8 @@ class Post_Manager {
 	 * Returns a WP_Error on first hard rejection (legacy tier); accumulates
 	 * non-fatal warnings into the passed-by-reference array.
 	 *
-	 * @param array             $blocks   Block defs in API shape.
-	 * @param array<int, mixed> $warnings Warning accumulator.
+	 * @param array $blocks   Block defs in API shape.
+	 * @param array $warnings Warning accumulator.
 	 *
 	 * @return null|\WP_Error
 	 */
@@ -841,7 +888,7 @@ class Post_Manager {
 			return null;
 		}
 		$first = array_values( $revisions )[0];
-		return is_object( $first ) && isset( $first->ID ) ? (int) $first->ID : null;
+		return is_object( $first ) ? (int) $first->ID : null;
 	}
 
 	/**

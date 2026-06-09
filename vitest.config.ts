@@ -8,6 +8,8 @@ export default defineConfig({
       // New layered layout
       'src/__tests__/unit/**/*.test.ts',
       'src/__tests__/tools/**/*.test.ts',
+      // Top-level tests/ directory (connect CLI and other standalone tests)
+      'tests/**/*.test.ts',
     ],
     // Integration tests live in src/__tests__/integration/ but are
     // explicitly excluded from the default run.  Use `npm run test:integration`

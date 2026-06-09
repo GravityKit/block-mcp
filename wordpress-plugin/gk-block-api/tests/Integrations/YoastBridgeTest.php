@@ -49,6 +49,14 @@ class Yoast_Bridge_Testable extends Yoast_Bridge {
 
 /**
  * Yoast_Bridge unit-test suite.
+ *
+ * Requires a loaded Yoast SEO plugin (WPSEO_FILE defined, yoast/* REST
+ * namespace registered, Yoast meta-key contracts in place). The general suite
+ * runs Yoast-free, so this class is tagged for the dedicated Yoast run
+ * (tests/phpunit/yoast.xml, which sets GK_LOAD_YOAST so the bootstrap loads
+ * Yoast). The group also excludes it from the general single-site run.
+ *
+ * @group yoast
  */
 class YoastBridgeTest extends WP_UnitTestCase {
 

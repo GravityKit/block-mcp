@@ -10,14 +10,25 @@
  * point is tested here too (it's part of the same module surface).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import {
   inferLanguage,
   enrichBlock,
   enrichBlocks,
   registerBlockEnricher,
+  shikiHighlight,
   type BlockDef,
 } from '../../../enrichers.js';
+
+// Shiki's first getHighlighter() call loads every grammar + theme and can take
+// several seconds — especially on a loaded CI box. getHighlighter() memoises a
+// single module-level promise, so only the FIRST highlight pays that cost; the
+// rest reuse it. Warm it once here, with a generous hook timeout, so no
+// individual test inherits the cold-start latency and trips the default 5s
+// per-test timeout (the cause of an intermittent "generates codeHTML" flake).
+beforeAll(async () => {
+  await shikiHighlight('// warm', 'javascript');
+}, 30_000);
 
 // ── inferLanguage ─────────────────────────────────────────────────────────────
 

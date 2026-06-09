@@ -24,14 +24,23 @@ putenv( 'WP_PHPUNIT__TESTS_CONFIG=' . __DIR__ . '/wp-tests-config.php' );
 // Load the plugin once muplugins_loaded fires, ahead of WP's normal plugin
 // boot — at this point all WP APIs are available but tests haven't started.
 //
-// Yoast SEO is loaded BEFORE gk-block-api so the bridge's REST routes
-// register correctly and Yoast's meta-key contracts are in place when
-// Yoast_Bridge writes to them in tests/Integrations/YoastBridgeTest.
+// Yoast SEO loads here ONLY when GK_LOAD_YOAST=1, which tests/phpunit/yoast.xml
+// sets for the dedicated Yoast bridge run. It is the sole consumer of a loaded
+// Yoast. Loading Yoast in the general suite is harmful in two ways: its DB
+// migrations issue CREATE INDEX statements the SQLite drop-in cannot execute,
+// and its boot calls wp_is_block_theme() — which WordPress 6.8+ flags via
+// _doing_it_wrong when the call lands inside a @runInSeparateProcess child,
+// where CI's error_reporting=E_ALL turns the notice into a test failure.
+// Scoping Yoast to its one run keeps every other process clean. The gate is an
+// env var, not a constant, because PHPUnit re-runs this bootstrap in each
+// separate-process child without inheriting parent constants — but the child
+// process does inherit the parent's environment.
 tests_add_filter(
 	'muplugins_loaded',
 	static function () use ( $plugin_root ): void {
-		$yoast = $plugin_root . '/vendor/wordpress/wordpress/wp-content/plugins/wordpress-seo/wp-seo.php';
-		if ( is_file( $yoast ) ) {
+		$load_yoast = '1' === getenv( 'GK_LOAD_YOAST' );
+		$yoast      = $plugin_root . '/vendor/wordpress/wordpress/wp-content/plugins/wordpress-seo/wp-seo.php';
+		if ( $load_yoast && is_file( $yoast ) ) {
 			require $yoast;
 		}
 		require dirname( __DIR__ ) . '/gk-block-api.php';

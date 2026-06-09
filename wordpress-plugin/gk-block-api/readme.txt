@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.8.1
+Stable tag: 2.0.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,7 @@ GK Block API provides a comprehensive REST API for reading, editing, and managin
 * **Block search** — Find blocks by name or text content within a page.
 * **Revision tracking** — Every write operation creates WordPress revisions with before/after IDs for easy rollback.
 * **Rate limiting** — Per-post write limits to prevent runaway automated edits.
+* **Connect onboarding** — A few-clicks flow (Settings → Block MCP → Connect) to connect an AI assistant: a one-click Claude Desktop installer (.mcpb) or a browser-approve flow that writes the client config for you, backed by a dedicated minimal-capability service account.
 * **Settings UI** — Admin page (Settings → Block MCP) for editing tier scores, replacement map, dual-storage list, and post-type allow-list.
 * **Post lifecycle tools** — Create and update posts, list taxonomy terms, upload media (with SSRF guard).
 * **Server-driven preference policy** — All namespace scoring is configurable per-site; nothing is hardcoded in the codebase.
@@ -64,9 +65,9 @@ GK Block API provides a comprehensive REST API for reading, editing, and managin
 
 1. Upload the `gk-block-api` folder to `/wp-content/plugins/`.
 2. Activate the plugin through the 'Plugins' menu in WordPress.
-3. (Optional) Visit Settings → Block MCP to review tier scores and the post-type allow-list.
-4. Create an Application Password for your API user (Users → Profile → Application Passwords).
-5. Authenticate REST requests using Basic Auth with the Application Password.
+3. Connect an AI assistant: Settings → Block MCP → Connect, pick your client, and follow the one-click (.mcpb) or browser-approve flow. This provisions a dedicated service account and its credential automatically.
+4. (Optional) Visit Settings → Block MCP to review tier scores and the post-type allow-list.
+5. To wire up the REST API by hand instead, create an Application Password (Users → Profile → Application Passwords) and authenticate with Basic Auth.
 
 == Frequently Asked Questions ==
 
@@ -86,6 +87,29 @@ Yes. The block API works with any post type that stores block content in `post_c
 
 The MCP (Model Context Protocol) server is a separate TypeScript application that wraps the REST API as AI-friendly tools. It runs locally on the developer's machine and connects to the WordPress plugin via REST. The MCP server is not required to use the REST API directly.
 
+= Can I connect a client manually, without the Connect flow? =
+
+Yes — the Connect flow is just a convenience. To wire up any MCP client by hand:
+
+1. Create an Application Password for a WordPress user that can edit posts (Users → Profile → Application Passwords).
+2. Add the Block MCP server to your client's MCP configuration, with your site URL, that username, and the Application Password:
+
+    {
+      "mcpServers": {
+        "block-mcp": {
+          "command": "npx",
+          "args": ["-y", "@gravitykit/block-mcp"],
+          "env": {
+            "WORDPRESS_URL": "https://your-site.com",
+            "WORDPRESS_USER": "your-username",
+            "WORDPRESS_APP_PASSWORD": "xxxx xxxx xxxx xxxx xxxx xxxx"
+          }
+        }
+      }
+    }
+
+3. Restart the client. The same `@gravitykit/block-mcp` package powers both this manual setup and the Connect flow.
+
 = How do I configure which blocks are "legacy" on my site? =
 
 Visit Settings → Block MCP. Set the score for a namespace to less than 10 to mark it as legacy (hard-rejected on insert). Use the replacement map to suggest alternatives.
@@ -95,6 +119,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 `uninstall.php` deletes all plugin options and transients (`gk_block_api_preferences`, `gk_block_api_post_types_allowlist`, `gk_block_api_storage_modes`, the manual dual-storage list, the inventory cache, and per-post rate-limit transients). Post content and revisions are not touched.
 
 == Upgrade Notice ==
+
+= 2.0.0 =
+Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create and whether it's allowed to move posts to the trash.
 
 = 1.8.1 =
 Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
@@ -136,6 +163,27 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 2.0.0 on June 8, 2026 =
+
+Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few clicks — no terminal and no config files — using a dedicated, limited account that keeps the assistant's access separate from your own login.
+
+#### 🚀 Added
+
+* **Connect an AI assistant in a few clicks.** A new Connect screen at Settings → Block MCP walks you through linking an AI app to your site — no command line, no editing files. Pick a one-click **Claude Desktop** installer, a browser **Approve** step for **Cursor**, **Claude Code**, or **ChatGPT** that sets everything up for you, or **Configure it myself** for any other MCP client.
+* **A separate, limited account for the AI.** Block MCP gives the assistant its own account to write and edit your posts and pages. It can't change your site settings, delete other people's content, or be used to log in — so the AI never has more access than it needs.
+* **Or connect through your own account.** Most sites should use the dedicated account above. If the assistant needs the same access your own account has, you can connect through your account instead — it's clearly flagged as the higher-risk choice and asks you to confirm you understand before finishing.
+* **Stay in control of your connections.** See every connected app on the Connect screen — including which account it uses and who approved it — and **Disconnect** any of them instantly to revoke its access.
+* **Decide what the AI is allowed to do.** Choose which content types it can create (or allow them all), turn media uploads on or off, and allow or block moving posts to the trash (off by default — and even when allowed, the assistant can only trash content, never permanently delete it). You can also set custom instructions it should always follow, and advanced users can tune which blocks the assistant prefers.
+* **Keyboard and screen-reader friendly.** The Connect and settings screens are fully operable with a keyboard and work with screen readers.
+
+#### 🔒 Security & privacy
+
+* When you connect, your site credential is never placed in a web address or left in your browser history, and any client config files are written so that only you can read them.
+
+#### 🛠 Developer note
+
+* Every plugin hook now uses the GravityKit `gk/block-mcp/{area}/{name}` naming — for example, the trash filter `gk_block_api_allow_trash` is now `gk/block-mcp/post/allow-trash`. If you've customized Block MCP with your own code, rename your `add_filter()` / `add_action()` calls to match. Option names are unchanged.
 
 = 1.8.1 on May 22, 2026 =
 

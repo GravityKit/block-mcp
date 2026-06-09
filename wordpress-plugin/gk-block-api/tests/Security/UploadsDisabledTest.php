@@ -2,7 +2,7 @@
 /**
  * Hard kill-switch tests for the media-upload pipeline.
  *
- * Pins the contract that when `gk_block_api_uploads_enabled` is false (or
+ * Pins the contract that when `gk/block-mcp/media/uploads-enabled` is false (or
  * the matching filter returns false), every upload mode returns HTTP 403
  * `uploads_disabled` *before* any disk I/O, DNS lookup, or HTTP fetch.
  * The validation must short-circuit at the entry point — a half-validated
@@ -43,13 +43,13 @@ class UploadsDisabledTest extends WP_UnitTestCase {
 
 	public function test_filter_overrides_option_to_false() {
 		update_option( Media_Manager::UPLOADS_OPTION, '1' );
-		add_filter( 'gk_block_api_uploads_enabled', '__return_false' );
+		add_filter( 'gk/block-mcp/media/uploads-enabled', '__return_false' );
 		$this->assertFalse( Media_Manager::uploads_enabled() );
 	}
 
 	public function test_filter_can_override_option_to_true() {
 		update_option( Media_Manager::UPLOADS_OPTION, '0' );
-		add_filter( 'gk_block_api_uploads_enabled', '__return_true' );
+		add_filter( 'gk/block-mcp/media/uploads-enabled', '__return_true' );
 		$this->assertTrue( Media_Manager::uploads_enabled() );
 	}
 

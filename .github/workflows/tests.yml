@@ -72,8 +72,23 @@ jobs:
       - name: Ensure SQLite drop-in is installed
         run: composer run-script install-sqlite-dropin
 
-      - name: Run PHPUnit
+      - name: Run PHPUnit (single-site)
         run: vendor/bin/phpunit -c tests/phpunit.xml --colors=never
+
+      # The yoast group is excluded from the single-site config (it needs a
+      # loaded Yoast SEO plugin). This config sets GK_LOAD_YOAST so the
+      # bootstrap loads Yoast and runs exactly that group — keeping Yoast's DB
+      # migrations and wp_is_block_theme() call out of the general suite's
+      # process-isolated children.
+      - name: Run PHPUnit (Yoast — yoast group)
+        run: vendor/bin/phpunit -c tests/phpunit/yoast.xml --colors=never
+
+      # The ms-required group is excluded from the single-site config (it would
+      # self-skip there). The multisite config runs exactly that group under a
+      # real multisite install, so the multisite-only contracts (per-blog cap
+      # provisioning, per-blog agent purge) are exercised in CI, not skipped.
+      - name: Run PHPUnit (multisite — ms-required group)
+        run: vendor/bin/phpunit -c tests/phpunit/multisite.xml --colors=never
 
       # phpcs gate. We carry zero errors AND zero warnings on the includes/
       # tree (see phpcs.xml.dist); CI enforces that contract so the next PR
@@ -104,6 +119,18 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+      # The committed dist/index.cjs and the plugin-embedded copy
+      # (assets/mcp-server/index.cjs, written by postbuild) are shipped
+      # artifacts. A fresh build off the locked esbuild must reproduce them
+      # byte-for-byte; a diff means a source change was committed without
+      # rebuilding, so npx users and Claude Desktop users would run different
+      # server versions. Fail the build instead of shipping a stale bundle.
+      - name: Verify committed bundles are up to date
+        run: |
+          git diff --exit-code -- dist/index.cjs \
+            wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs \
+            || { echo "::error::dist/index.cjs or the embedded copy is stale — run 'npm run build' and commit the result."; exit 1; }
 
   ts-integration:
     name: TypeScript MCP server (integration — live WP)

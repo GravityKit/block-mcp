@@ -143,7 +143,7 @@ class TermManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * `gk_block_api_allow_taxonomy_in_terms` lets admins opt a deliberately-
+	 * `gk/block-mcp/term/allow-taxonomy` lets admins opt a deliberately-
 	 * private taxonomy back in.
 	 *
 	 * The agent-editing use case: a CPT with a workflow-state taxonomy
@@ -166,7 +166,7 @@ class TermManagerTest extends WP_UnitTestCase {
 		$callback = static function ( $allow, $taxonomy ) {
 			return 'gk_editorial_status' === $taxonomy ? true : $allow;
 		};
-		add_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10, 2 );
+		add_filter( 'gk/block-mcp/term/allow-taxonomy', $callback, 10, 2 );
 
 		try {
 			$result = $this->tm->list_terms( array( 'taxonomy' => 'gk_editorial_status' ) );
@@ -174,7 +174,7 @@ class TermManagerTest extends WP_UnitTestCase {
 			$this->assertSame( 'gk_editorial_status', $result['taxonomy'] );
 			$this->assertNotEmpty( $result['terms'] );
 		} finally {
-			remove_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10 );
+			remove_filter( 'gk/block-mcp/term/allow-taxonomy', $callback, 10 );
 			unregister_taxonomy( 'gk_editorial_status' );
 		}
 	}
@@ -188,14 +188,14 @@ class TermManagerTest extends WP_UnitTestCase {
 		$callback = static function ( $allow, $taxonomy ) {
 			return 'post_tag' === $taxonomy ? false : $allow;
 		};
-		add_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10, 2 );
+		add_filter( 'gk/block-mcp/term/allow-taxonomy', $callback, 10, 2 );
 
 		try {
 			$result = $this->tm->list_terms( array( 'taxonomy' => 'post_tag' ) );
 			$this->assertInstanceOf( \WP_Error::class, $result );
 			$this->assertSame( 'invalid_taxonomy', $result->get_error_code() );
 		} finally {
-			remove_filter( 'gk_block_api_allow_taxonomy_in_terms', $callback, 10 );
+			remove_filter( 'gk/block-mcp/term/allow-taxonomy', $callback, 10 );
 		}
 	}
 }

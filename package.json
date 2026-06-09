@@ -1,20 +1,25 @@
 {
   "name": "@gravitykit/block-mcp",
-  "version": "1.8.0",
+  "version": "2.0.0",
   "description": "MCP server for WordPress block-level content management with preference-aware editing",
   "main": "dist/index.cjs",
+  "bin": {
+    "block-mcp": "dist/index.cjs"
+  },
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:supports-color --external:has-flag",
+    "postbuild": "bash scripts/copy-server-bundle.sh",
     "start": "node dist/index.cjs",
-    "dev": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --watch",
+    "dev": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs --watch --external:supports-color --external:has-flag",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "eval": "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test"
   },
   "keywords": [
     "mcp",
@@ -26,15 +31,25 @@
   ],
   "author": "GravityKit",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GravityKit/block-mcp.git"
+  },
+  "homepage": "https://github.com/GravityKit/block-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/GravityKit/block-mcp/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.9",
-    "shiki": "^4.0.2"
+    "axios": "^1.7.9"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@shikijs/engine-javascript": "^4.0.2",
+    "@shikijs/langs": "^4.0.2",
     "@types/node": "^22.0.0",
     "esbuild": "^0.27.3",
+    "shiki": "^4.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"

@@ -12,8 +12,15 @@ import { translateWpError } from './error-translator.js';
 /** Max retry attempts for transient server / network errors. */
 const MAX_RETRIES = 2;
 
-/** Idempotent HTTP verbs — safe to retry without risking duplicate work. */
-const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options', 'delete']);
+/**
+ * Verbs safe to retry without risking duplicate or wrong work.
+ *
+ * DELETE is intentionally NOT here: `delete_block` deletes by flat index, so if
+ * the server commits the delete but the response is lost (timeout / 502), a
+ * replay removes the *next* block (indices shift after the first delete). The
+ * delete_block tool mirrors this with `idempotentHint: false`.
+ */
+const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options']);
 
 /** Sleep for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
@@ -47,7 +54,7 @@ function backoffMs(attempt: number): number {
  *
  * Anything else is a real error that the caller needs to see.
  */
-function isRetryable(error: AxiosError): boolean {
+export function isRetryable(error: AxiosError): boolean {
   const method = (error.config?.method ?? 'get').toLowerCase();
   const idempotent = IDEMPOTENT_METHODS.has(method);
 
