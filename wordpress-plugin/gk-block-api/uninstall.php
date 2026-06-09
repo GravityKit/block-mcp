@@ -64,11 +64,6 @@ function gk_block_api_uninstall_blog() {
 	// Pattern reference-count cache (Pattern_Manager::REF_COUNT_CACHE_KEY).
 	delete_transient( 'gk_block_api_pattern_ref_counts' );
 
-	// Deactivation-notice transient. Normally auto-cleared on the next admin
-	// page load after deactivation, but survives when the plugin is deleted
-	// immediately after deactivation without a page load in between.
-	delete_transient( 'gk_block_api_deactivation_notice' );
-
 	// Per-post rate-limit transients accumulate per write activity. Sweep the
 	// option table directly — there's no core helper for prefixed transient
 	// deletion. Also sweeps the per-IP `instr_rl_` rate-limit transients written
