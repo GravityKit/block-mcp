@@ -12,7 +12,7 @@
  * launch.
  *
  * @package GravityKit\BlockAPI
- * @since   1.9.0
+ * @since   2.0.0
  */
 
 namespace GravityKit\BlockAPI;
@@ -25,7 +25,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Generates .mcpb extension bundles for Claude Desktop.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 class MCPB_Generator {
 
@@ -41,7 +41,7 @@ class MCPB_Generator {
 	 * Callers may mutate the manifest before it reaches the zip via the
 	 * `gk_block_api_mcpb_manifest` filter.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param array<string,string> $creds {
 	 *     Credential set produced by Agent_Provisioner.
@@ -85,23 +85,26 @@ class MCPB_Generator {
 			),
 			'user_config'      => array(
 				'wordpress_url'          => array(
-					'type'     => 'string',
-					'title'    => 'WordPress Site URL',
-					'required' => true,
-					'default'  => $creds['url'],
+					'type'        => 'string',
+					'title'       => 'WordPress Site URL',
+					'description' => 'The web address of your WordPress site.',
+					'required'    => true,
+					'default'     => $creds['url'],
 				),
 				'wordpress_user'         => array(
-					'type'     => 'string',
-					'title'    => 'WordPress Username',
-					'required' => true,
-					'default'  => $creds['user'],
+					'type'        => 'string',
+					'title'       => 'WordPress Username',
+					'description' => 'The WordPress account the assistant connects as.',
+					'required'    => true,
+					'default'     => $creds['user'],
 				),
 				'wordpress_app_password' => array(
-					'type'      => 'string',
-					'title'     => 'WordPress Application Password',
-					'required'  => true,
-					'sensitive' => true,
-					'default'   => $creds['password'],
+					'type'        => 'string',
+					'title'       => 'WordPress Application Password',
+					'description' => 'The connection key used to reach your site. Stored securely in your system keychain.',
+					'required'    => true,
+					'sensitive'   => true,
+					'default'     => $creds['password'],
 				),
 			),
 		);
@@ -110,7 +113,7 @@ class MCPB_Generator {
 		 * Filters the .mcpb manifest array before it is encoded and written
 		 * into the zip archive.
 		 *
-		 * @since 1.9.0
+		 * @since 2.0.0
 		 *
 		 * @param array<string,mixed>  $manifest The generated manifest array.
 		 * @param array<string,string> $creds    The credentials used to build it.
@@ -121,7 +124,7 @@ class MCPB_Generator {
 	/**
 	 * Return the host of a site URL, or '' when it has none.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param  string $url Site URL.
 	 * @return string Lowercased host, or '' if the URL has no parseable host.
@@ -145,7 +148,7 @@ class MCPB_Generator {
 	 * Falls back to `block-mcp` when the URL has no host. Power users can still
 	 * override the name via the `gk_block_api_mcpb_manifest` filter.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param  string $url Site URL.
 	 * @return string Extension/server name.
@@ -173,7 +176,7 @@ class MCPB_Generator {
 	 * Extracted so tests can subclass and override this method to simulate
 	 * temp-file creation failures without touching the filesystem.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @return string|false Absolute path to the new empty temp file, or false on failure.
 	 */
 	protected function make_temp_path() {
@@ -192,7 +195,7 @@ class MCPB_Generator {
 	 * the archive. Callers must check is_wp_error() before treating the return
 	 * value as a path.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param array<string,string> $creds       Credential set — passed through to manifest().
 	 * @param string               $server_path Absolute path to the pre-built MCP server bundle

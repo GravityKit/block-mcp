@@ -73,6 +73,28 @@ class McpbGeneratorTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Every user_config option must carry type, title, AND description.
+	 *
+	 * The MCPB v0.3 manifest schema marks all three as required on each option
+	 * (required: ["type", "title", "description"]). A missing description made
+	 * Claude Desktop reject the bundle on double-click with "Invalid manifest:
+	 * user_config: Required, Required, Required" — one error per field. This pins
+	 * that all three schema-required fields are present and non-empty on every
+	 * option so the .mcpb previews and installs.
+	 */
+	public function test_manifest_user_config_options_carry_schema_required_fields() {
+		$cfg = ( new MCPB_Generator() )->manifest( $this->creds() )['user_config'];
+
+		$this->assertNotEmpty( $cfg, 'the manifest must declare user_config options' );
+		foreach ( $cfg as $key => $option ) {
+			foreach ( array( 'type', 'title', 'description' ) as $field ) {
+				$this->assertArrayHasKey( $field, $option, "user_config.{$key} must define '{$field}' (required by the MCPB v0.3 schema)" );
+				$this->assertNotEmpty( $option[ $field ], "user_config.{$key} '{$field}' must be non-empty" );
+			}
+		}
+	}
+
+	/**
 	 * build() must return WP_Error with code 'mcpb_server_missing' when the
 	 * server bundle path does not exist or is not readable.
 	 *
