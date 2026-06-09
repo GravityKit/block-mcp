@@ -34,8 +34,88 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	 * @return void
 	 */
 	public function tear_down() {
-		unset( $_GET['tab'] );
+		unset( $_GET['tab'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+		remove_all_filters( 'wp_redirect' );
 		parent::tear_down();
+	}
+
+	/**
+	 * Capture the redirect URL a handler emits, swallowing its exit().
+	 *
+	 * The scan/reset handlers call wp_safe_redirect() (which runs the
+	 * 'wp_redirect' filter) then exit(). Hook the filter to grab the location
+	 * and throw a catchable marker so exit() doesn't kill the test process.
+	 *
+	 * @param  callable $invoke Closure that calls the handler under test.
+	 * @return string The captured redirect location.
+	 */
+	private function capture_redirect( callable $invoke ): string {
+		$captured = '';
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured ) {
+				$captured = (string) $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+		try {
+			$invoke();
+		} catch ( \RuntimeException $e ) {
+			// Expected: the redirect filter threw to stop exit().
+			unset( $e );
+		} finally {
+			remove_all_filters( 'wp_redirect' );
+		}
+		return $captured;
+	}
+
+	/**
+	 * The scan and reset handlers live on the Block-policy tab, so their
+	 * success notices only render when tab=policy. Both handlers must therefore
+	 * preserve tab=policy in their redirect — otherwise the user lands on the
+	 * default Connect tab and never sees "scan complete" / "settings reset".
+	 *
+	 * @dataProvider policy_tab_handler_provider
+	 *
+	 * @param string $nonce_action check_admin_referer action for the handler.
+	 * @param string $method       Settings_Page method to invoke.
+	 */
+	public function test_policy_tab_handlers_preserve_tab_in_redirect( string $nonce_action, string $method ) {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce                = wp_create_nonce( $nonce_action );
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$location = $this->capture_redirect(
+			static function () use ( $page, $method ) {
+				$page->$method();
+			}
+		);
+
+		$this->assertNotSame( '', $location, "{$method}() must redirect" );
+		$query = (string) wp_parse_url( $location, PHP_URL_QUERY );
+		parse_str( $query, $args );
+		$this->assertSame(
+			'policy',
+			$args['tab'] ?? null,
+			"{$method}() must redirect back to the Block-policy tab so its success notice is visible"
+		);
+	}
+
+	/**
+	 * Handlers whose success notice renders only on the policy tab.
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function policy_tab_handler_provider(): array {
+		return array(
+			'scan'  => array( 'gk_block_api_scan_storage_modes', 'handle_scan' ),
+			'reset' => array( 'gk_block_api_reset_defaults', 'handle_reset' ),
+		);
 	}
 
 	/**

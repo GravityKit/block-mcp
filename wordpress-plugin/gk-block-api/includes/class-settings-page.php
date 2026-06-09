@@ -354,6 +354,9 @@ class Settings_Page {
 		nocache_headers();
 		$args = array(
 			'page'    => self::PAGE_SLUG,
+			// The scan button and its success notice live on the Block-policy
+			// tab; preserve the tab so the notice is actually visible on return.
+			'tab'     => 'policy',
 			'scanned' => 1,
 			'unique'  => (int) $result['unique_blocks'],
 			'dual'    => (int) $result['dual_count'],
@@ -396,6 +399,9 @@ class Settings_Page {
 		nocache_headers();
 		$args = array(
 			'page'  => self::PAGE_SLUG,
+			// The reset button and its success notice live on the Block-policy
+			// tab; preserve the tab so the notice is actually visible on return.
+			'tab'   => 'policy',
 			'reset' => 1,
 		);
 		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
