@@ -360,16 +360,23 @@ class Connect_Page {
 		$identity = in_array( $identity, array( 'agent', 'self' ), true ) ? $identity : 'agent';
 
 		/**
-		 * Filters whether the high-risk "self" identity (mint the credential on the
-		 * approving user's own account, with their full capabilities) may be used.
+		 * Forbid full-account connections so the AI is always a limited agent.
 		 *
-		 * Returning false removes the option from the Approve screen and clamps any
-		 * 'self' request back to the dedicated limited agent account, so an operator
-		 * or managed host can forbid full-account credentials entirely.
+		 * The Approve screen offers two identities: the recommended dedicated
+		 * agent, and "your own account" — which mints a credential carrying the
+		 * approving user's full capabilities. Return false to take that second
+		 * option off the table entirely: the card disappears from the consent
+		 * screen and any `self` request is clamped back to the limited agent.
+		 * The right move for managed hosts, agencies, or any site where an AI
+		 * client should never hold admin-grade access.
 		 *
 		 * @since 2.0.0
 		 *
-		 * @param bool $allowed Whether 'self' is offered. Default true.
+		 * @example
+		 * // Only ever allow the dedicated, least-privilege agent identity.
+		 * add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
+		 *
+		 * @param bool $allowed Whether the "your own account" identity is offered. Default true.
 		 */
 		if ( 'self' === $identity && ! apply_filters( 'gk/block-mcp/identity/allow-self', true ) ) {
 			$identity = 'agent';
@@ -488,16 +495,25 @@ class Connect_Page {
 		$default_mode = ( defined( 'GK_BLOCK_API_FORCE_PASTE_SECRET' ) && GK_BLOCK_API_FORCE_PASTE_SECRET ) ? 'paste' : 'prefill';
 
 		/**
-		 * Filters the secret-at-rest mode for .mcpb bundle generation.
+		 * Decide whether the downloadable .mcpb bundle carries the password.
 		 *
-		 * Returning 'paste' causes the bundle to carry an empty password
-		 * default; the plaintext is returned separately for a one-time UI
-		 * display. Returning 'prefill' (the default) embeds the password so
-		 * the installer requires no manual copy step.
+		 * By default ('prefill') the generated Claude Desktop bundle embeds the
+		 * freshly minted Application Password so installation is a single
+		 * double-click. Tighten this to 'paste' on high-security setups: the
+		 * downloaded file ships with an empty password field and the plaintext
+		 * is shown once in the UI for the admin to copy by hand — so the secret
+		 * never lives inside a file that might land in Downloads, a backup, or a
+		 * shared drive.
 		 *
 		 * @since 2.0.0
 		 *
-		 * @param string $mode 'prefill'|'paste'.
+		 * @example
+		 * // Never write the password into the bundle file.
+		 * add_filter( 'gk/block-mcp/credential/seal-mode', function () {
+		 *     return 'paste';
+		 * } );
+		 *
+		 * @param string $mode Secret-at-rest mode: 'prefill' to embed, 'paste' to omit. Default 'prefill'.
 		 */
 		$mode = (string) apply_filters( 'gk/block-mcp/credential/seal-mode', $default_mode );
 
@@ -1930,6 +1946,7 @@ class Connect_Page {
 						</span>
 					</label>
 
+					<?php // Applies the gk/block-mcp/identity/allow-self filter (documented in provision_credentials()). ?>
 					<?php $self_allowed = (bool) apply_filters( 'gk/block-mcp/identity/allow-self', true ); ?>
 					<?php if ( $self_allowed ) : ?>
 					<label class="gk-block-api-connect__identity-option gk-block-api-connect__identity-option--risky">

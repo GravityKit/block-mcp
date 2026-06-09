@@ -789,7 +789,8 @@ class Settings_Page {
 				// Surface filter-driven overrides so admins aren't confused
 				// by a checked box that the API still rejects.
 				$option_raw = get_option( $uploads_option, '1' );
-				$filtered   = (bool) apply_filters(
+				// Applies the gk/block-mcp/media/uploads-enabled filter (documented in class-media-manager.php).
+				$filtered = (bool) apply_filters(
 					'gk/block-mcp/media/uploads-enabled',
 					( '0' !== (string) $option_raw && false !== $option_raw )
 				);
@@ -833,8 +834,9 @@ class Settings_Page {
 				<?php
 				// Surface filter-driven overrides so admins aren't confused
 				// by a box whose state the API doesn't actually honor.
-				$trash_raw      = get_option( $trash_option, '0' );
-				$trash_stored   = ( '0' !== (string) $trash_raw && false !== $trash_raw );
+				$trash_raw    = get_option( $trash_option, '0' );
+				$trash_stored = ( '0' !== (string) $trash_raw && false !== $trash_raw );
+				// Applies the gk/block-mcp/post/allow-trash filter (documented in class-post-manager.php).
 				$trash_filtered = (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $trash_stored );
 				if ( $trash_stored !== $trash_filtered ) :
 					?>

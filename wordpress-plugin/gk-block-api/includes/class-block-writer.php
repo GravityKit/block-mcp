@@ -847,6 +847,7 @@ class Block_Writer {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
+		// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 		$block_data = apply_filters(
 			'gk/block-mcp/block/format',
 			array(
@@ -1091,6 +1092,7 @@ class Block_Writer {
 			$block_ref = &$this->crud->get_block_by_path( $blocks, $r['path'] );
 			$this->apply_block_update_in_place( $block_ref, $r['attributes'], $r['innerHTML'] );
 
+			// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 			$block_data = apply_filters(
 				'gk/block-mcp/block/format',
 				array(

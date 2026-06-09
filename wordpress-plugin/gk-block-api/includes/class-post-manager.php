@@ -59,6 +59,26 @@ class Post_Manager {
 	public static function trashing_enabled() {
 		$enabled = (bool) get_option( self::ALLOW_TRASH_OPTION, false );
 
+		/**
+		 * Control whether the AI assistant may move posts to the trash.
+		 *
+		 * Trashing is off by default and the agent has no delete capability,
+		 * but moving a post to trash only needs edit access — so this is the
+		 * real gate. There's a checkbox for it in Settings; use the filter when
+		 * you'd rather decide in code, for example allowing the assistant to
+		 * tidy up only its own draft posts while keeping everything else
+		 * untouchable. Return true to permit trashing, false to forbid it.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Let the assistant trash posts only on the staging site.
+		 * add_filter( 'gk/block-mcp/post/allow-trash', function ( $enabled ) {
+		 *     return wp_get_environment_type() === 'staging' ? true : $enabled;
+		 * } );
+		 *
+		 * @param bool $enabled Whether trashing is currently allowed by the stored option.
+		 */
 		return (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $enabled );
 	}
 

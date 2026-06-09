@@ -72,6 +72,26 @@ class Agent_Provisioner {
 	 * @return string The effective role slug (post-filter) callers should assign.
 	 */
 	public static function register_role(): string {
+		/**
+		 * Tune exactly what the Block MCP agent account is allowed to do.
+		 *
+		 * The dedicated agent ships locked down — it writes content but can't
+		 * delete, change settings, or be used to log in. Reach for this filter
+		 * when your workflow needs a tighter or looser fit: hand the agent
+		 * permission to clean up its own drafts, or strip publishing so
+		 * everything it touches stays a draft for human review.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Let the assistant permanently delete the posts it created.
+		 * add_filter( 'gk/block-mcp/agent/caps', function ( $caps ) {
+		 *     $caps['delete_posts'] = true;
+		 *     return $caps;
+		 * } );
+		 *
+		 * @param array<string,bool> $caps Map of capability name => granted, for the agent role.
+		 */
 		$caps = apply_filters(
 			'gk/block-mcp/agent/caps',
 			array(
@@ -91,6 +111,26 @@ class Agent_Provisioner {
 			)
 		);
 
+		/**
+		 * Run the AI agent on a role you control instead of the built-in one.
+		 *
+		 * By default the plugin registers and manages a tidy
+		 * `block_mcp_agent` role for you. Return your own slug here when you
+		 * already govern capabilities centrally — say a membership plugin, a
+		 * compliance policy, or a shared "content bot" role across several
+		 * tools. The moment you return a custom slug, the plugin steps back and
+		 * stops creating or modifying the role, so it's yours to define.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Assign the agent to a role your team already manages.
+		 * add_filter( 'gk/block-mcp/agent/role', function () {
+		 *     return 'content_automation';
+		 * } );
+		 *
+		 * @param string $role Role slug for the agent account. Default 'block_mcp_agent'.
+		 */
 		$role = apply_filters( 'gk/block-mcp/agent/role', self::ROLE );
 
 		// Only register when the filter returns the canonical slug — a custom
@@ -122,6 +162,26 @@ class Agent_Provisioner {
 	 * @return int|\WP_Error Agent user ID, or WP_Error on failure.
 	 */
 	public function ensure() {
+		/**
+		 * Name the AI agent's user account to match your house style.
+		 *
+		 * The service account is created and looked up by this login, so it's
+		 * the username teammates will see in the author dropdown and the users
+		 * list. Pick something that reads cleanly on the byline — `ai-editor`,
+		 * `acme-content-bot` — or align it with a naming convention your other
+		 * automation already follows. Set it before the first connection; the
+		 * login is how the plugin finds the account on every run.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Give the agent a friendlier, on-brand username.
+		 * add_filter( 'gk/block-mcp/agent/login', function () {
+		 *     return 'acme-ai-editor';
+		 * } );
+		 *
+		 * @param string $login Account login name for the agent. Default 'block-mcp'.
+		 */
 		$login = apply_filters( 'gk/block-mcp/agent/login', self::LOGIN );
 
 		// Register the role (idempotent) up front so it exists on the CURRENT
@@ -248,16 +308,22 @@ class Agent_Provisioner {
 	 */
 	public static function purge() {
 		/**
-		 * Filters whether purge() should remove the agent user and credentials
-		 * during uninstall.
+		 * Keep the AI agent account alive across an uninstall/reinstall cycle.
 		 *
-		 * Return false to keep the service account intact — useful for operators
-		 * who manage credentials out-of-band and want to preserve them across
-		 * plugin reinstalls.
+		 * On uninstall the plugin cleans up after itself: it deletes the agent
+		 * user, revokes its credentials, and removes the custom role. Return
+		 * false to preserve that account instead — ideal when you provision
+		 * credentials out-of-band, ship the agent as part of a fleet image, or
+		 * simply don't want a temporary deactivation to force every connected
+		 * client to reconnect.
 		 *
 		 * @since 2.0.0
 		 *
-		 * @param bool $remove Whether to remove the agent. Default true.
+		 * @example
+		 * // Survive reinstalls so connected clients keep working.
+		 * add_filter( 'gk/block-mcp/agent/remove-on-uninstall', '__return_false' );
+		 *
+		 * @param bool $remove Whether to remove the agent on uninstall. Default true.
 		 */
 		if ( ! apply_filters( 'gk/block-mcp/agent/remove-on-uninstall', true ) ) {
 			return;
@@ -273,17 +339,24 @@ class Agent_Provisioner {
 
 			// Resolve the reassign target: filter first, then first administrator.
 			/**
-			 * Filters the user ID that receives agent-authored content when the
-			 * service account is deleted.
+			 * Choose who inherits the agent's content when its account is deleted.
 			 *
-			 * Return a non-zero integer to specify the reassign target directly.
-			 * When the filter returns 0 (the default), purge() selects the first
-			 * administrator on the site. If no administrator is found, authored
-			 * content is handled by WordPress default deletion behaviour.
+			 * When the agent user is removed on uninstall, everything it authored
+			 * needs a new owner. By default that's the first administrator on the
+			 * site — but you rarely want a bot's portfolio dumped on whoever
+			 * happens to be admin #1. Point this at a dedicated editorial owner so
+			 * the byline stays meaningful and nothing is orphaned. Return 0 to
+			 * keep the default behaviour.
 			 *
 			 * @since 2.0.0
 			 *
-			 * @param int $reassign_to Target user ID, or 0 to use the default. Default 0.
+			 * @example
+			 * // Hand the agent's posts to your managing editor (user ID 42).
+			 * add_filter( 'gk/block-mcp/agent/reassign-to', function () {
+			 *     return 42;
+			 * } );
+			 *
+			 * @param int $reassign_to Target user ID, or 0 to use the first administrator. Default 0.
 			 */
 			$reassign = (int) apply_filters( 'gk/block-mcp/agent/reassign-to', 0 );
 

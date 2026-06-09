@@ -995,13 +995,25 @@ class Block_CRUD {
 		clean_post_cache( (int) $post_id );
 
 		/**
-		 * Fires after gk_ref UUIDs have been persisted to a post via direct DB
-		 * write (no revision created, no save_post hook). Use this to invalidate
-		 * any secondary caches keyed on post_content (search indexes, CDN edge
-		 * caches, page-builder CSS). Skipped when the underlying $wpdb->update
-		 * fails.
+		 * React when block reference IDs are written straight to a post.
 		 *
-		 * @param int $post_id Post that received fresh refs.
+		 * To keep editor-only `gk_ref` UUIDs from cluttering your revision
+		 * history, the plugin writes them directly to `post_content` — which
+		 * means `save_post` does not fire and the normal cache-busting chain is
+		 * bypassed. Hook here to catch that write yourself: purge a CDN edge
+		 * cache, reindex the post for search, or regenerate page-builder CSS so
+		 * downstream caches don't serve stale content. Fires only after the
+		 * write succeeds.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Purge a CDN cache for the post whose refs just changed.
+		 * add_action( 'gk/block-mcp/block/refs-persisted', function ( $post_id ) {
+		 *     my_cdn_purge_url( get_permalink( $post_id ) );
+		 * } );
+		 *
+		 * @param int $post_id Post that received the freshly persisted block refs.
 		 */
 		if ( false !== $result ) {
 			do_action( 'gk/block-mcp/block/refs-persisted', (int) $post_id );

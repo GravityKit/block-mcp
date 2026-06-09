@@ -463,12 +463,23 @@ class Pattern_Manager {
 	 */
 	private function synced_patterns_query_limit() {
 		/**
-		 * Filters the maximum number of synced patterns acknowledged per query.
+		 * Set how many synced patterns the API recognizes per query.
 		 *
-		 * Applies to the listing query and the orphan-filter allow-list so
-		 * both call sites use the same set. Raising the cap affects both.
+		 * This cap governs both the synced-pattern listing and the reference
+		 * counts that decide which patterns are "in use," so the two always
+		 * agree on the same set. If your site runs a large, actively used
+		 * pattern library and some patterns aren't showing up, raise this so the
+		 * full set is acknowledged.
 		 *
-		 * @param int $limit Maximum synced patterns acknowledged. Default 500.
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Recognize up to 1,500 synced patterns on a pattern-heavy site.
+		 * add_filter( 'gk/block-mcp/pattern/synced-query-limit', function () {
+		 *     return 1500;
+		 * } );
+		 *
+		 * @param int $limit Maximum number of synced patterns acknowledged per query. Default 500.
 		 */
 		return (int) apply_filters( 'gk/block-mcp/pattern/synced-query-limit', 500 );
 	}
@@ -529,10 +540,23 @@ class Pattern_Manager {
 		$like_pattern = '%' . $wpdb->esc_like( '"ref":' ) . '%';
 
 		/**
-		 * Filters the batch size used when paging through post_content rows
-		 * to tally synced-pattern references. Values < 1 are clamped to 1.
+		 * Tune the memory/speed trade-off when counting pattern usage.
 		 *
-		 * @param int $batch_size Rows pulled per chunk. Default 200.
+		 * To work out how often each synced pattern is used, the plugin pages
+		 * through post content in chunks rather than loading every row at once.
+		 * Lower the batch size to shrink peak memory on a constrained host;
+		 * raise it to finish the tally in fewer round-trips on a fast database.
+		 * Values below 1 are clamped to 1.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @example
+		 * // Use smaller batches on a memory-limited host.
+		 * add_filter( 'gk/block-mcp/pattern/ref-scan-batch-size', function () {
+		 *     return 50;
+		 * } );
+		 *
+		 * @param int $batch_size Number of post rows pulled per chunk. Default 200.
 		 */
 		$batch_size = (int) apply_filters( 'gk/block-mcp/pattern/ref-scan-batch-size', self::SCAN_BATCH_SIZE );
 		$batch_size = max( 1, $batch_size );

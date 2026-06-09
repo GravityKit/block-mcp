@@ -509,17 +509,35 @@ class Block_Reader {
 			}
 
 			/**
-			 * Filter a formatted block before it is included in the response.
+			 * Shape what the AI sees for any block before it's returned.
 			 *
-			 * Use this to strip computed/derived fields (e.g. codeHTML, innerHTML)
-			 * from specific block types so agents never see large noise payloads,
-			 * or to enrich the block with metadata (e.g. attachment size for
-			 * core/image, pattern_ref for core/block).
+			 * This is the single most powerful extension point for tailoring how
+			 * the assistant perceives your content. Strip noisy computed fields so
+			 * the agent isn't drowned in markup, or enrich a block with the
+			 * context it actually needs to edit well — an image's dimensions, a
+			 * custom block's friendly label, a product block's price. It runs for
+			 * every block on read, so a tiny enricher can make a whole block type
+			 * far easier for the AI to reason about and safely modify.
 			 *
-			 * @param array  $data       Formatted block data.
+			 * The same filter also fires on the write path (in Block_Writer) so a
+			 * single enricher keeps reads and write-responses consistent; the
+			 * write path passes the block name but not the read-time context array.
+			 *
+			 * @since 2.0.0
+			 *
+			 * @example
+			 * // Drop heavy rendered HTML from a custom block so the AI sees only its attributes.
+			 * add_filter( 'gk/block-mcp/block/format', function ( $data, $block_name ) {
+			 *     if ( 'acme/chart' === $block_name ) {
+			 *         unset( $data['innerHTML'] );
+			 *     }
+			 *     return $data;
+			 * }, 10, 2 );
+			 *
+			 * @param array  $data       Formatted block data about to be returned.
 			 * @param string $block_name Fully-qualified block type name.
 			 * @param array  $context    {
-			 *     Additional context for enrichers that need it.
+			 *     Additional context for enrichers that need it (read path only).
 			 *
 			 *     @type array  $parsed_block Raw parse_blocks() entry for this block.
 			 *     @type bool   $render       Whether render-mode is active.

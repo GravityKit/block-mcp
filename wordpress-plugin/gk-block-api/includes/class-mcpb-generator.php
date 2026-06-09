@@ -110,13 +110,27 @@ class MCPB_Generator {
 		);
 
 		/**
-		 * Filters the .mcpb manifest array before it is encoded and written
-		 * into the zip archive.
+		 * Customize the Claude Desktop .mcpb bundle before it's packaged.
+		 *
+		 * This is the full manifest the user downloads and double-clicks to
+		 * connect Claude Desktop. Hook in to make the connection your own: set a
+		 * branded display name and description, add custom `user_config` fields,
+		 * or pin a specific server entry for an enterprise deployment. The
+		 * credentials that were just minted are passed alongside so you can tailor
+		 * the bundle to the exact account it's being built for.
 		 *
 		 * @since 2.0.0
 		 *
-		 * @param array<string,mixed>  $manifest The generated manifest array.
-		 * @param array<string,string> $creds    The credentials used to build it.
+		 * @example
+		 * // White-label the bundle your users see in Claude Desktop.
+		 * add_filter( 'gk/block-mcp/mcpb/manifest', function ( $manifest, $creds ) {
+		 *     $manifest['display_name'] = 'Acme Content Assistant';
+		 *     $manifest['description']  = 'Edit acme.com content from Claude.';
+		 *     return $manifest;
+		 * }, 10, 2 );
+		 *
+		 * @param array<string,mixed>  $manifest The generated .mcpb manifest array.
+		 * @param array<string,string> $creds    The credentials the bundle is built for.
 		 */
 		return apply_filters( 'gk/block-mcp/mcpb/manifest', $manifest, $creds );
 	}
