@@ -10,7 +10,9 @@
         "composer/installers": "^2.2",
         "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
         "doctrine/instantiator": "^1.5",
+        "php-stubs/wordpress-stubs": "^6.7",
         "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "phpstan/phpstan": "^1.12",
         "phpunit/phpunit": "^9.6",
         "roots/wordpress": "^6.7",
         "squizlabs/php_codesniffer": "^3.10",
@@ -60,7 +62,9 @@
             "phpunit -c tests/phpunit/multisite.xml"
         ],
         "lint": "phpcs",
-        "lint:fix": "phpcbf"
+        "lint:fix": "phpcbf",
+        "analyze": "phpstan analyse",
+        "analyse": "phpstan analyse"
     },
     "config": {
         "allow-plugins": {

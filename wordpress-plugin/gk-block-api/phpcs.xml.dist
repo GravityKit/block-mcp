@@ -14,6 +14,9 @@
 	<exclude-pattern>*/languages/*</exclude-pattern>
 	<exclude-pattern>*/tests/*</exclude-pattern>
 	<exclude-pattern>*/scripts/*</exclude-pattern>
+	<!-- Static-analysis tooling (defines placeholder WP constants for PHPStan;
+	     not plugin runtime code, so the global-prefix rule doesn't apply). -->
+	<exclude-pattern>*/phpstan-bootstrap.php</exclude-pattern>
 
 	<!-- CLI defaults. -->
 	<arg name="basepath" value="."/>
