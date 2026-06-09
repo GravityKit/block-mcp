@@ -16,3 +16,7 @@ reports/
 # Internal planning + spec docs — kept locally, not shipped to the public repo.
 docs/plans/
 docs/specs/
+docs/identity-modes.md
+
+# Local capture artifacts.
+docs/screenshots/
