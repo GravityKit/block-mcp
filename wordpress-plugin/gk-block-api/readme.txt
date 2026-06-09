@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.9.0
+Stable tag: 2.0.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -87,6 +87,29 @@ Yes. The block API works with any post type that stores block content in `post_c
 
 The MCP (Model Context Protocol) server is a separate TypeScript application that wraps the REST API as AI-friendly tools. It runs locally on the developer's machine and connects to the WordPress plugin via REST. The MCP server is not required to use the REST API directly.
 
+= Can I connect a client manually, without the Connect flow? =
+
+Yes — the Connect flow is just a convenience. To wire up any MCP client by hand:
+
+1. Create an Application Password for a WordPress user that can edit posts (Users → Profile → Application Passwords).
+2. Add the Block MCP server to your client's MCP configuration, with your site URL, that username, and the Application Password:
+
+    {
+      "mcpServers": {
+        "block-mcp": {
+          "command": "npx",
+          "args": ["-y", "@gravitykit/block-mcp"],
+          "env": {
+            "WORDPRESS_URL": "https://your-site.com",
+            "WORDPRESS_USER": "your-username",
+            "WORDPRESS_APP_PASSWORD": "xxxx xxxx xxxx xxxx xxxx xxxx"
+          }
+        }
+      }
+    }
+
+3. Restart the client. The same `@gravitykit/block-mcp` package powers both this manual setup and the Connect flow.
+
 = How do I configure which blocks are "legacy" on my site? =
 
 Visit Settings → Block MCP. Set the score for a namespace to less than 10 to mark it as legacy (hard-rejected on insert). Use the replacement map to suggest alternatives.
@@ -97,8 +120,8 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
-= 1.9.0 =
-New "Connect" onboarding at Settings → Block MCP makes connecting an AI assistant a few clicks: a one-click Claude Desktop installer (.mcpb) or a browser-approve flow for Cursor / Claude Code / ChatGPT that writes the client config for you. A dedicated, minimal-capability service account is provisioned automatically, and its site-wide Application Password is delivered out-of-band — never in a redirect URL or your shell history — and any client config is written owner-only. Disconnect revokes a connection at any time.
+= 2.0.0 =
+Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create — including how its work is credited and whether it's allowed to move posts to the trash.
 
 = 1.8.1 =
 Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
@@ -141,44 +164,22 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 
 == Changelog ==
 
-= 1.9.0 on June 3, 2026 =
+= 2.0.0 on June 8, 2026 =
 
-Connect an AI assistant to your site in a few clicks — no terminal, no hand-edited config files. A new onboarding flow at Settings → Block MCP provisions a dedicated, minimal-capability service account and connects your client for you.
+Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few clicks — no terminal and no config files — using a dedicated, limited account that keeps the assistant's access separate from your own login.
 
-#### ✨ New
+#### 🚀 Added
 
-* **Connect onboarding** (Settings → Block MCP → Connect): pick your client and connect in a few clicks.
-* **One-click Claude Desktop installer** — a generated `.mcpb` bundle with the credential pre-filled; Claude Desktop stores it in the OS keychain. Each site gets a distinct extension name (derived from its full host) so multiple sites coexist.
-* **Browser-Approve handoff** — an in-WordPress Approve screen mints the credential and hands it to a local connector over a loopback callback; the connector writes the MCP config for Cursor, Claude Code, or ChatGPT Desktop (or prints it).
-* **Bundled connector CLI** — `npx -y @gravitykit/block-mcp connect --site <url>` (with `--client` and `--name`); the same bundle backs both the npx path and the `.mcpb`.
-* **Dedicated service account** — a `block-mcp` user with a minimal `block_mcp_agent` role (edit/publish posts and pages; no `manage_options`, no deleting others' content). Interactive login is blocked; Application Password / REST / XML-RPC auth works normally.
-* **Active connections** — list every connection and Disconnect (revoke its Application Password) with one click.
-* **Setup-guide link** — a persistent "Need help? View the setup guide" link (filterable via `gk_block_api_help_url`).
+* **Connect an AI assistant in a few clicks.** A new Connect screen at Settings → Block MCP walks you through linking an AI app to your site — no command line, no editing files. Pick a one-click **Claude Desktop** installer, a browser **Approve** step for **Cursor**, **Claude Code**, or **ChatGPT** that sets everything up for you, or **Configure it myself** for any other MCP client.
+* **A separate, limited account for the AI.** Block MCP gives the assistant its own account to write and edit your posts and pages. It can't change your site settings, delete other people's content, or be used to log in — so the AI never has more access than it needs.
+* **Choose how the assistant's work is credited.** When you connect, decide whether new posts are authored by the dedicated Block MCP account or shown under your name. If you'd rather, you can let the app connect through your own account instead — clearly marked as the higher-access option.
+* **Stay in control of your connections.** See every connected app on the Connect screen — including who approved it and how its posts are credited — and **Disconnect** any of them instantly to revoke its access.
+* **Decide what the AI is allowed to do.** Choose which content types it can create (or allow them all), turn media uploads on or off, and allow or block moving posts to the trash (off by default — and even when allowed, the assistant can only trash content, never permanently delete it). You can also set custom instructions it should always follow, and advanced users can tune which blocks the assistant prefers.
+* **Keyboard and screen-reader friendly.** The Connect and settings screens are fully operable with a keyboard and work with screen readers.
 
-#### 🔒 Security
+#### 🔒 Security & privacy
 
-* The site-wide Application Password is delivered out-of-band via a single-use, short-lived exchange code rather than in the redirect URL, so it stays out of browser history and Referer headers. The code is redeemed exactly once (then deleted), and the credential is keyed at rest by a hash of the code.
-* Client config files are written owner-only (mode `0600`); the password is redacted from stdout unless explicitly revealed.
-* The connector validates the `--site` URL (rejects shell metacharacters; requires HTTPS for non-local hosts), opens the browser without a shell on Windows, and bounds the exchange request with a timeout and no redirect-following.
-* The loopback callback ignores requests that don't match the expected one-time state instead of aborting the pending connect.
-
-#### ✨ Improved
-
-* Modern block-editor styling on the settings page, and plain-language Approve and next-steps screens tailored to the chosen client.
-* Multisite — the service account is granted its role on every blog it's used on (so REST writes work network-wide), and each connection is labelled with the sub-site it was created from.
-
-#### 🧹 Uninstall & lifecycle
-
-* Uninstall removes the service account and its credentials, removes the role, reassigns content the account authored to an administrator (rather than deleting it), and clears the single-use exchange data — on every blog of a multisite network.
-
-#### 🧪 Tests & CI
-
-* The multisite PHPUnit suite is wired into `composer test` and CI so multisite-only contracts run instead of being skipped (and a long-hanging multisite teardown test was fixed).
-* New guards: the plugin-embedded server bundle stays byte-identical to the built `dist/`; an end-to-end harness for the connector flow; the credential-exchange single-use contract at the HTTP boundary; `.mcpb` temp-bundle cleanup; and an npm publish-readiness gate.
-
-#### 💻 Developer Updates
-
-* The connector is distributed as `@gravitykit/block-mcp` on npm; `npx -y @gravitykit/block-mcp connect …` runs the onboarding. A Node.js 20+ preflight prints a clear upgrade message on older runtimes.
+* When you connect, your site credential is never placed in a web address or left in your browser history, and any client config files are written so that only you can read them.
 
 = 1.8.1 on May 22, 2026 =
 
