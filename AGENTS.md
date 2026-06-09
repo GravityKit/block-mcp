@@ -86,9 +86,9 @@ All service objects are constructed inside these hooks — no global singletons.
 The headline 2.0 feature. Goal: connect an AI client in a few clicks, **without the user ever copy-pasting an Application Password**, and with the AI confined to a dedicated least-privilege account.
 
 **Actors:**
-- **`Agent_Provisioner`** (`class-agent-provisioner.php`) — ensures a dedicated WP user `block-mcp` (`LOGIN`), with a custom role `block_mcp_agent` (`ROLE`). The role's caps come through the `gk_block_api_agent_caps` filter: `read`, `edit_posts`, `edit_others_posts`, `edit_published_posts`, `publish_posts`, the `*_pages` equivalents, plus `upload_files`. **Deliberately NO `delete_*`, NO `unfiltered_html`, NO `manage_options`.** An `authenticate` filter blocks interactive sign-in (fail-closed). The role lives in `wp_user_roles` so it survives plugin deactivation. `gk_block_api_agent_role` lets an operator manage their own role slug.
+- **`Agent_Provisioner`** (`class-agent-provisioner.php`) — ensures a dedicated WP user `block-mcp` (`LOGIN`), with a custom role `block_mcp_agent` (`ROLE`). The role's caps come through the `gk/block-mcp/agent/caps` filter: `read`, `edit_posts`, `edit_others_posts`, `edit_published_posts`, `publish_posts`, the `*_pages` equivalents, plus `upload_files`. **Deliberately NO `delete_*`, NO `unfiltered_html`, NO `manage_options`.** An `authenticate` filter blocks interactive sign-in (fail-closed). The role lives in `wp_user_roles` so it survives plugin deactivation. `gk/block-mcp/agent/role` lets an operator manage their own role slug.
 - **`App_Password_Issuer`** (`class-app-password-issuer.php`) — mints an Application Password on a target user via core `WP_Application_Passwords`. The one-time plaintext is surfaced to the caller exactly once and never persisted in the clear.
-- **`Connections`** (`class-connections.php`) — lists/revokes Block-MCP-prefixed Application Passwords (`NAME_PREFIX = 'Block MCP'`) and stores the two facts core can't: who approved each connection and how it authors content (`META_OPTION = gk_block_api_connection_meta`, a **network** option keyed by app-password UUID → `{ user_id, created_by, author_mode, created_at }`).
+- **`Connections`** (`class-connections.php`) — lists/revokes Block-MCP-prefixed Application Passwords (`NAME_PREFIX = 'Block MCP'`) and stores the facts core can't: which account holds each connection and who approved it (`META_OPTION = gk_block_api_connection_meta`, a **network** option keyed by app-password UUID → `{ user_id, created_by, created_at }`).
 - **`MCPB_Generator`** (`class-mcpb-generator.php`) — builds a Claude Desktop `.mcpb` bundle (manifest_version `0.3`) whose `user_config` is pre-filled with the issued credential. Each `user_config` option MUST carry `type` + `title` + `description` (all three required by the v0.3 schema).
 - **`Connect_Page`** (`class-connect-page.php`, the largest class) — the onboarding UI + four admin-post handlers (`ACTION_CONNECT`, `ACTION_AUTHORIZE`, `ACTION_REVOKE`, `ACTION_EXCHANGE` + its `_nopriv` variant) + the REST exchange route.
 
@@ -101,16 +101,15 @@ The headline 2.0 feature. Goal: connect an AI client in a few clicks, **without 
 
 **The .mcpb path (Claude Desktop):** one-click download. `handle_connect()` (admin-post `ACTION_CONNECT`) → `provision_credentials()` → `MCPB_Generator::build()` streams the bundle with the credential pre-filled; the user double-clicks to install.
 
-**Identity model (three options on the Approve screen):**
+**Identity model (two options on the Approve screen):**
 | Option | Credential minted on | Caps | Byline (`post_author` on created posts) |
 |---|---|---|---|
 | `agent` *(default, recommended)* | the dedicated `block-mcp` user | least-privilege | "Block MCP" |
-| `agent_as_me` | the dedicated `block-mcp` user | least-privilege | the approving human |
 | `self` ("Your own account") | **the approving user** | their full caps | the approving human |
 
-`provision_credentials($client, $identity)` chooses the target user, mints the password, and records the choice via `Connections::record_meta()`. The byline is applied at create time by `Connections::author_to_credit()` (reads `rest_get_authenticated_app_password()` → meta → returns the human ID only for `author_mode === 'me'` when the user still exists) and `Post_Manager::create_post()` (sets `post_author`, gated on the agent holding `edit_others_{type}` and the human being able to author the type). The connections list spans both hosts (`Connections::list()` + `list_self_hosted()`); revoke resolves the host from meta (`revoke_by_uuid()`); uninstall revokes own-account credentials at the source (`purge_all_recorded()`).
+`provision_credentials($client, $identity)` validates the identity (`array( 'agent', 'self' )`, falling back to `agent`), chooses the target user, mints the password, and records the choice via `Connections::record_meta()`. There is **no byline subsystem** — `Connections::author_to_credit()` was removed and `Post_Manager::create_post()` no longer remaps `post_author` from connection meta; created content authors as the authenticating account. An explicit `author` argument on create still sets authorship (gated on the actor holding `edit_others_{type}`). Two related controls govern the high-risk `self` mode: the **`gk/block-mcp/identity/allow-self`** filter (default `true`) removes the "Your own account" option AND clamps any `self` request back to the agent when it returns false; and a JS **confirm-gate** (an acknowledgment checkbox) disables Approve until the user accepts that `self` mints an Application Password with their account's full access (the server validates the identity independently). The connections list spans both hosts (`Connections::list()` + `list_self_hosted()`); revoke resolves the host from meta (`revoke_by_uuid()`); uninstall revokes own-account credentials at the source (`purge_all_recorded()`).
 
-**Credential at rest:** the single-use exchange code and paste-mode password are sealed (AES-256-GCM, HKDF key from `wp_salt('auth')`) and stored as non-autoloaded `wp_options` (`gk_block_api_xchg_*`, `gk_block_api_paste_pw_*`) with embedded `expires_at` + opportunistic GC (`gk_block_api_cred_gc_at`). Seal mode is filterable via `gk_block_api_secret_at_rest_mode`. The minted password must NEVER reach JS, URLs, browser history, or be POSTed off-origin.
+**Credential at rest:** the single-use exchange code and paste-mode password are sealed (AES-256-GCM, HKDF key from `wp_salt('auth')`) and stored as non-autoloaded `wp_options` (`gk_block_api_xchg_*`, `gk_block_api_paste_pw_*`) with embedded `expires_at` + opportunistic GC (`gk_block_api_cred_gc_at`). Seal mode is filterable via `gk/block-mcp/credential/seal-mode`. The minted password must NEVER reach JS, URLs, browser history, or be POSTed off-origin.
 
 ### Block CRUD engine
 
@@ -153,7 +152,7 @@ All under `gk-block-api/v1`. Reads require `edit_posts`; per-block writes requir
 - TS: ESM source, `.js` import suffixes, esbuild → single CJS bundle (`dist/index.cjs`). No `dotenv` (breaks the esbuild ESM→CJS bundle; env comes from the parent process).
 
 ### Hook / filter naming
-All plugin hooks are prefixed `gk_block_api_`. Allowed global prefixes (enforced by `WordPress.NamingConventions.PrefixAllGlobals`): `gk_block_api`, `GK_BLOCK_API`, `GravityKit\BlockAPI`. Key filters: `gk_block_api_agent_caps`, `gk_block_api_agent_role`, `gk_block_api_allow_trash`, `gk_block_api_secret_at_rest_mode`, `gk_block_api_mcpb_manifest`, `gk_block_api_url_sideload_blocked_ranges`, `gk_block_api_uploads_enabled`, `gk_block_api_remove_agent_on_uninstall`. The plugin defines no custom *actions* — it relies on core extension points (`rest_api_init`, `admin_post_*`, `wp_kses_post`, `parse_blocks`/`serialize_blocks`, `wp_update_post`).
+Custom **hooks** follow the GravityKit slash convention `gk/block-mcp/{domain}/{leaf}` (e.g. `gk/block-mcp/agent/caps`, `gk/block-mcp/media/sideload-blocked-ranges`). **Option keys, constants, transients, and other global identifiers keep the `gk_block_api_*` prefix** — only `apply_filters`/`do_action`/`add_filter` hook *names* use the slash form. `WordPress.NamingConventions.PrefixAllGlobals` allows `gk_block_api`, `GK_BLOCK_API`, `GravityKit\BlockAPI`, plus the **hook-only** prefix `gk/block-mcp` (`gk/block-mcp` isn't a valid PHP identifier, so `InvalidPrefixPassed` is excluded and it's used only as a hook prefix). `ValidHookName` adds `/` and `-` as word delimiters so the slash/dash names don't trip the all-underscore rule (see `phpcs.xml.dist`). Key filters: `gk/block-mcp/agent/caps`, `gk/block-mcp/agent/role`, `gk/block-mcp/identity/allow-self`, `gk/block-mcp/post/allow-trash`, `gk/block-mcp/credential/seal-mode`, `gk/block-mcp/mcpb/manifest`, `gk/block-mcp/media/sideload-blocked-ranges`, `gk/block-mcp/media/uploads-enabled`, `gk/block-mcp/agent/remove-on-uninstall`. The one custom **action** is `gk/block-mcp/block/refs-persisted`; otherwise the plugin relies on core extension points (`rest_api_init`, `admin_post_*`, `wp_kses_post`, `parse_blocks`/`serialize_blocks`, `wp_update_post`).
 
 ### Code style
 - **Assign checks to named variables before the conditional** — don't inline function calls / compound expressions in `if`/`while`/`?:`. Exception: short-circuit guards where ordering is load-bearing (a null/`isset` guard before a dereference stays inline).
@@ -189,7 +188,7 @@ Add to the `MutationOp` union (`src/types.ts`), the `enum` in `REST_Controller` 
 Add a branch to `HTML_Transformer::auto_transform_html()` — tag swaps use regex (`WP_HTML_Tag_Processor` can't rename tags); attribute/style transforms use the processor (never pre-escape values); return `null` when nothing applies (so the safety warning fires).
 
 ### Restrict / extend the agent
-Filter `gk_block_api_agent_caps` to add/remove capabilities (e.g. grant `delete_posts` to allow hard deletes), or `gk_block_api_agent_role` to manage your own role slug. Enabling **Move posts to trash** in Settings flips `gk_block_api_allow_trash`, which gates `Post_Manager::update_post(status:trash)` at the application layer (the agent has no `delete_*` cap, but `wp_trash_post()` doesn't check caps, so the toggle is the real gate).
+Filter `gk/block-mcp/agent/caps` to add/remove capabilities (e.g. grant `delete_posts` to allow hard deletes), or `gk/block-mcp/agent/role` to manage your own role slug. Enabling **Move posts to trash** in Settings flips the option `gk_block_api_allow_trash` (also filterable via `gk/block-mcp/post/allow-trash`), which gates `Post_Manager::update_post(status:trash)` at the application layer (the agent has no `delete_*` cap, but `wp_trash_post()` doesn't check caps, so the toggle is the real gate).
 
 ## Development
 
@@ -244,7 +243,7 @@ The plugin and MCP server version independently. The plugin follows WP plugin co
 8. **Rate limiting is per-post, not per-user.** Multiple agents editing the same post share the budget (10 writes/min, 2 full rewrites/min).
 9. **Legacy-tier blocks are hard-rejected** on insert/replace (HTTP 400); avoid-tier warns but succeeds. Enforcement is insert-only — `update-attrs`/`update-html` don't re-check tiers.
 10. **No `dotenv` in the server.** It breaks the esbuild ESM→CJS bundle. Env vars come from the parent process only.
-11. **The agent role survives deactivation.** It lives in `wp_user_roles`; only `uninstall.php` (or `Agent_Provisioner::purge()`, gated by `gk_block_api_remove_agent_on_uninstall`) tears it down.
+11. **The agent role survives deactivation.** It lives in `wp_user_roles`; only `uninstall.php` (or `Agent_Provisioner::purge()`, gated by the `gk/block-mcp/agent/remove-on-uninstall` filter) tears it down.
 
 ## Related Resources
 

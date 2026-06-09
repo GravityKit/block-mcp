@@ -121,7 +121,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 == Upgrade Notice ==
 
 = 2.0.0 =
-Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create — including how its work is credited and whether it's allowed to move posts to the trash.
+Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create and whether it's allowed to move posts to the trash.
 
 = 1.8.1 =
 Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
@@ -172,14 +172,18 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 
 * **Connect an AI assistant in a few clicks.** A new Connect screen at Settings → Block MCP walks you through linking an AI app to your site — no command line, no editing files. Pick a one-click **Claude Desktop** installer, a browser **Approve** step for **Cursor**, **Claude Code**, or **ChatGPT** that sets everything up for you, or **Configure it myself** for any other MCP client.
 * **A separate, limited account for the AI.** Block MCP gives the assistant its own account to write and edit your posts and pages. It can't change your site settings, delete other people's content, or be used to log in — so the AI never has more access than it needs.
-* **Choose how the assistant's work is credited.** When you connect, decide whether new posts are authored by the dedicated Block MCP account or shown under your name. If you'd rather, you can let the app connect through your own account instead — clearly marked as the higher-access option.
-* **Stay in control of your connections.** See every connected app on the Connect screen — including who approved it and how its posts are credited — and **Disconnect** any of them instantly to revoke its access.
+* **Or connect through your own account.** Most sites should use the dedicated account above. If the assistant needs the same access your own account has, you can connect through your account instead — it's clearly flagged as the higher-risk choice and asks you to confirm you understand before finishing.
+* **Stay in control of your connections.** See every connected app on the Connect screen — including which account it uses and who approved it — and **Disconnect** any of them instantly to revoke its access.
 * **Decide what the AI is allowed to do.** Choose which content types it can create (or allow them all), turn media uploads on or off, and allow or block moving posts to the trash (off by default — and even when allowed, the assistant can only trash content, never permanently delete it). You can also set custom instructions it should always follow, and advanced users can tune which blocks the assistant prefers.
 * **Keyboard and screen-reader friendly.** The Connect and settings screens are fully operable with a keyboard and work with screen readers.
 
 #### 🔒 Security & privacy
 
 * When you connect, your site credential is never placed in a web address or left in your browser history, and any client config files are written so that only you can read them.
+
+#### 🛠 Developer note
+
+* Every plugin hook now uses the GravityKit `gk/block-mcp/{area}/{name}` naming — for example, the trash filter `gk_block_api_allow_trash` is now `gk/block-mcp/post/allow-trash`. If you've customized Block MCP with your own code, rename your `add_filter()` / `add_action()` calls to match. Option names are unchanged.
 
 = 1.8.1 on May 22, 2026 =
 

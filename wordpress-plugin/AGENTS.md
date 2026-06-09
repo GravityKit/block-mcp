@@ -31,7 +31,7 @@ gk-block-api/
     ├── class-block-inventory.php  # Site-wide block/pattern inventory + storage-mode scan (~775)
     ├── class-preferences.php      # Namespace scoring, replacement map (~345)
     ── Post / term / media lifecycle (v1.2) ──────────────────────────────
-    ├── class-post-manager.php     # create_post / update_post (+ trash toggle, byline) (~915)
+    ├── class-post-manager.php     # create_post / update_post (+ trash toggle, explicit author arg) (~915)
     ├── class-term-manager.php     # list_terms (~175)
     ├── class-media-manager.php    # upload_media (multipart/URL/base64 + SSRF guard) (~680)
     ── HTTP + integrations ───────────────────────────────────────────────
@@ -42,7 +42,7 @@ gk-block-api/
     ├── class-connect-page.php     # Onboarding UI + admin-post handlers + exchange route (~2530)
     ├── class-agent-provisioner.php# Dedicated agent user + role + login block + purge (~405)
     ├── class-app-password-issuer.php # Mint an Application Password on a user (~75)
-    ├── class-connections.php      # List/revoke connections + connection meta + byline (~330)
+    ├── class-connections.php      # List/revoke connections + connection meta (~330)
     ├── class-mcpb-generator.php   # Claude Desktop .mcpb bundle generator (~255)
     └── class-settings-page.php    # Settings + Connect admin pages (~1280)
 ```
@@ -87,9 +87,9 @@ REST_Controller
 The 2.0 flow connects an AI client in a few clicks with no Application-Password copy-pasting and confines the AI to a dedicated least-privilege account.
 
 ### Classes
-- **`Agent_Provisioner`** — `ensure()` provisions/returns the dedicated user `block-mcp` (`LOGIN`) with role `block_mcp_agent` (`ROLE`). Caps come through `gk_block_api_agent_caps`: `read`, `edit_posts`, `edit_others_posts`, `edit_published_posts`, `publish_posts`, the four `*_pages` equivalents, `upload_files` — **NO `delete_*`, NO `unfiltered_html`, NO `manage_options`, NO `manage_categories`**. `block_agent_login()` (on `authenticate`) blocks interactive sign-in (fail-closed). The role persists in `wp_user_roles` across deactivation; `purge()` (gated by `gk_block_api_remove_agent_on_uninstall`) removes the user + role + options. `gk_block_api_agent_role` lets an operator own the slug.
+- **`Agent_Provisioner`** — `ensure()` provisions/returns the dedicated user `block-mcp` (`LOGIN`) with role `block_mcp_agent` (`ROLE`). Caps come through `gk/block-mcp/agent/caps`: `read`, `edit_posts`, `edit_others_posts`, `edit_published_posts`, `publish_posts`, the four `*_pages` equivalents, `upload_files` — **NO `delete_*`, NO `unfiltered_html`, NO `manage_options`, NO `manage_categories`**. `block_agent_login()` (on `authenticate`) blocks interactive sign-in (fail-closed). The role persists in `wp_user_roles` across deactivation; `purge()` (gated by `gk/block-mcp/agent/remove-on-uninstall`) removes the user + role + options. `gk/block-mcp/agent/role` lets an operator own the slug.
 - **`App_Password_Issuer`** — `issue($user_id, $label)` mints an Application Password via core; returns the one-time plaintext + UUID (never persisted in the clear).
-- **`Connections`** — `list($user_id)` / `list_self_hosted($agent_id)` enumerate Block-MCP-prefixed credentials (`NAME_PREFIX = 'Block MCP'`); `revoke()` / `revoke_by_uuid()` delete them (host resolved from meta); `record_meta()` / `get_meta()` / `forget_meta()` / `author_to_credit()` / `purge_all_recorded()` manage the network option `gk_block_api_connection_meta` (UUID → `{ user_id, created_by, author_mode, created_at }`).
+- **`Connections`** — `list($user_id)` / `list_self_hosted($agent_id)` enumerate Block-MCP-prefixed credentials (`NAME_PREFIX = 'Block MCP'`); `revoke()` / `revoke_by_uuid()` delete them (host resolved from meta); `record_meta()` / `get_meta()` / `forget_meta()` / `purge_all_recorded()` manage the network option `gk_block_api_connection_meta` (UUID → `{ user_id, created_by, created_at }`). No byline subsystem — `author_to_credit()` was removed in 2.0.
 - **`MCPB_Generator`** — `manifest($creds)` (manifest_version `0.3`; each `user_config` option needs `type`+`title`+`description`) and `build($creds, $server_path)` (streams the `.mcpb` zip).
 - **`Connect_Page`** — the onboarding UI + the handlers + the exchange route (methods below).
 
@@ -99,7 +99,7 @@ The 2.0 flow connects an AI client in a few clicks with no Application-Password 
 |---|---|
 | `register()` | Hooks the four `admin_post_*` handlers (+ `_nopriv` exchange) |
 | `register_rest_routes()` / `rest_exchange()` | `POST /connect/exchange` (permission `__return_true`) |
-| `provision_credentials($client, $identity)` | Mint on agent or self per identity; record meta; return creds |
+| `provision_credentials($client, $identity)` | Mint on agent or self per identity (`agent` / `self`; `self` clamps to `agent` when `gk/block-mcp/identity/allow-self` is false); record meta; return creds |
 | `handle_connect()` (`ACTION_CONNECT`) | `.mcpb` download / setup-artifact path |
 | `handle_authorize()` (`ACTION_AUTHORIZE`) | Browser-Approve: validate loopback callback, provision, redirect a single-use *code* |
 | `handle_exchange()` (`ACTION_EXCHANGE` + `_nopriv`) | Redeem the code once → `{ success, data:{ site, user, password } }` |
@@ -110,10 +110,10 @@ The 2.0 flow connects an AI client in a few clicks with no Application-Password 
 | `gc_records()` | Opportunistic sweep of expired sealed credential records |
 
 ### Identity model
-`provision_credentials($client, $identity)` branches on `agent` (mint on the dedicated user, byline "Block MCP"), `agent_as_me` (mint on the dedicated user, byline = approver), or `self` (mint on the **approving user**, full caps, byline = approver). Byline is applied at create time via `Connections::author_to_credit()` + `Post_Manager::create_post()` (`post_author`, gated on the agent's `edit_others_{type}` + the human being able to author the type).
+`provision_credentials($client, $identity)` offers **two** identities: `agent` (mint on the dedicated `block-mcp` user, least-privilege, content authored by "Block MCP") and `self` (mint on the **approving user**, their full caps, content authored by them). The middle `agent_as_me` byline option was removed in 2.0 — there is no byline subsystem; `Post_Manager::create_post()` no longer remaps `post_author` from connection meta, and content authors as the authenticating account. An explicit `author` argument on create still sets authorship (gated on the actor's `edit_others_{type}`). The high-risk `self` mode is governed by the **`gk/block-mcp/identity/allow-self`** filter (default `true`): returning false removes the "Your own account" card from the Approve screen AND clamps any `self` request back to `agent`. A JS confirm-gate (acknowledgment checkbox) also disables Approve until the user accepts that `self` mints an Application Password with full account access (the server validates the identity independently).
 
 ### Credential at rest
-The single-use exchange code + paste-mode password are sealed (AES-256-GCM, HKDF from `wp_salt('auth')`) into non-autoloaded options `gk_block_api_xchg_*` / `gk_block_api_paste_pw_*` with embedded `expires_at` + GC marker `gk_block_api_cred_gc_at`. Seal mode is filterable via `gk_block_api_secret_at_rest_mode`. The minted password must NEVER reach JS, URLs, browser history, or be POSTed off-origin.
+The single-use exchange code + paste-mode password are sealed (AES-256-GCM, HKDF from `wp_salt('auth')`) into non-autoloaded options `gk_block_api_xchg_*` / `gk_block_api_paste_pw_*` with embedded `expires_at` + GC marker `gk_block_api_cred_gc_at`. Seal mode is filterable via `gk/block-mcp/credential/seal-mode`. The minted password must NEVER reach JS, URLs, browser history, or be POSTed off-origin.
 
 ## REST API Reference
 
@@ -138,7 +138,7 @@ All routes under `gk-block-api/v1`.
 | PUT | `/posts/{id}/blocks` | `replace_all_blocks` (stricter `put` rate limit) |
 | POST | `/posts/{id}/mutate` | 9-op path mutation |
 | POST | `/posts/{id}/insert-pattern` | synced ref or inlined |
-| POST | `/posts` · PATCH `/posts/{id}` | create / update (status, terms, byline) |
+| POST | `/posts` · PATCH `/posts/{id}` | create / update (status, terms, explicit author arg) |
 | GET | `/terms` · POST `/media` | term listing · media upload (SSRF-guarded) |
 | POST | `/storage-modes/scan` | dual-storage classification scan (`manage_options`) |
 
@@ -163,9 +163,9 @@ All routes under `gk-block-api/v1`.
 
 **`Block_Registry` / `Pattern_Manager` / `Block_Inventory` / `Preferences`** — discovery, scoring, inventory, and the namespace-score/replacement-map config (option `gk_block_api_preferences`). `Block_Inventory::scan_storage_modes()` classifies blocks as static/dynamic/dual.
 
-**`Post_Manager`** — `create_post()` (title required, post-type allow-list, status enum, parent/term/featured validation, byline), `update_post()` (status transitions via `wp_trash_post`/`wp_untrash_post`; `mixed_trash_payload` guard; **trash gated by `Post_Manager::trashing_enabled()` / option `gk_block_api_allow_trash`**, default off). Shares the per-post write rate bucket.
+**`Post_Manager`** — `create_post()` (title required, post-type allow-list, status enum, parent/term/featured validation, optional explicit `author` arg gated on `edit_others_{type}`), `update_post()` (status transitions via `wp_trash_post`/`wp_untrash_post`; `mixed_trash_payload` guard; **trash gated by `Post_Manager::trashing_enabled()` / option `gk_block_api_allow_trash`, filtered through `gk/block-mcp/post/allow-trash`**, default off). Shares the per-post write rate bucket.
 
-**`Term_Manager`** — `list_terms()` (cap `edit_posts`, per-page ≤200). **`Media_Manager`** — `upload_media()` (multipart / URL sideload / base64; SSRF guard rejecting reserved/private/link-local IPs before `download_url()`; MIME allow-list; size caps; `gk_block_api_url_sideload_blocked_ranges` filter).
+**`Term_Manager`** — `list_terms()` (cap `edit_posts`, per-page ≤200). **`Media_Manager`** — `upload_media()` (multipart / URL sideload / base64; SSRF guard rejecting reserved/private/link-local IPs before `download_url()`; MIME allow-list; size caps; `gk/block-mcp/media/sideload-blocked-ranges` filter).
 
 **`REST_Controller`** — registers every route; `check_permissions` (read) / `check_edit_permissions` + `check_post_edit_permission` (write); `handle_error()` envelope; sparse-field selection; recursive search.
 
@@ -178,14 +178,14 @@ All routes under `gk-block-api/v1`.
 - **Render mode** sets up `$GLOBALS['post']`/`setup_postdata` (restored after) so shortcodes/template tags resolve.
 - **Rate limiting is per-post, not per-user** (transient `gk_block_api_rate_{post_id}`, 2-minute TTL, sliding window).
 - **Mixed-trash guard:** `update_post` rejects `status:trash` combined with other fields (`mixed_trash_payload`); the trash *gate* (`trash_disabled` 403) fires first when the toggle is off.
-- **Agent identity gate:** the agent has no `delete_*` cap, but `wp_trash_post()` checks none — so `gk_block_api_allow_trash` is the application-level gate. Byline assignment requires the agent's `edit_others_{type}`.
+- **Agent identity gate:** the agent has no `delete_*` cap, but `wp_trash_post()` checks none — so the option `gk_block_api_allow_trash` (filtered through `gk/block-mcp/post/allow-trash`) is the application-level gate. Assigning an explicit `author` other than the actor requires the actor's `edit_others_{type}`.
 
 ## Extension Patterns
 
 - **New REST endpoint:** `register_rest_route()` in `REST_Controller::register_routes()` → handler (try/catch → `handle_error()`) → `check_permissions`/`check_edit_permissions` + `check_post_edit_permission`.
 - **New mutation op:** add to the route `enum` + `Block_Mutator::mutate()` switch; update grandparent `innerContent` if child count changes.
 - **New auto-transform:** add to `HTML_Transformer::auto_transform_html()` (regex for tag swaps; `WP_HTML_Tag_Processor` for attrs); return `null` when inapplicable.
-- **Restrict/extend the agent:** filter `gk_block_api_agent_caps` (e.g. add `delete_posts`) or `gk_block_api_agent_role`. Enable trashing via Settings (option `gk_block_api_allow_trash`).
+- **Restrict/extend the agent:** filter `gk/block-mcp/agent/caps` (e.g. add `delete_posts`) or `gk/block-mcp/agent/role`. Forbid full-account credentials with `gk/block-mcp/identity/allow-self` → `__return_false`. Enable trashing via Settings (option `gk_block_api_allow_trash`) or the `gk/block-mcp/post/allow-trash` filter.
 - **Modify preferences:** `Preferences::update_preferences()` (deep-merges sub-keys).
 
 ## Conventions
