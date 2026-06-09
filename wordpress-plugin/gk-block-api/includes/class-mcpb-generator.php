@@ -39,7 +39,7 @@ class MCPB_Generator {
 	 * extension cannot be enabled without it.
 	 *
 	 * Callers may mutate the manifest before it reaches the zip via the
-	 * `gk_block_api_mcpb_manifest` filter.
+	 * `gk/block-mcp/mcpb/manifest` filter.
 	 *
 	 * @since 2.0.0
 	 *
@@ -118,7 +118,7 @@ class MCPB_Generator {
 		 * @param array<string,mixed>  $manifest The generated manifest array.
 		 * @param array<string,string> $creds    The credentials used to build it.
 		 */
-		return apply_filters( 'gk_block_api_mcpb_manifest', $manifest, $creds );
+		return apply_filters( 'gk/block-mcp/mcpb/manifest', $manifest, $creds );
 	}
 
 	/**
@@ -146,7 +146,7 @@ class MCPB_Generator {
 	 * ports. This is the same scheme the connector's defaultServerName() uses, so
 	 * a site keeps a consistent name whether connected via .mcpb or the CLI.
 	 * Falls back to `block-mcp` when the URL has no host. Power users can still
-	 * override the name via the `gk_block_api_mcpb_manifest` filter.
+	 * override the name via the `gk/block-mcp/mcpb/manifest` filter.
 	 *
 	 * @since 2.0.0
 	 *

@@ -31,7 +31,7 @@ class MediaManagerTest extends WP_UnitTestCase {
 		// hooks this file attaches — useful if a future base-class change
 		// drops the hook-backup behavior.
 		remove_all_filters( 'upload_size_limit' );
-		remove_all_filters( 'gk_block_api_media_upload_overrides' );
+		remove_all_filters( 'gk/block-mcp/media/upload-overrides' );
 		remove_all_filters( 'pre_http_request' );
 		parent::tear_down();
 	}
@@ -128,10 +128,10 @@ class MediaManagerTest extends WP_UnitTestCase {
 		// _wp_handle_upload() short-circuits to `is_readable()` instead of
 		// `is_uploaded_file()` whenever the action is anything other than
 		// the literal 'wp_handle_upload'. The plugin's
-		// gk_block_api_media_upload_overrides filter lets us swap to the
+		// gk/block-mcp/media/upload-overrides filter lets us swap to the
 		// sideload action so PHPUnit-staged temp files reach the rest of
 		// the pipeline.
-		add_filter( 'gk_block_api_media_upload_overrides', static function ( $overrides ) {
+		add_filter( 'gk/block-mcp/media/upload-overrides', static function ( $overrides ) {
 			$overrides['action'] = 'wp_handle_sideload';
 			return $overrides;
 		} );

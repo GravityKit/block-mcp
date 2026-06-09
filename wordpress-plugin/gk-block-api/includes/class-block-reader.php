@@ -410,7 +410,7 @@ class Block_Reader {
 
 			// Synced-pattern (core/block) `pattern_ref` expansion lives in the
 			// Core_Block_Enricher at includes/block-enrichers/class-core-block-enricher.php
-			// and fires via the gk_block_api_format_block filter below. The enricher
+			// and fires via the gk/block-mcp/block/format filter below. The enricher
 			// receives the parsed block + this Reader instance through filter context
 			// so it can recursively format the pattern's own block tree under render
 			// mode without touching this loop.
@@ -529,7 +529,7 @@ class Block_Reader {
 			 * }
 			 */
 			$data = apply_filters(
-				'gk_block_api_format_block',
+				'gk/block-mcp/block/format',
 				$data,
 				$block['blockName'],
 				array(

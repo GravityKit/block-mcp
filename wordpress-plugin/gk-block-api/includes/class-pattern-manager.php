@@ -44,7 +44,7 @@ class Pattern_Manager {
 	/**
 	 * Rows pulled per chunk when scanning post_content for pattern references.
 	 * Peak memory scales with batch_size × matching post_content size.
-	 * Override via the `gk_block_api_pattern_ref_scan_batch_size` filter.
+	 * Override via the `gk/block-mcp/pattern/ref-scan-batch-size` filter.
 	 */
 	const SCAN_BATCH_SIZE = 200;
 
@@ -470,7 +470,7 @@ class Pattern_Manager {
 		 *
 		 * @param int $limit Maximum synced patterns acknowledged. Default 500.
 		 */
-		return (int) apply_filters( 'gk_block_api_synced_patterns_query_limit', 500 );
+		return (int) apply_filters( 'gk/block-mcp/pattern/synced-query-limit', 500 );
 	}
 
 	/**
@@ -534,7 +534,7 @@ class Pattern_Manager {
 		 *
 		 * @param int $batch_size Rows pulled per chunk. Default 200.
 		 */
-		$batch_size = (int) apply_filters( 'gk_block_api_pattern_ref_scan_batch_size', self::SCAN_BATCH_SIZE );
+		$batch_size = (int) apply_filters( 'gk/block-mcp/pattern/ref-scan-batch-size', self::SCAN_BATCH_SIZE );
 		$batch_size = max( 1, $batch_size );
 
 		$offset = 0;

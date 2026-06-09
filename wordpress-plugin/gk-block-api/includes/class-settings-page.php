@@ -790,7 +790,7 @@ class Settings_Page {
 				// by a checked box that the API still rejects.
 				$option_raw = get_option( $uploads_option, '1' );
 				$filtered   = (bool) apply_filters(
-					'gk_block_api_uploads_enabled',
+					'gk/block-mcp/media/uploads-enabled',
 					( '0' !== (string) $option_raw && false !== $option_raw )
 				);
 				if ( ( '0' !== (string) $option_raw && false !== $option_raw ) !== $filtered ) :
@@ -801,7 +801,7 @@ class Settings_Page {
 						printf(
 							/* translators: %s: filter name */
 							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-api' ),
-							'<code>gk_block_api_uploads_enabled</code>'
+							'<code>gk/block-mcp/media/uploads-enabled</code>'
 						);
 						?>
 					</p>
@@ -835,7 +835,7 @@ class Settings_Page {
 				// by a box whose state the API doesn't actually honor.
 				$trash_raw      = get_option( $trash_option, '0' );
 				$trash_stored   = ( '0' !== (string) $trash_raw && false !== $trash_raw );
-				$trash_filtered = (bool) apply_filters( 'gk_block_api_allow_trash', $trash_stored );
+				$trash_filtered = (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $trash_stored );
 				if ( $trash_stored !== $trash_filtered ) :
 					?>
 					<p class="description" style="color:#b32d2e;">
@@ -844,7 +844,7 @@ class Settings_Page {
 						printf(
 							/* translators: %s: filter name */
 							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-api' ),
-							'<code>gk_block_api_allow_trash</code>'
+							'<code>gk/block-mcp/post/allow-trash</code>'
 						);
 						?>
 					</p>

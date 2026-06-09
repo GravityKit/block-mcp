@@ -87,7 +87,7 @@ const CURRENT_DB_VERSION = '1.4.2';
  * was added for (WP P1-3).
  */
 function register_global_filters() {
-	add_filter( 'gk_block_api_dual_storage_blocks', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
+	add_filter( 'gk/block-mcp/block/dual-storage', __NAMESPACE__ . '\\merge_manual_dual_storage_blocks' );
 
 	// Block-type integrations — each file registers its own gk_block_api_* filters.
 	// (array) cast guards against glob() returning false on permission errors or
@@ -98,7 +98,7 @@ function register_global_filters() {
 	}
 
 	// Block-type enrichers — one class per block-name namespace, each calling
-	// add_filter on gk_block_api_format_block. Pattern modeled on Automattic's
+	// add_filter on gk/block-mcp/block/format. Pattern modeled on Automattic's
 	// vip-block-data-api block-additions/ directory. Each file ends with
 	// `Foo_Enricher::init();` to self-register the filter.
 	foreach ( (array) glob( GK_BLOCK_API_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {

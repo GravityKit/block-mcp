@@ -56,7 +56,7 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		$this->clean_agent_state();
-		remove_filter( 'gk_block_api_remove_agent_on_uninstall', '__return_false' );
+		remove_filter( 'gk/block-mcp/agent/remove-on-uninstall', '__return_false' );
 		parent::tear_down();
 	}
 

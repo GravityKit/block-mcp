@@ -7,7 +7,7 @@
  * would let it manage the site (manage_options), delete others' work
  * (delete_others_posts), or inject unfiltered HTML (unfiltered_html).
  *
- * The gk_block_api_agent_caps filter must let operators narrow or widen
+ * The gk/block-mcp/agent/caps filter must let operators narrow or widen
  * the capability set — register_role() must honour it on a clean call.
  *
  * @package GravityKit\BlockAPI\Tests\Connect
@@ -28,7 +28,7 @@ class AgentRoleTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		remove_all_filters( 'gk_block_api_agent_caps' );
+		remove_all_filters( 'gk/block-mcp/agent/caps' );
 		remove_role( Agent_Provisioner::ROLE );
 		parent::tear_down();
 	}
@@ -57,7 +57,7 @@ class AgentRoleTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * When the gk_block_api_agent_role filter returns a non-canonical slug,
+	 * When the gk/block-mcp/agent/role filter returns a non-canonical slug,
 	 * register_role() must return that slug and must NOT create or modify the
 	 * block_mcp_agent role — the operator is responsible for ensuring the
 	 * custom role exists.
@@ -67,24 +67,24 @@ class AgentRoleTest extends WP_UnitTestCase {
 	 * have a redundant block_mcp_agent role created alongside it.
 	 */
 	public function test_role_slug_filter_returns_custom_slug_without_creating_canonical_role() {
-		add_filter( 'gk_block_api_agent_role', static fn() => 'editor' );
+		add_filter( 'gk/block-mcp/agent/role', static fn() => 'editor' );
 
 		$returned_slug = Agent_Provisioner::register_role();
 
-		remove_all_filters( 'gk_block_api_agent_role' );
+		remove_all_filters( 'gk/block-mcp/agent/role' );
 
 		$this->assertSame( 'editor', $returned_slug, 'register_role() must return the slug the filter resolves' );
 		$this->assertNull( get_role( Agent_Provisioner::ROLE ), 'block_mcp_agent role must not be created when the filter returns a custom slug' );
 	}
 
 	/**
-	 * The gk_block_api_agent_caps filter must override the default capability
+	 * The gk/block-mcp/agent/caps filter must override the default capability
 	 * set when register_role() is called. A narrow filter that omits
 	 * upload_files must produce a role without that capability.
 	 */
 	public function test_caps_filter_overrides_default_capabilities() {
 		add_filter(
-			'gk_block_api_agent_caps',
+			'gk/block-mcp/agent/caps',
 			static function () {
 				return array( 'read' => true, 'edit_posts' => true );
 			}

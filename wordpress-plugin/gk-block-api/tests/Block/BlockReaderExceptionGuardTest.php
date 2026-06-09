@@ -37,7 +37,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 
 	public function tear_down(): void {
 		// Clean up any filters registered in test bodies.
-		remove_all_filters( 'gk_block_api_format_block' );
+		remove_all_filters( 'gk/block-mcp/block/format' );
 		parent::tear_down();
 	}
 
@@ -45,7 +45,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 
 	public function test_get_blocks_returns_wp_error_when_format_filter_throws() {
 		add_filter(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			static function () {
 				throw new \RuntimeException( 'simulated downstream failure' );
 			}
@@ -69,7 +69,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 
 	public function test_get_blocks_wp_error_message_includes_exception_message() {
 		add_filter(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			static function () {
 				throw new \LogicException( 'unique-marker-string-zXq42' );
 			}
@@ -89,7 +89,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 
 	public function test_get_blocks_wp_error_details_only_when_wp_debug_enabled() {
 		add_filter(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			static function () {
 				throw new \RuntimeException( 'debug-mode-probe' );
 			}
@@ -131,7 +131,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 
 	public function test_get_blocks_render_mode_exception_is_caught() {
 		add_filter(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			static function () {
 				throw new \RuntimeException( 'render-time failure' );
 			}
@@ -153,7 +153,7 @@ class BlockReaderExceptionGuardTest extends BlockApiTestCase {
 		$GLOBALS['post'] = get_post( $other_post_id );
 
 		add_filter(
-			'gk_block_api_format_block',
+			'gk/block-mcp/block/format',
 			static function () {
 				throw new \RuntimeException( 'restore probe' );
 			}

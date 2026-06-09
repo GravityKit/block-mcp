@@ -105,7 +105,7 @@ class Block_Inventory {
 	 *   must be kept in sync (e.g., yoast/faq-block.questions[]).
 	 *
 	 * Site admins can extend the dual-storage list via the
-	 * `gk_block_api_dual_storage_blocks` filter.
+	 * `gk/block-mcp/block/dual-storage` filter.
 	 *
 	 * @param string $block_name Fully-qualified block name.
 	 * @param bool   $is_dynamic Whether the registered block is server-rendered.
@@ -144,7 +144,7 @@ class Block_Inventory {
 			 * @param string[] $dual_blocks Block names considered dual-storage.
 			 */
 			$dual_blocks = (array) apply_filters(
-				'gk_block_api_dual_storage_blocks',
+				'gk/block-mcp/block/dual-storage',
 				array(
 					'yoast/faq-block',
 					'yoast/how-to-block',
@@ -702,7 +702,7 @@ class Block_Inventory {
 		 *
 		 * @param int $limit Maximum synced patterns to scan. Default 500.
 		 */
-		$legacy_scan_limit = (int) apply_filters( 'gk_block_api_legacy_patterns_scan_limit', 500 );
+		$legacy_scan_limit = (int) apply_filters( 'gk/block-mcp/pattern/legacy-scan-limit', 500 );
 
 		$patterns = get_posts(
 			array(

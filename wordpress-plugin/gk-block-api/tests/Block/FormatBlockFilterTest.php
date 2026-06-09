@@ -1,6 +1,6 @@
 <?php
 /**
- * Tests for the gk_block_api_format_block filter behaviour from
+ * Tests for the gk/block-mcp/block/format filter behaviour from
  * includes/integrations/cbp.php.
  *
  * These tests exercise the filter logic directly as a plain PHP function

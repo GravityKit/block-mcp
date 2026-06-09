@@ -39,7 +39,7 @@ class Yoast_Faq_Enricher {
 	 * @return void
 	 */
 	public static function init() {
-		add_filter( 'gk_block_api_format_block', array( __CLASS__, 'enrich' ), 10, 2 );
+		add_filter( 'gk/block-mcp/block/format', array( __CLASS__, 'enrich' ), 10, 2 );
 	}
 
 	/**

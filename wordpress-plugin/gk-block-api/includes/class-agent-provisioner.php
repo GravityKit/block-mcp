@@ -30,7 +30,7 @@ class Agent_Provisioner {
 	/**
 	 * Default login name for the service account.
 	 *
-	 * Overridable via the `gk_block_api_agent_login` filter.
+	 * Overridable via the `gk/block-mcp/agent/login` filter.
 	 *
 	 * @since 2.0.0
 	 * @var string
@@ -60,9 +60,9 @@ class Agent_Provisioner {
 	/**
 	 * Register the minimal block_mcp_agent role idempotently.
 	 *
-	 * The capability set is passed through the `gk_block_api_agent_caps`
+	 * The capability set is passed through the `gk/block-mcp/agent/caps`
 	 * filter so site operators can narrow or widen it. The role slug is
-	 * passed through `gk_block_api_agent_role`; registration is skipped
+	 * passed through `gk/block-mcp/agent/role`; registration is skipped
 	 * when the filter returns a non-canonical slug (the operator is
 	 * responsible for ensuring that role exists).
 	 *
@@ -73,7 +73,7 @@ class Agent_Provisioner {
 	 */
 	public static function register_role(): string {
 		$caps = apply_filters(
-			'gk_block_api_agent_caps',
+			'gk/block-mcp/agent/caps',
 			array(
 				'read'                 => true,
 				'edit_posts'           => true,
@@ -91,7 +91,7 @@ class Agent_Provisioner {
 			)
 		);
 
-		$role = apply_filters( 'gk_block_api_agent_role', self::ROLE );
+		$role = apply_filters( 'gk/block-mcp/agent/role', self::ROLE );
 
 		// Only register when the filter returns the canonical slug — a custom
 		// slug means the operator manages that role themselves.
@@ -122,7 +122,7 @@ class Agent_Provisioner {
 	 * @return int|\WP_Error Agent user ID, or WP_Error on failure.
 	 */
 	public function ensure() {
-		$login = apply_filters( 'gk_block_api_agent_login', self::LOGIN );
+		$login = apply_filters( 'gk/block-mcp/agent/login', self::LOGIN );
 
 		// Register the role (idempotent) up front so it exists on the CURRENT
 		// blog before we assign it — on multisite the global agent user may have
@@ -141,7 +141,7 @@ class Agent_Provisioner {
 							'A user with that login already exists but is not the Block MCP service account. Use the %s filter to specify a different login.',
 							'gk-block-api'
 						),
-						'gk_block_api_agent_login'
+						'gk/block-mcp/agent/login'
 					)
 				);
 			}
@@ -215,7 +215,7 @@ class Agent_Provisioner {
 	 * user, removes the option, and removes the block_mcp_agent role.
 	 *
 	 * The entire operation is gated on the
-	 * `gk_block_api_remove_agent_on_uninstall` filter (default true). When
+	 * `gk/block-mcp/agent/remove-on-uninstall` filter (default true). When
 	 * the filter returns false, purge() is a no-op — an operator who wants to
 	 * keep the service account across plugin reinstalls can opt out without
 	 * forking the plugin.
@@ -236,7 +236,7 @@ class Agent_Provisioner {
 	 * network-admin uninstall hook should loop over blogs and call purge() on
 	 * each. The current blog's content is always protected.
 	 *
-	 * The reassign target is resolved via the gk_block_api_agent_reassign_to
+	 * The reassign target is resolved via the gk/block-mcp/agent/reassign-to
 	 * filter (default 0). When the filter returns falsy, the first
 	 * administrator on the site is used. If no administrator exists — an edge
 	 * case on misconfigured sites — the fallback is null, which restores the
@@ -259,7 +259,7 @@ class Agent_Provisioner {
 		 *
 		 * @param bool $remove Whether to remove the agent. Default true.
 		 */
-		if ( ! apply_filters( 'gk_block_api_remove_agent_on_uninstall', true ) ) {
+		if ( ! apply_filters( 'gk/block-mcp/agent/remove-on-uninstall', true ) ) {
 			return;
 		}
 
@@ -285,7 +285,7 @@ class Agent_Provisioner {
 			 *
 			 * @param int $reassign_to Target user ID, or 0 to use the default. Default 0.
 			 */
-			$reassign = (int) apply_filters( 'gk_block_api_agent_reassign_to', 0 );
+			$reassign = (int) apply_filters( 'gk/block-mcp/agent/reassign-to', 0 );
 
 			if ( ! $reassign ) {
 				$admins   = get_users(

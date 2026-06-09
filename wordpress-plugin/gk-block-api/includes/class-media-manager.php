@@ -34,7 +34,7 @@ class Media_Manager {
 	 * Reserved IP ranges to block on URL sideload (SSRF defense).
 	 * Includes link-local, loopback, multicast, RFC1918 private ranges,
 	 * and IPv6 unique-local + link-local. Overrideable by site admins
-	 * via the `gk_block_api_url_sideload_blocked_ranges` filter.
+	 * via the `gk/block-mcp/media/sideload-blocked-ranges` filter.
 	 */
 	const SSRF_BLOCKED_IPV4_RANGES = array(
 		array( '0.0.0.0', '0.255.255.255' ),       // "This network."
@@ -64,7 +64,7 @@ class Media_Manager {
 	 * read-only block surface in two ways:
 	 *
 	 *   1. Programmatic: `update_option( 'gk_block_api_uploads_enabled', false );`
-	 *   2. Filter:       `add_filter( 'gk_block_api_uploads_enabled', '__return_false' );`
+	 *   2. Filter:       `add_filter( 'gk/block-mcp/media/uploads-enabled', '__return_false' );`
 	 *
 	 * The filter wins over the option so emergencies (e.g., a
 	 * compromised API token) can be patched without writing to the DB.
@@ -80,14 +80,14 @@ class Media_Manager {
 		$raw     = get_option( self::UPLOADS_OPTION, '1' );
 		$enabled = ( '0' !== (string) $raw && false !== $raw );
 		/**
-		 * Filter: gk_block_api_uploads_enabled.
+		 * Filter: gk/block-mcp/media/uploads-enabled.
 		 *
 		 * Last-mile override for the per-site uploads kill-switch. Return
 		 * false here to refuse every MCP upload regardless of the option.
 		 *
 		 * @param bool $enabled Current option value.
 		 */
-		return (bool) apply_filters( 'gk_block_api_uploads_enabled', $enabled );
+		return (bool) apply_filters( 'gk/block-mcp/media/uploads-enabled', $enabled );
 	}
 
 	/**
@@ -247,7 +247,7 @@ class Media_Manager {
 		 *                                  upload is being processed.
 		 */
 		$overrides = apply_filters(
-			'gk_block_api_media_upload_overrides',
+			'gk/block-mcp/media/upload-overrides',
 			$default_overrides,
 			$field
 		);
@@ -484,7 +484,7 @@ class Media_Manager {
 	 * `169.254.169.254`) and RFC1918 ranges are explicitly blocked.
 	 *
 	 * Site admins can extend the block list via the
-	 * `gk_block_api_url_sideload_blocked_ranges` filter (returns array of
+	 * `gk/block-mcp/media/sideload-blocked-ranges` filter (returns array of
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
 	 * @param string $url URL to validate against reserved IP ranges.
@@ -541,7 +541,7 @@ class Media_Manager {
 		// IPv4 ranges (filterable).
 		$v4_ranges = self::SSRF_BLOCKED_IPV4_RANGES;
 		if ( function_exists( 'apply_filters' ) ) {
-			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ranges', $v4_ranges );
+			$filtered = apply_filters( 'gk/block-mcp/media/sideload-blocked-ranges', $v4_ranges );
 			if ( is_array( $filtered ) ) {
 				$v4_ranges = $filtered;
 			}
@@ -588,7 +588,7 @@ class Media_Manager {
 		// 100::/64           discard-only
 		// 2001::/23          IETF protocol assignments
 		// ff00::/8           multicast
-		// Filterable via `gk_block_api_url_sideload_blocked_ipv6_cidrs`.
+		// Filterable via `gk/block-mcp/media/sideload-blocked-ipv6-cidrs`.
 		$v6_cidrs = array(
 			'::/128',
 			'::1/128',
@@ -600,7 +600,7 @@ class Media_Manager {
 			'ff00::/8',
 		);
 		if ( function_exists( 'apply_filters' ) ) {
-			$filtered = apply_filters( 'gk_block_api_url_sideload_blocked_ipv6_cidrs', $v6_cidrs );
+			$filtered = apply_filters( 'gk/block-mcp/media/sideload-blocked-ipv6-cidrs', $v6_cidrs );
 			if ( is_array( $filtered ) ) {
 				$v6_cidrs = $filtered;
 			}

@@ -3,7 +3,7 @@
  * Core Image enricher — attaches attachment metadata to core/image blocks.
  *
  * Mirrors Automattic vip-block-data-api's block-additions/core-image.php
- * pattern. Hooks into gk_block_api_format_block and, for core/image blocks
+ * pattern. Hooks into gk/block-mcp/block/format and, for core/image blocks
  * carrying an `id`, attaches `width`, `height`, and a `sizes` map sourced
  * from wp_get_attachment_metadata(). When the block specifies a sizeSlug
  * that matches a registered intermediate size, the slug's width/height
@@ -34,7 +34,7 @@ class Core_Image_Enricher {
 	 * @return void
 	 */
 	public static function init() {
-		add_filter( 'gk_block_api_format_block', array( __CLASS__, 'enrich' ), 10, 2 );
+		add_filter( 'gk/block-mcp/block/format', array( __CLASS__, 'enrich' ), 10, 2 );
 	}
 
 	/**

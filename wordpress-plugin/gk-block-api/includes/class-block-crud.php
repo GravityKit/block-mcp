@@ -1004,7 +1004,7 @@ class Block_CRUD {
 		 * @param int $post_id Post that received fresh refs.
 		 */
 		if ( false !== $result ) {
-			do_action( 'gk_block_api_refs_persisted', (int) $post_id );
+			do_action( 'gk/block-mcp/block/refs-persisted', (int) $post_id );
 		}
 
 		return false !== $result;

@@ -7,12 +7,12 @@
  * rooted here. The contracts pinned by this suite:
  *
  *  - purge() revokes all Application Passwords and deletes the agent user
- *    when the gk_block_api_remove_agent_on_uninstall filter returns true
+ *    when the gk/block-mcp/agent/remove-on-uninstall filter returns true
  *    (the default). After purge() the agent user must not exist, the
  *    gk_block_api_agent_user_id option must be gone, and no app passwords
  *    must remain on that user ID.
  *
- *  - purge() is gated behind apply_filters('gk_block_api_remove_agent_on_uninstall', true).
+ *  - purge() is gated behind apply_filters('gk/block-mcp/agent/remove-on-uninstall', true).
  *    When the filter returns false the agent user, its credentials, and the
  *    option must all remain intact — an operator who opted to keep the
  *    account must not see it silently wiped.
@@ -44,7 +44,7 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		$this->clean_agent_state();
-		remove_filter( 'gk_block_api_remove_agent_on_uninstall', '__return_false' );
+		remove_filter( 'gk/block-mcp/agent/remove-on-uninstall', '__return_false' );
 		parent::tear_down();
 	}
 
@@ -111,7 +111,7 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * When the gk_block_api_remove_agent_on_uninstall filter returns false,
+	 * When the gk/block-mcp/agent/remove-on-uninstall filter returns false,
 	 * purge() must be a no-op: the agent user, its option, and its role must
 	 * all remain intact.
 	 *
@@ -123,7 +123,7 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 		$agent_id = ( new Agent_Provisioner() )->ensure();
 		$this->assertIsInt( $agent_id );
 
-		add_filter( 'gk_block_api_remove_agent_on_uninstall', '__return_false' );
+		add_filter( 'gk/block-mcp/agent/remove-on-uninstall', '__return_false' );
 
 		Agent_Provisioner::purge();
 
@@ -138,7 +138,7 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 			'gk_block_api_agent_user_id option must remain when the disable filter returns false'
 		);
 
-		remove_filter( 'gk_block_api_remove_agent_on_uninstall', '__return_false' );
+		remove_filter( 'gk/block-mcp/agent/remove-on-uninstall', '__return_false' );
 	}
 
 	/**
@@ -174,7 +174,7 @@ class UninstallCleanupTest extends WP_UnitTestCase {
 	 * When an agent account is removed, any content it authored must survive.
 	 * Passing no reassign argument to wp_delete_user() causes WordPress to
 	 * delete every post the user authored. purge() resolves a reassign target
-	 * (via the gk_block_api_agent_reassign_to filter, falling back to the
+	 * (via the gk/block-mcp/agent/reassign-to filter, falling back to the
 	 * first administrator) and passes it to wp_delete_user() so authored
 	 * content is preserved under a different owner.
 	 */

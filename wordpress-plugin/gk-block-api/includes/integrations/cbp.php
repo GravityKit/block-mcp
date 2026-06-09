@@ -2,7 +2,7 @@
 /**
  * Code Block Pro integration for the GK Block API.
  *
- * Hooks into gk_block_api_format_block to strip fields that are either
+ * Hooks into gk/block-mcp/block/format to strip fields that are either
  * derived (codeHTML, highestLineNumber) or too large to be useful to an AI
  * agent (innerHTML — the full copy-button + Shiki <pre> widget HTML).
  *
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 add_filter(
-	'gk_block_api_format_block',
+	'gk/block-mcp/block/format',
 	function ( $data, $block_name ) {
 		if ( 'kevinbatdorf/code-block-pro' !== $block_name ) {
 			return $data;

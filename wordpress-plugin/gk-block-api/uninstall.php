@@ -127,7 +127,7 @@ if ( is_multisite() ) {
 	gk_block_api_uninstall_blog();
 
 	// Tear down the agent service account (user + app passwords + role + option).
-	// purge() is idempotent and respects the gk_block_api_remove_agent_on_uninstall
+	// purge() is idempotent and respects the gk/block-mcp/agent/remove-on-uninstall
 	// filter, so operators can opt out of agent deletion during reinstalls.
 	GravityKit\BlockAPI\Agent_Provisioner::purge();
 }

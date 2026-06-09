@@ -190,7 +190,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 	 *   - per-pattern counts add up correctly under volume — every random
 	 *     reference inserted is reflected in the final map
 	 *
-	 * Bumps the shared `gk_block_api_synced_patterns_query_limit` filter
+	 * Bumps the shared `gk/block-mcp/pattern/synced-query-limit` filter
 	 * so the allow-list covers all inserted patterns. Test is marked @group
 	 * stress so it can be skipped in fast runs if it becomes painful.
 	 *
@@ -202,7 +202,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 		$cap           = static function () use ( $pattern_count ): int {
 			return $pattern_count + 100;
 		};
-		add_filter( 'gk_block_api_synced_patterns_query_limit', $cap );
+		add_filter( 'gk/block-mcp/pattern/synced-query-limit', $cap );
 
 		try {
 			// Insert $pattern_count synced patterns.
@@ -254,7 +254,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 				'Map must contain exactly the patterns that were referenced — no orphans or duplicates.'
 			);
 		} finally {
-			remove_filter( 'gk_block_api_synced_patterns_query_limit', $cap );
+			remove_filter( 'gk/block-mcp/pattern/synced-query-limit', $cap );
 		}
 	}
 
@@ -271,7 +271,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 		$tiny_batch = static function (): int {
 			return 2;
 		};
-		add_filter( 'gk_block_api_pattern_ref_scan_batch_size', $tiny_batch );
+		add_filter( 'gk/block-mcp/pattern/ref-scan-batch-size', $tiny_batch );
 
 		try {
 			$pa = $this->make_pattern( 'Hot pattern' );
@@ -291,7 +291,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 			$this->assertSame( 5, $counts[ $pa ] );
 			$this->assertSame( 3, $counts[ $pb ] );
 		} finally {
-			remove_filter( 'gk_block_api_pattern_ref_scan_batch_size', $tiny_batch );
+			remove_filter( 'gk/block-mcp/pattern/ref-scan-batch-size', $tiny_batch );
 		}
 	}
 }

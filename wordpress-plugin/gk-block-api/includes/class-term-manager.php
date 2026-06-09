@@ -46,7 +46,7 @@ class Term_Manager {
 		// in that taxonomy to any edit_posts caller. Matches the
 		// invariant WordPress's own /wp/v2/taxonomies endpoint enforces.
 		//
-		// Override via the `gk_block_api_allow_taxonomy_in_terms` filter:
+		// Override via the `gk/block-mcp/term/allow-taxonomy` filter:
 		// agents editing a CPT with a deliberately-private taxonomy
 		// (workflow state, internal department) still need to discover
 		// term IDs to assign them — site admins can grant per-taxonomy
@@ -69,7 +69,7 @@ class Term_Manager {
 		 * @param \WP_Taxonomy|null|false $tax_object Taxonomy object (null/false if not registered).
 		 */
 		$allow = apply_filters(
-			'gk_block_api_allow_taxonomy_in_terms',
+			'gk/block-mcp/term/allow-taxonomy',
 			$rest_listed,
 			$taxonomy,
 			$tax_object
