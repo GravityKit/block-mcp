@@ -1,6 +1,6 @@
 {
   "name": "@gravitykit/block-mcp",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "MCP server for WordPress block-level content management with preference-aware editing",
   "main": "dist/index.cjs",
   "bin": {
@@ -41,13 +41,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.9",
-    "shiki": "^4.0.2"
+    "axios": "^1.7.9"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@shikijs/engine-javascript": "^4.0.2",
+    "@shikijs/langs": "^4.0.2",
     "@types/node": "^22.0.0",
     "esbuild": "^0.27.3",
+    "shiki": "^4.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"

@@ -66,7 +66,7 @@ describe('plugin-embedded server bundle stays in sync with dist', () => {
     // If the two drift, Claude Desktop one-click users get a stale connector
     // while npx users get the current one. Pin byte-equality so a build that
     // skipped the copy — or a hand-edit of either copy — fails here.
-    expect(fs.existsSync(distPath), 'dist/index.cjs must be built and committed').toBe(true);
+    expect(fs.existsSync(distPath), 'dist/index.cjs must be built — run `npm run build`').toBe(true);
     expect(fs.existsSync(assetPath), 'assets/mcp-server/index.cjs must be committed').toBe(true);
     const dist = fs.readFileSync(distPath);
     const asset = fs.readFileSync(assetPath);

@@ -3,6 +3,16 @@ node_modules/
 .env.gkclone
 .phpunit.result.cache
 
+# Build output — rebuilt by `npm run build` (the `prepare` hook) on every
+# install/ci/pack/publish and shipped to npm via the files[] whitelist. The
+# durable copy the WordPress plugin embeds lives (committed) at
+# wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs; the parity test
+# keeps the two in sync.
+dist/
+
+# Ephemeral review/analysis output (codex runs, audits, UX tests).
+reports/
+
 # Internal planning + spec docs — kept locally, not shipped to the public repo.
 docs/plans/
 docs/specs/
