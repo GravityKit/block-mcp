@@ -115,7 +115,7 @@ class Block_Registry {
 
 			// Substring search on name + title (case-insensitive).
 			if ( '' !== $needle ) {
-				$title = (string) ( $block_type->title ?? '' );
+				$title = (string) $block_type->title;
 				if ( false === strpos( strtolower( $name ), $needle )
 					&& false === strpos( strtolower( $title ), $needle ) ) {
 					continue;

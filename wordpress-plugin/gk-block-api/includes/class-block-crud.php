@@ -80,27 +80,6 @@ class Block_CRUD {
 	const REF_PREFIX = 'blk_';
 
 	/**
-	 * Preferences instance.
-	 *
-	 * @var Preferences
-	 */
-	private $preferences;
-
-	/**
-	 * Block safety checker.
-	 *
-	 * @var Block_Safety
-	 */
-	private $safety;
-
-	/**
-	 * HTML transformer.
-	 *
-	 * @var HTML_Transformer
-	 */
-	private $transformer;
-
-	/**
 	 * Site-wide block inventory (storage_mode classification + dual-storage list).
 	 *
 	 * @var Block_Inventory
@@ -130,12 +109,9 @@ class Block_CRUD {
 	 * @param Block_Inventory  $inventory   Block inventory.
 	 */
 	public function __construct( Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
-		$this->preferences = $preferences;
-		$this->safety      = $safety;
-		$this->transformer = $transformer;
-		$this->inventory   = $inventory;
-		$this->reader      = new Block_Reader( $this, $preferences, $safety, $transformer, $inventory );
-		$this->writer      = new Block_Writer( $this, $preferences, $safety, $transformer, $inventory );
+		$this->inventory = $inventory;
+		$this->reader    = new Block_Reader( $this, $preferences, $inventory );
+		$this->writer    = new Block_Writer( $this, $preferences, $safety, $transformer );
 	}
 
 	// =========================================================================

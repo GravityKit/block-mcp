@@ -73,27 +73,18 @@ class Block_Writer {
 	private $transformer;
 
 	/**
-	 * Site-wide block inventory.
-	 *
-	 * @var Block_Inventory
-	 */
-	private $inventory;
-
-	/**
 	 * Constructor.
 	 *
 	 * @param Block_CRUD       $crud        Owning CRUD instance for shared utilities.
 	 * @param Preferences      $preferences Preferences instance.
 	 * @param Block_Safety     $safety      Block safety checker.
 	 * @param HTML_Transformer $transformer HTML transformer.
-	 * @param Block_Inventory  $inventory   Block inventory.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
 		$this->safety      = $safety;
 		$this->transformer = $transformer;
-		$this->inventory   = $inventory;
 	}
 
 	// -------------------------------------------------------------------------

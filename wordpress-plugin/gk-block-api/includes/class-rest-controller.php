@@ -992,11 +992,9 @@ class REST_Controller {
 	 * land quickly in dev; long enough that legitimate clients don't hammer
 	 * the endpoint. Caller-side cache key is the WordPress URL + path.
 	 *
-	 * @param \WP_REST_Request $request Request object.
-	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
-	public function get_instructions( $request ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- WP_REST_Server requires the request object on every callback signature even when the route has no params.
+	public function get_instructions() {
 		try {
 			$ip = isset( $_SERVER['REMOTE_ADDR'] )
 				? sanitize_text_field( wp_unslash( (string) $_SERVER['REMOTE_ADDR'] ) )
@@ -1206,7 +1204,7 @@ class REST_Controller {
 	 *
 	 * @param \WP_REST_Request $request Request object.
 	 *
-	 * @return \WP_REST_Response
+	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function get_patterns( $request ) {
 		try {
@@ -1251,7 +1249,7 @@ class REST_Controller {
 	 *
 	 * @param \WP_REST_Request $request Request object.
 	 *
-	 * @return \WP_REST_Response
+	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function search_patterns( $request ) {
 		try {
@@ -1308,7 +1306,7 @@ class REST_Controller {
 	 *
 	 * @param \WP_REST_Request $request Request object.
 	 *
-	 * @return \WP_REST_Response
+	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function get_site_usage( $request ) {
 		try {

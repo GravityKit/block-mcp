@@ -59,20 +59,6 @@ class Block_Reader {
 	private $preferences;
 
 	/**
-	 * Block safety checker.
-	 *
-	 * @var Block_Safety
-	 */
-	private $safety;
-
-	/**
-	 * HTML transformer.
-	 *
-	 * @var HTML_Transformer
-	 */
-	private $transformer;
-
-	/**
 	 * Site-wide block inventory.
 	 *
 	 * @var Block_Inventory
@@ -82,17 +68,13 @@ class Block_Reader {
 	/**
 	 * Constructor.
 	 *
-	 * @param Block_CRUD       $crud        Owning CRUD instance for shared utilities.
-	 * @param Preferences      $preferences Preferences instance.
-	 * @param Block_Safety     $safety      Block safety checker.
-	 * @param HTML_Transformer $transformer HTML transformer.
-	 * @param Block_Inventory  $inventory   Block inventory.
+	 * @param Block_CRUD      $crud        Owning CRUD instance for shared utilities.
+	 * @param Preferences     $preferences Preferences instance.
+	 * @param Block_Inventory $inventory   Block inventory.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer, Block_Inventory $inventory ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Inventory $inventory ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
-		$this->safety      = $safety;
-		$this->transformer = $transformer;
 		$this->inventory   = $inventory;
 	}
 
@@ -502,11 +484,9 @@ class Block_Reader {
 						}
 					}
 				} catch ( \Throwable $e ) {
-					// Render failed — skip silently.
-					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-						if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-							error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-						}
+					// Render failed — skip silently, leaving a breadcrumb when debugging.
+					if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+						error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 					}
 				}
 			}

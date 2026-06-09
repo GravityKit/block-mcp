@@ -200,7 +200,7 @@ class HTML_Transformer {
 			// core/details: `showContent` toggles the `open` attribute.
 			if ( 'core/details' === $block_name && array_key_exists( 'showContent', $changed_attrs ) ) {
 				$processor = new \WP_HTML_Tag_Processor( $html );
-				if ( $processor->next_tag( 'details' ) ) {
+				if ( $processor->next_tag( array( 'tag_name' => 'details' ) ) ) {
 					// Same FILTER_VALIDATE_BOOLEAN handling as autoplay/loop — string
 					// "false" must disable, not enable.
 					if ( filter_var( $changed_attrs['showContent'], FILTER_VALIDATE_BOOLEAN ) ) {

@@ -169,7 +169,10 @@ class Block_Inventory {
 	 * subsequent calls to `is_block_dual_storage()` use the live data
 	 * instead of the filter defaults.
 	 *
-	 * @return array {
+	 * @return array|\WP_Error {
+	 *     On success, the scan summary; WP_Error('scan_rate_limited') when the
+	 *     rate-limit window has not yet elapsed and $force is false.
+	 *
 	 *     @type int   $scanned_posts Number of posts walked.
 	 *     @type int   $unique_blocks Count of distinct block names found.
 	 *     @type array $classification block_name => storage_mode.
