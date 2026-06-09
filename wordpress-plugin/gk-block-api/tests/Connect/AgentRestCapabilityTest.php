@@ -32,6 +32,7 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockAPI\Agent_Provisioner;
+use GravityKit\BlockAPI\Connect_Page;
 
 /**
  * End-to-end tests asserting the agent role is sufficient for every REST
@@ -266,6 +267,83 @@ class AgentRestCapabilityTest extends RestControllerTestCase {
 			\WP_Error::class,
 			$result,
 			'Agent must not receive a WP_Error from check_upload_permissions(); upload_files capability may be missing.'
+		);
+	}
+
+	/**
+	 * END-TO-END AUTH: a minted Application Password authenticates a real REST
+	 * request as the agent — via the credential + the determine_current_user
+	 * chain, NOT wp_set_current_user().
+	 *
+	 * Gap closed: every other REST test here sets identity with
+	 * wp_set_current_user($agent_id), which short-circuits Application Password
+	 * validation. AGENTS.md warns this exact omission once let an app-password auth
+	 * break stay green. This mints a real credential, presents it as HTTP Basic
+	 * auth on an API request, clears the current user so the REST permission check
+	 * re-determines identity from the credential (no manual login), and asserts the
+	 * request both resolves to the agent and is authorized.
+	 */
+	public function test_minted_app_password_authenticates_rest_request_as_agent(): void {
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+
+		$creds = ( new Connect_Page() )->provision_credentials( 'Claude Code' );
+		$this->assertIsArray( $creds, 'provisioning must mint a credential' );
+		$plaintext = $creds['password'];
+
+		$post_id = self::factory()->post->create(
+			array(
+				'post_status'  => 'publish',
+				'post_author'  => $this->admin_id,
+				'post_content' => '<!-- wp:paragraph --><p>Readable</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		// Present the credential as HTTP Basic auth on an API request, and clear the
+		// current user so the REST permission check re-determines identity from it.
+		add_filter( 'application_password_is_api_request', '__return_true' );
+		$_SERVER['PHP_AUTH_USER'] = Agent_Provisioner::LOGIN;
+		$_SERVER['PHP_AUTH_PW']   = $plaintext;
+		// WP_Application_Passwords records the usage IP; ensure REMOTE_ADDR exists
+		// (a prior test in the full suite may have unset it).
+		$_SERVER['REMOTE_ADDR']   = '127.0.0.1';
+		$GLOBALS['current_user']  = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- force determine_current_user to re-run from the credential.
+
+		$request  = new \WP_REST_Request( 'GET', '/gk-block-api/v1/posts/' . $post_id . '/blocks' );
+		$response = $this->dispatch( $request );
+
+		$resolved = get_current_user_id();
+
+		unset( $_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'] );
+		remove_all_filters( 'application_password_is_api_request' );
+		remove_all_filters( 'wp_is_application_passwords_available' );
+
+		$this->assertSame( $this->agent_id, $resolved, 'the Application Password must resolve the request to the agent (not wp_set_current_user)' );
+		$this->assertSame( 200, $response->get_status(), 'the minted credential must authorize a gk-block-api read end-to-end' );
+	}
+
+	/**
+	 * The agent's capability LIMITS hold at the REST layer, not just at the
+	 * role-definition layer: a real request to a manage_options-gated core route is
+	 * forbidden for the agent.
+	 *
+	 * Gap closed: denial was previously asserted only via user_can()/has_cap() on
+	 * the role. This dispatches a real core REST request requiring a capability the
+	 * agent lacks (manage_options) and asserts 401/403, so a meta-cap mapping that
+	 * accidentally over-granted the agent would fail here rather than pass.
+	 */
+	public function test_agent_is_forbidden_from_manage_options_route_via_rest(): void {
+		wp_set_current_user( $this->agent_id );
+
+		$request  = new \WP_REST_Request( 'GET', '/wp/v2/settings' );
+		$response = $this->dispatch( $request );
+
+		$this->assertContains(
+			$response->get_status(),
+			array( 401, 403 ),
+			sprintf(
+				'the agent must be denied the manage_options-gated /wp/v2/settings route; got %d',
+				$response->get_status()
+			)
 		);
 	}
 }

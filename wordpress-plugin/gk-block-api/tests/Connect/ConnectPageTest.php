@@ -132,6 +132,74 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Default identity ('agent') mints on the agent and records a neutral byline:
+	 * the approving human is captured for the audit trail, author_mode stays 'agent'.
+	 */
+	public function test_provision_credentials_agent_records_agent_byline() {
+		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin );
+
+		$page  = new Connect_Page();
+		$creds = $page->provision_credentials( 'Claude Code', 'agent' );
+
+		$this->assertIsArray( $creds );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'] );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$meta  = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
+		$this->assertSame( 'agent', $meta['author_mode'] );
+		$this->assertSame( (int) $agent->ID, (int) $meta['user_id'] );
+		$this->assertSame( $admin, (int) $meta['created_by'] );
+	}
+
+	/**
+	 * 'agent_as_me' still mints on the agent (same limited account) but records the
+	 * byline as the approving human, so created posts are credited to them.
+	 */
+	public function test_provision_credentials_agent_as_me_records_me_byline() {
+		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin );
+
+		$page  = new Connect_Page();
+		$creds = $page->provision_credentials( 'Cursor', 'agent_as_me' );
+
+		$this->assertIsArray( $creds );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'], 'agent_as_me still mints on the agent' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$meta  = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
+		$this->assertSame( 'me', $meta['author_mode'] );
+		$this->assertSame( (int) $agent->ID, (int) $meta['user_id'] );
+		$this->assertSame( $admin, (int) $meta['created_by'] );
+	}
+
+	/**
+	 * 'self' (use my own account) mints the credential on the approving user — not
+	 * the agent — so the AI app acts with that person's full capabilities. The
+	 * agent is not provisioned on this path. Pins the higher-blast-radius contract.
+	 */
+	public function test_provision_credentials_self_mints_on_current_user() {
+		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin );
+
+		$page  = new Connect_Page();
+		$creds = $page->provision_credentials( 'Cursor', 'self' );
+
+		$this->assertIsArray( $creds );
+		$admin_user = get_user_by( 'id', $admin );
+		$this->assertSame( $admin_user->user_login, $creds['user'], 'self mints on the approving user' );
+
+		// The credential lives on the human, and the agent was never provisioned.
+		$this->assertCount( 1, WP_Application_Passwords::get_user_application_passwords( $admin ) );
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'self path must not provision the agent' );
+
+		$meta = \GravityKit\BlockAPI\Connections::get_meta( $creds['uuid'] );
+		$this->assertSame( $admin, (int) $meta['user_id'] );
+		$this->assertSame( $admin, (int) $meta['created_by'] );
+		$this->assertSame( 'me', $meta['author_mode'] );
+	}
+
+	/**
 	 * On single-site, a connection's Application Password label is exactly
 	 * "Block MCP — <client>" with no site suffix.
 	 *
@@ -833,6 +901,134 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * End-to-end JOIN: the code handle_authorize() redirects must redeem at the
+	 * real handle_exchange() endpoint and yield the live minted credential.
+	 *
+	 * Gap closed: the two real handlers were previously tested only in isolation —
+	 * handle_authorize() asserted a code was emitted in its redirect, and
+	 * handle_exchange() was fed a reflection-minted code. Nothing proved the
+	 * authorize redirect's code is actually redeemable by the exchange handler, so
+	 * a key/format drift between the two (or the transient->wp_options storage
+	 * migration) could pass. This drives the FULL path: mint + redirect via the
+	 * real authorize handler, extract the redirected code, POST that exact code to
+	 * the real exchange handler, and assert it returns the agent's credential.
+	 */
+	public function test_authorize_to_exchange_round_trips_end_to_end() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51791/cb';
+		$_POST['state']       = 'join-state-token';
+		$_POST['client']      = 'block-mcp';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$captured_redirect = null;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$captured_redirect ) {
+				$captured_redirect = $location;
+				throw new \RuntimeException( 'redirect_captured' );
+			}
+		);
+
+		$page = new Connect_Page();
+		try {
+			$page->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'redirect_captured', $e->getMessage() );
+		}
+		remove_all_filters( 'wp_redirect' );
+
+		$this->assertNotNull( $captured_redirect, 'handle_authorize() must redirect' );
+
+		// Extract the single-use code the REAL authorize handler redirected with.
+		parse_str( (string) wp_parse_url( $captured_redirect, PHP_URL_QUERY ), $qs );
+		$this->assertNotEmpty( $qs['code'], 'authorize must redirect a single-use code' );
+
+		// Feed THAT exact code to the REAL exchange handler.
+		$_POST['code'] = $qs['code'];
+		try {
+			$exchanged = $this->capture_exchange_json( $page );
+		} finally {
+			unset(
+				$_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'],
+				$_POST['_wpnonce'], $_REQUEST['_wpnonce'], $_POST['code']
+			);
+		}
+
+		$this->assertTrue( $exchanged['success'], 'the authorize-issued code must redeem at the exchange endpoint' );
+		$this->assertSame( untrailingslashit( home_url() ), $exchanged['data']['site'], 'exchange returns the site' );
+		$this->assertSame( Agent_Provisioner::LOGIN, $exchanged['data']['user'], 'exchange returns the agent login' );
+		$this->assertNotEmpty( $exchanged['data']['password'], 'exchange returns the live minted password' );
+
+		// And it is genuinely single-use: replaying the same code now fails.
+		$_POST['code'] = $qs['code'];
+		try {
+			$replay = $this->capture_exchange_json( $page );
+		} finally {
+			unset( $_POST['code'] );
+		}
+		$this->assertFalse( $replay['success'], 'the code must not redeem twice' );
+	}
+
+	/**
+	 * The connector's REST exchange route redeems a valid code once (returning the
+	 * credential envelope) and rejects a replay.
+	 *
+	 * This exercises the ACTUAL transport the connector uses: REST, not
+	 * admin-post.php. admin-post.php is routinely 30x'd before the handler runs by
+	 * canonical/SSL redirects, the Redirection plugin, and security plugins on real
+	 * sites (it surfaced as a hard "fetch failed" in the field); REST routes escape
+	 * those. The route is registered by init_rest_api() on rest_api_init.
+	 */
+	public function test_rest_exchange_route_redeems_once_then_rejects_replay() {
+		do_action( 'rest_api_init' );
+
+		$page  = new Connect_Page();
+		$store = new \ReflectionMethod( Connect_Page::class, 'store_exchange_code' );
+		$store->setAccessible( true );
+		$code  = $store->invoke( $page, array( 'url' => 'https://example.com', 'user' => 'block-mcp', 'password' => 'rest-secret' ) );
+
+		$make_request = static function ( $value ) {
+			$req = new \WP_REST_Request( 'POST', '/gk-block-api/v1/connect/exchange' );
+			$req->set_header( 'Content-Type', 'application/json' );
+			$req->set_body( (string) wp_json_encode( array( 'code' => $value ) ) );
+			return $req;
+		};
+
+		$res  = rest_get_server()->dispatch( $make_request( $code ) );
+		$data = $res->get_data();
+		$this->assertSame( 200, $res->get_status(), 'a valid code must redeem at the REST route' );
+		$this->assertTrue( $data['success'] );
+		$this->assertSame( 'rest-secret', $data['data']['password'], 'the REST route returns the live minted password once' );
+		$this->assertSame( 'block-mcp', $data['data']['user'] );
+		$this->assertSame( 'https://example.com', $data['data']['site'] );
+
+		$replay = rest_get_server()->dispatch( $make_request( $code ) );
+		$this->assertSame( 400, $replay->get_status(), 'a replayed code must be rejected (single-use)' );
+	}
+
+	/**
+	 * The REST exchange route is reachable WITHOUT authentication — the single-use
+	 * code is the only credential — and 400s an unknown code.
+	 */
+	public function test_rest_exchange_route_is_public_and_rejects_unknown_code() {
+		do_action( 'rest_api_init' );
+		wp_set_current_user( 0 );
+
+		$req = new \WP_REST_Request( 'POST', '/gk-block-api/v1/connect/exchange' );
+		$req->set_header( 'Content-Type', 'application/json' );
+		$req->set_body( (string) wp_json_encode( array( 'code' => 'never-issued-code' ) ) );
+
+		$res = rest_get_server()->dispatch( $req );
+		$this->assertSame( 400, $res->get_status(), 'an unknown code must 400 (the route is reachable while logged out)' );
+	}
+
+	/**
 	 * The generated .mcpb bundle embeds the plaintext Application Password, so it
 	 * must not linger on disk. unlink_temp_bundle() — called from the streaming
 	 * finally AND a shutdown function (the browser-abort case) — must delete the
@@ -1159,7 +1355,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * CLIENT_CURSOR, CLIENT_CHATGPT, CLIENT_AI_PROMPT, CLIENT_OTHER.
 	 * The "Let my AI set it up" card must carry the is-ai class.
 	 *
-	 * Wrapping markup uses <div class="gk-connect"> + <div class="gk-connect__card">
+	 * Wrapping markup uses <div class="gk-block-api-connect"> + <div class="gk-block-api-connect__card">
 	 * so all CSS selectors are scoped.
 	 */
 	/**
@@ -1198,8 +1394,8 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$html = ob_get_clean();
 
 		// Wrapper class and card container must be present for scoped CSS.
-		$this->assertStringContainsString( 'class="gk-connect"', $html, 'Outer wrapper must carry class gk-connect' );
-		$this->assertStringContainsString( 'gk-connect__card', $html, 'Card container must be present' );
+		$this->assertStringContainsString( 'class="gk-block-api-connect"', $html, 'Outer wrapper must carry class gk-block-api-connect' );
+		$this->assertStringContainsString( 'gk-block-api-connect__card', $html, 'Card container must be present' );
 
 		// Radio inputs must be present with name="client" (not a <select>).
 		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
@@ -1219,7 +1415,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Cursor', $html, 'Cursor card label must be present as card text' );
 		$this->assertStringContainsString( 'ChatGPT Desktop', $html, 'ChatGPT Desktop card label must be present as card text' );
 		$this->assertStringContainsString( 'Let my AI set it up', $html, '"Let my AI" card label must be present as card text' );
-		$this->assertStringContainsString( 'Something else', $html, '"Something else" card label must be present as card text' );
+		$this->assertStringContainsString( 'Configure it myself', $html, '"Configure it myself" card label must be present as card text' );
 
 		// The "Let my AI" card must carry the is-ai accent class.
 		$this->assertStringContainsString( 'is-ai', $html, '"Let my AI" card must carry is-ai class' );
@@ -1291,12 +1487,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'claude.ai/download', $html, 'Claude Desktop next-steps block must contain the claude.ai/download link' );
 		$this->assertStringContainsString( 'mcpb', $html, 'Claude Desktop next-steps block must reference the .mcpb file' );
 
-		// The claude-code block must contain Generate-setup-config / Approve /
-		// "No password to copy" copy, and must NOT contain the .mcpb download steps.
+		// The claude-code block must show the command-setup artifact + Approve step
+		// and reassure no password is needed — and must NOT carry the .mcpb steps.
 		$this->assertStringContainsString(
-			'Generate setup config',
+			'Claude Code setup',
 			$html,
-			'claude-code next-steps block must mention "Generate setup config"'
+			'claude-code next-steps block must show the "Claude Code setup" artifact card'
 		);
 		$this->assertStringContainsString(
 			'Approve',
@@ -1304,20 +1500,21 @@ class ConnectPageTest extends WP_UnitTestCase {
 			'CLI-client next-steps block must mention the Approve step'
 		);
 		$this->assertStringContainsString(
-			'No password to copy',
+			'never on this page',
 			$html,
-			'CLI-client next-steps block must state "No password to copy"'
+			'the command-line flow must reassure the password never appears on the page'
 		);
 	}
 
 	/**
-	 * render_section() in the 'connected' state must output the connected-state
-	 * markers ("You're connected") and a Disconnect control for each active
-	 * connection, in addition to the after-download guidance and client picker.
+	 * render_section() in the 'connected' state must output the Active
+	 * connections list (the connected indicator) with a Disconnect control for
+	 * each active connection, in addition to the after-download guidance and
+	 * client picker.
 	 *
 	 * This pins the P0 deliverable for the post-connection state: both the
-	 * connection indicator and the revoke affordance must be rendered when at
-	 * least one credential is live.
+	 * connections list and the revoke affordance must be rendered when at least
+	 * one credential is live.
 	 */
 	public function test_render_section_shows_connected_state_markers() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -1335,7 +1532,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
-		$this->assertStringContainsString( "You&#039;re connected", $html, "Connected state marker must be present" );
+		$this->assertStringContainsString( 'Active connections', $html, 'the active connections list must be present in the connected state' );
 		$this->assertStringContainsString( 'Disconnect', $html, 'Disconnect control must be present for active connection' );
 		$this->assertStringContainsString( 'After you download', $html, 'Next-steps panel must still be present in connected state' );
 	}
@@ -1350,9 +1547,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * card was silently skipped. The fix uses slugs as the canonical key everywhere,
 	 * ensuring ?setup=<slug> always matches and ?setup=<label> never does.
 	 *
-	 * The test also confirms that setting $_GET['setup'] to a slug (the post-fix
-	 * canonical form) DOES render the artifact, and setting it to the old label
-	 * value does NOT.
+	 * All client panels now render in the DOM (client-side switching), so the
+	 * canonical-key contract is observable via pre-selection: ?setup=<slug>
+	 * pre-selects that client's radio, while an old label value is not recognised
+	 * and falls back to the default (Claude Desktop).
 	 */
 	public function test_render_section_setup_slug_renders_artifact_label_does_not() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -1360,7 +1558,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		delete_option( 'gk_block_api_agent_user_id' );
 
-		// Slug renders the artifact (the fixed behaviour).
+		$checked_re = static function ( string $slug ) {
+			$q = preg_quote( $slug, '/' );
+			return '/value="' . $q . '"[^>]*checked|checked[^>]*value="' . $q . '"/';
+		};
+
+		// Slug is canonical: ?setup=<slug> pre-selects that client.
 		$_GET['setup'] = Connect_Page::CLIENT_CLAUDE_CODE; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		ob_start();
@@ -1369,18 +1572,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		unset( $_GET['setup'] );
 
-		$this->assertStringContainsString(
-			'npx -y @gravitykit/block-mcp connect',
-			$html_slug,
-			'Artifact card must render when ?setup carries the slug'
-		);
-		$this->assertStringContainsString(
-			'--client ' . Connect_Page::CLIENT_CLAUDE_CODE,
-			$html_slug,
-			'Artifact body must include the --client slug flag'
-		);
+		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $html_slug, 'the npx connect artifact must render' );
+		$this->assertStringContainsString( '--client ' . Connect_Page::CLIENT_CLAUDE_CODE, $html_slug, 'the artifact must carry the --client slug flag' );
+		$this->assertMatchesRegularExpression( $checked_re( Connect_Page::CLIENT_CLAUDE_CODE ), $html_slug, '?setup=<slug> must pre-select that client' );
 
-		// Old label value must NOT render the artifact (was the broken behaviour).
+		// An old label value is NOT canonical: unrecognised, so the picker falls
+		// back to the default (Claude Desktop) and does not pre-select claude-code.
 		$_GET['setup'] = 'Claude Code'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		ob_start();
@@ -1389,11 +1586,8 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		unset( $_GET['setup'] );
 
-		$this->assertStringNotContainsString(
-			'npx -y @gravitykit/block-mcp connect',
-			$html_label,
-			'Artifact card must NOT render when ?setup carries an old label value'
-		);
+		$this->assertDoesNotMatchRegularExpression( $checked_re( Connect_Page::CLIENT_CLAUDE_CODE ), $html_label, 'an old label value must NOT pre-select claude-code' );
+		$this->assertMatchesRegularExpression( $checked_re( Connect_Page::CLIENT_CLAUDE_DESKTOP ), $html_label, 'an unrecognised ?setup must fall back to the default Claude Desktop' );
 	}
 
 	/**
@@ -1423,9 +1617,17 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $html, 'Artifact textarea must contain the npx connect command' );
 		$this->assertStringContainsString( '--client ' . Connect_Page::CLIENT_CLAUDE_CODE, $html, 'Artifact must carry the --client slug' );
-		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $html, 'WORDPRESS_APP_PASSWORD must NOT appear in the output' );
 		$this->assertStringNotContainsString( 'Copy password', $html, 'No "Copy password" button must be present' );
-		$this->assertStringContainsString( 'No password to copy', $html, '"No password to copy" note must be present' );
+
+		// The command artifact itself must be secret-free. The env-var NAME may
+		// appear elsewhere only as the "Configure it myself" manual-config
+		// placeholder (a <pre>, not a textarea), so scope the secret check to the
+		// artifact textareas — the thing the user actually copies.
+		preg_match_all( '/<textarea[^>]*gk-block-api-connect__artifact-textarea[^>]*>(.*?)<\/textarea>/s', $html, $matches );
+		$this->assertNotEmpty( $matches[1], 'at least one artifact textarea must render' );
+		foreach ( $matches[1] as $artifact_body ) {
+			$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact_body, 'the command artifact must be secret-free' );
+		}
 	}
 
 	/**
@@ -1590,7 +1792,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'coming soon', $html, 'the coming-soon dead-end copy must be replaced with guidance' );
 
 		// F6: real guidance that routes the uncertain user to a working path.
-		$this->assertStringContainsString( 'Not sure which', $html, 'the other path must offer a decision helper' );
+		$this->assertStringContainsString( 'Not sure what a terminal is', $html, 'the other path must offer a decision helper' );
 	}
 
 	/**
@@ -1623,22 +1825,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$html = ob_get_clean();
 
 		$this->assertStringContainsString( 'Not sure what a terminal', $html, 'the command-line path must offer a non-developer escape hatch' );
-	}
-
-	/**
-	 * [F10] The ready state tells the user what a successful connection looks
-	 * like, so they know whether setup worked.
-	 */
-	public function test_render_section_ready_state_describes_success_status() {
-		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		wp_set_current_user( $admin_id );
-		delete_option( 'gk_block_api_agent_user_id' );
-
-		ob_start();
-		( new Connect_Page() )->render_section();
-		$html = ob_get_clean();
-
-		$this->assertStringContainsString( "know it worked", $html, 'the ready state must describe the success/connected confirmation' );
 	}
 
 	/**
@@ -1699,7 +1885,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
 
 		// Plain language present.
-		$this->assertStringContainsString( 'permission to edit pages and posts', $html, 'must say what permission is granted in plain words' );
+		$this->assertStringContainsString( 'permission to create and edit content', $html, 'must say what permission is granted in plain words' );
 		$this->assertStringContainsString( 'remove this access anytime', $html, 'must reassure the access is revocable' );
 
 		// Old jargon phrasing gone.
@@ -1708,23 +1894,73 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * [F12] The Connect section reassures the user that unrelated admin notices
-	 * (from other plugins) are not part of, and don't affect, this setup.
+	 * Account-creation wording is conditional on the agent already existing.
 	 *
-	 * Sarah saw third-party notices and a red license banner (BetterDocs', not
-	 * ours) above the feature and feared she'd broken something. We can't
-	 * suppress other plugins' global notices, but our own surface can defuse the
-	 * fear. Phrased conditionally so it reads fine when no notices are present.
+	 * The "Block MCP" account persists once provisioned (it survives revoking
+	 * every connection), so "connecting creates a new account" and "Download
+	 * installer & create MCP user" are only accurate on the very first connect.
+	 * After the account exists the onboarding notice switches to present tense
+	 * and the Desktop button drops the "create MCP user" clause. This pins both
+	 * states so the copy can't regress to always-claims-creation.
 	 */
-	public function test_render_section_reassures_about_unrelated_notices() {
-		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+	public function test_connect_section_creation_copy_is_conditional_on_agent_existing() {
+		// Before the agent exists: creation language is shown.
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$before = ob_get_clean();
+		$this->assertStringContainsString( 'Connecting creates a new user account', $before );
+		$this->assertStringContainsString( 'create MCP user', $before, 'the Desktop button names account creation on first run' );
+
+		// Provision the agent — no connection needed; the account itself persists.
+		( new Agent_Provisioner() )->ensure();
+		$this->assertNotFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'agent must exist for the second render' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$after = ob_get_clean();
+		$this->assertStringContainsString( 'The AI uses a dedicated', $after, 'present-tense copy once the account exists' );
+		$this->assertStringNotContainsString( 'Connecting creates a new user account', $after, 'must not claim creation once the account exists' );
+		$this->assertStringNotContainsString( 'create MCP user', $after, 'the Desktop button drops the creation clause once the account exists' );
+	}
+
+	/**
+	 * The Active connections list has a dedicated "Account" column that names the
+	 * connection type, separate from "Approved by".
+	 *
+	 * Regression: the connection type used to be crammed into the "Approved by"
+	 * column as subtext ("Shown as author"), which read ambiguously — was the
+	 * name the account, the approver, or the author? For a "shown as you"
+	 * connection the Account column must say the AI uses the dedicated "Block MCP"
+	 * account and posts as the approver, while "Approved by" carries just the
+	 * audit name. The old conflated subtext must be gone.
+	 */
+	public function test_active_connections_account_column_names_the_connection_type() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator', 'display_name' => 'Screenshot Admin' ) );
 		wp_set_current_user( $admin_id );
-		delete_option( 'gk_block_api_agent_user_id' );
+
+		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		update_option( 'gk_block_api_agent_user_id', $agent_id );
+
+		$created = \WP_Application_Passwords::create_new_application_password(
+			$agent_id,
+			array( 'name' => 'Block MCP — Claude Code' )
+		);
+		\GravityKit\BlockAPI\Connections::record_meta(
+			$created[1]['uuid'],
+			array( 'user_id' => $agent_id, 'created_by' => $admin_id, 'author_mode' => 'me' )
+		);
 
 		ob_start();
 		( new Connect_Page() )->render_section();
 		$html = ob_get_clean();
 
-		$this->assertStringContainsString( 'from your other plugins', $html, 'the section must reassure that unrelated notices are not from this setup' );
+		// New Account column header + the agent-account identity + the byline note.
+		$this->assertStringContainsString( 'Account', $html, 'the Account column header must be present' );
+		$this->assertStringContainsString( 'Posts as Screenshot Admin', $html, 'the Account column names the byline for a "shown as you" connection' );
+		// Approved-by audit still shows the approver name.
+		$this->assertStringContainsString( 'Screenshot Admin', $html );
+		// The old conflated subtext must be gone.
+		$this->assertStringNotContainsString( 'Shown as author', $html, 'the ambiguous "Shown as author" subtext must be replaced by the Account column' );
 	}
+
 }

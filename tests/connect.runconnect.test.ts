@@ -95,11 +95,11 @@ describe('runConnect end-to-end (loopback → exchange → config write)', () =>
       { openBrowserFn, timeoutMs: 5_000 }
     );
 
-    // The exchange POST targeted the out-of-band endpoint with the callback code…
+    // The exchange POST targeted the out-of-band REST endpoint with the callback code…
     expect(exchange.posted).not.toBeNull();
-    expect(exchange.posted!.url).toContain('/wp-admin/admin-post.php');
-    expect(exchange.posted!.body).toContain('action=gk_block_api_exchange');
-    expect(exchange.posted!.body).toContain('code=deadbeefcafef00d1122334455667788');
+    expect(exchange.posted!.url).toContain('rest_route=/gk-block-api/v1/connect/exchange');
+    expect(exchange.posted!.url).not.toContain('admin-post.php');
+    expect(exchange.posted!.body).toContain('"code":"deadbeefcafef00d1122334455667788"');
 
     // …and the credential from the response body was written to ~/.cursor/mcp.json.
     const file = path.join(home, '.cursor', 'mcp.json');

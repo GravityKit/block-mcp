@@ -8,7 +8,7 @@
  * screen and via this class stays consistent without any synchronisation.
  *
  * @package GravityKit\BlockAPI
- * @since   1.9.0
+ * @since   2.0.0
  */
 
 namespace GravityKit\BlockAPI;
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Lists and revokes Block MCP Application Passwords for a given user.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 class Connections {
 
@@ -34,10 +34,126 @@ class Connections {
 	 * and 'Block MCP — Cursor' are both matched while unrelated credentials
 	 * are excluded.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var   string
 	 */
 	const NAME_PREFIX = 'Block MCP';
+
+	/**
+	 * Option that records the two facts core's Application Password store can't:
+	 * who approved each connection and whether it authors content as the agent
+	 * or as that person.
+	 *
+	 * Keyed by Application Password UUID → { created_by, author_mode, created_at }.
+	 * Stored as a network option so it stays consistent with the network-wide
+	 * connection list on multisite; on single-site it transparently falls back
+	 * to wp_options. The credential list itself still derives from core — this
+	 * only annotates it.
+	 *
+	 * @since 2.0.0
+	 * @var   string
+	 */
+	const META_OPTION = 'gk_block_api_connection_meta';
+
+	/**
+	 * Record the approving human and the byline choice for a minted credential.
+	 *
+	 * Merges into any existing entry so partial updates don't clobber siblings.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $uuid Application Password UUID the credential was minted as.
+	 * @param array  $meta { @type int $created_by, @type string $author_mode, @type int $created_at }.
+	 * @return void
+	 */
+	public static function record_meta( $uuid, array $meta ) {
+		$uuid = (string) $uuid;
+		if ( '' === $uuid ) {
+			return;
+		}
+		$all          = self::meta_all();
+		$existing     = isset( $all[ $uuid ] ) && is_array( $all[ $uuid ] ) ? $all[ $uuid ] : array();
+		$all[ $uuid ] = array_merge( $existing, $meta );
+		update_network_option( null, self::META_OPTION, $all );
+	}
+
+	/**
+	 * Return the recorded meta for a credential UUID, or null when none exists.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $uuid Application Password UUID.
+	 * @return array|null
+	 */
+	public static function get_meta( $uuid ) {
+		$all  = self::meta_all();
+		$uuid = (string) $uuid;
+		return isset( $all[ $uuid ] ) && is_array( $all[ $uuid ] ) ? $all[ $uuid ] : null;
+	}
+
+	/**
+	 * Drop the meta entry for a credential UUID (called when a connection is revoked).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $uuid Application Password UUID.
+	 * @return void
+	 */
+	public static function forget_meta( $uuid ) {
+		$all  = self::meta_all();
+		$uuid = (string) $uuid;
+		if ( isset( $all[ $uuid ] ) ) {
+			unset( $all[ $uuid ] );
+			update_network_option( null, self::META_OPTION, $all );
+		}
+	}
+
+	/**
+	 * The full UUID → meta map. Always an array.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array
+	 */
+	private static function meta_all() {
+		$all = get_network_option( null, self::META_OPTION, array() );
+		return is_array( $all ) ? $all : array();
+	}
+
+	/**
+	 * The human user ID to credit as author for content created on the current
+	 * REST request — or null when the connection authors as the agent.
+	 *
+	 * Reads the Application Password used to authenticate this request, looks up
+	 * the connection's recorded byline choice, and returns the approving human's
+	 * ID only when that connection opted into "show as me" and the person still
+	 * exists. Returns null otherwise (no credential, unknown connection, agent
+	 * byline, or deleted user) so callers fall back to the agent as author.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return int|null
+	 */
+	public static function author_to_credit() {
+		if ( ! function_exists( 'rest_get_authenticated_app_password' ) ) {
+			return null;
+		}
+		$uuid = rest_get_authenticated_app_password();
+		if ( ! $uuid ) {
+			return null;
+		}
+		$meta = self::get_meta( $uuid );
+		$mode = is_array( $meta ) && isset( $meta['author_mode'] ) ? $meta['author_mode'] : 'agent';
+		if ( 'me' !== $mode ) {
+			return null;
+		}
+		$human = is_array( $meta ) && isset( $meta['created_by'] ) ? (int) $meta['created_by'] : 0;
+		if ( $human <= 0 ) {
+			return null;
+		}
+		$user = get_user_by( 'id', $human );
+		return $user ? $human : null;
+	}
 
 	/**
 	 * Return all Block MCP Application Passwords for the given user.
@@ -47,7 +163,7 @@ class Connections {
 	 * the UUID, display name, creation timestamp, and (when recorded by core)
 	 * the last-used timestamp.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  int $user_id WordPress user ID to query.
 	 * @return array[] Each element: {
@@ -66,11 +182,62 @@ class Connections {
 				continue;
 			}
 
+			$meta = self::get_meta( $item['uuid'] );
+
 			$rows[] = array(
-				'uuid'      => (string) $item['uuid'],
-				'name'      => (string) $item['name'],
-				'created'   => (int) $item['created'],
-				'last_used' => isset( $item['last_used'] ) ? (int) $item['last_used'] : null,
+				'uuid'         => (string) $item['uuid'],
+				'name'         => (string) $item['name'],
+				'created'      => (int) $item['created'],
+				'last_used'    => isset( $item['last_used'] ) ? (int) $item['last_used'] : null,
+				'created_by'   => is_array( $meta ) && isset( $meta['created_by'] ) ? (int) $meta['created_by'] : null,
+				'author_mode'  => is_array( $meta ) && isset( $meta['author_mode'] ) ? (string) $meta['author_mode'] : 'agent',
+				'host_user_id' => (int) $user_id,
+				'own_account'  => false,
+			);
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * Return connections whose credential lives on a user OTHER than the agent —
+	 * the "use my own account" connections.
+	 *
+	 * Derived from the meta store (the only record of which user holds each
+	 * own-account credential), then confirmed against core: each entry must still
+	 * exist on its host user AND carry the NAME_PREFIX, so a stale meta row or a
+	 * credential the user revoked from their profile screen is silently dropped.
+	 *
+	 * @since  2.0.0
+	 *
+	 * @param  int $agent_id The agent user ID, whose own credentials list() already covers.
+	 * @return array[] Same row shape as list(), with own_account => true.
+	 */
+	public function list_self_hosted( $agent_id ) {
+		$agent_id = (int) $agent_id;
+		$rows     = array();
+
+		foreach ( self::meta_all() as $uuid => $meta ) {
+			$host = is_array( $meta ) && isset( $meta['user_id'] ) ? (int) $meta['user_id'] : 0;
+			if ( $host <= 0 || $host === $agent_id ) {
+				continue;
+			}
+
+			$item       = \WP_Application_Passwords::get_user_application_password( $host, (string) $uuid );
+			$is_managed = is_array( $item ) && isset( $item['name'] ) && strpos( $item['name'], self::NAME_PREFIX ) === 0;
+			if ( ! $is_managed ) {
+				continue;
+			}
+
+			$rows[] = array(
+				'uuid'         => (string) $item['uuid'],
+				'name'         => (string) $item['name'],
+				'created'      => (int) $item['created'],
+				'last_used'    => isset( $item['last_used'] ) ? (int) $item['last_used'] : null,
+				'created_by'   => isset( $meta['created_by'] ) ? (int) $meta['created_by'] : null,
+				'author_mode'  => isset( $meta['author_mode'] ) ? (string) $meta['author_mode'] : 'me',
+				'host_user_id' => $host,
+				'own_account'  => true,
 			);
 		}
 
@@ -88,7 +255,7 @@ class Connections {
 	 * core confirms the entry was removed; false when the UUID is unknown, the
 	 * credential is out of scope, or core returns a WP_Error.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  int    $user_id WordPress user ID that owns the credential.
 	 * @param  string $uuid    UUID of the Application Password to delete.
@@ -102,7 +269,64 @@ class Connections {
 			return false;
 		}
 
-		$result = \WP_Application_Passwords::delete_application_password( $user_id, $uuid );
-		return ! is_wp_error( $result ) && $result;
+		$result  = \WP_Application_Passwords::delete_application_password( $user_id, $uuid );
+		$deleted = ! is_wp_error( $result ) && $result;
+
+		if ( $deleted ) {
+			self::forget_meta( $uuid );
+		}
+
+		return $deleted;
+	}
+
+	/**
+	 * Revoke a connection by UUID, resolving which user holds it from the meta store.
+	 *
+	 * A connection's credential may live on the agent OR on the approving user
+	 * (own-account connections). The revoke form only carries the UUID, so this
+	 * looks up the host user from the recorded meta and falls back to the supplied
+	 * agent ID when no meta exists (older agent-hosted connections). Scope-checking
+	 * and meta cleanup are handled by revoke().
+	 *
+	 * @since  2.0.0
+	 *
+	 * @param  string $uuid             UUID of the Application Password to delete.
+	 * @param  int    $fallback_user_id User to use when meta has no recorded host (the agent).
+	 * @return bool True on successful deletion, false otherwise.
+	 */
+	public function revoke_by_uuid( $uuid, $fallback_user_id ) {
+		$meta = self::get_meta( $uuid );
+		$host = is_array( $meta ) && ! empty( $meta['user_id'] ) ? (int) $meta['user_id'] : (int) $fallback_user_id;
+
+		return $this->revoke( $host, $uuid );
+	}
+
+	/**
+	 * Delete every credential recorded in the meta store from its host user.
+	 *
+	 * Used at uninstall: own-account credentials live on real users, so the agent
+	 * teardown doesn't touch them, and an Application Password keeps authenticating
+	 * to core REST/XML-RPC even after the plugin is gone. This revokes them at the
+	 * source. Agent-hosted entries are covered too (harmless — the agent user is
+	 * deleted separately, which removes its credentials anyway). Idempotent: a
+	 * credential already gone is skipped.
+	 *
+	 * @since  2.0.0
+	 *
+	 * @return void
+	 */
+	public static function purge_all_recorded() {
+		foreach ( self::meta_all() as $uuid => $meta ) {
+			$host = is_array( $meta ) && isset( $meta['user_id'] ) ? (int) $meta['user_id'] : 0;
+			if ( $host <= 0 ) {
+				continue;
+			}
+
+			$item       = \WP_Application_Passwords::get_user_application_password( $host, (string) $uuid );
+			$is_managed = is_array( $item ) && isset( $item['name'] ) && strpos( $item['name'], self::NAME_PREFIX ) === 0;
+			if ( $is_managed ) {
+				\WP_Application_Passwords::delete_application_password( $host, (string) $uuid );
+			}
+		}
 	}
 }

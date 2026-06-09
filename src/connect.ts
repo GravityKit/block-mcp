@@ -31,6 +31,25 @@ export type ClientTarget =
   | 'claude-desktop'
   | 'print';
 
+/** Accepted `--client` values. Both `--client <v>` and `--client=<v>` validate against this. */
+const VALID_CLIENTS: ClientTarget[] = [
+  'claude-code',
+  'cursor',
+  'chatgpt-desktop',
+  'claude-desktop',
+  'print',
+];
+
+/** Validate a raw `--client` value against the allowlist; throws on a typo. */
+function assertValidClient(val: string): ClientTarget {
+  if (!VALID_CLIENTS.includes(val as ClientTarget)) {
+    throw new Error(
+      `Invalid --client value "${val}". Must be one of: ${VALID_CLIENTS.join(', ')}`
+    );
+  }
+  return val as ClientTarget;
+}
+
 export interface ConnectArgs {
   site: string;
   client: ClientTarget;
@@ -85,19 +104,7 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
     if (arg === '--site') {
       site = argv[++i];
     } else if (arg === '--client') {
-      const val = argv[++i] as ClientTarget;
-      const valid: ClientTarget[] = [
-        'claude-code',
-        'cursor',
-        'chatgpt-desktop',
-        'claude-desktop',
-        'print',
-      ];
-      if (!valid.includes(val)) {
-        throw new Error(
-          `Invalid --client value "${val}". Must be one of: ${valid.join(', ')}`
-        );
-      }
+      const val = assertValidClient(argv[++i]);
       client = val;
       // An explicit `--client print` is itself an opt-in to reveal the secret;
       // the implicit default 'print' does not reveal.
@@ -122,8 +129,9 @@ export function parseConnectArgs(argv: string[]): ConnectArgs {
     } else if (arg.startsWith('--site=')) {
       site = arg.slice('--site='.length);
     } else if (arg.startsWith('--client=')) {
-      client = arg.slice('--client='.length) as ClientTarget;
-      if (client === 'print') {
+      const val = assertValidClient(arg.slice('--client='.length));
+      client = val;
+      if (val === 'print') {
         reveal = true;
       }
     } else if (arg.startsWith('--port=')) {
@@ -332,12 +340,25 @@ export const EXCHANGE_FETCH_TIMEOUT_MS = 15_000;
 /**
  * Exchange a single-use code for the credential set.
  *
- * POSTs the code to the site's `admin-post.php` exchange endpoint and returns
- * the credential once. The credential is delivered here, in a direct response
- * body — never in a URL — so it stays out of browser history and Referer
- * headers. The request rejects redirects (`redirect: 'error'`) so the POSTed
- * code can't be 30x-bounced to another origin, and is bounded by a timeout so a
- * hung site doesn't wedge the connector. `fetchFn` is injectable for testing.
+ * POSTs the code to the site's REST exchange route and returns the credential
+ * once, in a direct response body — never in a URL — so it stays out of browser
+ * history and Referer headers.
+ *
+ * The transport is the REST API, NOT admin-post.php: admin-post.php is routinely
+ * 30x'd before the handler runs by canonical/SSL redirects, the Redirection
+ * plugin, and security plugins on real sites — which surfaced as "fetch failed"
+ * under the old `redirect:'error'`. REST routes escape those front-end rules.
+ *
+ * The URL uses the `?rest_route=` form — the permalink-independent form that
+ * WordPress's rest_url() itself falls back to. The connector is Node and cannot
+ * call rest_url(), and hardcoding `/wp-json/` would break on plain permalinks or
+ * a custom rest_url_prefix; `?rest_route=` works on every permalink configuration.
+ *
+ * Redirects are handled manually: up to 3 SAME-ORIGIN hops are followed by
+ * re-POSTing the body (so a canonical/SSL 30x still delivers the code), while a
+ * cross-origin redirect is REFUSED — the credential must never be POSTed
+ * off-origin. A timeout bounds the whole exchange. `fetchFn` is injectable for
+ * testing.
  */
 export async function exchangeCode(
   site: string,
@@ -345,23 +366,47 @@ export async function exchangeCode(
   fetchFn: typeof fetch = fetch,
   timeoutMs: number = EXCHANGE_FETCH_TIMEOUT_MS
 ): Promise<Credentials> {
-  const url = `${site}/wp-admin/admin-post.php`;
-  const body = new URLSearchParams({ action: 'gk_block_api_exchange', code });
+  const origin = new URL(site).origin;
+  let url = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  let res: Response;
+  let res!: Response;
   try {
-    res = await fetchFn(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      redirect: 'error',
-      signal: controller.signal,
-    });
-  } catch (err) {
-    throw new Error(`Exchange failed: could not reach ${url} (${(err as Error).message}).`);
+    for (let hops = 0; ; hops++) {
+      try {
+        res = await fetchFn(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ code }),
+          redirect: 'manual',
+          signal: controller.signal,
+        });
+      } catch (err) {
+        throw new Error(`Exchange failed: could not reach ${url} (${(err as Error).message}).`);
+      }
+
+      // 2xx (or any non-redirect) → done.
+      if (res.status < 300 || res.status >= 400) {
+        break;
+      }
+
+      // Follow only same-origin redirects, re-POSTing the body.
+      const location = res.headers.get('location');
+      if (!location || hops >= 3) {
+        throw new Error(
+          `Exchange failed: the site redirected the request (HTTP ${res.status}); ensure --site is the canonical site URL.`
+        );
+      }
+      const next = new URL(location, url);
+      if (next.origin !== origin) {
+        throw new Error(
+          `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
+        );
+      }
+      url = next.toString();
+    }
   } finally {
     clearTimeout(timer);
   }

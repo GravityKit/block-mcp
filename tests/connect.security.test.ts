@@ -244,12 +244,13 @@ describe('[WP-F3] credential delivered via exchange, not the callback URL', () =
     expect(result.ok && result.code).toBe(CODE);
   });
 
-  it('exchangeCode POSTs the code to admin-post.php and returns the body credential', async () => {
+  it('exchangeCode POSTs the code to the REST exchange route and returns the body credential', async () => {
     let posted: { url: string; body: string } | null = null;
     const fakeFetch = (async (url: string, init: { body: string }) => {
       posted = { url, body: init.body };
       return {
         status: 200,
+        headers: new Headers(),
         json: async () => ({
           success: true,
           data: { site: 'https://example.com', user: 'block-mcp', password: 'exchanged-secret' },
@@ -260,33 +261,58 @@ describe('[WP-F3] credential delivered via exchange, not the callback URL', () =
     const creds = await exchangeCode('https://example.com', CODE, fakeFetch);
 
     expect(creds.password).toBe('exchanged-secret');
-    expect(posted!.url).toContain('/wp-admin/admin-post.php');
-    expect(posted!.body).toContain('action=gk_block_api_exchange');
-    expect(posted!.body).toContain(`code=${CODE}`);
+    // REST transport via the permalink-independent ?rest_route form — admin-post.php
+    // is 30x'd by canonical/SSL/Redirection rules.
+    expect(posted!.url).toContain('rest_route=/gk-block-api/v1/connect/exchange');
+    expect(posted!.url).not.toContain('admin-post.php');
+    expect(posted!.body).toContain(`"code":"${CODE}"`);
   });
 
   it('exchangeCode throws when the site rejects the code', async () => {
     const fakeFetch = (async () => ({
       status: 400,
+      headers: new Headers(),
       json: async () => ({ success: false, data: { message: 'Invalid or expired code.' } }),
     })) as unknown as typeof fetch;
 
     await expect(exchangeCode('https://example.com', 'bad-code', fakeFetch)).rejects.toThrow();
   });
 
-  it('[CONN7] exchangeCode refuses redirects and bounds the request with an abort signal', async () => {
+  it('[CONN7] exchangeCode follows a same-origin redirect, refuses cross-origin, and bounds with an abort signal', async () => {
+    // (a) redirect mode is 'manual' and a timeout-backed AbortSignal bounds a hung site.
     let init: { redirect?: string; signal?: unknown } | undefined;
-    const fakeFetch = (async (_url: string, opts: { redirect?: string; signal?: unknown }) => {
+    const okFetch = (async (_url: string, opts: { redirect?: string; signal?: unknown }) => {
       init = opts;
-      return { status: 200, json: async () => ({ success: true, data: { site: 's', user: 'u', password: 'p' } }) };
+      return { status: 200, headers: new Headers(), json: async () => ({ success: true, data: { site: 's', user: 'u', password: 'p' } }) };
     }) as unknown as typeof fetch;
-
-    await exchangeCode('https://example.com', CODE, fakeFetch);
-
-    // redirect:'error' stops the POSTed code being 30x-bounced to another origin.
-    expect(init!.redirect).toBe('error');
-    // a timeout-backed AbortSignal bounds a hung site.
-    expect(init!.signal).toBeDefined();
+    await exchangeCode('https://example.com', CODE, okFetch);
+    expect(init!.redirect).toBe('manual');
     expect(init!.signal instanceof AbortSignal).toBe(true);
+
+    // (b) a SAME-ORIGIN redirect (e.g. http->https / trailing slash) is followed by
+    // re-POSTing the body, so the exchange still completes.
+    const urls: string[] = [];
+    const sameOriginFetch = (async (url: string) => {
+      urls.push(url);
+      if (urls.length === 1) {
+        return {
+          status: 301,
+          headers: new Headers({ location: 'https://example.com/wp-json/gk-block-api/v1/connect/exchange/' }),
+          json: async () => ({}),
+        };
+      }
+      return { status: 200, headers: new Headers(), json: async () => ({ success: true, data: { site: 's', user: 'u', password: 'p' } }) };
+    }) as unknown as typeof fetch;
+    const creds = await exchangeCode('https://example.com', CODE, sameOriginFetch);
+    expect(creds.password).toBe('p');
+    expect(urls.length).toBe(2); // the same-origin redirect was followed (re-POSTed).
+
+    // (c) a CROSS-ORIGIN redirect is REFUSED — the credential must never be POSTed off-site.
+    const crossOriginFetch = (async () => ({
+      status: 302,
+      headers: new Headers({ location: 'https://evil.example.net/steal' }),
+      json: async () => ({}),
+    })) as unknown as typeof fetch;
+    await expect(exchangeCode('https://example.com', CODE, crossOriginFetch)).rejects.toThrow(/different origin/);
   });
 });

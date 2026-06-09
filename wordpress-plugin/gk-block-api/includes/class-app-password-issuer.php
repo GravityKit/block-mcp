@@ -9,7 +9,7 @@
  * before this method returns.
  *
  * @package GravityKit\BlockAPI
- * @since   1.9.0
+ * @since   2.0.0
  */
 
 namespace GravityKit\BlockAPI;
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Mints an Application Password for the supplied user.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 class App_Password_Issuer {
 
@@ -33,7 +33,7 @@ class App_Password_Issuer {
 	 * credential on success. Returns WP_Error when Application Passwords
 	 * are unavailable for the installation or when core creation fails.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  int    $user_id User to create the credential for.
 	 * @param  string $label   Human-readable name stored alongside the credential.

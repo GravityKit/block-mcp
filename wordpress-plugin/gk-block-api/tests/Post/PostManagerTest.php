@@ -12,6 +12,7 @@
  */
 
 use GravityKit\BlockAPI\Post_Manager;
+use GravityKit\BlockAPI\Connections;
 use GravityKit\BlockAPI\Preferences;
 use GravityKit\BlockAPI\Block_CRUD;
 use GravityKit\BlockAPI\Block_Inventory;
@@ -39,6 +40,11 @@ class PostManagerTest extends WP_UnitTestCase {
 		$preferences = new Preferences();
 		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
 		$this->pm    = new Post_Manager( $block_crud );
+	}
+
+	public function tear_down(): void {
+		unset( $GLOBALS['wp_rest_application_password_uuid'] );
+		parent::tear_down();
 	}
 
 	// ── create_post: required + format ───────────────────────────────
@@ -564,7 +570,14 @@ class PostManagerTest extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * With the trash toggle enabled, status:trash moves the post to trash.
+	 *
+	 * Trashing is off by default (see the gate tests below); this exercises the
+	 * mechanism with the opt-in switched on.
+	 */
 	public function test_update_post_to_trash() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 		$this->assertIsArray( $result );
@@ -634,6 +647,7 @@ class PostManagerTest extends WP_UnitTestCase {
 	// ── update_post: mixed trash payload guard ───────────────────────
 
 	public function test_update_post_rejects_status_trash_with_title() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash', 'title' => 'New' ) );
 		$this->assertInstanceOf( \WP_Error::class, $result );
@@ -645,10 +659,170 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	public function test_update_post_status_trash_alone_is_allowed() {
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
 		$this->assertIsArray( $result );
 		$this->assertSame( 'trash', get_post( $id )->post_status );
+	}
+
+	// ── update_post: trash toggle (off by default) ───────────────────
+
+	/**
+	 * Trashing is off by default: status:trash is rejected with `trash_disabled`
+	 * and the post is left untouched.
+	 *
+	 * The agent has no `delete_*` caps, but trashing routes through `update_post`
+	 * (gated only on `edit_post`, which the agent holds), so without this
+	 * application-level gate the assistant could trash content out of the box.
+	 * This pins the closed-by-default contract.
+	 */
+	public function test_update_post_trash_disabled_by_default_rejects() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$this->assertSame( 403, $result->get_error_data()['status'] );
+		// The post must NOT have been trashed.
+		$this->assertSame( 'publish', get_post( $id )->post_status );
+	}
+
+	/**
+	 * The authorization gate fires before the mixed-payload correctness check:
+	 * when trashing is disabled, a trash+other-fields payload reports
+	 * `trash_disabled`, not `mixed_trash_payload`. Don't leak payload-shape
+	 * feedback for an operation that isn't permitted at all.
+	 */
+	public function test_update_post_trash_disabled_takes_precedence_over_mixed_payload() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Keep me' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash', 'title' => 'New' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'trash_disabled', $result->get_error_code() );
+		$post = get_post( $id );
+		$this->assertSame( 'publish', $post->post_status );
+		$this->assertSame( 'Keep me', $post->post_title );
+	}
+
+	/**
+	 * The `gk_block_api_allow_trash` filter can force trashing on even when the
+	 * stored option is off — programmatic control for site owners who'd rather
+	 * gate this in code than in the UI.
+	 */
+	public function test_trashing_enabled_filter_can_force_enable() {
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+
+		$force = static function () {
+			return true;
+		};
+		add_filter( 'gk_block_api_allow_trash', $force );
+
+		$this->assertTrue( Post_Manager::trashing_enabled() );
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'X' ) );
+		$result = $this->pm->update_post( $id, array( 'status' => 'trash' ) );
+
+		remove_filter( 'gk_block_api_allow_trash', $force );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 'trash', get_post( $id )->post_status );
+	}
+
+	/**
+	 * `trashing_enabled()` tracks the stored option: '1' → true, absent → false.
+	 */
+	public function test_trashing_enabled_reflects_stored_option() {
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '1' );
+		$this->assertTrue( Post_Manager::trashing_enabled() );
+		update_option( Post_Manager::ALLOW_TRASH_OPTION, '0' );
+		$this->assertFalse( Post_Manager::trashing_enabled() );
+	}
+
+	// ── create_post: byline (show as me) ─────────────────────────────
+
+	/**
+	 * When the request's connection opted into "show as me", a created post is
+	 * authored by the approving human — provided the acting account may assign
+	 * authorship and that human can author the type.
+	 *
+	 * The current actor (an editor) has edit_others_posts; the credited human is
+	 * an author who can author posts. Simulates the authenticated request by
+	 * setting the app-password UUID the resolver reads.
+	 */
+	public function test_create_post_byline_credits_human_when_show_as_me() {
+		$human = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-byline', array( 'created_by' => $human, 'author_mode' => 'me' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-byline';
+
+		$result = $this->pm->create_post( array( 'title' => 'Credited' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( $human, (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * A connection that authors as the agent does NOT remap the author: the post
+	 * is authored by the acting account (the default), not anyone recorded in meta.
+	 */
+	public function test_create_post_byline_defaults_to_agent_when_mode_agent() {
+		$human = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-agent', array( 'created_by' => $human, 'author_mode' => 'agent' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-agent';
+
+		$result = $this->pm->create_post( array( 'title' => 'Neutral' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( get_current_user_id(), (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * With no Application Password on the request (e.g. cookie auth), the byline
+	 * resolver is inert and the post is authored by the acting account.
+	 */
+	public function test_create_post_byline_ignored_without_request_password() {
+		$human = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-me', array( 'created_by' => $human, 'author_mode' => 'me' ) );
+		unset( $GLOBALS['wp_rest_application_password_uuid'] );
+
+		$result = $this->pm->create_post( array( 'title' => 'No PW' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( get_current_user_id(), (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * The byline is gated on the acting account being able to assign authorship.
+	 * An author (no edit_others_posts) connecting with "show as me" pointed at a
+	 * different user keeps authorship on themselves — no silent escalation of the
+	 * post to another person.
+	 */
+	public function test_create_post_byline_skipped_when_actor_cannot_assign_authorship() {
+		$actor = self::factory()->user->create( array( 'role' => 'author' ) );
+		wp_set_current_user( $actor );
+
+		$other = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-me', array( 'created_by' => $other, 'author_mode' => 'me' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
+
+		$result = $this->pm->create_post( array( 'title' => 'Locked' ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( $actor, (int) get_post( $result['id'] )->post_author );
+	}
+
+	/**
+	 * An explicit `author` argument wins over the connection byline — the
+	 * resolver only fills in authorship when the caller didn't specify one.
+	 */
+	public function test_create_post_explicit_author_takes_precedence_over_byline() {
+		$explicit = self::factory()->user->create( array( 'role' => 'author' ) );
+		$byline   = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-me', array( 'created_by' => $byline, 'author_mode' => 'me' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
+
+		$result = $this->pm->create_post( array( 'title' => 'Explicit', 'author' => $explicit ) );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( $explicit, (int) get_post( $result['id'] )->post_author );
 	}
 
 	// ── future status requires future date ───────────────────────────

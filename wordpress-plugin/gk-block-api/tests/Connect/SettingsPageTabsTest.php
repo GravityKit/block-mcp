@@ -113,8 +113,11 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 		( new Settings_Page( new Block_Inventory() ) )->render_page();
 		$html = ob_get_clean();
 
-		$this->assertStringContainsString( 'Namespace tier scores', $html, 'Namespace tier scores heading must appear on policy tab' );
-		$this->assertStringNotContainsString( 'Connect an AI Assistant', $html, 'Connect onboarding must NOT appear on policy tab' );
+		$this->assertStringContainsString( 'Which blocks AI should prefer', $html, 'the block-scores section heading must appear on the policy tab' );
+		// Client-side tabs render BOTH panels; on ?tab=policy the Connect panel is
+		// present but hidden (not the active view), and the policy panel is visible.
+		$this->assertStringContainsString( 'data-tab-panel="connect" hidden', $html, 'the Connect panel must be hidden on the policy tab' );
+		$this->assertStringNotContainsString( 'data-tab-panel="policy" hidden', $html, 'the policy panel must be visible (not hidden) on the policy tab' );
 	}
 
 	/**

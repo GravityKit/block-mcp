@@ -10,7 +10,7 @@
  * login is blocked at the authenticate filter level.
  *
  * @package GravityKit\BlockAPI
- * @since   1.9.0
+ * @since   2.0.0
  */
 
 namespace GravityKit\BlockAPI;
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Creates and resolves the dedicated Block MCP service-account user.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 class Agent_Provisioner {
 
@@ -32,7 +32,7 @@ class Agent_Provisioner {
 	 *
 	 * Overridable via the `gk_block_api_agent_login` filter.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const LOGIN = 'block-mcp';
@@ -40,7 +40,7 @@ class Agent_Provisioner {
 	/**
 	 * Role slug for the minimal agent role.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const ROLE = 'block_mcp_agent';
@@ -52,7 +52,7 @@ class Agent_Provisioner {
 	 * agent. Without it, an existing user with the target login is treated as
 	 * a real account that must not be adopted.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const META_FLAG = '_gk_block_api_agent';
@@ -68,7 +68,7 @@ class Agent_Provisioner {
 	 *
 	 * Calling this method when the role already exists is a no-op.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @return string The effective role slug (post-filter) callers should assign.
 	 */
 	public static function register_role(): string {
@@ -118,7 +118,7 @@ class Agent_Provisioner {
 	 * This method is idempotent: calling it repeatedly when the agent already
 	 * exists produces the same result.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 * @return int|\WP_Error Agent user ID, or WP_Error on failure.
 	 */
 	public function ensure() {
@@ -188,7 +188,7 @@ class Agent_Provisioner {
 	 * adds the user to the current blog with the role when it is not yet a member;
 	 * then (on any site type) it re-asserts the role so the caps exist. Idempotent.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param  int    $user_id Agent user ID.
 	 * @param  string $role    Agent role slug.
@@ -242,7 +242,7 @@ class Agent_Provisioner {
 	 * case on misconfigured sites — the fallback is null, which restores the
 	 * original deletion behaviour for that branch only.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @return void
 	 */
@@ -255,7 +255,7 @@ class Agent_Provisioner {
 		 * who manage credentials out-of-band and want to preserve them across
 		 * plugin reinstalls.
 		 *
-		 * @since 1.9.0
+		 * @since 2.0.0
 		 *
 		 * @param bool $remove Whether to remove the agent. Default true.
 		 */
@@ -281,7 +281,7 @@ class Agent_Provisioner {
 			 * administrator on the site. If no administrator is found, authored
 			 * content is handled by WordPress default deletion behaviour.
 			 *
-			 * @since 1.9.0
+			 * @since 2.0.0
 			 *
 			 * @param int $reassign_to Target user ID, or 0 to use the default. Default 0.
 			 */
@@ -354,7 +354,7 @@ class Agent_Provisioner {
 	 *
 	 * Pass-through for every other user, and for all API requests.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param null|\WP_User|\WP_Error $user     Authenticating user, or a prior filter's result.
 	 * @param string                  $username Login name supplied by the caller.

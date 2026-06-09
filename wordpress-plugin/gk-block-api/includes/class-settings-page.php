@@ -63,6 +63,25 @@ class Settings_Page {
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_post_gk_block_api_scan_storage_modes', array( $this, 'handle_scan' ) );
 		add_action( 'admin_post_gk_block_api_reset_defaults', array( $this, 'handle_reset' ) );
+		add_action( 'in_admin_header', array( $this, 'suppress_foreign_admin_notices' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+	}
+
+	/**
+	 * Load WordPress core's component stylesheet on this settings page only.
+	 *
+	 * The page's action buttons use the core @wordpress/components button
+	 * classes (.components-button) rather than bespoke CSS. Section containers
+	 * use core .postbox cards and data tables use core .widefat styling, so the
+	 * whole screen is styled by WordPress core with no custom stylesheet.
+	 *
+	 * @param string $hook_suffix Current admin page hook.
+	 */
+	public function enqueue_assets( $hook_suffix ) {
+		if ( 'settings_page_' . self::PAGE_SLUG === $hook_suffix ) {
+			wp_enqueue_style( 'wp-components' );
+			wp_enqueue_style( 'dashicons' );
+		}
 	}
 
 	/**
@@ -76,6 +95,24 @@ class Settings_Page {
 			self::PAGE_SLUG,
 			array( $this, 'render_page' )
 		);
+	}
+
+	/**
+	 * Hide other plugins' and core admin notices on this settings page only.
+	 *
+	 * Unrelated admin notices (update nags, third-party banners) clutter the
+	 * onboarding screen. Everything that renders through the admin_notices /
+	 * all_admin_notices hooks is removed just before the admin header prints
+	 * them, and only on this screen. The plugin's own confirmations are echoed
+	 * inline in render_page() (not through those hooks), so they are unaffected.
+	 */
+	public function suppress_foreign_admin_notices() {
+		$screen           = get_current_screen();
+		$on_settings_page = $screen && 'settings_page_' . self::PAGE_SLUG === $screen->id;
+		if ( $on_settings_page ) {
+			remove_all_actions( 'admin_notices' );
+			remove_all_actions( 'all_admin_notices' );
+		}
 	}
 
 	/**
@@ -140,14 +177,21 @@ class Settings_Page {
 			\GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION,
 			array(
 				'type'              => 'string',
-				'sanitize_callback' => static function ( $value ) {
-					if ( is_bool( $value ) ) {
-						return $value ? '1' : '0';
-					}
-					$truthy = in_array( strtolower( (string) $value ), array( '1', 'on', 'true', 'yes' ), true );
-					return $truthy ? '1' : '0';
-				},
+				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
 				'default'           => '1',
+			)
+		);
+
+		// 6. "Let the assistant move posts to trash" toggle. Same '0'/'1'
+		// string storage rationale as the media kill-switch above. Default
+		// '0' (off): trashing is closed until a site owner opts in.
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockAPI\Post_Manager::ALLOW_TRASH_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
+				'default'           => '0',
 			)
 		);
 	}
@@ -155,6 +199,28 @@ class Settings_Page {
 	// ──────────────────────────────────────────────────────────────────
 	// Sanitization callbacks.
 	// ──────────────────────────────────────────────────────────────────
+
+	/**
+	 * Normalize an HTML checkbox value to the '0' / '1' strings the boolean
+	 * toggles persist.
+	 *
+	 * These settings round-trip as strings, not bools: PHP omits an unchecked
+	 * checkbox from $_POST entirely, and update_option() won't reliably store a
+	 * literal `false` against an option that doesn't exist yet (the equality
+	 * check against the "missing → false" default short-circuits the write). A
+	 * hidden '0' input paired with the '1' checkbox guarantees a value arrives
+	 * here either way.
+	 *
+	 * @param mixed $value Raw POST value (bool, or one of '1'/'on'/'true'/'yes').
+	 * @return string '1' when truthy, '0' otherwise.
+	 */
+	public static function normalize_checkbox_option( $value ) {
+		if ( is_bool( $value ) ) {
+			return $value ? '1' : '0';
+		}
+		$truthy = in_array( strtolower( (string) $value ), array( '1', 'on', 'true', 'yes' ), true );
+		return $truthy ? '1' : '0';
+	}
 
 	/**
 	 * Sanitize the indexed-row form input back into the canonical
@@ -348,6 +414,20 @@ class Settings_Page {
 			wp_die( esc_html__( 'You do not have permission to view this page.', 'gk-block-api' ), '', array( 'response' => 403 ) );
 		}
 
+		// Focused consent screen: when the connector sends the admin here with
+		// ?gk_authorize, drop the settings tabs and chrome and render only the
+		// Approve card. The page then reads as a single allow/deny prompt rather
+		// than a settings page the admin could wander away from mid-connect. The
+		// Approve form itself is nonce-protected; gk_authorize is only a mode flag.
+		if ( isset( $_GET['gk_authorize'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- mode flag, not user data.
+			?>
+			<div class="wrap">
+				<?php ( new Connect_Page() )->render_section(); ?>
+			</div>
+			<?php
+			return;
+		}
+
 		$defaults         = Preferences::get_defaults();
 		$prefs            = (array) get_option( 'gk_block_api_preferences', array() );
 		$namespace_scores = isset( $prefs['namespace_scores'] ) && is_array( $prefs['namespace_scores'] )
@@ -361,6 +441,8 @@ class Settings_Page {
 		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
 		$uploads_enabled  = \GravityKit\BlockAPI\Media_Manager::uploads_enabled();
 		$uploads_option   = \GravityKit\BlockAPI\Media_Manager::UPLOADS_OPTION;
+		$trash_enabled    = \GravityKit\BlockAPI\Post_Manager::trashing_enabled();
+		$trash_option     = \GravityKit\BlockAPI\Post_Manager::ALLOW_TRASH_OPTION;
 		$instructions_val = Instructions::get_addendum();
 		$instructions_max = Instructions::MAX_LENGTH;
 
@@ -378,6 +460,20 @@ class Settings_Page {
 			$block_names       = array_keys( $registered_blocks );
 			sort( $block_names, SORT_NATURAL | SORT_FLAG_CASE );
 		}
+
+		// Unique block families (namespaces) for the "Block family" type-ahead.
+		// The score table keys on namespace (e.g. "core"), not full block names
+		// like the replacement table, so it gets its own suggestion list.
+		$block_families = array();
+		foreach ( $block_names as $registered_name ) {
+			$slash  = strpos( $registered_name, '/' );
+			$family = ( false !== $slash ) ? substr( $registered_name, 0, $slash ) : $registered_name;
+			if ( '' !== $family ) {
+				$block_families[ $family ] = true;
+			}
+		}
+		$block_families = array_keys( $block_families );
+		sort( $block_families, SORT_NATURAL | SORT_FLAG_CASE );
 
 		// Notices from action handlers. All inputs unslashed and clamped via
 		// absint before composition; the message itself never contains user data.
@@ -465,6 +561,9 @@ class Settings_Page {
 					color: var(--wp-admin-theme-color, #2271b1);
 					box-shadow: inset 0 -2px 0 0 var(--wp-admin-theme-color, #2271b1);
 				}
+				.gk-tab-panel[hidden] {
+					display: none;
+				}
 			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-api' ); ?></h1>
 			<p class="description gk-block-api-subtitle" style="margin:4px 0 12px; max-width:800px;">
@@ -484,7 +583,7 @@ class Settings_Page {
 					)
 				);
 				?>
-							" class="nav-tab<?php echo 'connect' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Connect', 'gk-block-api' ); ?></a>
+							" data-tab="connect" class="nav-tab<?php echo 'connect' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Connect', 'gk-block-api' ); ?></a>
 				<a href="
 				<?php
 				echo esc_url(
@@ -497,14 +596,44 @@ class Settings_Page {
 					)
 				);
 				?>
-							" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Block policy', 'gk-block-api' ); ?></a>
+							" data-tab="policy" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Settings', 'gk-block-api' ); ?></a>
 			</h2>
 
-			<?php if ( 'connect' === $tab ) : ?>
+			<div class="gk-tab-panel" data-tab-panel="connect"<?php echo 'connect' === $tab ? '' : ' hidden'; ?>>
 
 				<?php ( new Connect_Page() )->render_section(); ?>
 
-			<?php else : ?>
+			</div>
+			<div class="gk-tab-panel" data-tab-panel="policy"<?php echo 'policy' === $tab ? '' : ' hidden'; ?>>
+				<style>
+					/* Generous, WP-native rhythm so each settings section breathes:
+						a wide gap above every section heading, with its description
+						pulled in tight beneath it so the pair reads as one unit. */
+					.gk-tab-panel[data-tab-panel="policy"] h2 {
+						margin: 40px 0 4px;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] h2 + p {
+						margin-top: 4px;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] form:first-of-type > h2:first-of-type {
+						margin-top: 20px;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] .gk-block-api-advanced > h2:first-of-type {
+						margin-top: 24px;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] .gk-block-api-section-rule {
+						margin: 40px 0 0;
+						border: 0;
+						border-top: 1px solid #dcdcde;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] .gk-block-api-section-rule + h2 {
+						margin-top: 20px;
+					}
+					.gk-tab-panel[data-tab-panel="policy"] {
+						padding-bottom: 40px;
+					}
+				</style>
+
 
 				<?php if ( $scanned ) : ?>
 				<div class="notice notice-success is-dismissible"><p>
@@ -524,21 +653,7 @@ class Settings_Page {
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings reset to defaults.', 'gk-block-api' ); ?></p></div>
 			<?php endif; ?>
 
-			<p><?php esc_html_e( 'These settings drive how the Block MCP server classifies blocks (preferred / acceptable / avoid / legacy), suggests replacements, and detects dual-storage blocks that need both attributes and innerHTML on every update.', 'gk-block-api' ); ?></p>
-
-			<style>
-				/* Keep the Remove checkbox + label on a single line — the 80px
-					column width was wrapping the label below the checkbox. */
-				.gk-block-api-remove-label {
-					white-space: nowrap;
-					display: inline-flex;
-					align-items: center;
-					gap: 4px;
-				}
-				.gk-block-api-remove-label input[type="checkbox"] {
-					margin: 0;
-				}
-			</style>
+			<p><?php esc_html_e( 'These settings control which blocks AI assistants prefer, what to use in place of older blocks, and which blocks need extra care when edited.', 'gk-block-api' ); ?></p>
 
 				<?php
 				/*
@@ -555,202 +670,28 @@ class Settings_Page {
 				<?php endfor; ?>
 			</datalist>
 
+			<datalist id="gk-block-families">
+				<?php foreach ( $block_families as $block_family ) : ?>
+					<option value="<?php echo esc_attr( $block_family ); ?>"></option>
+				<?php endforeach; ?>
+			</datalist>
+
 			<form method="post" action="options.php">
 				<?php settings_fields( self::OPTION_GROUP ); ?>
 
-				<h2><?php esc_html_e( 'MCP server instructions', 'gk-block-api' ); ?></h2>
-				<p class="description">
-					<?php
-					echo wp_kses(
-						sprintf(
-							/* translators: 1: link to MCP spec, 2: max length */
-							__( 'Custom rules that every connected MCP client receives at handshake via <a href="%1$s" target="_blank" rel="noopener noreferrer">serverInfo.instructions</a>. Use it to encode site-specific conventions — callout className mapping, code-block theme, doc structure rules — so LLM agents don\'t have to re-discover them. Plain text up to %2$d characters; appended to the server\'s baseline.', 'gk-block-api' ),
-							'https://modelcontextprotocol.io/specification',
-							(int) $instructions_max
-						),
-						array(
-							'a' => array(
-								'href'   => array(),
-								'target' => array(),
-								'rel'    => array(),
-							),
-						)
-					);
-					?>
-				</p>
-				<p class="description" style="color:#b32d2e;">
-					<strong><?php esc_html_e( 'Public data:', 'gk-block-api' ); ?></strong>
-					<?php esc_html_e( 'This value is served unauthenticated to every connected MCP client. Do NOT paste secrets, API keys, or internal URLs.', 'gk-block-api' ); ?>
-				</p>
+
+				<h2><?php esc_html_e( 'What AI assistants can create', 'gk-block-api' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Choose which kinds of content AI assistants are allowed to create. Check the types you want to allow.', 'gk-block-api' ); ?></p>
 				<?php
-				/*
-				 * No HTML `maxlength` attribute. The browser counts UTF-16
-				 * code units while the server counts UTF-8 code points
-				 * (mb_strlen / Instructions::MAX_LENGTH), so a maxlength
-				 * value of 2000 would block ~1000 emoji at the client
-				 * even though the server would accept them. The inline
-				 * JS below enforces a true code-point limit that matches
-				 * the server's counter.
-				 */
+				$gk_allow_all_msg  = __( 'All public content types are currently allowed (the default).', 'gk-block-api' );
+				$gk_restricted_msg = __( 'Only the checked content types are allowed.', 'gk-block-api' );
 				?>
-				<textarea
-					id="gk-block-api-instructions"
-					name="<?php echo esc_attr( Instructions::OPTION_KEY ); ?>"
-					rows="8"
-					data-max-codepoints="<?php echo esc_attr( (string) $instructions_max ); ?>"
-					class="large-text code"
-					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-api' ); ?>"
-				><?php echo esc_textarea( $instructions_val ); ?></textarea>
-				<p class="description">
-					<span id="gk-block-api-instructions-count"><?php echo esc_html( (string) mb_strlen( $instructions_val, 'UTF-8' ) ); ?></span>
-					<?php
-					echo esc_html(
-						sprintf(
-							/* translators: %d: max length */
-							__( '/ %d characters used. Roughly 500 tokens at max length — keep it short and use concise bulleted rules rather than prose.', 'gk-block-api' ),
-							(int) $instructions_max
-						)
-					);
-					?>
+				<p class="description gk-block-api-allow-all-note" aria-live="polite">
+					<span class="dashicons dashicons-info-outline" aria-hidden="true"></span>
+					<span class="gk-block-api-allow-all-text"><?php echo esc_html( empty( $post_type_allow ) ? $gk_allow_all_msg : $gk_restricted_msg ); ?></span>
 				</p>
-				<script>
-				(function () {
-					var ta    = document.getElementById('gk-block-api-instructions');
-					var count = document.getElementById('gk-block-api-instructions-count');
-					if (!ta || !count) return;
-					var max = parseInt(ta.getAttribute('data-max-codepoints'), 10) || 0;
-
-					// Count Unicode code points, not UTF-16 code units, so
-					// astral characters (emoji, rare CJK, math symbols)
-					// match the server's mb_strlen(...) tally.
-					function codePoints(s) { return Array.from(s); }
-
-					ta.addEventListener('input', function () {
-						var cps = codePoints(ta.value);
-						if (max > 0 && cps.length > max) {
-							ta.value = cps.slice(0, max).join('');
-							cps = codePoints(ta.value);
-						}
-						count.textContent = String(cps.length);
-					});
-				})();
-				</script>
-
-				<h2><?php esc_html_e( 'Namespace tier scores', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Score 0–100 per namespace. >= 80 = preferred, >= 50 = acceptable, >= 10 = avoid (warning), < 10 = legacy (hard reject on insert).', 'gk-block-api' ); ?></p>
-				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[namespace_rows]" style="max-width: 700px;">
-					<thead>
-						<tr>
-							<th scope="col"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></th>
-							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></th>
-							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php
-						$ns_keys  = array_keys( $namespace_scores );
-						$ns_count = count( $ns_keys );
-						for ( $ns_index = 0; $ns_index < $ns_count; $ns_index++ ) :
-							$ns    = $ns_keys[ $ns_index ];
-							$score = $namespace_scores[ $ns ];
-							?>
-							<tr>
-								<td>
-									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Namespace', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="regular-text" data-row-trigger="1" />
-								</td>
-								<td>
-									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></label>
-									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
-								</td>
-								<td>
-									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
-								</td>
-							</tr>
-						<?php endfor; ?>
-						<?php $ns_index = $ns_count; ?>
-						<tr>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New namespace', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" class="regular-text" data-row-trigger="1" />
-							</td>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-api' ); ?></label>
-								<input type="number" id="gk-ns-score-new" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" placeholder="0" class="small-text" />
-							</td>
-							<td></td>
-						</tr>
-					</tbody>
-				</table>
-
-				<h2><?php esc_html_e( 'Replacement map', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'When a legacy block is rejected on insert, the error suggests its mapped replacement. The Replacement column shows a searchable list of all currently registered blocks on this site — type to filter, or enter any block name manually.', 'gk-block-api' ); ?></p>
-				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[replacement_rows]" style="max-width: 800px;">
-					<thead>
-						<tr>
-							<th scope="col"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></th>
-							<th scope="col"><?php esc_html_e( 'Replacement', 'gk-block-api' ); ?></th>
-							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php
-						$rm_keys  = array_keys( $replacement_map );
-						$rm_count = count( $rm_keys );
-						for ( $rm_index = 0; $rm_index < $rm_count; $rm_index++ ) :
-							$from = $rm_keys[ $rm_index ];
-							$to   = $replacement_map[ $from ];
-							?>
-							<tr>
-								<td>
-									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="regular-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
-								</td>
-								<td>
-									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-api' ); ?></label>
-									<input type="text" id="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" value="<?php echo esc_attr( (string) $to ); ?>" class="regular-text" list="gk-block-names" autocomplete="off" />
-								</td>
-								<td>
-									<label class="gk-block-api-remove-label"><input type="checkbox" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][delete]" value="1" /> <?php esc_html_e( 'Remove', 'gk-block-api' ); ?></label>
-								</td>
-							</tr>
-						<?php endfor; ?>
-						<?php $rm_index = $rm_count; ?>
-						<tr>
-							<td>
-								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-api' ); ?>" class="regular-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
-							</td>
-							<td>
-								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-api' ); ?></label>
-								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-api' ); ?>" class="regular-text" list="gk-block-names" autocomplete="off" />
-							</td>
-							<td></td>
-						</tr>
-					</tbody>
-				</table>
-
-				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-api' ); ?></h2>
-				<p class="description">
-					<?php esc_html_e( 'Most blocks store their content in one place — either as block attributes (the JSON between the wp:block comments) or as innerHTML. A few blocks store the same data in BOTH at the same time. For these, updating one without the other corrupts the block silently.', 'gk-block-api' ); ?>
-				</p>
-				<p class="description">
-					<?php
-					echo wp_kses(
-						__( 'A common example is <code>yoast/faq-block</code>: it keeps the questions in <code>attributes.questions</code> AND in the inner <code>&lt;dl&gt;</code> markup. If an agent updates only innerHTML, the structured questions array goes stale.', 'gk-block-api' ),
-						array( 'code' => array() )
-					);
-					?>
-				</p>
-				<p class="description">
-					<?php esc_html_e( 'Block MCP detects most dual-storage blocks automatically by scanning your site. List any extras here (one per line) — when an agent tries to update one of these blocks, it will be required to send both attributes and innerHTML together, preventing the corruption.', 'gk-block-api' ); ?>
-				</p>
-				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block-name"; ?>
-				<textarea name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
-
-				<h2><?php esc_html_e( 'Post types AI agents can create', 'gk-block-api' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Restrict which post types the create_post MCP tool is allowed to use. Check the boxes for the types you want agents to be able to create. Leave everything unchecked to allow any public post type with REST support (the default).', 'gk-block-api' ); ?></p>
 				<fieldset class="gk-block-api-allowlist">
+					<legend class="screen-reader-text"><?php esc_html_e( 'Content types AI assistants are allowed to create', 'gk-block-api' ); ?></legend>
 					<?php
 					$pt_slugs = array_keys( $registered_post_types );
 					$pt_count = count( $pt_slugs );
@@ -780,11 +721,53 @@ class Settings_Page {
 						overflow: hidden;
 						text-overflow: ellipsis;
 					}
+					.gk-tab-panel[data-tab-panel="policy"] .gk-block-api-allow-all-note {
+						margin: 20px 0 24px;
+					}
+					.gk-block-api-allow-all-note {
+						padding: 10px 14px;
+						background: #f0f6fc;
+						border-left: 3px solid #72aee6;
+						display: flex;
+						align-items: center;
+						gap: 6px;
+						max-width: 1000px;
+					}
+					.gk-block-api-allow-all-note .dashicons {
+						color: #2271b1;
+						font-size: 18px;
+						width: 18px;
+						height: 18px;
+					}
 				</style>
+				<script>
+					( function () {
+						var fieldset = document.querySelector( '.gk-block-api-allowlist' );
+						var note     = document.querySelector( '.gk-block-api-allow-all-note' );
+						if ( ! fieldset || ! note ) {
+							return;
+						}
+						var textEl        = note.querySelector( '.gk-block-api-allow-all-text' );
+						var allowAllMsg   = <?php echo wp_json_encode( $gk_allow_all_msg ); ?>;
+						var restrictedMsg = <?php echo wp_json_encode( $gk_restricted_msg ); ?>;
+						var boxes = fieldset.querySelectorAll( 'input[type="checkbox"]' );
+						function update() {
+							var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
+								return box.checked;
+							} );
+							if ( textEl ) {
+								textEl.textContent = anyChecked ? restrictedMsg : allowAllMsg;
+							}
+						}
+						fieldset.addEventListener( 'change', update );
+						update();
+					} )();
+				</script>
+
 
 				<h2><?php esc_html_e( 'Media uploads', 'gk-block-api' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Master kill-switch for every MCP-driven upload path: multipart, URL sideload, base64. When disabled, the plugin refuses every upload with HTTP 403 before any disk I/O, DNS lookup, or HTTP fetch — useful if you want agents to edit blocks but not write to the media library.', 'gk-block-api' ); ?>
+					<?php esc_html_e( 'Turn this off to stop AI assistants from adding files to your Media Library. They can still edit blocks — they just won\'t be able to upload images or other files.', 'gk-block-api' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -800,7 +783,7 @@ class Settings_Page {
 						value="1"
 						<?php checked( $uploads_enabled ); ?>
 					/>
-					<?php esc_html_e( 'Allow MCP agents to upload media', 'gk-block-api' ); ?>
+					<?php esc_html_e( 'Allow AI assistants to upload media', 'gk-block-api' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so admins aren't confused
@@ -826,20 +809,319 @@ class Settings_Page {
 				endif;
 				?>
 
-				<?php submit_button(); ?>
+
+				<h2><?php esc_html_e( 'Trash', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Turn this on to let AI assistants move posts and pages to the trash. It\'s off by default. Even when on, they can\'t permanently delete anything — trashed items stay in your Trash until you empty it, and you can restore them.', 'gk-block-api' ); ?>
+				</p>
+				<?php
+				// Belt-and-braces: emit '0' even when the box is unchecked so
+				// update_option() reliably stores false. PHP omits unchecked
+				// checkboxes entirely from $_POST, and the setting's
+				// sanitize_callback would then receive nothing.
+				?>
+				<input type="hidden" name="<?php echo esc_attr( $trash_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $trash_option ); ?>"
+						value="1"
+						<?php checked( $trash_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Allow AI assistants to move posts to the trash', 'gk-block-api' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so admins aren't confused
+				// by a box whose state the API doesn't actually honor.
+				$trash_raw      = get_option( $trash_option, '0' );
+				$trash_stored   = ( '0' !== (string) $trash_raw && false !== $trash_raw );
+				$trash_filtered = (bool) apply_filters( 'gk_block_api_allow_trash', $trash_stored );
+				if ( $trash_stored !== $trash_filtered ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-api' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-api' ),
+							'<code>gk_block_api_allow_trash</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
+
+
+				<style>
+					/* Style the Advanced disclosure like a metabox header: postbox
+						h2 size with a chevron that flips when the panel is open. Uses
+						the core dashicons font (enqueued for this page). */
+					details.gk-block-api-advanced { margin: 30px 0 0; }
+					details.gk-block-api-advanced > summary {
+						list-style: none;
+						cursor: pointer;
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						gap: 12px;
+						padding: 12px 14px;
+						background: #fff;
+						border: 1px solid #c3c4c7;
+						border-radius: 4px;
+						color: #1d2327;
+						transition: background 0.12s ease, border-color 0.12s ease;
+					}
+					details.gk-block-api-advanced > summary:hover {
+						background: #f6f7f7;
+						border-color: #8c8f94;
+					}
+					details.gk-block-api-advanced > summary:focus-visible {
+						outline: 2px solid var(--wp-admin-theme-color, #2271b1);
+						outline-offset: 1px;
+					}
+					.gk-block-api-advanced__label {
+						display: block;
+						font-size: 14px;
+						font-weight: 600;
+						line-height: 1.3;
+					}
+					.gk-block-api-advanced__desc {
+						display: block;
+						font-size: 12px;
+						font-weight: 400;
+						color: #646970;
+						margin-top: 2px;
+					}
+					details.gk-block-api-advanced > summary::-webkit-details-marker { display: none; }
+					details.gk-block-api-advanced > summary::after {
+						content: "\f347";
+						font-family: dashicons;
+						font-size: 20px;
+						line-height: 1;
+						color: #50575e;
+						flex: 0 0 auto;
+						transition: transform 0.15s ease;
+					}
+					details.gk-block-api-advanced[open] > summary::after { transform: rotate( 180deg ); }
+				</style>
+				<details class="gk-block-api-advanced">
+				<summary>
+					<span class="gk-block-api-advanced__text">
+						<span class="gk-block-api-advanced__label"><?php esc_html_e( 'Advanced', 'gk-block-api' ); ?></span>
+						<span class="gk-block-api-advanced__desc"><?php esc_html_e( 'Custom instructions, block preferences, replacements, and blocks that store data in two places — most sites won\'t need these.', 'gk-block-api' ); ?></span>
+					</span>
+				</summary>
+				<h2><?php esc_html_e( 'Custom instructions for AI assistants', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php
+					echo wp_kses(
+						sprintf(
+							/* translators: 1: link to MCP spec, 2: max length */
+							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site — which callout styles to use, your preferred code-block look, how documents should be structured — so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-api' ),
+							'https://modelcontextprotocol.io/specification',
+							(int) $instructions_max
+						),
+						array(
+							'a' => array(
+								'href'   => array(),
+								'target' => array(),
+								'rel'    => array(),
+							),
+						)
+					);
+					?>
+				</p>
+				<p class="description" style="color:#b32d2e;">
+					<strong><?php esc_html_e( 'Public data:', 'gk-block-api' ); ?></strong>
+					<?php esc_html_e( 'Anyone who connects an AI assistant to your site can read this. Don\'t paste passwords, API keys, or private links here.', 'gk-block-api' ); ?>
+				</p>
+				<?php
+				/*
+				 * No HTML `maxlength` attribute. The browser counts UTF-16
+				 * code units while the server counts UTF-8 code points
+				 * (mb_strlen / Instructions::MAX_LENGTH), so a maxlength
+				 * value of 2000 would block ~1000 emoji at the client
+				 * even though the server would accept them. The inline
+				 * JS below enforces a true code-point limit that matches
+				 * the server's counter.
+				 */
+				?>
+				<textarea
+					id="gk-block-api-instructions"
+					aria-label="<?php esc_attr_e( 'Custom instructions for AI assistants', 'gk-block-api' ); ?>"
+					name="<?php echo esc_attr( Instructions::OPTION_KEY ); ?>"
+					rows="8"
+					data-max-codepoints="<?php echo esc_attr( (string) $instructions_max ); ?>"
+					class="large-text code"
+					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-api' ); ?>"
+				><?php echo esc_textarea( $instructions_val ); ?></textarea>
+				<p class="description">
+					<span id="gk-block-api-instructions-count"><?php echo esc_html( (string) mb_strlen( $instructions_val, 'UTF-8' ) ); ?></span>
+					<?php
+					echo esc_html(
+						sprintf(
+							/* translators: %d: max length */
+							__( '/ %d characters used. Keep it short — a few clear bullet points work better than long paragraphs.', 'gk-block-api' ),
+							(int) $instructions_max
+						)
+					);
+					?>
+				</p>
+				<script>
+				(function () {
+					var ta    = document.getElementById('gk-block-api-instructions');
+					var count = document.getElementById('gk-block-api-instructions-count');
+					if (!ta || !count) return;
+					var max = parseInt(ta.getAttribute('data-max-codepoints'), 10) || 0;
+
+					// Count Unicode code points, not UTF-16 code units, so
+					// astral characters (emoji, rare CJK, math symbols)
+					// match the server's mb_strlen(...) tally.
+					function codePoints(s) { return Array.from(s); }
+
+					ta.addEventListener('input', function () {
+						var cps = codePoints(ta.value);
+						if (max > 0 && cps.length > max) {
+							ta.value = cps.slice(0, max).join('');
+							cps = codePoints(ta.value);
+						}
+						count.textContent = String(cps.length);
+					});
+				})();
+				</script>
+
+
+				<h2><?php esc_html_e( 'Which blocks AI should prefer', 'gk-block-api' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Give each block family a score from 0 to 100 to tell AI assistants which blocks to favor. 80 or higher = preferred, 50 or higher = fine to use, 10 or higher = discouraged (the assistant is warned), below 10 = blocked.', 'gk-block-api' ); ?></p>
+				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[namespace_rows]" style="max-width: 820px;">
+					<thead>
+						<tr>
+							<th scope="col"><?php esc_html_e( 'Block family', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+						$ns_keys  = array_keys( $namespace_scores );
+						$ns_count = count( $ns_keys );
+						for ( $ns_index = 0; $ns_index < $ns_count; $ns_index++ ) :
+							$ns    = $ns_keys[ $ns_index ];
+							$score = $namespace_scores[ $ns ];
+							?>
+							<tr>
+								<td>
+									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Block family', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
+								</td>
+								<td>
+									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-api' ); ?></label>
+									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
+								</td>
+								<td>
+									<button type="button" class="components-button is-link is-destructive gk-block-api-remove-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: block family name */ __( 'Remove %s', 'gk-block-api' ), (string) $ns ) ); ?>"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></button>
+								</td>
+							</tr>
+						<?php endfor; ?>
+						<?php $ns_index = $ns_count; ?>
+						<tr>
+							<td>
+								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New block family', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-api' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
+							</td>
+							<td>
+								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-api' ); ?></label>
+								<input type="number" id="gk-ns-score-new" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" placeholder="0" class="small-text" />
+							</td>
+							<td></td>
+						</tr>
+					</tbody>
+				</table>
+
+
+				<h2><?php esc_html_e( 'Replacement map', 'gk-block-api' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'When an AI assistant is blocked from using an older block, it suggests the replacement you set here. Start typing in the Replacement column to search the blocks available on your site, or type any block name.', 'gk-block-api' ); ?></p>
+				<table class="widefat striped gk-block-api-growable" data-row-prefix="gk_block_api_preferences[replacement_rows]" style="max-width: 820px;">
+					<thead>
+						<tr>
+							<th scope="col"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Replacement', 'gk-block-api' ); ?></th>
+							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+						$rm_keys  = array_keys( $replacement_map );
+						$rm_count = count( $rm_keys );
+						for ( $rm_index = 0; $rm_index < $rm_count; $rm_index++ ) :
+							$from = $rm_keys[ $rm_index ];
+							$to   = $replacement_map[ $from ];
+							?>
+							<tr>
+								<td>
+									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+								</td>
+								<td>
+									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-api' ); ?></label>
+									<input type="text" id="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" value="<?php echo esc_attr( (string) $to ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
+								</td>
+								<td>
+									<button type="button" class="components-button is-link is-destructive gk-block-api-remove-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: legacy block name */ __( 'Remove %s', 'gk-block-api' ), (string) $from ) ); ?>"><?php esc_html_e( 'Remove', 'gk-block-api' ); ?></button>
+								</td>
+							</tr>
+						<?php endfor; ?>
+						<?php $rm_index = $rm_count; ?>
+						<tr>
+							<td>
+								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-api' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+							</td>
+							<td>
+								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-api' ); ?></label>
+								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-api' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
+							</td>
+							<td></td>
+						</tr>
+					</tbody>
+				</table>
+
+
+				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-api' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Most blocks keep their content in one place. A few keep the same content in two places at once — and if an AI assistant updates only one of them, the block quietly breaks.', 'gk-block-api' ); ?>
+				</p>
+				<p class="description">
+					<?php
+					echo wp_kses(
+						__( 'A common example is the Yoast FAQ block, which keeps its list of questions in two places at the same time.', 'gk-block-api' ),
+						array( 'code' => array() )
+					);
+					?>
+				</p>
+				<p class="description">
+					<?php esc_html_e( 'Block MCP finds most of these automatically when it scans your site. Add any others here, one per line — assistants will then be required to update both copies together, so nothing breaks.', 'gk-block-api' ); ?>
+				</p>
+				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block-name"; ?>
+				<label class="screen-reader-text" for="gk-block-api-dual-manual"><?php esc_html_e( 'Blocks that keep the same content in two places — one block name per line', 'gk-block-api' ); ?></label>
+				<textarea id="gk-block-api-dual-manual" name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
+				</details>
+
+				<p class="submit"><button type="submit" name="submit" id="gk-block-api-save" class="components-button is-primary"><?php esc_html_e( 'Save changes', 'gk-block-api' ); ?></button></p>
 			</form>
 
-			<hr />
+			<hr class="gk-block-api-section-rule" />
 
-			<h2><?php esc_html_e( 'Storage-mode scan', 'gk-block-api' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Walks every published post and classifies each distinct block name as static / dynamic / dual. After running, get_page_blocks annotations and dual-storage enforcement use the live classification instead of the filter defaults. Slow on large sites.', 'gk-block-api' ); ?></p>
+			<h2><?php esc_html_e( 'Re-scan your blocks', 'gk-block-api' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Scans your published content to learn how each block stores its data, so AI assistants make accurate edits. This can take a while on large sites.', 'gk-block-api' ); ?></p>
 				<?php if ( ! empty( $scan_results ) ) : ?>
 				<p><strong>
 					<?php
 					echo esc_html(
 						sprintf(
 							/* translators: %d: number of distinct block names persisted */
-							__( 'Last scan classified %d distinct block name(s).', 'gk-block-api' ),
+							__( 'Last scan checked %d different block type(s).', 'gk-block-api' ),
 							count( $scan_results )
 						)
 					);
@@ -849,17 +1131,16 @@ class Settings_Page {
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action" value="gk_block_api_scan_storage_modes" />
 				<?php wp_nonce_field( 'gk_block_api_scan_storage_modes' ); ?>
-				<?php submit_button( __( 'Run scan now', 'gk-block-api' ), 'secondary', 'submit', false ); ?>
+				<button type="submit" class="components-button is-secondary"><?php esc_html_e( 'Run scan now', 'gk-block-api' ); ?></button>
 			</form>
 
-			<hr />
 
 			<h2><?php esc_html_e( 'Reset to defaults', 'gk-block-api' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Deletes all settings stored above (preferences, post-type allow-list, manual dual-storage list, scan results, inventory cache, and per-post rate-limit transients). The next read falls back to the hard-coded Preferences defaults.', 'gk-block-api' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Clears everything on this page and returns Block MCP to its default settings. This can\'t be undone.', 'gk-block-api' ); ?></p>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'Reset all Block MCP settings? This cannot be undone.', 'gk-block-api' ) ); ?>');">
 				<input type="hidden" name="action" value="gk_block_api_reset_defaults" />
 				<?php wp_nonce_field( 'gk_block_api_reset_defaults' ); ?>
-				<?php submit_button( __( 'Reset to defaults', 'gk-block-api' ), 'delete', 'submit', false ); ?>
+				<button type="submit" class="components-button is-secondary is-destructive"><?php esc_html_e( 'Reset to defaults', 'gk-block-api' ); ?></button>
 			</form>
 
 			<script>
@@ -871,6 +1152,7 @@ class Settings_Page {
 			(function () {
 				var live = document.getElementById('gk-block-api-live');
 				var announcement = <?php echo wp_json_encode( __( 'New row added. You can keep adding entries.', 'gk-block-api' ) ); ?>;
+				var removedMsg   = <?php echo wp_json_encode( __( 'Row removed. Save changes to apply.', 'gk-block-api' ) ); ?>;
 
 				function announce(msg) {
 					if (!live) return;
@@ -903,7 +1185,14 @@ class Settings_Page {
 								var input = inputs[i];
 								input.value = '';
 								if (input.checked) input.checked = false;
+								var oldId = input.getAttribute('id');
 								input.removeAttribute('id');
+								if (oldId) {
+									var newId = 'gk-row-' + idx + '-' + i;
+									input.id = newId;
+									var lbl = clone.querySelector('label[for="' + oldId + '"]');
+									if (lbl) { lbl.setAttribute('for', newId); }
+								}
 								if (input.name) {
 									input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
 								}
@@ -921,12 +1210,71 @@ class Settings_Page {
 							tbody.appendChild(clone);
 							announce(announcement);
 						});
+
+						tbody.addEventListener('click', function (e) {
+							var btn = e.target.closest('.gk-block-api-remove-row');
+							if (!btn || !tbody.contains(btn)) return;
+							e.preventDefault();
+							var row = btn.closest('tr');
+							if (!row) return;
+							// Move focus to a neighbouring Remove button before deletion (a11y).
+							var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+							var idx = rows.indexOf(row);
+							var focusTarget = null, k;
+							for (k = idx + 1; k < rows.length; k++) { var nb = rows[k].querySelector('.gk-block-api-remove-row'); if (nb) { focusTarget = nb; break; } }
+							if (!focusTarget) { for (k = idx - 1; k >= 0; k--) { var pb = rows[k].querySelector('.gk-block-api-remove-row'); if (pb) { focusTarget = pb; break; } } }
+							row.parentNode.removeChild(row);
+							if (focusTarget) { focusTarget.focus(); }
+							announce(removedMsg);
+						});
 					})(tables[t]);
 				}
 			})();
 			</script>
 
-			<?php endif; // policy tab. ?>
+
+			</div><!-- /.gk-tab-panel -->
+
+			<script>
+				( function () {
+					var tabs   = document.querySelectorAll( '.settings_page_gk-block-api-settings .nav-tab-wrapper .nav-tab[data-tab]' );
+					var panels = document.querySelectorAll( '.gk-tab-panel[data-tab-panel]' );
+					if ( ! tabs.length || ! panels.length ) {
+						return;
+					}
+					function activate( tab ) {
+						panels.forEach( function ( panel ) {
+							panel.hidden = ( panel.getAttribute( 'data-tab-panel' ) !== tab );
+						} );
+						tabs.forEach( function ( link ) {
+							var on = link.getAttribute( 'data-tab' ) === tab;
+							link.classList.toggle( 'nav-tab-active', on );
+							if ( on ) {
+								link.setAttribute( 'aria-current', 'page' );
+							} else {
+								link.removeAttribute( 'aria-current' );
+							}
+						} );
+					}
+					tabs.forEach( function ( link ) {
+						link.addEventListener( 'click', function ( e ) {
+							var tab = link.getAttribute( 'data-tab' );
+							if ( ! tab ) {
+								return;
+							}
+							e.preventDefault();
+							activate( tab );
+							if ( window.history && history.pushState ) {
+								history.pushState( { gkTab: tab }, '', link.getAttribute( 'href' ) );
+							}
+						} );
+					} );
+					window.addEventListener( 'popstate', function () {
+						var params = new URLSearchParams( window.location.search );
+						activate( params.get( 'tab' ) || 'connect' );
+					} );
+				} )();
+			</script>
 
 		</div>
 		<?php

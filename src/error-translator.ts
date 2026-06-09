@@ -135,7 +135,7 @@ export function translateWpError(code: string | undefined, data: unknown): strin
       return 'Post type not allowed by this site\'s gk_block_api_post_types_allowlist option. Ask the site admin to add it, or pick a supported type.';
 
     case 'invalid_status':
-      return 'Post status not allowed. Valid values: draft, pending, publish, future, private (trash via DELETE only).';
+      return 'Post status not allowed. Valid values: draft, pending, publish, future, private. To trash, call update_post with status:"trash" (on its own, not combined with other fields).';
 
     // ── Media uploads ──────────────────────────────────────────────
     case 'invalid_url':

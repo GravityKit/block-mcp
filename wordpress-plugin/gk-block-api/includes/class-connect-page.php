@@ -18,7 +18,7 @@
  * pattern stay as thin as possible so the seams above stay unit-testable.
  *
  * @package GravityKit\BlockAPI
- * @since   1.9.0
+ * @since   2.0.0
  */
 
 namespace GravityKit\BlockAPI;
@@ -31,7 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Admin "Connect an AI Assistant" wizard for the GK Block API plugin.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 class Connect_Page {
 
@@ -42,7 +42,7 @@ class Connect_Page {
 	 * everywhere the client identity is needed. Human labels are sourced only from
 	 * clients() and must never appear in branching logic.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_CLAUDE_DESKTOP = 'claude-desktop';
@@ -50,7 +50,7 @@ class Connect_Page {
 	/**
 	 * Stable slug for the Claude Code terminal agent client.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_CLAUDE_CODE = 'claude-code';
@@ -58,7 +58,7 @@ class Connect_Page {
 	/**
 	 * Stable slug for the Cursor AI code editor client.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_CURSOR = 'cursor';
@@ -66,7 +66,7 @@ class Connect_Page {
 	/**
 	 * Stable slug for the ChatGPT Desktop client.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_CHATGPT = 'chatgpt-desktop';
@@ -77,7 +77,7 @@ class Connect_Page {
 	 * Selecting this option presents a natural-language prompt the user pastes
 	 * into any AI assistant to trigger the npx connect flow.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_AI_PROMPT = 'ai-prompt';
@@ -88,7 +88,7 @@ class Connect_Page {
 	 * Redirects with ?other=1 so a coming-soon note is shown instead of
 	 * attempting provisioning.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const CLIENT_OTHER = 'other';
@@ -96,7 +96,7 @@ class Connect_Page {
 	/**
 	 * Form action for the connect (download bundle / generate config) handler.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const ACTION_CONNECT = 'gk_block_api_connect';
@@ -108,7 +108,7 @@ class Connect_Page {
 	 * The admin sees the Approve screen; submitting it POSTs here, mints a credential,
 	 * and redirects the one-time secret to the loopback callback.
 	 *
-	 * @since 1.11.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const ACTION_AUTHORIZE = 'gk_block_api_authorize';
@@ -116,7 +116,7 @@ class Connect_Page {
 	/**
 	 * Form action for the revoke (disconnect) handler.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const ACTION_REVOKE = 'gk_block_api_revoke';
@@ -124,7 +124,7 @@ class Connect_Page {
 	/**
 	 * Slug used when registering the admin submenu page.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const PAGE_SLUG = 'gk-block-api-connect';
@@ -136,10 +136,10 @@ class Connect_Page {
 	 * in 5 minutes — long enough for the redirect + page reload, short enough
 	 * to minimise the window a password sits in the options table.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
-	const PASTE_TRANSIENT_PREFIX = 'gk_block_api_paste_pw_';
+	const PASTE_OPTION_PREFIX = 'gk_block_api_paste_pw_';
 
 	/**
 	 * Form action for the connector credential-exchange handler.
@@ -149,22 +149,65 @@ class Connect_Page {
 	 * on both the logged-in and nopriv admin-post hooks because the connector is
 	 * an unauthenticated local process and the code itself is the bearer secret.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
 	const ACTION_EXCHANGE = 'gk_block_api_exchange';
 
 	/**
-	 * Transient key prefix for single-use credential exchange codes.
+	 * Option-table key prefix for single-use credential exchange records.
 	 *
 	 * The full key is this prefix + a SHA-256 hash of the code, so the raw code
-	 * lives only in the redirect/connector and a database read does not reveal
-	 * it. The stored value is the minted credential set.
+	 * lives only in the redirect/connector. The record is a NON-autoloaded option
+	 * (never a transient) so the browser->connector handoff survives every hosting
+	 * topology: with a persistent object cache, transients live in the cache —
+	 * where a per-server (non-shared) cache makes the connector's request miss the
+	 * value the browser wrote, and an LRU cache can evict it before the TTL.
+	 * wp_options is always the shared database. The password inside is sealed at
+	 * rest (see seal_secret()), so a database read cannot recover the live secret.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var string
 	 */
-	const EXCHANGE_TRANSIENT_PREFIX = 'gk_block_api_xchg_';
+	const EXCHANGE_OPTION_PREFIX = 'gk_block_api_xchg_';
+
+	/**
+	 * Marker prefixing a sealed secret in storage.
+	 *
+	 * Lets unseal_secret() distinguish AES-256-GCM-sealed values from legacy or
+	 * plaintext ones (e.g. written on a host without the openssl extension).
+	 *
+	 * @since 2.0.0
+	 * @var string
+	 */
+	const SEAL_PREFIX = 'gkseal:v1:';
+
+	/**
+	 * AES-GCM IV length in bytes (96-bit — the GCM standard).
+	 *
+	 * @since 2.0.0
+	 * @var int
+	 */
+	const SEAL_IV_LEN = 12;
+
+	/**
+	 * AES-GCM authentication tag length in bytes (128-bit).
+	 *
+	 * @since 2.0.0
+	 * @var int
+	 */
+	const SEAL_TAG_LEN = 16;
+
+	/**
+	 * HKDF "info" label that domain-separates the seal key.
+	 *
+	 * Ensures the derived AES key can never collide with any other consumer of
+	 * wp_salt( 'auth' ) on the site.
+	 *
+	 * @since 2.0.0
+	 * @var string
+	 */
+	const SEAL_INFO = 'gk-block-api/credential-seal/v1';
 
 	/**
 	 * Lifetime, in seconds, of a single-use credential exchange code.
@@ -173,7 +216,7 @@ class Connect_Page {
 	 * to the exchange endpoint, short enough to bound the window the credential
 	 * sits in the options table.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 * @var int
 	 */
 	const EXCHANGE_TTL = 120;
@@ -185,7 +228,7 @@ class Connect_Page {
 	 * values, query-string parameters, command flags). Labels and descriptions
 	 * are translatable and used only for display.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 *
 	 * @return array<string, array{label: string, description: string}>
 	 */
@@ -212,8 +255,8 @@ class Connect_Page {
 				'description' => __( 'Copy a prompt and let your AI assistant configure it.', 'gk-block-api' ),
 			),
 			self::CLIENT_OTHER          => array(
-				'label'       => __( "Something else / I'm not sure", 'gk-block-api' ),
-				'description' => __( 'Web apps, or not sure yet.', 'gk-block-api' ),
+				'label'       => __( 'Configure it myself', 'gk-block-api' ),
+				'description' => __( 'Any other MCP client — copy a config.', 'gk-block-api' ),
 			),
 		);
 	}
@@ -224,7 +267,7 @@ class Connect_Page {
 	 * Falls back to the slug itself when the slug is not found in clients(),
 	 * so callers always receive a printable string.
 	 *
-	 * @since 1.12.0
+	 * @since 2.0.0
 	 *
 	 * @param  string $slug One of the slugs returned by clients().
 	 * @return string Translatable display label.
@@ -239,7 +282,7 @@ class Connect_Page {
 	 *
 	 * Filterable so the documentation location can change without a release.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @return string Absolute URL to the Connect setup guide.
 	 */
@@ -247,7 +290,7 @@ class Connect_Page {
 		/**
 		 * Filters the setup-guide URL shown on the Connect screen.
 		 *
-		 * @since 1.9.0
+		 * @since 2.0.0
 		 *
 		 * @param string $url Absolute URL to the Connect setup documentation.
 		 */
@@ -260,13 +303,16 @@ class Connect_Page {
 	 * Shown on every state of the Connect flow and on the Approve screen so a
 	 * stuck beginner always has a documentation path, not just an email.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
+	 * @param bool $top When true, float the link to the top-right (used directly
+	 *                  under the connect heading); otherwise it sits inline.
 	 * @return void
 	 */
-	private function render_help_link(): void {
+	private function render_help_link( bool $top = false ): void {
+		$classes = 'gk-block-api-connect__help description' . ( $top ? ' gk-block-api-connect__help--top' : '' );
 		?>
-		<p class="gk-connect__help description">
+		<p class="<?php echo esc_attr( $classes ); ?>">
 			<?php
 			echo wp_kses(
 				sprintf(
@@ -288,43 +334,79 @@ class Connect_Page {
 	}
 
 	/**
-	 * Provision the agent service account and mint a fresh Application Password.
+	 * Mint a fresh Application Password for a new connection.
 	 *
 	 * This is the shared credential-provisioning seam used by both
 	 * prepare_installer() (for the .mcpb path) and handle_connect() (for the
-	 * artifact path). It runs the full ensure → issue pipeline and returns the
-	 * raw credential set so each caller can consume it in its own way.
+	 * artifact path). For the 'agent' and 'agent_as_me' identities it ensures the
+	 * dedicated agent account and mints on it; for 'self' it mints on the
+	 * approving user instead. Records the connection meta (host, approver, byline)
+	 * and returns the raw credential set so each caller can consume it.
 	 *
-	 * @since  1.10.0
+	 * @since  2.0.0
 	 *
-	 * @param  string $client Human-readable display name for the connecting client
-	 *                        (e.g. the return value of client_label()). Used only as
-	 *                        the Application Password label — never matched or branched on.
+	 * @param  string $client   Human-readable display name for the connecting client
+	 *                          (e.g. the return value of client_label()). Used only as
+	 *                          the Application Password label — never matched or branched on.
+	 * @param  string $identity Which account holds the credential and how content is
+	 *                          authored: 'agent' (dedicated account, neutral byline),
+	 *                          'agent_as_me' (dedicated account, approver byline), or
+	 *                          'self' (the approving user's own account). Anything else
+	 *                          falls back to 'agent'.
 	 * @return array|\WP_Error {
 	 *     On success, a credential array ready for callers to use.
 	 *
 	 *     @type string $url      Untrailed home_url() base.
-	 *     @type string $user     Agent user login.
+	 *     @type string $user     Login of the account the credential was minted on.
 	 *     @type string $password One-time plaintext Application Password.
 	 *     @type string $uuid     UUID of the minted Application Password.
 	 * }
 	 */
-	public function provision_credentials( $client ) {
-		$agent = ( new Agent_Provisioner() )->ensure();
-		if ( is_wp_error( $agent ) ) {
-			return $agent;
+	public function provision_credentials( $client, $identity = 'agent' ) {
+		$identity = in_array( $identity, array( 'agent', 'agent_as_me', 'self' ), true ) ? $identity : 'agent';
+		$human    = get_current_user_id();
+
+		if ( 'self' === $identity ) {
+			// Own-account: mint the credential on the approving user, so the AI app
+			// acts with that person's full capabilities. Higher blast radius — the
+			// Approve screen warns about it. There is no separate byline here:
+			// content is authored by them because it is literally their account
+			// doing the work. The agent is not provisioned for this path.
+			$target_user = $human;
+		} else {
+			$agent = ( new Agent_Provisioner() )->ensure();
+			if ( is_wp_error( $agent ) ) {
+				return $agent;
+			}
+			$target_user = $agent;
 		}
 
-		$issued = ( new App_Password_Issuer() )->issue( $agent, $this->connection_label( $client ) );
+		$issued = ( new App_Password_Issuer() )->issue( $target_user, $this->connection_label( $client ) );
 		if ( is_wp_error( $issued ) ) {
 			return $issued;
 		}
 
-		$agent_user = get_user_by( 'id', $agent );
+		// Record which account holds the credential, who approved it, and the
+		// byline. get_current_user_id() is the approving human — provision runs
+		// inside their authenticated admin request. 'self' authors as the person
+		// inherently; 'agent_as_me' opts the agent into crediting them; plain
+		// 'agent' stays neutral.
+		$author_mode = ( 'agent' === $identity ) ? 'agent' : 'me';
+		Connections::record_meta(
+			$issued['uuid'],
+			array(
+				'user_id'     => $target_user,
+				'created_by'  => $human,
+				'author_mode' => $author_mode,
+				'created_at'  => time(),
+			)
+		);
+
+		$target = get_user_by( 'id', $target_user );
 
 		return array(
 			'url'      => untrailingslashit( home_url() ),
-			'user'     => $agent_user ? $agent_user->user_login : Agent_Provisioner::LOGIN,
+			'user'     => $target ? $target->user_login : Agent_Provisioner::LOGIN,
 			'password' => $issued['password'],
 			'uuid'     => $issued['uuid'],
 		);
@@ -342,7 +424,7 @@ class Connect_Page {
 	 * actually grants. The label keeps the Connections::NAME_PREFIX so a connection
 	 * is still recognised and revocable.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  string $client Human-readable client display name.
 	 * @return string Application Password label.
@@ -366,7 +448,7 @@ class Connect_Page {
 	 * Calls provision_credentials() then builds the .mcpb from the returned
 	 * creds, keeping the .mcpb path unchanged for the Claude Desktop flow.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  string      $client      Human-readable display label for the connecting client
 	 *                                  (e.g. the return value of client_label('claude-desktop')).
@@ -406,7 +488,7 @@ class Connect_Page {
 		 * display. Returning 'prefill' (the default) embeds the password so
 		 * the installer requires no manual copy step.
 		 *
-		 * @since 1.9.0
+		 * @since 2.0.0
 		 *
 		 * @param string $mode 'prefill'|'paste'.
 		 */
@@ -447,19 +529,19 @@ class Connect_Page {
 	 * The body is RAW (not HTML-escaped). Callers that write it to HTML must
 	 * escape it at output time — render_artifact_card() uses esc_textarea().
 	 *
-	 * @since  1.11.0
-	 * @since  1.12.0 Parameter renamed from label string to stable slug.
+	 * @since  2.0.0
+	 * @since  2.0.0 Parameter renamed from label string to stable slug.
 	 *
 	 * @param  string $slug     One of: 'claude-code', 'cursor', 'chatgpt-desktop', 'ai-prompt'.
 	 * @param  string $site_url Untrailed home_url() base to embed in the command.
 	 * @return array {
-	 *     @type string $label    Short description shown above the textarea (HTML-safe).
+	 *     @type string $label    Short description shown above the textarea. Raw text — escape at output.
 	 *     @type string $language Syntax hint ('bash', 'text').
 	 *     @type string $body     Raw command string. Must be escaped by the caller before HTML output.
 	 * }
 	 */
 	public function setup_artifact( $slug, $site_url ) {
-		$terminal_label = esc_html__( 'Run this in your terminal. A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' );
+		$terminal_label = __( 'Run this in your terminal:', 'gk-block-api' );
 
 		switch ( $slug ) {
 			case self::CLIENT_CLAUDE_CODE:
@@ -484,14 +566,21 @@ class Connect_Page {
 				);
 
 			case self::CLIENT_AI_PROMPT:
-			default:
 				return array(
-					'label'    => esc_html__( 'Paste this to your AI assistant. It will run the command, a browser window will open for you to click Approve, and then confirm it can read your blocks.', 'gk-block-api' ),
+					'label'    => __( 'Paste this to your AI assistant:', 'gk-block-api' ),
 					'language' => 'text',
 					'body'     =>
 						"Run `npx -y @gravitykit/block-mcp connect --site {$site_url}` for me, " .
 						'then approve the connection in the browser window that opens, ' .
 						'and confirm you can read the blocks on one of my pages.',
+				);
+
+			case self::CLIENT_OTHER:
+			default:
+				return array(
+					'label'    => $terminal_label,
+					'language' => 'bash',
+					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client print",
 				);
 		}
 	}
@@ -506,7 +595,7 @@ class Connect_Page {
 	 * Valid: http://127.0.0.1:51791/cb, http://localhost:8080/callback, http://[::1]:3000/
 	 * Invalid: https://evil.com/cb, missing port, file://, http://127.0.0.1.evil.com/
 	 *
-	 * @since  1.11.0
+	 * @since  2.0.0
 	 *
 	 * @param  string $url Candidate callback URL.
 	 * @return bool True when the URL is safe to redirect credentials to.
@@ -543,9 +632,47 @@ class Connect_Page {
 	}
 
 	/**
+	 * All connections, regardless of which account holds the credential.
+	 *
+	 * Merges the agent's connections with the own-account connections recorded in
+	 * the meta store. Own-account connections exist even when no agent has been
+	 * provisioned, so this is the single source of truth for "is anything
+	 * connected" and for rendering the Active connections list.
+	 *
+	 * @since  2.0.0
+	 *
+	 * @param  int $agent_id The agent user ID (0 when none provisioned).
+	 * @return array[] Rows in Connections::list() shape.
+	 */
+	private function all_connections( $agent_id ) {
+		$agent_id = (int) $agent_id;
+		$conns    = new Connections();
+		$rows     = $agent_id > 0 ? $conns->list( $agent_id ) : array();
+
+		return array_merge( $rows, $conns->list_self_hosted( $agent_id ) );
+	}
+
+	/**
+	 * Whether the dedicated "Block MCP" agent account already exists.
+	 *
+	 * True once a connection has provisioned it — the account persists even after
+	 * every connection is revoked. Onboarding copy keys off this to switch from
+	 * "connecting creates an account" to present tense once the account is there.
+	 *
+	 * @since  2.0.0
+	 *
+	 * @return bool
+	 */
+	private function agent_exists() {
+		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+
+		return $agent_id > 0 && false !== get_user_by( 'id', $agent_id );
+	}
+
+	/**
 	 * Determine the current connection state for render_page() branching.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @return string 'needs_https' | 'connected' | 'ready'
 	 */
@@ -554,12 +681,10 @@ class Connect_Page {
 			return 'needs_https';
 		}
 
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
-		if ( $agent_id > 0 ) {
-			$connections = ( new Connections() )->list( $agent_id );
-			if ( ! empty( $connections ) ) {
-				return 'connected';
-			}
+		$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$connections = $this->all_connections( $agent_id );
+		if ( ! empty( $connections ) ) {
+			return 'connected';
 		}
 
 		return 'ready';
@@ -571,7 +696,7 @@ class Connect_Page {
 	 * The menu page is hosted by Settings_Page; only the form-action handlers
 	 * need to be wired here.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 */
 	public function register() {
 		add_action( 'admin_post_' . self::ACTION_CONNECT, array( $this, 'handle_connect' ) );
@@ -599,8 +724,8 @@ class Connect_Page {
 	 *
 	 * For 'other': redirects back with ?other=1 so the "coming soon" note is shown.
 	 *
-	 * @since 1.9.0
-	 * @since 1.12.0 Uses stable slugs from clients(); dropped rawurlencode()
+	 * @since 2.0.0
+	 * @since 2.0.0 Uses stable slugs from clients(); dropped rawurlencode()
 	 *               double-encode (add_query_arg already encodes values).
 	 */
 	public function handle_connect() {
@@ -622,7 +747,7 @@ class Connect_Page {
 		// Command-artifact clients: no provisioning — redirect back with the slug
 		// so render_section() can display the secret-free npx command.
 		// add_query_arg() encodes query values; no rawurlencode() wrapper needed.
-		$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT );
+		$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
 		if ( in_array( $slug, $artifact_clients, true ) ) {
 			wp_safe_redirect(
 				add_query_arg(
@@ -630,21 +755,6 @@ class Connect_Page {
 						'page'  => Settings_Page::PAGE_SLUG,
 						'tab'   => 'connect',
 						'setup' => $slug,
-					),
-					admin_url( 'options-general.php' )
-				)
-			);
-			exit;
-		}
-
-		// 'other' slug: redirect with a note flag, no provisioning.
-		if ( self::CLIENT_OTHER === $slug ) {
-			wp_safe_redirect(
-				add_query_arg(
-					array(
-						'page'  => Settings_Page::PAGE_SLUG,
-						'tab'   => 'connect',
-						'other' => '1',
 					),
 					admin_url( 'options-general.php' )
 				)
@@ -661,11 +771,16 @@ class Connect_Page {
 			wp_die( esc_html( $r->get_error_message() ) );
 		}
 
-		// Stash the plaintext for paste-mode so render_page() can show it once
-		// on the redirect back without re-minting.
+		// Stash the sealed password for paste-mode so render_page() can show it
+		// once on the redirect back without re-minting. Stored as a non-autoloaded
+		// wp_options record (see put_record()) — same object-cache-safe path as the
+		// exchange handoff — not a transient.
 		if ( 'paste' === $r['mode'] && '' !== $r['password'] ) {
-			$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
-			set_transient( $transient_key, $r['password'], 5 * MINUTE_IN_SECONDS );
+			$this->put_record(
+				self::PASTE_OPTION_PREFIX . get_current_user_id(),
+				array( 'password' => $this->seal_secret( $r['password'] ) ),
+				5 * MINUTE_IN_SECONDS
+			);
 		}
 
 		$path = $r['path'];
@@ -685,6 +800,9 @@ class Connect_Page {
 		try {
 			readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
 		} catch ( \Throwable $e ) {
+			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+				error_log( 'gk-block-api: installer stream failed: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
 			// Only surface an error page if nothing has been streamed yet —
 			// once octet-stream + Content-Length headers are out, the response
 			// body is committed and WordPress's HTML error handler would
@@ -709,7 +827,7 @@ class Connect_Page {
 	 * already-removed path is a harmless no-op, so the two callers can both
 	 * fire for the same bundle without error.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param string $path Absolute path to the temp bundle.
 	 *
@@ -736,7 +854,7 @@ class Connect_Page {
 	 * is loopback (already validated by is_loopback_callback()) and is therefore
 	 * not in WordPress's allowed_redirect_hosts list.
 	 *
-	 * @since 1.11.0
+	 * @since 2.0.0
 	 */
 	public function handle_authorize() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -749,6 +867,7 @@ class Connect_Page {
 		$callback = isset( $_POST['callback'] ) ? sanitize_text_field( wp_unslash( $_POST['callback'] ) ) : '';
 		$state    = isset( $_POST['state'] ) ? sanitize_text_field( wp_unslash( $_POST['state'] ) ) : '';
 		$client   = isset( $_POST['client'] ) ? sanitize_text_field( wp_unslash( $_POST['client'] ) ) : 'block-mcp';
+		$identity = isset( $_POST['identity'] ) ? sanitize_key( wp_unslash( $_POST['identity'] ) ) : 'agent';
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		// Callback must resolve to a loopback address — credential must never leave
@@ -761,7 +880,7 @@ class Connect_Page {
 			);
 		}
 
-		$creds = $this->provision_credentials( $client );
+		$creds = $this->provision_credentials( $client, $identity );
 		if ( is_wp_error( $creds ) ) {
 			wp_die( esc_html( $creds->get_error_message() ) );
 		}
@@ -791,12 +910,15 @@ class Connect_Page {
 	/**
 	 * Store a minted credential set under a single-use exchange code.
 	 *
-	 * Returns the raw code to embed in the loopback redirect. The credential is
-	 * stored in a short-TTL transient keyed by a SHA-256 hash of the code, so the
-	 * code is the only bearer of the credential and a database read does not
-	 * reveal it.
+	 * Returns the raw code to embed in the loopback redirect. The record KEY is a
+	 * SHA-256 of the code, so a database read cannot reconstruct the code (the
+	 * bearer token) and the credential never travels in the redirect URL, browser
+	 * history, or Referer. The password is sealed at rest, the record is a
+	 * non-autoloaded wp_options row (see put_record()) so the handoff survives
+	 * object-cache / multi-server topologies, EXCHANGE_TTL bounds the window, and
+	 * redeem_exchange_code() consumes it single-use.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param  array $creds Minted credential set with url/user/password keys.
 	 * @return string The raw single-use exchange code.
@@ -804,12 +926,12 @@ class Connect_Page {
 	protected function store_exchange_code( array $creds ) {
 		$code = bin2hex( random_bytes( 32 ) );
 
-		set_transient(
-			self::EXCHANGE_TRANSIENT_PREFIX . hash( 'sha256', $code ),
+		$this->put_record(
+			self::EXCHANGE_OPTION_PREFIX . hash( 'sha256', $code ),
 			array(
 				'site'     => isset( $creds['url'] ) ? $creds['url'] : '',
 				'user'     => isset( $creds['user'] ) ? $creds['user'] : '',
-				'password' => isset( $creds['password'] ) ? $creds['password'] : '',
+				'password' => $this->seal_secret( isset( $creds['password'] ) ? $creds['password'] : '' ),
 			),
 			self::EXCHANGE_TTL
 		);
@@ -820,11 +942,12 @@ class Connect_Page {
 	/**
 	 * Redeem a single-use exchange code, returning the stored credential once.
 	 *
-	 * Looks up the credential set stored by store_exchange_code(), deletes the
-	 * transient before returning so the code cannot be replayed, and returns the
-	 * creds — or null when the code is empty, unknown, or expired.
+	 * Consumes the record stored by store_exchange_code() (single-use via
+	 * take_record()) and returns the creds with the password unsealed — or null
+	 * when the code is empty, unknown, expired, already-consumed, or the sealed
+	 * password fails to authenticate.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @param  string $code Raw exchange code presented by the connector.
 	 * @return array|null Credential set with site/user/password keys, or null.
@@ -834,21 +957,253 @@ class Connect_Page {
 			return null;
 		}
 
-		$key    = self::EXCHANGE_TRANSIENT_PREFIX . hash( 'sha256', $code );
-		$stored = get_transient( $key );
-
-		if ( false === $stored || ! is_array( $stored ) ) {
+		$stored = $this->take_record( self::EXCHANGE_OPTION_PREFIX . hash( 'sha256', $code ) );
+		if ( null === $stored ) {
 			return null;
 		}
 
-		// Single-use: delete before returning so a replay finds nothing.
-		delete_transient( $key );
+		$password = $this->unseal_secret( isset( $stored['password'] ) ? $stored['password'] : '' );
+		if ( null === $password ) {
+			// Sealed credential failed to authenticate (tampering or a rotated
+			// salt). Treat as unusable rather than returning a corrupt secret.
+			return null;
+		}
 
 		return array(
 			'site'     => isset( $stored['site'] ) ? $stored['site'] : '',
 			'user'     => isset( $stored['user'] ) ? $stored['user'] : '',
-			'password' => isset( $stored['password'] ) ? $stored['password'] : '',
+			'password' => $password,
 		);
+	}
+
+	/**
+	 * Persist a short-lived record in wp_options (deliberately NOT a transient).
+	 *
+	 * Transients are unreliable for this cross-request, cross-server credential
+	 * handoff: with a persistent object cache they live in the cache, where a
+	 * per-server (non-shared) cache makes the connector's request miss the value
+	 * the browser wrote, and an LRU cache can evict it before the TTL. wp_options
+	 * is always the shared database (the object cache is only a read-through with a
+	 * DB fallback), so the handoff is correct on every topology. The row is written
+	 * autoload='no' so these blobs never enter the autoloaded options cache; an
+	 * 'expires_at' timestamp replaces the transient auto-expiry and is enforced by
+	 * take_record() / gc_records().
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  string $key   Option name.
+	 * @param  array  $value Record to store; an 'expires_at' key is added.
+	 * @param  int    $ttl   Lifetime in seconds.
+	 * @return void
+	 */
+	private function put_record( $key, array $value, $ttl ) {
+		$value['expires_at'] = time() + (int) $ttl;
+		delete_option( $key );                 // Keys are single-use/unique; ensure a clean add.
+		add_option( $key, $value, '', false ); // autoload = false (non-autoloaded).
+	}
+
+	/**
+	 * Read and consume a short-lived record written by put_record() (single-use).
+	 *
+	 * Single-use is atomic on the delete: only the caller whose delete_option()
+	 * actually removed the row "wins", so a concurrent replay loses and gets null.
+	 * Expired records return null. Returns the record with 'expires_at' stripped,
+	 * or null when missing / expired / already-consumed.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  string $key Option name.
+	 * @return array|null
+	 */
+	private function take_record( $key ) {
+		$value = get_option( $key, null );
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+
+		// Consume: the winner of the delete is the only caller allowed to proceed.
+		if ( ! delete_option( $key ) ) {
+			return null;
+		}
+
+		$expires = isset( $value['expires_at'] ) ? (int) $value['expires_at'] : 0;
+		if ( time() > $expires ) {
+			return null;
+		}
+
+		unset( $value['expires_at'] );
+		return $value;
+	}
+
+	/**
+	 * Opportunistically purge expired exchange/paste records.
+	 *
+	 * Removes rows whose embedded expires_at has passed. Throttled to roughly once
+	 * an hour via a marker option so it does not scan on every connect-page load.
+	 * These records are low-volume (one per connect attempt, single-use-deleted on
+	 * success) and admin-only, so this opportunistic sweep stands in for a cron
+	 * event. The marker key is deliberately outside the swept prefixes.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  bool $force Skip the once-an-hour throttle (tests / uninstall).
+	 * @return void
+	 */
+	public function gc_records( $force = false ) {
+		$marker = 'gk_block_api_cred_gc_at';
+		$now    = time();
+
+		if ( ! $force ) {
+			$last = (int) get_option( $marker, 0 );
+			if ( $now - $last < HOUR_IN_SECONDS ) {
+				return;
+			}
+		}
+		update_option( $marker, $now, false );
+
+		global $wpdb;
+		foreach ( array( self::EXCHANGE_OPTION_PREFIX, self::PASTE_OPTION_PREFIX ) as $prefix ) {
+			$names = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+					$wpdb->esc_like( $prefix ) . '%'
+				)
+			);
+			foreach ( (array) $names as $name ) {
+				$record  = get_option( $name );
+				$expires = is_array( $record ) && isset( $record['expires_at'] ) ? (int) $record['expires_at'] : 0;
+				if ( ! is_array( $record ) || $now > $expires ) {
+					delete_option( $name );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Whether AES-256-GCM sealing is actually available on this host.
+	 *
+	 * Verifies the openssl functions AND that the cipher itself is present, rather
+	 * than assuming function_exists() implies GCM support. Memoised per request.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return bool
+	 */
+	private function can_seal() {
+		static $ok = null;
+		if ( null === $ok ) {
+			$ok = function_exists( 'openssl_encrypt' )
+				&& function_exists( 'openssl_decrypt' )
+				&& function_exists( 'openssl_get_cipher_methods' )
+				&& in_array( 'aes-256-gcm', openssl_get_cipher_methods(), true );
+		}
+		return $ok;
+	}
+
+	/**
+	 * Derive the 32-byte AES-256 key for credential sealing.
+	 *
+	 * Uses HKDF with a use-specific info label so the key is domain-separated from
+	 * any other consumer of wp_salt( 'auth' ) on the site — two subsystems must
+	 * never share an AES key (GCM fails catastrophically under (key, IV) reuse).
+	 * The salt lives in wp-config.php, not the database, so a DB read still cannot
+	 * derive it. Falls back to a labelled SHA-256 only on the rare build without
+	 * hash_hkdf() (PHP < 7.1.2, below the plugin's 7.4 floor).
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return string 32 raw key bytes.
+	 */
+	private function seal_key() {
+		if ( function_exists( 'hash_hkdf' ) ) {
+			return hash_hkdf( 'sha256', wp_salt( 'auth' ), 32, self::SEAL_INFO );
+		}
+		return hash( 'sha256', self::SEAL_INFO . '|' . wp_salt( 'auth' ), true );
+	}
+
+	/**
+	 * Seal a secret for at-rest storage.
+	 *
+	 * Encrypts with AES-256-GCM under an HKDF-derived key (see seal_key()). A fresh
+	 * random IV is generated per call and the GCM authentication tag is stored with
+	 * the ciphertext, so a database read or stolen backup cannot recover the value.
+	 *
+	 * When sealing is unavailable (no openssl/GCM, or encryption fails) it degrades
+	 * to returning the plaintext so the connect flow never breaks — but logs the
+	 * degradation, because the at-rest guarantee is then void for the short TTL.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  string $plaintext Secret to seal.
+	 * @return string Sealed token (SEAL_PREFIX + base64), or the plaintext on the fallback path.
+	 */
+	protected function seal_secret( $plaintext ) {
+		if ( '' === $plaintext ) {
+			return $plaintext;
+		}
+
+		if ( ! $this->can_seal() ) {
+			error_log( 'gk-block-api: AES-256-GCM unavailable (openssl); credential stored UNSEALED for its short TTL.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			return $plaintext;
+		}
+
+		$iv  = random_bytes( self::SEAL_IV_LEN );
+		$tag = '';
+
+		$cipher = openssl_encrypt( $plaintext, 'aes-256-gcm', $this->seal_key(), OPENSSL_RAW_DATA, $iv, $tag, '', self::SEAL_TAG_LEN );
+		if ( false === $cipher ) {
+			error_log( 'gk-block-api: openssl_encrypt failed; credential stored UNSEALED for its short TTL.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			return $plaintext;
+		}
+
+		return self::SEAL_PREFIX . base64_encode( $iv . $tag . $cipher ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+	}
+
+	/**
+	 * Unseal a value produced by seal_secret().
+	 *
+	 * On a host that CAN seal, a value WITHOUT the seal marker is anomalous — this
+	 * code would never have written plaintext there — so it is rejected (null)
+	 * rather than trusted, closing an inject-unsealed-plaintext tampering vector. A
+	 * missing marker is accepted as raw plaintext ONLY where sealing is unavailable
+	 * (the graceful-degradation path). A sealed token returns null on any
+	 * decrypt/authenticate failure — tampering, truncation, or a wrong key after a
+	 * salt rotation.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  mixed $sealed Stored value to unseal.
+	 * @return string|null Plaintext, or null when the value cannot be trusted/verified.
+	 */
+	protected function unseal_secret( $sealed ) {
+		if ( ! is_string( $sealed ) ) {
+			return null;
+		}
+
+		if ( 0 !== strpos( $sealed, self::SEAL_PREFIX ) ) {
+			// No seal marker: reject on a seal-capable host (anomalous / injection),
+			// accept as plaintext only where sealing is genuinely unavailable.
+			return $this->can_seal() ? null : $sealed;
+		}
+
+		if ( ! $this->can_seal() ) {
+			// A sealed value on a host that cannot decrypt it (e.g. a migrated DB).
+			return null;
+		}
+
+		$raw = base64_decode( substr( $sealed, strlen( self::SEAL_PREFIX ) ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+		$min = self::SEAL_IV_LEN + self::SEAL_TAG_LEN;
+		if ( false === $raw || strlen( $raw ) < $min ) {
+			return null;
+		}
+
+		$iv     = substr( $raw, 0, self::SEAL_IV_LEN );
+		$tag    = substr( $raw, self::SEAL_IV_LEN, self::SEAL_TAG_LEN );
+		$cipher = substr( $raw, $min );
+
+		$plain = openssl_decrypt( $cipher, 'aes-256-gcm', $this->seal_key(), OPENSSL_RAW_DATA, $iv, $tag );
+
+		return ( false === $plain ) ? null : $plain;
 	}
 
 	/**
@@ -860,7 +1215,7 @@ class Connect_Page {
 	 * no WordPress session), so no nonce is required and the handler is reachable
 	 * on the nopriv admin-post hook.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 *
 	 * @return void
 	 */
@@ -878,6 +1233,71 @@ class Connect_Page {
 	}
 
 	/**
+	 * Register the connector's credential-exchange REST route.
+	 *
+	 * The connector POSTs its single-use code here to retrieve the credential
+	 * once. REST (`/wp-json/`) is the transport — NOT admin-post.php — because
+	 * admin-post.php is routinely 30x'd before the handler runs by canonical/SSL
+	 * redirects, the Redirection plugin, and security plugins on real sites, which
+	 * the connector cannot follow safely for a credential POST. REST routes escape
+	 * those front-end redirect rules. permission_callback is __return_true: the
+	 * single-use code IS the bearer credential, so there is no session to gate.
+	 *
+	 * Wired on rest_api_init (not behind the admin-only settings bootstrap) so it
+	 * answers the connector's logged-out request.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	public function register_rest_routes() {
+		register_rest_route(
+			'gk-block-api/v1',
+			'/connect/exchange',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'rest_exchange' ),
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'code' => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+				),
+			)
+		);
+	}
+
+	/**
+	 * REST handler: redeem a single-use exchange code for the credential set.
+	 *
+	 * Returns the same `{ success: true, data: { site, user, password } }` shape as
+	 * the admin-post.php handler so the connector parses both identically; a 400
+	 * on an invalid/expired/replayed code.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  \WP_REST_Request $request Request carrying the single-use `code`.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function rest_exchange( \WP_REST_Request $request ) {
+		$creds = $this->redeem_exchange_code( (string) $request->get_param( 'code' ) );
+
+		if ( null === $creds ) {
+			return new \WP_Error( 'invalid_code', 'Invalid or expired code.', array( 'status' => 400 ) );
+		}
+
+		return new \WP_REST_Response(
+			array(
+				'success' => true,
+				'data'    => $creds,
+			),
+			200
+		);
+	}
+
+	/**
 	 * Revoke the Application Password identified by UUID for the agent user.
 	 *
 	 * This is the testable core of handle_revoke(). It performs the agent-id
@@ -885,19 +1305,22 @@ class Connect_Page {
 	 * boolean result. Cap/nonce enforcement and the redirect stay in the HTTP
 	 * handler so tests can call this seam directly without triggering exit.
 	 *
-	 * @since  1.9.0
+	 * @since  2.0.0
 	 *
 	 * @param  string $uuid UUID of the Application Password to delete.
 	 * @return bool True when the credential was deleted, false otherwise.
 	 */
 	public function do_revoke( $uuid ) {
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
-
-		if ( $agent_id <= 0 || '' === $uuid ) {
+		if ( '' === $uuid ) {
 			return false;
 		}
 
-		return ( new Connections() )->revoke( $agent_id, $uuid );
+		// Resolve which account holds the credential from the meta store — it may
+		// be the agent OR the approving user (own-account connections). Falls back
+		// to the agent for older connections recorded before host tracking.
+		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+
+		return ( new Connections() )->revoke_by_uuid( $uuid, $agent_id );
 	}
 
 	/**
@@ -906,7 +1329,7 @@ class Connect_Page {
 	 * Validates capabilities and nonce, delegates the credential deletion to
 	 * do_revoke(), then redirects back to the page with a success query parameter.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 */
 	public function handle_revoke() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -950,10 +1373,10 @@ class Connect_Page {
 	 * Branches on connection_state(): shows an HTTPS requirement notice, a connect
 	 * form with client picker, or an active-connections list with revoke buttons.
 	 *
-	 * All selectors are scoped under .gk-connect to avoid leaking into the rest
+	 * All selectors are scoped under .gk-block-api-connect to avoid leaking into the rest
 	 * of wp-admin.
 	 *
-	 * @since 1.9.0
+	 * @since 2.0.0
 	 */
 	public function render_section() {
 		$state = $this->connection_state();
@@ -978,44 +1401,42 @@ class Connect_Page {
 		$setup_client = ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( isset( $_GET['setup'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			$raw_setup        = sanitize_key( wp_unslash( $_GET['setup'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT );
+			$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
 			if ( in_array( $raw_setup, $artifact_clients, true ) ) {
 				$setup_client = $raw_setup;
 			}
 		}
 
-		$setup_data = null;
-		if ( '' !== $setup_client ) {
-			$site_url   = untrailingslashit( home_url() );
-			$setup_data = array(
-				'client'   => $setup_client,
-				'artifact' => $this->setup_artifact( $setup_client, $site_url ),
-			);
-		}
+		// Opportunistically purge expired exchange/paste records (throttled,
+		// admin-only) — stands in for a cron sweep on this low-volume flow.
+		$this->gc_records();
 
-		// Legacy scalar path: Claude Desktop paste-mode password (shown once after
-		// a paste-mode .mcpb download).
-		$paste_pw      = '';
-		$transient_key = self::PASTE_TRANSIENT_PREFIX . get_current_user_id();
-		$stored        = get_transient( $transient_key );
-		if ( is_string( $stored ) && '' !== $stored ) {
-			$paste_pw = $stored;
-			delete_transient( $transient_key );
+		// Claude Desktop paste-mode password (shown once after a paste-mode .mcpb
+		// download). take_record() consumes it single-use, so it is shown exactly
+		// once even across reloads.
+		$paste_pw  = '';
+		$paste_rec = $this->take_record( self::PASTE_OPTION_PREFIX . get_current_user_id() );
+		if ( is_array( $paste_rec ) && isset( $paste_rec['password'] ) ) {
+			$unsealed = $this->unseal_secret( $paste_rec['password'] );
+			if ( is_string( $unsealed ) && '' !== $unsealed ) {
+				$paste_pw = $unsealed;
+			}
 		}
 
 		// Read-only query-string flags from our own redirects (nonce-free: value
 		// is an integer flag, no user data in the message).
 		$revoked = isset( $_GET['revoked'] ) ? absint( wp_unslash( $_GET['revoked'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
-		// Active connections for the 'connected' state.
+		// Active connections for the 'connected' state — across the agent and any
+		// own-account hosts.
 		$connections = array();
 		if ( 'connected' === $state ) {
 			$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
-			$connections = $agent_id > 0 ? ( new Connections() )->list( $agent_id ) : array();
+			$connections = $this->all_connections( $agent_id );
 		}
 
 		?>
-		<div class="gk-connect">
+		<div class="gk-block-api-connect">
 
 		<?php if ( $revoked ) : ?>
 			<div class="notice notice-success is-dismissible">
@@ -1027,29 +1448,50 @@ class Connect_Page {
 			<div class="notice notice-warning">
 				<p>
 					<strong><?php esc_html_e( 'Your application password (shown once):', 'gk-block-api' ); ?></strong><br />
-					<code class="gk-connect__paste-pw"><?php echo esc_html( $paste_pw ); ?></code>
+					<code class="gk-block-api-connect__paste-pw"><?php echo esc_html( $paste_pw ); ?></code>
 				</p>
 				<p><?php esc_html_e( 'Copy this password and paste it into the Application Password field when you open the downloaded file. It will not be shown again.', 'gk-block-api' ); ?></p>
 			</div>
 		<?php endif; ?>
 
-		<?php if ( null !== $setup_data ) : ?>
-			<?php $this->render_artifact_card( $setup_data['client'], $setup_data['artifact'] ); ?>
+		<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
+			<?php $this->render_active_connections( $connections ); ?>
 		<?php endif; ?>
 
-		<div class="gk-connect__card">
+		<div class="postbox gk-block-api-connect__card">
+			<div class="postbox-header">
+				<h2 class="hndle"><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h2>
+			</div>
+			<div class="inside">
 
-			<h2 class="gk-connect__heading"><?php esc_html_e( 'Connect an AI Assistant to Your Site', 'gk-block-api' ); ?></h2>
+			<?php $this->render_help_link( true ); ?>
 
-			<p class="gk-connect__intro">
-				<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you. Setup takes about a minute — no passwords to copy, no technical files to edit.', 'gk-block-api' ); ?>
+			<p class="gk-block-api-connect__intro">
+				<?php esc_html_e( 'This lets an AI app like Claude write and edit the pages and posts on your site for you.', 'gk-block-api' ); ?>
 			</p>
-			<p class="gk-connect__intro">
-				<?php esc_html_e( "Setup creates a dedicated 'Block MCP' account the AI uses, separate from your own login. You can disconnect it anytime below.", 'gk-block-api' ); ?>
-			</p>
-			<p class="gk-connect__intro description" style="color:#646970;">
-				<?php esc_html_e( "If you see other notices on this page, they're from your other plugins — not from this setup, and they won't affect connecting your AI assistant.", 'gk-block-api' ); ?>
-			</p>
+			<div class="notice notice-warning inline">
+				<p>
+					<?php
+					if ( $this->agent_exists() ) {
+						/* translators: %1$s: opening <strong> tag, %2$s: closing </strong> tag. */
+						$account_copy = __( '%1$sThe AI uses a dedicated "Block MCP" account.%2$s It edits your posts and pages but can\'t sign in or change your settings, and you can remove access anytime by disconnecting.', 'gk-block-api' );
+					} else {
+						/* translators: %1$s: opening <strong> tag, %2$s: closing </strong> tag. */
+						$account_copy = __( '%1$sConnecting creates a new user account.%2$s It\'s created the first time you connect — when you download the installer or approve in your browser. Named "Block MCP", the AI uses it to edit your posts and pages. It can\'t sign in or change your settings, and you can remove it anytime by disconnecting.', 'gk-block-api' );
+					}
+					echo wp_kses(
+						strtr(
+							$account_copy,
+							array(
+								'%1$s' => '<strong>',
+								'%2$s' => '</strong>',
+							)
+						),
+						array( 'strong' => array() )
+					);
+					?>
+				</p>
+			</div>
 
 			<?php if ( 'needs_https' === $state ) : ?>
 
@@ -1064,146 +1506,228 @@ class Connect_Page {
 
 			<?php else : ?>
 
-				<?php if ( 'connected' === $state ) : ?>
-					<p class="gk-connect__connected-badge"><strong>&#x2705; <?php esc_html_e( "You're connected", 'gk-block-api' ); ?></strong></p>
-				<?php endif; ?>
-
 				<?php $this->render_connect_form( $setup_client ); ?>
 				<?php $this->render_client_next_steps( $setup_client ); ?>
 
-				<?php if ( 'connected' !== $state ) : ?>
-					<p class="gk-connect__success-hint description">
-						<?php esc_html_e( 'When setup finishes, a green "Connected" status appears here with a Disconnect button — that\'s how you\'ll know it worked.', 'gk-block-api' ); ?>
-					</p>
-				<?php endif; ?>
-
-				<?php if ( 'connected' === $state && ! empty( $connections ) ) : ?>
-					<div class="gk-connect__connections-card">
-						<h3 class="gk-connect__connections-heading"><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h3>
-						<p class="gk-connect__connections-desc">
-							<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
-						</p>
-						<table class="gk-connect__connections-table">
-							<thead>
-								<tr>
-									<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
-									<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
-									<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
-									<th scope="col"></th>
-								</tr>
-							</thead>
-							<tbody>
-								<?php foreach ( $connections as $conn ) : ?>
-									<tr>
-										<td><?php echo esc_html( $conn['name'] ); ?></td>
-										<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
-										<td>
-											<?php
-											echo $conn['last_used']
-												? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
-												: esc_html__( 'Never', 'gk-block-api' );
-											?>
-										</td>
-										<td>
-											<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-												<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
-												<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
-												<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
-												<button type="submit" class="gk-connect__disconnect-btn button button-link"><?php esc_html_e( 'Disconnect', 'gk-block-api' ); ?></button>
-											</form>
-										</td>
-									</tr>
-								<?php endforeach; ?>
-							</tbody>
-						</table>
-					</div>
-				<?php endif; ?>
-
 			<?php endif; ?>
 
-			<?php $this->render_help_link(); ?>
+			</div><!-- /.inside -->
+		</div><!-- /.postbox.gk-block-api-connect__card -->
 
-		</div><!-- /.gk-connect__card -->
-
-		</div><!-- /.gk-connect -->
+		</div><!-- /.gk-block-api-connect -->
 		<?php
 	}
 
 	/**
-	 * Render the setup-artifact card shown after a successful non-.mcpb connect.
+	 * Build the manual-setup MCP config shown on the "Configure it myself" path.
+	 *
+	 * For users who wire up their client by hand instead of running the connect
+	 * command: the standard stdio `mcpServers` entry with the real site URL and
+	 * placeholders for the username and Application Password the user creates.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param string $site_url Site URL shown in WORDPRESS_URL.
+	 * @return string Pretty-printed JSON.
+	 */
+	private function manual_config_json( $site_url ) {
+		$config = array(
+			'mcpServers' => array(
+				'block-mcp' => array(
+					'command' => 'npx',
+					'args'    => array( '-y', '@gravitykit/block-mcp' ),
+					'env'     => array(
+						'WORDPRESS_URL'          => $site_url,
+						'WORDPRESS_USER'         => 'your-username',
+						'WORDPRESS_APP_PASSWORD' => 'your application password',
+					),
+				),
+			),
+		);
+
+		return (string) wp_json_encode( $config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+	}
+
+	/**
+	 * Render the "Active connections" metabox.
+	 *
+	 * Lists each connected AI client with a Disconnect button, in its own core
+	 * .postbox metabox shown above the connect card when the site is connected.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param array $connections Rows from Connections::list().
+	 * @return void
+	 */
+	private function render_active_connections( array $connections ) {
+		?>
+		<div class="postbox gk-block-api-connect__connections-box">
+			<div class="postbox-header">
+				<h2 class="hndle"><?php esc_html_e( 'Active connections', 'gk-block-api' ); ?></h2>
+			</div>
+			<div class="inside">
+				<p class="gk-block-api-connect__connections-desc">
+					<?php esc_html_e( 'Each entry below is one connected AI client. Clicking Disconnect immediately revokes that client\'s access.', 'gk-block-api' ); ?>
+				</p>
+				<table class="gk-block-api-connect__connections-table">
+					<thead>
+						<tr>
+							<th scope="col"><?php esc_html_e( 'Client', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Account', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Approved by', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Connected', 'gk-block-api' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Last used', 'gk-block-api' ); ?></th>
+							<th scope="col"></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $connections as $conn ) : ?>
+							<?php
+							$approver      = ! empty( $conn['created_by'] ) ? get_userdata( $conn['created_by'] ) : null;
+							$approver_name = $approver ? $approver->display_name : '—';
+							$is_own        = ! empty( $conn['own_account'] );
+							$shows_author  = ! $is_own && $approver && isset( $conn['author_mode'] ) && 'me' === $conn['author_mode'];
+							?>
+							<tr>
+								<td><?php echo esc_html( $conn['name'] ); ?></td>
+								<td>
+									<?php if ( $is_own ) : ?>
+										<?php echo esc_html( $approver_name ); ?>
+										<span class="description" style="display:block; color:#8a6d00;"><?php esc_html_e( 'Full access', 'gk-block-api' ); ?></span>
+									<?php else : ?>
+										<?php esc_html_e( 'Block MCP', 'gk-block-api' ); ?>
+										<?php if ( $shows_author ) : ?>
+											<span class="description" style="display:block;">
+												<?php
+												/* translators: %s: the approving user's display name. */
+												printf( esc_html__( 'Posts as %s', 'gk-block-api' ), esc_html( $approver_name ) );
+												?>
+											</span>
+										<?php else : ?>
+											<span class="description" style="display:block;"><?php esc_html_e( 'Limited account', 'gk-block-api' ); ?></span>
+										<?php endif; ?>
+									<?php endif; ?>
+								</td>
+								<td><?php echo esc_html( $approver_name ); ?></td>
+								<td><?php echo esc_html( wp_date( get_option( 'date_format' ), $conn['created'] ) ); ?></td>
+								<td>
+									<?php
+									echo $conn['last_used']
+										? esc_html( wp_date( get_option( 'date_format' ), $conn['last_used'] ) )
+										: esc_html__( 'Never', 'gk-block-api' );
+									?>
+								</td>
+								<td>
+									<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+										<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
+										<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
+										<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
+										<button type="submit" class="gk-block-api-connect__disconnect-btn button button-link"><?php esc_html_e( 'Disconnect', 'gk-block-api' ); ?></button>
+									</form>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render the setup-artifact card for an artifact client.
 	 *
 	 * Displays a readonly textarea containing the secret-free `npx connect` command
-	 * and a single Copy button. No password field is shown — the credential is
-	 * delivered later via the browser-Approve handshake when the user runs the
-	 * command and clicks Approve in the browser window that opens.
+	 * (or AI prompt) and a single Copy button. No password field is shown — the
+	 * credential is delivered later via the browser-Approve handshake when the user
+	 * runs the command and clicks Approve in the browser window that opens.
 	 *
-	 * @since 1.10.0
-	 * @since 1.11.0 Password param removed; command-only artifact, no credential shown.
-	 * @since 1.12.0 $client is now a stable slug; label resolved via client_label().
+	 * Emits markup only. The shared CSS and copy JS that wire every card on the
+	 * page live in render_artifact_card_assets(), which must be called once.
+	 *
+	 * @since 2.0.0
+	 * @since 2.0.0 Password param removed; command-only artifact, no credential shown.
+	 * @since 2.0.0 $client is now a stable slug; label resolved via client_label().
+	 * @since 2.0.0 Markup only; CSS/JS moved to render_artifact_card_assets() for multi-card support.
 	 *
 	 * @param string $client   Stable client slug (e.g. 'claude-code').
 	 * @param array  $artifact Return value of setup_artifact().
+	 * @param string $heading  Optional card heading; defaults to "{client label} setup".
 	 * @return void
 	 */
-	private function render_artifact_card( $client, array $artifact ) {
-		$display_name = $this->client_label( $client );
+	private function render_artifact_card( $client, array $artifact, $heading = '' ) {
+		if ( '' === $heading ) {
+			$heading = sprintf(
+				/* translators: %s: AI client name e.g. "Claude Code" */
+				__( '%s setup', 'gk-block-api' ),
+				$this->client_label( $client )
+			);
+		}
 		?>
-		<div class="gk-connect__artifact-card">
-			<h3 class="gk-connect__artifact-heading">
-				<?php
-				echo esc_html(
-					sprintf(
-						/* translators: %s: AI client name e.g. "Claude Code" */
-						__( '%s setup', 'gk-block-api' ),
-						$display_name
-					)
-				);
-				?>
-			</h3>
+		<div class="gk-block-api-connect__artifact-card">
+			<h3 class="gk-block-api-connect__artifact-heading"><?php echo esc_html( $heading ); ?></h3>
 
-			<p class="gk-connect__artifact-label"><?php echo $artifact['label']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- already escaped in setup_artifact(). ?></p>
-			<div class="gk-connect__artifact-copy-wrap">
+			<p class="gk-block-api-connect__artifact-label"><?php echo esc_html( $artifact['label'] ); ?></p>
+			<div class="gk-block-api-connect__artifact-copy-wrap">
 				<textarea
-					class="gk-connect__artifact-textarea"
+					class="gk-block-api-connect__artifact-textarea"
 					readonly
 					rows="3"
 					data-language="<?php echo esc_attr( $artifact['language'] ); ?>"
 				><?php echo esc_textarea( $artifact['body'] ); ?></textarea>
-				<button type="button" class="gk-connect__artifact-copy-btn button" data-target="artifact"><?php esc_html_e( 'Copy', 'gk-block-api' ); ?></button>
+				<button type="button" class="gk-block-api-connect__artifact-copy-btn button" data-target="artifact"><?php esc_html_e( 'Copy', 'gk-block-api' ); ?></button>
 			</div>
-			<p class="gk-connect__artifact-no-password-note">
-				<?php esc_html_e( 'A browser window will open — click Approve, and the connection finishes automatically. No password to copy.', 'gk-block-api' ); ?>
-			</p>
 		</div>
+		<?php
+	}
 
+	/**
+	 * Emit the shared CSS and copy-to-clipboard JS for the artifact cards.
+	 *
+	 * Up to four cards can live in the DOM at once — one inside each artifact
+	 * client's "How it works" panel, toggled by the radio selection. The card
+	 * markup (render_artifact_card()) is therefore asset-free; this method emits
+	 * the stylesheet and a single script that wires every card on the page. Each
+	 * Copy button copies its OWN card's textarea, so the four cards never collide.
+	 *
+	 * Call this exactly once per page render, after the cards are output.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return void
+	 */
+	private function render_artifact_card_assets() {
+		?>
 		<style>
-		.gk-connect__artifact-card {
+		.gk-block-api-connect__artifact-card {
 			background: #fff;
 			border: 1px solid #e0e0e0;
 			border-left: 4px solid var(--wp-admin-theme-color, #2271b1);
 			border-radius: 4px;
 			padding: 16px 20px;
 			max-width: 800px;
-			margin-bottom: 20px;
+			margin: 16px 0 20px;
 		}
-		.gk-connect__artifact-heading {
+		.gk-block-api-connect__artifact-heading {
 			font-size: 1em;
 			font-weight: 600;
 			color: #1e1e1e;
 			margin: 0 0 8px;
 		}
-		.gk-connect__artifact-label {
+		.gk-block-api-connect__artifact-label {
 			font-size: .9375em;
 			color: #1e1e1e;
 			margin: 0 0 6px;
 		}
-		.gk-connect__artifact-copy-wrap {
+		.gk-block-api-connect__artifact-copy-wrap {
 			display: flex;
+			flex-direction: column;
 			gap: 8px;
 			align-items: flex-start;
 		}
-		.gk-connect__artifact-textarea {
-			flex: 1;
+		.gk-block-api-connect__artifact-textarea {
+			width: 100%;
+			box-sizing: border-box;
 			font-family: monospace;
 			font-size: .875em;
 			resize: vertical;
@@ -1213,36 +1737,32 @@ class Connect_Page {
 			padding: 8px;
 			color: #1e1e1e;
 		}
-		.gk-connect__artifact-copy-btn {
+		.gk-block-api-connect__artifact-copy-btn {
 			flex-shrink: 0;
-		}
-		.gk-connect__artifact-no-password-note {
-			font-size: .875em;
-			color: #757575;
-			margin: 8px 0 0;
 		}
 		</style>
 
 		<script>
 		(function () {
-			var card = document.querySelector( '.gk-connect__artifact-card' );
-			if ( ! card ) return;
+			var defaultLabel = '<?php echo esc_js( __( 'Copy', 'gk-block-api' ) ); ?>';
+			var copiedLabel  = '<?php echo esc_js( __( 'Copied!', 'gk-block-api' ) ); ?>';
 
-			var artifactTextarea = card.querySelector( '.gk-connect__artifact-textarea' );
-			var artifactCopyBtn  = card.querySelector( '.gk-connect__artifact-copy-btn' );
-			if ( ! artifactTextarea || ! artifactCopyBtn ) return;
+			document.querySelectorAll( '.gk-block-api-connect__artifact-card' ).forEach( function ( card ) {
+				var textarea = card.querySelector( '.gk-block-api-connect__artifact-textarea' );
+				var copyBtn  = card.querySelector( '.gk-block-api-connect__artifact-copy-btn' );
+				if ( ! textarea || ! copyBtn ) return;
 
-			artifactCopyBtn.addEventListener( 'click', function () {
-				var defaultLabel = '<?php echo esc_js( __( 'Copy', 'gk-block-api' ) ); ?>';
-				if ( navigator.clipboard && navigator.clipboard.writeText ) {
-					navigator.clipboard.writeText( artifactTextarea.value ).then( function () {
-						artifactCopyBtn.textContent = '<?php echo esc_js( __( 'Copied!', 'gk-block-api' ) ); ?>';
-						setTimeout( function () { artifactCopyBtn.textContent = defaultLabel; }, 2000 );
-					} );
-				} else {
-					artifactTextarea.select();
-					document.execCommand( 'copy' );
-				}
+				copyBtn.addEventListener( 'click', function () {
+					if ( navigator.clipboard && navigator.clipboard.writeText ) {
+						navigator.clipboard.writeText( textarea.value ).then( function () {
+							copyBtn.textContent = copiedLabel;
+							setTimeout( function () { copyBtn.textContent = defaultLabel; }, 2000 );
+						} );
+					} else {
+						textarea.select();
+						document.execCommand( 'copy' );
+					}
+				} );
 			} );
 		} )();
 		</script>
@@ -1257,7 +1777,7 @@ class Connect_Page {
 	 * The Approve form POSTs to handle_authorize(), carrying the loopback callback,
 	 * state token, and client label as hidden fields with a nonce.
 	 *
-	 * @since 1.11.0
+	 * @since 2.0.0
 	 *
 	 * @param string $callback Loopback callback URL (displayed for context; validated on POST).
 	 * @param string $state    Opaque state token from the connector CLI (echoed back on redirect).
@@ -1267,17 +1787,45 @@ class Connect_Page {
 	private function render_authorize_screen( $callback, $state, $client ) {
 		$site_name = get_bloginfo( 'name' );
 		?>
-		<div class="gk-connect">
-		<div class="gk-connect__card">
-
-			<h2 class="gk-connect__heading"><?php esc_html_e( 'Allow your AI app to connect?', 'gk-block-api' ); ?></h2>
+		<style>
+			/* Restate the native metabox chrome so the consent card matches the
+				Connect / Active-connections postboxes: core .postbox styling only
+				applies inside #poststuff, and this focused screen renders on its own. */
+			.gk-block-api-connect .postbox {
+				background: #fff;
+				border: 1px solid #c3c4c7;
+				border-radius: 8px;
+				box-shadow: 0 1px 1px rgba( 0, 0, 0, .04 );
+			}
+			.gk-block-api-connect .postbox-header { border-bottom: 0; }
+			.gk-block-api-connect .postbox .hndle {
+				margin: 0;
+				padding: 12px 16px;
+				font-size: 14px;
+				font-weight: 600;
+				line-height: 1.4;
+				color: #1e1e1e;
+				border: 0;
+				cursor: auto;
+			}
+			.gk-block-api-connect .postbox .inside { margin: 0; padding: 4px 16px 16px; }
+			/* Focused consent layout: one centered card, no surrounding tabs. */
+			.gk-block-api-connect--authorize { max-width: 640px; margin: 40px auto; }
+			.gk-block-api-connect--authorize .gk-block-api-connect__card { max-width: none; margin: 0; }
+		</style>
+		<div class="gk-block-api-connect gk-block-api-connect--authorize">
+		<div class="postbox gk-block-api-connect__card">
+			<div class="postbox-header">
+				<h2 class="hndle"><?php esc_html_e( 'Allow your AI app to connect?', 'gk-block-api' ); ?></h2>
+			</div>
+			<div class="inside">
 
 			<p>
 				<?php
 				echo wp_kses(
 					sprintf(
 						/* translators: 1: site name, 2: client identifier */
-						__( 'Your AI app (<code>%2$s</code>) on this computer is asking for permission to edit pages and posts on <strong>%1$s</strong>.', 'gk-block-api' ),
+						__( 'Your AI app (<code>%2$s</code>) on this computer is asking for permission to create and edit content on <strong>%1$s</strong>.', 'gk-block-api' ),
 						esc_html( $site_name ),
 						esc_html( $client )
 					),
@@ -1288,7 +1836,7 @@ class Connect_Page {
 				);
 				?>
 			</p>
-			<p><?php esc_html_e( 'Click Approve to allow it. This creates a dedicated, limited account just for your AI app and securely sends it a connection key — there\'s no password for you to copy. You can remove this access anytime from this page.', 'gk-block-api' ); ?></p>
+			<p><?php esc_html_e( 'Click Approve to allow it. You can remove this access anytime from the Block MCP settings page.', 'gk-block-api' ); ?></p>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<input type="hidden" name="action"   value="<?php echo esc_attr( self::ACTION_AUTHORIZE ); ?>" />
@@ -1296,19 +1844,141 @@ class Connect_Page {
 				<input type="hidden" name="state"    value="<?php echo esc_attr( $state ); ?>" />
 				<input type="hidden" name="client"   value="<?php echo esc_attr( $client ); ?>" />
 				<?php wp_nonce_field( self::ACTION_AUTHORIZE ); ?>
-				<?php submit_button( __( 'Approve', 'gk-block-api' ), 'primary', 'submit', false ); ?>
-			</form>
+				<?php $current_display_name = wp_get_current_user()->display_name; ?>
+				<style>
+					.gk-block-api-connect__identity { border: 0; margin: 0 0 16px; padding: 0; }
+					.gk-block-api-connect__identity-legend { font-weight: 600; margin: 0 0 8px; padding: 0; }
+					.gk-block-api-connect__identity-option {
+						display: flex;
+						gap: 10px;
+						align-items: flex-start;
+						border: 1px solid #c3c4c7;
+						border-radius: 6px;
+						padding: 12px 14px;
+						margin: 0 0 8px;
+						cursor: pointer;
+					}
+					.gk-block-api-connect__identity-option:hover { border-color: var(--wp-admin-theme-color, #2271b1); }
+					.gk-block-api-connect__identity-option:has(input:focus-visible) {
+						outline: 2px solid var(--wp-admin-theme-color, #2271b1);
+						outline-offset: 1px;
+					}
+					/* Selected state mirrors the connect screen's radio cards: blue border + ring on a light-blue surface. */
+					.gk-block-api-connect__identity-option:has(input:checked) {
+						border-color: var(--wp-admin-theme-color, #2271b1);
+						box-shadow: 0 0 0 1px var(--wp-admin-theme-color, #2271b1);
+						background: #f0f6fc;
+					}
+					.gk-block-api-connect__identity-option input[type="radio"] {
+						margin-top: 3px;
+						flex: 0 0 auto;
+						accent-color: var(--wp-admin-theme-color, #2271b1);
+					}
+					.gk-block-api-connect__identity-body { display: block; }
+					.gk-block-api-connect__identity-title { display: block; font-weight: 600; }
+					.gk-block-api-connect__identity-option .description { display: block; margin-top: 2px; }
+					.gk-block-api-connect__identity-warning {
+						display: block;
+						margin-top: 6px;
+						padding: 10px 14px;
+						background: #f0f6fc;
+						border-left: 3px solid #72aee6;
+						color: #1e1e1e;
+					}
+					.gk-block-api-connect__actions {
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						margin-top: 8px;
+					}
+					.gk-block-api-connect__actions .button { margin: 0; }
+					/* Cancel as a standard destructive button: red outline that fills on hover. */
+					.gk-block-api-connect__actions .button-link-delete {
+						color: #b32d2e;
+						border: 1px solid #b32d2e;
+						background: transparent;
+						box-shadow: none;
+						text-decoration: none;
+					}
+					.gk-block-api-connect__actions .button-link-delete:hover,
+					.gk-block-api-connect__actions .button-link-delete:focus {
+						color: #fff;
+						background: #b32d2e;
+						border-color: #b32d2e;
+					}
+					.gk-block-api-connect--authorize .gk-block-api-connect__help {
+						text-align: center;
+						margin: 20px 0 4px;
+					}
+				</style>
+				<fieldset class="gk-block-api-connect__identity">
+					<legend class="gk-block-api-connect__identity-legend"><?php esc_html_e( 'How should the AI app act on your site?', 'gk-block-api' ); ?></legend>
 
-			<p>
-				<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Settings_Page::PAGE_SLUG . '&tab=connect' ) ); ?>">
-					<?php esc_html_e( 'Cancel', 'gk-block-api' ); ?>
-				</a>
-			</p>
+					<label class="gk-block-api-connect__identity-option">
+						<input type="radio" name="identity" value="agent" checked="checked" />
+						<span class="gk-block-api-connect__identity-body">
+							<span class="gk-block-api-connect__identity-title">
+								<?php esc_html_e( 'Dedicated Block MCP account', 'gk-block-api' ); ?>
+								<em><?php esc_html_e( '(recommended)', 'gk-block-api' ); ?></em>
+							</span>
+							<span class="description"><?php esc_html_e( 'A limited account just for your AI app. It can create and edit content, but can\'t change settings, delete other people\'s content, or sign in. New posts are authored by "Block MCP".', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-block-api-connect__identity-option">
+						<input type="radio" name="identity" value="agent_as_me" />
+						<span class="gk-block-api-connect__identity-body">
+							<span class="gk-block-api-connect__identity-title">
+								<?php
+								printf(
+									/* translators: %s: the approving user's display name */
+									esc_html__( 'Block MCP account, shown as you (%s)', 'gk-block-api' ),
+									esc_html( $current_display_name )
+								);
+								?>
+							</span>
+							<span class="description"><?php esc_html_e( 'A limited account just for your AI app, but new posts show you as the author instead of "Block MCP". The edit history still records Block MCP.', 'gk-block-api' ); ?></span>
+						</span>
+					</label>
+
+					<label class="gk-block-api-connect__identity-option gk-block-api-connect__identity-option--risky">
+						<input type="radio" name="identity" value="self" />
+						<span class="gk-block-api-connect__identity-body">
+							<span class="gk-block-api-connect__identity-title">
+								<?php
+								printf(
+									/* translators: %s: the approving user's display name */
+									esc_html__( 'Your own account (%s)', 'gk-block-api' ),
+									esc_html( $current_display_name )
+								);
+								?>
+							</span>
+							<span class="description">
+								<?php
+									printf(
+										/* translators: 1: opening <strong> tag, 2: closing </strong> tag */
+										esc_html__( '%1$sHigher risk:%2$s gives the AI app the full capabilities your account has, including changing site settings and deleting content. Only choose this if you understand the risk.', 'gk-block-api' ),
+										'<strong>',
+										'</strong>'
+									);
+								?>
+							</span>
+						</span>
+					</label>
+				</fieldset>
+				<div class="gk-block-api-connect__actions">
+					<?php submit_button( __( 'Approve', 'gk-block-api' ), 'primary', 'submit', false ); ?>
+					<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Settings_Page::PAGE_SLUG . '&tab=connect' ) ); ?>" class="button button-link-delete">
+						<?php esc_html_e( 'Cancel', 'gk-block-api' ); ?>
+					</a>
+				</div>
+			</form>
 
 			<?php $this->render_help_link(); ?>
 
-		</div><!-- /.gk-connect__card -->
-		</div><!-- /.gk-connect -->
+			</div><!-- /.inside -->
+		</div><!-- /.postbox.gk-block-api-connect__card -->
+		</div><!-- /.gk-block-api-connect -->
 		<?php
 	}
 
@@ -1325,14 +1995,14 @@ class Connect_Page {
 	 * Cards are generated by iterating clients() so the form and the branching
 	 * logic share a single source of truth.
 	 *
-	 * All selectors are scoped under .gk-connect to prevent leaking into
+	 * All selectors are scoped under .gk-block-api-connect to prevent leaking into
 	 * the rest of wp-admin. The design follows the WordPress block-editor /
 	 *
 	 * @wordpress/components visual language: white card surfaces on the gray
 	 * admin background, accent-color via --wp-admin-theme-color.
 	 *
-	 * @since 1.9.0
-	 * @since 1.12.0 Radio values are stable slugs; labels come from clients().
+	 * @since 2.0.0
+	 * @since 2.0.0 Radio values are stable slugs; labels come from clients().
 	 *
 	 * @param string $default_client Preselected client slug (the ?setup client);
 	 *                               empty selects the default Claude Desktop card.
@@ -1349,36 +2019,51 @@ class Connect_Page {
 		?>
 		<style>
 		/* ── Outer card ────────────────────────────────────────────────────── */
-		.gk-connect__card {
+		/*
+		WordPress's core .postbox chrome (white background + shadow) is only fully
+		applied inside the post editor's #poststuff context, so on this custom
+		settings page we restate the native metabox appearance ourselves — scoped to
+		.gk-block-api-connect — so the connect box and the Active connections box read
+		as real wp-admin metaboxes (white, bordered, header bar) and match.
+		*/
+		.gk-block-api-connect .postbox {
 			background: #fff;
-			border: 1px solid #e0e0e0;
+			border: 1px solid #c3c4c7;
 			border-radius: 8px;
-			box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
-			padding: 24px 28px;
-			max-width: 800px;
-			margin-top: 16px;
+			box-shadow: 0 1px 1px rgba(0, 0, 0, .04);
+			margin-top: 20px;
 		}
-
-		/* ── Typography ────────────────────────────────────────────────────── */
-		.gk-connect__heading {
-			font-size: 1.1em;
+		.gk-block-api-connect .postbox-header {
+			border-bottom: 0;
+		}
+		.gk-block-api-connect .postbox .hndle {
+			margin: 0;
+			padding: 12px 16px;
+			font-size: 14px;
 			font-weight: 600;
+			line-height: 1.4;
+			color: #1e1e1e;
+			border: 0;
+			cursor: auto;
+		}
+		.gk-block-api-connect .postbox .inside {
+			margin: 0;
+			padding: 4px 16px 16px;
+		}
+		.gk-block-api-connect__card {
+			max-width: 800px;
+		}
+		.gk-block-api-connect__help--top {
+			float: right;
+			margin: 0 0 4px 20px;
+		}
+		.gk-block-api-connect__intro {
 			color: #1e1e1e;
 			margin: 0 0 12px;
-			padding: 0;
-			border: none;
-		}
-		.gk-connect__intro {
-			color: #1e1e1e;
-			margin: 0 0 12px;
-		}
-		.gk-connect__connected-badge {
-			color: #1e1e1e;
-			margin: 0 0 16px;
 		}
 
 		/* ── Paste-mode password display ───────────────────────────────────── */
-		.gk-connect__paste-pw {
+		.gk-block-api-connect__paste-pw {
 			font-size: 1.1em;
 			user-select: all;
 		}
@@ -1416,9 +2101,6 @@ class Connect_Page {
 		}
 
 		/* ── "Let my AI set it up" accent card ─────────────────────────────── */
-		.gk-radio-card.is-ai {
-			border-left: 4px solid var(--wp-admin-theme-color, #2271b1);
-		}
 		.gk-radio-card.is-ai:has(input:checked),
 		.gk-radio-card.is-ai.is-selected {
 			background: #f0f6fc;
@@ -1441,12 +2123,12 @@ class Connect_Page {
 		}
 		.gk-radio-card__desc {
 			font-size: .875em;
-			color: #757575;
+			color: #646970;
 			line-height: 1.4;
 		}
 
 		/* ── Primary submit button (components Button is-primary style) ─────── */
-		.gk-connect #submit {
+		.gk-block-api-connect #submit {
 			background: var(--wp-admin-theme-color, #2271b1);
 			color: #fff;
 			border: none;
@@ -1460,18 +2142,18 @@ class Connect_Page {
 			text-decoration: none;
 			box-shadow: none;
 		}
-		.gk-connect #submit:hover,
-		.gk-connect #submit:active {
+		.gk-block-api-connect #submit:hover,
+		.gk-block-api-connect #submit:active {
 			background: var(--wp-admin-theme-color-darker-10, #1d6196);
 			color: #fff;
 		}
-		.gk-connect #submit:focus-visible {
+		.gk-block-api-connect #submit:focus-visible {
 			outline: none;
 			box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px var(--wp-admin-theme-color, #2271b1);
 		}
 
 		/* ── "After you download/set up" inner panel ───────────────────────── */
-		.gk-connect__next-steps {
+		.gk-block-api-connect__next-steps {
 			background: #fff;
 			border: 1px solid #e0e0e0;
 			border-radius: 4px;
@@ -1479,71 +2161,57 @@ class Connect_Page {
 			max-width: 700px;
 			margin-top: 24px;
 		}
-		.gk-connect__next-steps h3 {
+		.gk-block-api-connect__next-steps h3 {
 			margin-top: 0;
 			font-weight: 600;
 			color: #1e1e1e;
 		}
-		.gk-connect__next-steps ol {
+		.gk-block-api-connect__next-steps ol {
 			margin: 0 0 12px;
 			padding-left: 1.5em;
 		}
-		.gk-connect__next-steps li {
+		.gk-block-api-connect__next-steps li {
 			color: #1e1e1e;
 			margin-bottom: 8px;
 			line-height: 1.5;
 		}
-		.gk-connect__next-steps p {
+		.gk-block-api-connect__next-steps p {
 			margin-bottom: 0;
-			color: #757575;
+			color: #646970;
 		}
 
 		/* ── Active connections inner panel ────────────────────────────────── */
-		.gk-connect__connections-card {
-			background: #fff;
-			border: 1px solid #e0e0e0;
-			border-radius: 4px;
-			padding: 16px 20px;
-			max-width: 800px;
-			margin-top: 24px;
-		}
-		.gk-connect__connections-heading {
-			font-size: 1em;
-			font-weight: 600;
-			color: #1e1e1e;
-			margin: 0 0 4px;
-		}
-		.gk-connect__connections-desc {
-			color: #757575;
+		.gk-block-api-connect__connections-desc {
+			color: #646970;
 			font-size: .875em;
 			margin: 0 0 12px;
 		}
-		.gk-connect__connections-table {
+		.gk-block-api-connect__connections-table {
 			width: 100%;
 			border-collapse: collapse;
 		}
-		.gk-connect__connections-table th {
+		.gk-block-api-connect__connections-table th {
 			text-align: left;
 			font-weight: 600;
-			color: #757575;
+			color: #646970;
 			font-size: .8125em;
 			text-transform: uppercase;
 			letter-spacing: .03em;
 			padding: 6px 12px 6px 0;
 			border-bottom: 1px solid #f0f0f1;
 		}
-		.gk-connect__connections-table td {
+		.gk-block-api-connect__connections-table td {
 			color: #1e1e1e;
 			padding: 10px 12px 10px 0;
 			border-bottom: 1px solid #f0f0f1;
 			font-size: .9375em;
 		}
-		.gk-connect__connections-table tr:last-child td {
+		.gk-block-api-connect__connections-table tr:last-child td {
 			border-bottom: none;
 		}
 
 		/* ── Disconnect button (link-button, tertiary style) ───────────────── */
-		.gk-connect__disconnect-btn.button.button-link {
+		.gk-block-api-connect__disconnect-btn.button.button-link {
 			color: var(--wp-admin-theme-color, #2271b1);
 			text-decoration: none;
 			padding: 0;
@@ -1556,11 +2224,11 @@ class Connect_Page {
 			min-height: 0;
 			line-height: inherit;
 		}
-		.gk-connect__disconnect-btn.button.button-link:hover {
+		.gk-block-api-connect__disconnect-btn.button.button-link:hover {
 			color: var(--wp-admin-theme-color-darker-10, #1d6196);
 			text-decoration: underline;
 		}
-		.gk-connect__disconnect-btn.button.button-link:focus-visible {
+		.gk-block-api-connect__disconnect-btn.button.button-link:focus-visible {
 			outline: 2px solid var(--wp-admin-theme-color, #2271b1);
 			outline-offset: 2px;
 			box-shadow: none;
@@ -1576,7 +2244,7 @@ class Connect_Page {
 					<?php esc_html_e( 'Which app do you use to chat with AI?', 'gk-block-api' ); ?>
 				</legend>
 
-				<div class="gk-radio-card-group" role="radiogroup">
+				<div class="gk-radio-card-group">
 
 					<?php foreach ( $clients as $slug => $meta ) : ?>
 					<label
@@ -1600,23 +2268,36 @@ class Connect_Page {
 				</div>
 			</fieldset>
 
+			<?php
+			// "create MCP user" is only accurate the first time — once the agent
+			// account exists, downloading the installer just reuses it.
+			$desktop_button_label = $this->agent_exists()
+				? __( 'Download installer', 'gk-block-api' )
+				: __( 'Download installer & create MCP user', 'gk-block-api' );
+			?>
 			<script>
 			(function () {
 				function init() {
 				var radios    = document.querySelectorAll( 'input[name="client"]' );
 				var btn       = document.getElementById( 'submit' );
-				var nextSteps = document.querySelectorAll( '.gk-connect__next-steps[data-client]' );
+				var nextSteps = document.querySelectorAll( '.gk-block-api-connect__next-steps[data-client]' );
 
 				if ( ! radios.length ) return;
 
 				var labels = {
-					'<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>': '<?php echo esc_js( __( 'Download installer', 'gk-block-api' ) ); ?>',
-					'<?php echo esc_js( self::CLIENT_CLAUDE_CODE ); ?>'   : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'<?php echo esc_js( self::CLIENT_CURSOR ); ?>'        : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'<?php echo esc_js( self::CLIENT_CHATGPT ); ?>'       : '<?php echo esc_js( __( 'Generate setup config', 'gk-block-api' ) ); ?>',
-					'<?php echo esc_js( self::CLIENT_AI_PROMPT ); ?>'     : '<?php echo esc_js( __( 'Copy AI setup prompt', 'gk-block-api' ) ); ?>',
-					'<?php echo esc_js( self::CLIENT_OTHER ); ?>'         : '<?php echo esc_js( __( 'Choose an app above', 'gk-block-api' ) ); ?>'
+					'<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>': <?php echo wp_json_encode( $desktop_button_label ); ?>
 				};
+
+				// For these clients the copyable command/prompt now lives inline in the
+				// matching "How it works" block below, so the primary submit button is
+				// hidden — there is nothing to submit.
+				var artifactClients = [
+					'<?php echo esc_js( self::CLIENT_CLAUDE_CODE ); ?>',
+					'<?php echo esc_js( self::CLIENT_CURSOR ); ?>',
+					'<?php echo esc_js( self::CLIENT_CHATGPT ); ?>',
+					'<?php echo esc_js( self::CLIENT_AI_PROMPT ); ?>',
+					'<?php echo esc_js( self::CLIENT_OTHER ); ?>'
+				];
 
 				function updateState() {
 					var checkedVal = '';
@@ -1631,8 +2312,15 @@ class Connect_Page {
 					} );
 
 					if ( btn ) {
-						var label = labels[ checkedVal ] || labels[ '<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>' ];
-						btn.value = label;
+						var isArtifact = artifactClients.indexOf( checkedVal ) !== -1;
+						// Hide the whole submit paragraph (not just the input) so no
+						// empty margin remains for the artifact clients, whose command
+						// card carries its own Copy button.
+						var btnWrap = btn.closest( '.submit' ) || btn;
+						btnWrap.hidden = isArtifact;
+						if ( ! isArtifact ) {
+							btn.value = labels[ checkedVal ] || labels[ '<?php echo esc_js( self::CLIENT_CLAUDE_DESKTOP ); ?>' ];
+						}
 					}
 
 					// Show only the next-steps block matching the selected client; hide the rest.
@@ -1657,7 +2345,7 @@ class Connect_Page {
 			} )();
 			</script>
 
-			<?php submit_button( __( 'Download installer', 'gk-block-api' ), 'primary', 'submit', true ); ?>
+			<?php submit_button( $desktop_button_label, 'primary', 'submit', true ); ?>
 		</form>
 		<?php
 	}
@@ -1666,17 +2354,19 @@ class Connect_Page {
 	 * Render per-client "next steps" blocks — one for each of the six client slugs.
 	 *
 	 * All six blocks are written to the DOM simultaneously. Only the block whose
-	 * `data-client` attribute matches the default selection (`claude-desktop`) is
-	 * visible on load; the others carry `aria-hidden="true"` and are hidden via
-	 * inline style. The JS `updateState` handler (in render_connect_form()) swaps
-	 * visibility whenever the radio selection changes.
+	 * `data-client` attribute matches the selected client is visible on load; the
+	 * others carry `aria-hidden="true"` and are hidden via inline style. The JS
+	 * `updateState` handler (in render_connect_form()) swaps visibility whenever the
+	 * radio selection changes.
 	 *
-	 * The Claude Desktop block is the existing "After you download" content, moved
-	 * here verbatim. The CLI/AI blocks explain the Generate-setup-config / browser-
-	 * Approve flow; no download steps are shown for them. The `other` block keeps
-	 * the existing coming-soon note.
+	 * The Claude Desktop block walks through the .mcpb download. Each of the four
+	 * artifact clients (CLI tools + AI prompt) embeds its own secret-free setup card
+	 * (render_artifact_card()) inline so the copyable command/prompt appears the
+	 * moment that client is selected — no button click, no reload. The `other` block
+	 * helps the user pick. After the loop, render_artifact_card_assets() emits the
+	 * shared card CSS + copy JS exactly once.
 	 *
-	 * @since 1.13.0
+	 * @since 2.0.0
 	 *
 	 * @param string $default_client Preselected client slug whose panel is visible
 	 *                               on load; empty defaults to Claude Desktop.
@@ -1703,7 +2393,7 @@ class Connect_Page {
 			$aria_attr   = $is_default ? '' : ' aria-hidden="true"';
 			?>
 			<div
-				class="gk-connect__next-steps"
+				class="gk-block-api-connect__next-steps"
 				data-client="<?php echo esc_attr( $slug ); ?>"
 				<?php echo $hidden_attr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static safe attribute strings, no user data. ?>
 				<?php echo $aria_attr;   // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static safe attribute strings, no user data. ?>
@@ -1712,6 +2402,10 @@ class Connect_Page {
 			</div>
 			<?php
 		}
+
+		// The four artifact panels each embed a setup card; emit the shared
+		// CSS + copy JS exactly once, after every card is in the DOM.
+		$this->render_artifact_card_assets();
 	}
 
 	/**
@@ -1721,7 +2415,7 @@ class Connect_Page {
 	 * be read and tested in isolation. The containing <div> (with data-client and
 	 * visibility attributes) is the caller's responsibility.
 	 *
-	 * @since 1.13.0
+	 * @since 2.0.0
 	 *
 	 * @param string $slug One of the CLIENT_* slug constants.
 	 * @return void
@@ -1768,10 +2462,8 @@ class Connect_Page {
 						);
 						?>
 					</li>
+					<li><?php esc_html_e( 'That file briefly holds a private key; once you\'ve clicked Enable you can delete it from Downloads — your AI app has stored the key securely.', 'gk-block-api' ); ?></li>
 				</ol>
-				<p>
-					<?php esc_html_e( 'That file briefly holds a private key; once you\'ve clicked Enable you can delete it from Downloads — your AI app has stored the key securely.', 'gk-block-api' ); ?>
-				</p>
 				<?php
 				break;
 
@@ -1780,17 +2472,11 @@ class Connect_Page {
 			case self::CLIENT_CHATGPT:
 				?>
 				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
+				<?php $this->render_artifact_card( $slug, $this->setup_artifact( $slug, untrailingslashit( home_url() ) ) ); ?>
 				<ol>
-					<li>
-						<?php
-						echo wp_kses(
-							__( 'Click <strong>Generate setup config</strong> above.', 'gk-block-api' ),
-							array( 'strong' => array() )
-						);
-						?>
-					</li>
-					<li><?php esc_html_e( "You'll get a one-line command to run in your terminal — a browser window opens, you click Approve, and the connection finishes automatically.", 'gk-block-api' ); ?></li>
-					<li><strong><?php esc_html_e( 'No password to copy.', 'gk-block-api' ); ?></strong></li>
+					<li><?php esc_html_e( 'Copy the command above and run it in your terminal.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'A browser window opens.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'Click Approve — the connection finishes automatically.', 'gk-block-api' ); ?></li>
 				</ol>
 				<p class="description">
 					<?php esc_html_e( 'This option is for developer tools that use a command line (the Terminal). Not sure what a terminal is? Choose "Claude Desktop app" or "Let my AI set it up for me" above instead — no terminal needed.', 'gk-block-api' ); ?>
@@ -1801,17 +2487,11 @@ class Connect_Page {
 			case self::CLIENT_AI_PROMPT:
 				?>
 				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
+				<?php $this->render_artifact_card( $slug, $this->setup_artifact( $slug, untrailingslashit( home_url() ) ), __( 'Your setup prompt', 'gk-block-api' ) ); ?>
 				<ol>
-					<li>
-						<?php
-						echo wp_kses(
-							__( 'Click <strong>Copy AI setup prompt</strong> above, then paste it to your AI assistant.', 'gk-block-api' ),
-							array( 'strong' => array() )
-						);
-						?>
-					</li>
-					<li><?php esc_html_e( 'It runs the command for you, a browser window opens, you click Approve, and it confirms the connection.', 'gk-block-api' ); ?></li>
-					<li><strong><?php esc_html_e( 'No password to copy.', 'gk-block-api' ); ?></strong></li>
+					<li><?php esc_html_e( 'Copy the prompt above and paste it to your AI assistant.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'The assistant runs the command and a browser window opens.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'Click Approve — it confirms the connection.', 'gk-block-api' ); ?></li>
 				</ol>
 				<?php
 				break;
@@ -1819,57 +2499,28 @@ class Connect_Page {
 			case self::CLIENT_OTHER:
 			default:
 				?>
-				<h3><?php esc_html_e( 'Not sure which one you use?', 'gk-block-api' ); ?></h3>
-				<p><?php esc_html_e( 'Pick the option that sounds like you:', 'gk-block-api' ); ?></p>
-				<ul>
-					<li>
-						<?php
-						echo wp_kses(
-							sprintf(
-								/* translators: %s: download URL */
-								__( 'You chat with Claude in a web browser, or you\'re just getting started — install the free <a href="%s" target="_blank" rel="noopener noreferrer">Claude Desktop app</a>, then choose <strong>Claude Desktop app</strong> above. This is the easiest path for most people.', 'gk-block-api' ),
-								'https://claude.ai/download'
-							),
-							array(
-								'a'      => array(
-									'href'   => array(),
-									'target' => array(),
-									'rel'    => array(),
-								),
-								'strong' => array(),
-							)
-						);
-						?>
-					</li>
-					<li>
-						<?php
-						echo wp_kses(
-							__( 'You use ChatGPT — choose <strong>ChatGPT Desktop</strong> above.', 'gk-block-api' ),
-							array( 'strong' => array() )
-						);
-						?>
-					</li>
-					<li>
-						<?php
-						echo wp_kses(
-							__( 'A developer set you up with Cursor or Claude Code — choose that option above.', 'gk-block-api' ),
-							array( 'strong' => array() )
-						);
-						?>
-					</li>
-				</ul>
-				<p class="description">
-					<?php
-					echo wp_kses(
-						sprintf(
-							/* translators: %s: mailto link */
-							__( 'Still not sure? <a href="%s">Contact support</a> and we\'ll help you connect.', 'gk-block-api' ),
-							'mailto:support@gravitykit.com'
-						),
-						array( 'a' => array( 'href' => array() ) )
-					);
-					?>
+				<h3><?php esc_html_e( 'How it works', 'gk-block-api' ); ?></h3>
+				<p><?php esc_html_e( 'Block MCP works with any client that runs a local MCP server. Run this, approve in the browser, and your terminal prints a ready-to-paste config:', 'gk-block-api' ); ?></p>
+				<?php $this->render_artifact_card( $slug, $this->setup_artifact( $slug, untrailingslashit( home_url() ) ), __( 'Generate your config', 'gk-block-api' ) ); ?>
+				<ol>
+					<li><?php esc_html_e( 'Copy the command above and run it in your terminal.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'A browser window opens.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'Click Approve.', 'gk-block-api' ); ?></li>
+					<li><?php esc_html_e( 'Your terminal prints the finished config, with the password filled in — paste it into your MCP client and restart it.', 'gk-block-api' ); ?></li>
+				</ol>
+				<p class="description gk-block-api-connect__safety-note" style="display:flex; align-items:flex-start; gap:6px; background:#f0f6fc; border-left:3px solid #72aee6; padding:10px 14px; margin:16px 0 0; max-width:800px;">
+					<span class="dashicons dashicons-info-outline" aria-hidden="true" style="color:#2271b1; flex:0 0 auto;"></span>
+					<span><?php esc_html_e( 'The password is created on your computer when you approve, and only ever appears in your terminal — never on this page.', 'gk-block-api' ); ?></span>
 				</p>
+				<details class="gk-block-api-connect__manual" style="margin-top:16px; max-width:800px;">
+				<summary style="cursor:pointer; font-weight:600; color:#1e1e1e;"><?php esc_html_e( 'Prefer to set it up by hand (no command)?', 'gk-block-api' ); ?></summary>
+				<p class="description" style="margin-top:8px;"><?php esc_html_e( 'Skip the command and connect manually — create your own Application Password and add Block MCP to your client\'s config.', 'gk-block-api' ); ?></p>
+				<ol>
+					<li><?php echo wp_kses( __( 'In <strong>Users → Profile → Application Passwords</strong>, create a password for any user who can edit posts.', 'gk-block-api' ), array( 'strong' => array() ) ); ?></li>
+					<li><?php esc_html_e( 'Add this to your MCP client\'s config file, filling in that username and the password:', 'gk-block-api' ); ?></li>
+				</ol>
+				<pre style="background:#f6f7f7; border:1px solid #dcdcde; border-radius:4px; padding:12px 14px; margin:8px 0 0; overflow-x:auto; font-size:12px; line-height:1.6; max-width:800px;"><?php echo esc_html( $this->manual_config_json( untrailingslashit( home_url() ) ) ); ?></pre>
+				</details>
 				<?php
 				break;
 		}

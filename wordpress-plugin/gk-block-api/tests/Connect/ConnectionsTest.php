@@ -151,4 +151,196 @@ class ConnectionsTest extends WP_UnitTestCase {
 		$this->assertCount( 1, $remaining, 'the password must remain' );
 		$this->assertSame( $other, $remaining[0]['uuid'] );
 	}
+
+	// ── connection meta: audit trail + byline ────────────────────────
+
+	public function tear_down() {
+		unset( $GLOBALS['wp_rest_application_password_uuid'] );
+		parent::tear_down();
+	}
+
+	/**
+	 * Seed an Application Password on a specific user and return its UUID.
+	 *
+	 * @param int    $user_id User to own the credential.
+	 * @param string $name    Label to store.
+	 * @return string UUID.
+	 */
+	private function seed_for( $user_id, $name ) {
+		$created = \WP_Application_Passwords::create_new_application_password( $user_id, array( 'name' => $name ) );
+		return $created[1]['uuid'];
+	}
+
+	/**
+	 * record_meta() then get_meta() round-trips the stored fields; an unknown UUID
+	 * returns null.
+	 */
+	public function test_record_and_get_meta_round_trips() {
+		Connections::record_meta( 'uuid-1', array( 'created_by' => 7, 'author_mode' => 'me', 'created_at' => 123 ) );
+
+		$meta = Connections::get_meta( 'uuid-1' );
+		$this->assertSame( 7, $meta['created_by'] );
+		$this->assertSame( 'me', $meta['author_mode'] );
+		$this->assertSame( 123, $meta['created_at'] );
+		$this->assertNull( Connections::get_meta( 'no-such-uuid' ) );
+	}
+
+	/**
+	 * A second record_meta() for the same UUID merges into the existing entry
+	 * rather than replacing it, so a partial update can't drop sibling fields.
+	 */
+	public function test_record_meta_merges_into_existing() {
+		Connections::record_meta( 'uuid-1', array( 'created_by' => 7, 'author_mode' => 'agent' ) );
+		Connections::record_meta( 'uuid-1', array( 'author_mode' => 'me' ) );
+
+		$meta = Connections::get_meta( 'uuid-1' );
+		$this->assertSame( 7, $meta['created_by'], 'created_by must survive the partial update' );
+		$this->assertSame( 'me', $meta['author_mode'] );
+	}
+
+	/**
+	 * forget_meta() removes the entry for a UUID and leaves siblings intact.
+	 */
+	public function test_forget_meta_removes_entry() {
+		Connections::record_meta( 'uuid-1', array( 'created_by' => 7 ) );
+		Connections::record_meta( 'uuid-2', array( 'created_by' => 9 ) );
+
+		Connections::forget_meta( 'uuid-1' );
+
+		$this->assertNull( Connections::get_meta( 'uuid-1' ) );
+		$this->assertSame( 9, Connections::get_meta( 'uuid-2' )['created_by'] );
+	}
+
+	/**
+	 * list() joins the recorded meta onto each row: created_by, author_mode, and
+	 * own_account=false for agent-hosted credentials.
+	 */
+	public function test_list_includes_recorded_meta() {
+		$uuid = $this->seed( 'Block MCP — Cursor' );
+		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id, 'author_mode' => 'me', 'user_id' => $this->user_id ) );
+
+		$rows = ( new Connections() )->list( $this->user_id );
+		$this->assertCount( 1, $rows );
+		$this->assertSame( $this->user_id, $rows[0]['created_by'] );
+		$this->assertSame( 'me', $rows[0]['author_mode'] );
+		$this->assertFalse( $rows[0]['own_account'] );
+		$this->assertSame( $this->user_id, $rows[0]['host_user_id'] );
+	}
+
+	/**
+	 * Revoking a connection also forgets its meta, so a re-minted credential that
+	 * happens to reuse a UUID can't inherit a stale byline.
+	 */
+	public function test_revoke_forgets_meta() {
+		$uuid = $this->seed( 'Block MCP — Cursor' );
+		Connections::record_meta( $uuid, array( 'created_by' => $this->user_id, 'author_mode' => 'me' ) );
+
+		( new Connections() )->revoke( $this->user_id, $uuid );
+
+		$this->assertNull( Connections::get_meta( $uuid ) );
+	}
+
+	/**
+	 * author_to_credit() returns null when no Application Password authenticated
+	 * the request (e.g. cookie auth or an unauthenticated call).
+	 */
+	public function test_author_to_credit_null_without_request_password() {
+		unset( $GLOBALS['wp_rest_application_password_uuid'] );
+		$this->assertNull( Connections::author_to_credit() );
+	}
+
+	/**
+	 * author_to_credit() returns null for a connection that authors as the agent,
+	 * even when the request used its credential.
+	 */
+	public function test_author_to_credit_null_for_agent_byline() {
+		Connections::record_meta( 'uuid-agent', array( 'created_by' => $this->user_id, 'author_mode' => 'agent' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-agent';
+
+		$this->assertNull( Connections::author_to_credit() );
+	}
+
+	/**
+	 * author_to_credit() returns the approving human's ID for a "show as me"
+	 * connection, keyed by the credential that authenticated the request.
+	 */
+	public function test_author_to_credit_returns_human_for_me_byline() {
+		Connections::record_meta( 'uuid-me', array( 'created_by' => $this->user_id, 'author_mode' => 'me' ) );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-me';
+
+		$this->assertSame( $this->user_id, Connections::author_to_credit() );
+	}
+
+	/**
+	 * author_to_credit() returns null when the recorded human no longer exists,
+	 * so create_post falls back to the agent rather than a dangling author ID.
+	 */
+	public function test_author_to_credit_null_when_recorded_user_deleted() {
+		$ghost = self::factory()->user->create( array( 'role' => 'author' ) );
+		Connections::record_meta( 'uuid-ghost', array( 'created_by' => $ghost, 'author_mode' => 'me' ) );
+		wp_delete_user( $ghost );
+		$GLOBALS['wp_rest_application_password_uuid'] = 'uuid-ghost';
+
+		$this->assertNull( Connections::author_to_credit() );
+	}
+
+	/**
+	 * list_self_hosted() surfaces own-account connections (credentials minted on a
+	 * user other than the agent) with own_account=true, and excludes the agent's.
+	 */
+	public function test_list_self_hosted_returns_own_account_connections() {
+		$agent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$human    = $this->user_id;
+
+		$self_uuid = $this->seed_for( $human, 'Block MCP — Cursor' );
+		Connections::record_meta( $self_uuid, array( 'created_by' => $human, 'author_mode' => 'me', 'user_id' => $human ) );
+
+		// An agent-hosted entry must NOT appear in the self-hosted list.
+		$agent_uuid = $this->seed_for( $agent_id, 'Block MCP — Claude Desktop' );
+		Connections::record_meta( $agent_uuid, array( 'created_by' => $human, 'author_mode' => 'agent', 'user_id' => $agent_id ) );
+
+		$rows = ( new Connections() )->list_self_hosted( $agent_id );
+
+		$this->assertCount( 1, $rows );
+		$this->assertSame( $self_uuid, $rows[0]['uuid'] );
+		$this->assertTrue( $rows[0]['own_account'] );
+		$this->assertSame( $human, $rows[0]['host_user_id'] );
+	}
+
+	/**
+	 * revoke_by_uuid() resolves the host user from the meta store, so an
+	 * own-account credential is deleted from the user who actually holds it even
+	 * though the revoke form only carries the UUID.
+	 */
+	public function test_revoke_by_uuid_resolves_host_from_meta() {
+		$agent_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$human    = $this->user_id;
+
+		$uuid = $this->seed_for( $human, 'Block MCP — Cursor' );
+		Connections::record_meta( $uuid, array( 'user_id' => $human, 'created_by' => $human, 'author_mode' => 'me' ) );
+
+		$ok = ( new Connections() )->revoke_by_uuid( $uuid, $agent_id );
+
+		$this->assertTrue( $ok );
+		$this->assertSame( array(), \WP_Application_Passwords::get_user_application_passwords( $human ) );
+	}
+
+	/**
+	 * purge_all_recorded() deletes every credential the meta store knows about,
+	 * from whichever user holds it — the uninstall path for own-account
+	 * credentials that the agent teardown can't reach.
+	 */
+	public function test_purge_all_recorded_revokes_recorded_credentials() {
+		$other = self::factory()->user->create( array( 'role' => 'author' ) );
+
+		$a = $this->seed_for( $this->user_id, 'Block MCP — Cursor' );
+		$b = $this->seed_for( $other, 'Block MCP — Claude Code' );
+		Connections::record_meta( $a, array( 'user_id' => $this->user_id ) );
+		Connections::record_meta( $b, array( 'user_id' => $other ) );
+
+		Connections::purge_all_recorded();
+
+		$this->assertSame( array(), \WP_Application_Passwords::get_user_application_passwords( $this->user_id ) );
+		$this->assertSame( array(), \WP_Application_Passwords::get_user_application_passwords( $other ) );
+	}
 }

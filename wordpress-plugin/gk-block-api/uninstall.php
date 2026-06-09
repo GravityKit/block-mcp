@@ -16,9 +16,11 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
-// Agent_Provisioner is needed for purge(). The plugin's spl_autoload_register
-// is not active during uninstall, so load the class file directly.
+// Agent_Provisioner is needed for purge() and Connections for own-account
+// credential teardown. The plugin's spl_autoload_register is not active during
+// uninstall, so load the class files directly.
 require_once __DIR__ . '/includes/class-agent-provisioner.php';
+require_once __DIR__ . '/includes/class-connections.php';
 
 /**
  * Delete every plugin option / transient on the current blog.
@@ -32,6 +34,21 @@ function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
 	delete_option( 'gk_block_api_post_types_allowlist' );
 	delete_option( 'gk_block_api_uploads_enabled' );
+	delete_option( 'gk_block_api_allow_trash' );
+
+	// Revoke any own-account credentials (Application Passwords minted on real
+	// users for "use my own account" connections) BEFORE dropping the meta that
+	// records where they live. Core Application Passwords outlive the plugin and
+	// keep authenticating to REST/XML-RPC, so they must be deleted at the source.
+	GravityKit\BlockAPI\Connections::purge_all_recorded();
+
+	// Connection meta (who approved each connection + its byline choice) is a
+	// network option — consistent with the network-wide connection list — so it
+	// needs delete_network_option, which falls back to wp_options on single-site.
+	// Idempotent if this runs once per blog on multisite: every call targets the
+	// same network row.
+	delete_network_option( null, 'gk_block_api_connection_meta' );
+
 	delete_option( 'gk_block_api_dual_storage_blocks_manual' );
 	delete_option( 'gk_block_api_storage_modes' );
 	delete_option( 'gk_block_api_storage_modes_last_run' );
@@ -52,14 +69,16 @@ function gk_block_api_uninstall_blog() {
 	// immediately after deactivation without a page load in between.
 	delete_transient( 'gk_block_api_deactivation_notice' );
 
-	// Per-post rate-limit transients accumulate per write activity. Sweep
-	// the option table directly — there's no core helper for prefixed
-	// transient deletion. Also sweeps the per-IP `instr_rl_` rate-limit
-	// transients written by the public /instructions endpoint, the one-time
-	// paste-mode passwords stashed by Connect_Page, and the single-use
-	// credential-exchange transients (`xchg_`) — which hold a live plaintext
-	// Application Password until redeemed or expired, so they must not survive
-	// uninstall.
+	// Per-post rate-limit transients accumulate per write activity. Sweep the
+	// option table directly — there's no core helper for prefixed transient
+	// deletion. Also sweeps the per-IP `instr_rl_` rate-limit transients written
+	// by the public /instructions endpoint, plus the paste-mode passwords and
+	// single-use credential-exchange records stashed by Connect_Page — stored as
+	// non-autoloaded `gk_block_api_paste_pw_*` / `gk_block_api_xchg_*` options,
+	// each holding a live (sealed) Application Password until redeemed or expired,
+	// so they must not survive uninstall — and the GC throttle marker. The
+	// `_transient_*` xchg/paste patterns are a defensive backstop for rows left by
+	// any pre-release build that used transients.
 	global $wpdb;
 	$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		"DELETE FROM {$wpdb->options}
@@ -67,6 +86,9 @@ function gk_block_api_uninstall_blog() {
 			   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'
 			   OR option_name LIKE '_transient_gk_block_api_instr_rl_%'
 			   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'
+			   OR option_name LIKE 'gk_block_api_paste_pw_%'
+			   OR option_name LIKE 'gk_block_api_xchg_%'
+			   OR option_name = 'gk_block_api_cred_gc_at'
 			   OR option_name LIKE '_transient_gk_block_api_paste_pw_%'
 			   OR option_name LIKE '_transient_timeout_gk_block_api_paste_pw_%'
 			   OR option_name LIKE '_transient_gk_block_api_xchg_%'

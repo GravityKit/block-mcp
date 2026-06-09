@@ -3,7 +3,7 @@
  * Plugin Name: GK Block API
  * Plugin URI: https://www.gravitykit.com
  * Description: REST API for block-level CRUD operations with smart preferences for AI agents.
- * Version: 1.9.0
+ * Version: 2.0.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GK_BLOCK_API_VERSION', '1.9.0' );
+define( 'GK_BLOCK_API_VERSION', '2.0.0' );
 define( 'GK_BLOCK_API_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -158,6 +158,13 @@ function init_rest_api() {
 		// is active; absent Yoast, this is a no-op. Lives in its own class so
 		// gk-block-api stays self-contained — no mu-plugin or theme dependency.
 		( new Yoast_Bridge() )->register_routes();
+
+		// Connector credential-exchange route. Registered here (rest_api_init, NOT
+		// the admin-only settings bootstrap) so it answers the connector's
+		// logged-out POST. REST is used instead of admin-post.php because
+		// admin-post.php is routinely 30x'd by canonical/SSL/Redirection/security
+		// rules before the handler runs; /wp-json/ escapes those.
+		( new Connect_Page() )->register_rest_routes();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'GK Block API init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
@@ -201,7 +208,7 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
  * Also installs the authenticate filter that blocks interactive login for
  * the service account.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 function init_agent() {
 	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
@@ -263,7 +270,7 @@ register_activation_hook( __FILE__, __NAMESPACE__ . '\\on_activation' );
  * credentials. Deactivation itself is non-destructive: no data is deleted
  * here so the plugin can be reactivated without losing configuration.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 function on_deactivation() {
 	$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
@@ -289,7 +296,7 @@ register_deactivation_hook( __FILE__, __NAMESPACE__ . '\\on_deactivation' );
  * It offers a one-click "Revoke all connections" link that posts to the
  * gk_block_api_revoke_all admin_post action handled by handle_revoke_all().
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 function init_deactivation_notice() {
 	add_action( 'admin_notices', __NAMESPACE__ . '\\maybe_show_deactivation_notice' );
@@ -300,7 +307,7 @@ add_action( 'admin_init', __NAMESPACE__ . '\\init_deactivation_notice' );
 /**
  * Render the deactivation notice if the transient is set.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 function maybe_show_deactivation_notice() {
 	if ( ! get_transient( 'gk_block_api_deactivation_notice' ) ) {
@@ -345,7 +352,7 @@ function maybe_show_deactivation_notice() {
  * enforcement and the redirect stay in the HTTP handler so tests can call
  * this seam directly without triggering exit.
  *
- * @since  1.9.0
+ * @since  2.0.0
  *
  * @return int Number of Application Passwords that were revoked (0 when no
  *             agent user is stored or the user has no passwords).
@@ -373,7 +380,7 @@ function do_revoke_all() {
  * do_revoke_all(), then redirects back to the plugins screen with a success
  * notice.
  *
- * @since 1.9.0
+ * @since 2.0.0
  */
 function handle_revoke_all() {
 	if ( ! current_user_can( 'manage_options' ) ) {

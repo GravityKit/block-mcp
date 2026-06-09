@@ -94,6 +94,19 @@ describe('parseConnectArgs', () => {
     ).toThrow(/invalid.*client/i);
   });
 
+  it('parses --client=<value> (equals form)', () => {
+    const args = parseConnectArgs(['--site', 'https://example.com', '--client=cursor']);
+    expect(args.client).toBe('cursor');
+  });
+
+  it('rejects unknown --client=<value> the same as the space form', () => {
+    // Regression: the `--client=<value>` form used to skip the allowlist check
+    // that `--client <value>` applied, so a typo silently drove the wrong flow.
+    expect(() =>
+      parseConnectArgs(['--site', 'https://example.com', '--client=vscode'])
+    ).toThrow(/invalid.*client/i);
+  });
+
   it('parses --port', () => {
     const args = parseConnectArgs(['--site', 'https://example.com', '--port', '8080']);
     expect(args.port).toBe(8080);
