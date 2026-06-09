@@ -382,19 +382,10 @@ class Agent_Provisioner {
 					require_once ABSPATH . 'wp-admin/includes/ms.php';
 				}
 
-				// wpmu_delete_user() takes no reassign parameter and deletes
-				// authored posts network-wide. Reassign content on the current
-				// blog before the network deletion runs.
-				if ( $reassign ) {
-					global $wpdb;
-					$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-						$wpdb->posts,
-						array( 'post_author' => $reassign ),
-						array( 'post_author' => $agent_id ),
-						array( '%d' ),
-						array( '%d' )
-					);
-				}
+				// wpmu_delete_user() takes no reassign arg and deletes the
+				// network-global agent's posts on every blog in one pass —
+				// reassign on every blog first, or cross-blog content is lost.
+				self::reassign_agent_posts_network_wide( $agent_id, $reassign );
 
 				wpmu_delete_user( $agent_id );
 			} else {
@@ -404,6 +395,62 @@ class Agent_Provisioner {
 
 		delete_option( 'gk_block_api_agent_user_id' );
 		remove_role( self::ROLE );
+	}
+
+	/**
+	 * Reassign the agent's authored posts to a surviving owner on every blog,
+	 * for the multisite teardown path (the caller deletes the user network-wide
+	 * right after).
+	 *
+	 * Per blog the target is the filter value when set, else that blog's first
+	 * administrator — resolved per-blog so posts never go to a non-member. A blog
+	 * with no resolvable target is skipped: its posts fall through to core's
+	 * deletion, matching the single-site no-administrator fallback.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param  int $agent_id        Agent user ID whose posts are reassigned.
+	 * @param  int $filter_reassign Explicit reassign target, or 0 to resolve per-blog.
+	 * @return void
+	 */
+	private static function reassign_agent_posts_network_wide( $agent_id, $filter_reassign ) {
+		global $wpdb;
+
+		$blog_ids = get_sites(
+			array(
+				'fields' => 'ids',
+				'number' => 0,
+			)
+		);
+
+		foreach ( $blog_ids as $blog_id ) {
+			switch_to_blog( (int) $blog_id );
+
+			$target = $filter_reassign;
+			if ( ! $target ) {
+				$admins = get_users(
+					array(
+						'role'   => 'administrator',
+						'number' => 1,
+						'fields' => 'ID',
+					)
+				);
+				$target = $admins ? (int) $admins[0] : 0;
+			}
+
+			if ( $target ) {
+				$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$wpdb->posts,
+					array( 'post_author' => $target ),
+					array( 'post_author' => $agent_id ),
+					array( '%d' ),
+					array( '%d' )
+				);
+				clean_user_cache( $agent_id );
+			}
+
+			restore_current_blog();
+		}
 	}
 
 	/**

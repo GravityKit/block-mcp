@@ -11,8 +11,7 @@
  *  1. Single-site: requiring uninstall.php after provisioning an agent and
  *     minting an Application Password removes the agent user, deletes the
  *     gk_block_api_agent_user_id option, removes the block_mcp_agent role,
- *     clears the deactivation-notice transient, and leaves no Application
- *     Passwords on the deleted user ID.
+ *     and leaves no Application Passwords on the deleted user ID.
  *
  *  2. Multisite: provisioning an agent on a non-main sub-site, then calling
  *     Agent_Provisioner::purge() under that blog's context, removes the sub-site
@@ -73,14 +72,13 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 			wp_delete_user( $user->ID );
 		}
 		delete_option( 'gk_block_api_agent_user_id' );
-		delete_transient( 'gk_block_api_deactivation_notice' );
 		remove_role( Agent_Provisioner::ROLE );
 	}
 
 	/**
 	 * Requiring uninstall.php after provisioning an agent must remove the
-	 * agent user, delete its option, remove the role, sweep the
-	 * deactivation-notice transient, and revoke all Application Passwords.
+	 * agent user, delete its option, remove the role, and revoke all
+	 * Application Passwords.
 	 *
 	 * This test proves that purge() is actually invoked from within
 	 * uninstall.php — not just that purge() works in isolation (which
@@ -104,8 +102,13 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$before = WP_Application_Passwords::get_user_application_passwords( $agent_id );
 		$this->assertNotEmpty( $before, 'An app password must exist before running uninstall.php' );
 
-		// Plant the deactivation-notice transient to confirm it is swept.
-		set_transient( 'gk_block_api_deactivation_notice', 1, 5 * MINUTE_IN_SECONDS );
+		// Seed the UI-managed options and the inventory cache so we can assert
+		// uninstall.php's per-blog option/transient sweep actually removes them
+		// (gk_block_api_uninstall_blog deletes the preferences + allowlist options
+		// and the gk_block_inventory transient).
+		update_option( 'gk_block_api_preferences', array( 'namespace_scores' => array( 'core' => 90 ) ) );
+		update_option( 'gk_block_api_post_types_allowlist', array( 'post', 'page' ) );
+		set_transient( 'gk_block_inventory', array( 'seeded' => true ), HOUR_IN_SECONDS );
 
 		// [LC1] Plant a single-use exchange-code transient — it holds a live
 		// plaintext app password and must not survive uninstall.
@@ -131,10 +134,6 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 			get_role( Agent_Provisioner::ROLE ),
 			'block_mcp_agent role must be removed after uninstall.php'
 		);
-		$this->assertFalse(
-			(bool) get_transient( 'gk_block_api_deactivation_notice' ),
-			'gk_block_api_deactivation_notice transient must be deleted after uninstall.php'
-		);
 		// The sweep is a raw $wpdb DELETE (it bypasses the object cache), so assert
 		// the underlying option row is gone rather than via get_transient().
 		global $wpdb;
@@ -150,6 +149,20 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$this->assertEmpty(
 			$after,
 			'All Application Passwords for the agent user ID must be revoked after uninstall.php'
+		);
+
+		// The UI-managed options and the inventory cache seeded above must be gone.
+		$this->assertFalse(
+			get_option( 'gk_block_api_preferences', false ),
+			'gk_block_api_preferences option must be deleted after uninstall.php'
+		);
+		$this->assertFalse(
+			get_option( 'gk_block_api_post_types_allowlist', false ),
+			'gk_block_api_post_types_allowlist option must be deleted after uninstall.php'
+		);
+		$this->assertFalse(
+			get_transient( 'gk_block_inventory' ),
+			'gk_block_inventory transient must be deleted after uninstall.php'
 		);
 	}
 
@@ -257,6 +270,78 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 				(int) $post->post_author,
 				'post_author must be reassigned to the sub-site administrator'
 			);
+		} finally {
+			restore_current_blog();
+		}
+	}
+
+	/**
+	 * On multisite, purge() must reassign the agent's posts on EVERY blog before
+	 * the network-wide user deletion — not just the blog it is invoked from.
+	 *
+	 * wpmu_delete_user() deletes the user's authored posts across the entire
+	 * network. The agent user is network-global, so a post it authored on blog B
+	 * is destroyed when purge() runs from blog A unless blog B's posts are
+	 * reassigned first. Before the fix, purge() reassigned only the current
+	 * blog, so cross-blog agent content was silently deleted. This provisions
+	 * the agent and authors a post on a second sub-site, runs purge() from the
+	 * first sub-site, and asserts the OTHER blog's post survived with a
+	 * reassigned author.
+	 *
+	 * @group ms-required
+	 */
+	public function test_multisite_purge_reassigns_posts_on_all_blogs_before_delete() {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Multisite-only test. Run with WP_TESTS_MULTISITE=1.' );
+		}
+
+		$blog_a = self::factory()->blog->create();
+		$blog_b = self::factory()->blog->create();
+		$this->assertIsInt( $blog_a );
+		$this->assertIsInt( $blog_b );
+
+		// Provision the agent from blog A; the gk_block_api_agent_user_id option
+		// lands on blog A, so purge() invoked there drives the network deletion.
+		switch_to_blog( $blog_a );
+		$admin_a  = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$agent_id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $agent_id );
+		restore_current_blog();
+
+		// Author a post by the agent on blog B (a DIFFERENT blog) and give blog B
+		// an administrator so its content has a reassignment target.
+		switch_to_blog( $blog_b );
+		$admin_b = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		add_user_to_blog( $blog_b, $agent_id, Agent_Provisioner::ROLE );
+		$post_b = wp_insert_post(
+			array(
+				'post_title'  => 'Agent post on the OTHER blog',
+				'post_status' => 'publish',
+				'post_author' => $agent_id,
+			)
+		);
+		$this->assertIsInt( $post_b );
+		$this->assertGreaterThan( 0, $post_b );
+		restore_current_blog();
+
+		// Run purge() from blog A — this triggers the network-wide wpmu_delete_user().
+		switch_to_blog( $blog_a );
+		try {
+			Agent_Provisioner::purge();
+		} finally {
+			restore_current_blog();
+		}
+
+		$this->assertFalse( get_user_by( 'id', $agent_id ), 'agent user must be deleted network-wide' );
+
+		// Blog B's post must still exist with a non-agent author — proving its
+		// content was reassigned BEFORE the network deletion, not destroyed.
+		switch_to_blog( $blog_b );
+		try {
+			clean_post_cache( $post_b );
+			$post = get_post( $post_b );
+			$this->assertInstanceOf( \WP_Post::class, $post, 'cross-blog agent post must survive purge()' );
+			$this->assertNotSame( $agent_id, (int) $post->post_author, 'cross-blog post_author must be reassigned away from the agent' );
 		} finally {
 			restore_current_blog();
 		}
