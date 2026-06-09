@@ -529,13 +529,33 @@ export function claudeCodeAddArgs(creds: Credentials, name: string = 'block-mcp'
 
 // ── Config file writers ───────────────────────────────────────────────────────
 
-/** Read a JSON file, return default if missing or unparseable. */
-function readJsonFile(filePath: string, defaultValue: McpConfig): McpConfig {
+/**
+ * Read a JSON file, returning the default ONLY when the file does not exist.
+ *
+ * A missing config (ENOENT) is the normal first-run case, so fall back to the
+ * default. Any other failure — an unreadable file or, critically, malformed
+ * JSON — is rethrown so the caller surfaces it instead of silently treating a
+ * corrupt config as empty and overwriting it (which would clobber every other
+ * MCP server the user had configured).
+ */
+export function readJsonFile(filePath: string, defaultValue: McpConfig): McpConfig {
+  let raw: string;
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return defaultValue;
+    }
+    throw err;
+  }
+
+  try {
     return JSON.parse(raw) as McpConfig;
-  } catch {
-    return defaultValue;
+  } catch (err) {
+    throw new Error(
+      `Could not parse the existing MCP config at ${filePath}: ${(err as Error).message}. ` +
+        'Fix or remove the file, then re-run connect — refusing to overwrite it.'
+    );
   }
 }
 

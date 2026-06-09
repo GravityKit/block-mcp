@@ -52197,11 +52197,21 @@ function claudeCodeAddArgs(creds, name = "block-mcp") {
   ];
 }
 function readJsonFile(filePath, defaultValue) {
+  let raw2;
   try {
-    const raw2 = fs.readFileSync(filePath, "utf8");
+    raw2 = fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return defaultValue;
+    }
+    throw err;
+  }
+  try {
     return JSON.parse(raw2);
-  } catch {
-    return defaultValue;
+  } catch (err) {
+    throw new Error(
+      `Could not parse the existing MCP config at ${filePath}: ${err.message}. Fix or remove the file, then re-run connect \u2014 refusing to overwrite it.`
+    );
   }
 }
 function writeJsonFile(filePath, data) {
