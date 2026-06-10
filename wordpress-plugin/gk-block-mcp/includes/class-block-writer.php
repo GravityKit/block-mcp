@@ -678,15 +678,10 @@ class Block_Writer {
 			$namespace       = $this->preferences->extract_namespace( $block_name );
 			$message_parts   = array(
 				sprintf(
-					/* translators: 1: legacy block name, 2: suggested replacement block name */
-					__( 'Block "%1$s" is legacy. Use "%2$s" instead.', 'gk-block-mcp' ),
-					$block_name,
+					/* translators: 1: rejected namespace, 2: suggested replacement block name */
+					__( 'The %1$s/ namespace is configured as legacy on this site; use "%2$s" instead.', 'gk-block-mcp' ),
+					$namespace,
 					$replacement ? $replacement : __( 'a preferred block', 'gk-block-mcp' )
-				),
-				sprintf(
-					/* translators: %s: rejected namespace */
-					__( 'The %s/ namespace is blocked by site policy.', 'gk-block-mcp' ),
-					$namespace
 				),
 				__( 'See the block-mcp://agent-guide resource for the full allow/deny list.', 'gk-block-mcp' ),
 			);

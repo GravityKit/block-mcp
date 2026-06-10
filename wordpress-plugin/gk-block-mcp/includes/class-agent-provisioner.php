@@ -236,7 +236,8 @@ class Agent_Provisioner {
 		$existing = get_user_by( 'login', $login );
 
 		if ( $existing instanceof \WP_User ) {
-			if ( '1' !== get_user_meta( $existing->ID, self::META_FLAG, true ) ) {
+			$meta_flag = get_user_meta( $existing->ID, self::META_FLAG, true );
+			if ( '1' !== $meta_flag ) {
 				return new \WP_Error(
 					'agent_login_taken',
 					sprintf(
