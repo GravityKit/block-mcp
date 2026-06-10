@@ -48,6 +48,7 @@ import { POST_TOOLS, handlePostTool } from './tools/posts.js';
 import { TERM_TOOLS, handleTermTool } from './tools/terms.js';
 import { MEDIA_TOOLS, handleMediaTool } from './tools/media.js';
 import { YOAST_TOOLS, handleYoastTool } from './tools/yoast.js';
+import { validateToolArgs } from './validate-args.js';
 import { runConnect } from './connect.js';
 
 // Environment variables are passed by the parent process (Claude Code, Hermes, etc.)
@@ -219,6 +220,16 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!handle) {
       throw new Error(`Unknown tool: ${name}`);
     }
+
+    // Reject unknown / misnamed arguments before the handler runs. The MCP SDK
+    // does not validate against inputSchema, so without this an unrecognized key
+    // (e.g. `after` instead of `after_top_level`) is silently dropped and the
+    // tool runs with defaults — a silent wrong-place write rather than an error.
+    const def = ALL_TOOLS.find((t) => t.name === name) as
+      | { inputSchema?: { properties?: Record<string, unknown>; required?: string[]; additionalProperties?: unknown } }
+      | undefined;
+    validateToolArgs(name, def?.inputSchema, toolArgs);
+
     const result = await handle(name, toolArgs, client);
 
     // Emit `structuredContent` alongside the text fallback when the tool

@@ -52263,7 +52263,7 @@ var WRITE_TOOLS = [
   },
   {
     name: "insert_blocks",
-    description: 'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref \u2014 recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Blocks whose attribute schema is HTML-sourced (e.g. core/paragraph `content`, core/image `url`) must include `innerHTML` matching the attribute(s) \u2014 attribute-only inserts are rejected with `inner_html_required` to prevent the self-closing-block / "invalid content" failure mode. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
+    description: "Insert top-level blocks into a post.\n\nPOSITIONING \u2014 use exactly ONE anchor (any other key, e.g. `after`, `before`, `position`, is rejected):\n- `before_ref` / `after_ref` \u2014 gk_ref from get_page_blocks. Recommended: refs survive sibling shifts.\n- `before_top_level` / `after_top_level` \u2014 top_level_counter position.\n- Prepend at the very top: `before_top_level: 0`. Append at the end: omit all anchors.\n\nCONTENT \u2014 legacy-tier blocks are rejected per the site policy. Blocks with HTML-sourced attributes (e.g. core/paragraph `content`, core/image `url`) must include matching `innerHTML`; attribute-only inserts fail with `inner_html_required`.\n\nVERIFY \u2014 the response's inserted[] returns `ref`, `path`, and `top_level_counter`: confirm the block landed where you intended before moving on. The refs let you chain edit_block_tree without re-reading.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert blocks" },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
@@ -52272,7 +52272,7 @@ var WRITE_TOOLS = [
         post_id: { type: "number", description: "Post ID." },
         after_top_level: {
           type: ["number", "string"],
-          description: 'top_level_counter to insert AFTER. -1/omit = append, "start" = prepend.'
+          description: "top_level_counter to insert AFTER (omit or -1 = append). To prepend at the very top, prefer `before_top_level: 0`."
         },
         before_top_level: {
           type: "number",
@@ -53276,6 +53276,71 @@ function narrowYoastFields(input) {
   return out;
 }
 
+// src/validate-args.ts
+function validateToolArgs(toolName, inputSchema, args) {
+  const properties = inputSchema?.properties;
+  if (!properties) {
+    return;
+  }
+  const known = Object.keys(properties);
+  const provided = Object.keys(args ?? {});
+  const allowsExtra = inputSchema?.additionalProperties !== void 0 && inputSchema.additionalProperties !== false;
+  if (!allowsExtra) {
+    const unknown3 = provided.filter((k3) => !known.includes(k3));
+    if (unknown3.length > 0) {
+      const parts = unknown3.map((k3) => {
+        const near = closestKey(k3, known);
+        return near ? `'${k3}' (did you mean '${near}'?)` : `'${k3}'`;
+      });
+      throw new Error(
+        `Unknown parameter(s) for ${toolName}: ${parts.join(", ")}. Valid parameters: ${known.join(", ")}.`
+      );
+    }
+  }
+  const required2 = inputSchema?.required ?? [];
+  const missing = required2.filter((r4) => !(r4 in (args ?? {})));
+  if (missing.length > 0) {
+    throw new Error(`Missing required parameter(s) for ${toolName}: ${missing.join(", ")}.`);
+  }
+}
+function closestKey(input, candidates) {
+  const lc = input.toLowerCase();
+  const affixed = candidates.filter((c) => {
+    const cl = c.toLowerCase();
+    return cl.startsWith(lc) || lc.startsWith(cl) || cl.includes(lc) || lc.includes(cl);
+  }).sort((a2, b3) => a2.length - b3.length);
+  if (affixed.length > 0) {
+    return affixed[0];
+  }
+  let best = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d2 = levenshtein(lc, c.toLowerCase());
+    if (d2 < bestDist) {
+      bestDist = d2;
+      best = c;
+    }
+  }
+  return best !== null && bestDist <= Math.max(2, Math.ceil(input.length / 2)) ? best : null;
+}
+function levenshtein(a2, b3) {
+  const m3 = a2.length;
+  const n = b3.length;
+  if (m3 === 0) return n;
+  if (n === 0) return m3;
+  let prev = Array.from({ length: n + 1 }, (_3, i2) => i2);
+  let curr = new Array(n + 1);
+  for (let i2 = 1; i2 <= m3; i2++) {
+    curr[0] = i2;
+    for (let j2 = 1; j2 <= n; j2++) {
+      const cost = a2[i2 - 1] === b3[j2 - 1] ? 0 : 1;
+      curr[j2] = Math.min(prev[j2] + 1, curr[j2 - 1] + 1, prev[j2 - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
 var crypto2 = __toESM(require("node:crypto"), 1);
@@ -53894,6 +53959,8 @@ function registerHandlers(server, client) {
       if (!handle2) {
         throw new Error(`Unknown tool: ${name}`);
       }
+      const def = ALL_TOOLS.find((t) => t.name === name);
+      validateToolArgs(name, def?.inputSchema, toolArgs);
       const result = await handle2(name, toolArgs, client);
       const toolDef = ALL_TOOLS.find((t) => t.name === name);
       const response = {

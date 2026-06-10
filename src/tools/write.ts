@@ -192,7 +192,13 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Blocks whose attribute schema is HTML-sourced (e.g. core/paragraph `content`, core/image `url`) must include `innerHTML` matching the attribute(s) — attribute-only inserts are rejected with `inner_html_required` to prevent the self-closing-block / "invalid content" failure mode. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
+      'Insert top-level blocks into a post.\n\n' +
+      'POSITIONING — use exactly ONE anchor (any other key, e.g. `after`, `before`, `position`, is rejected):\n' +
+      '- `before_ref` / `after_ref` — gk_ref from get_page_blocks. Recommended: refs survive sibling shifts.\n' +
+      '- `before_top_level` / `after_top_level` — top_level_counter position.\n' +
+      '- Prepend at the very top: `before_top_level: 0`. Append at the end: omit all anchors.\n\n' +
+      'CONTENT — legacy-tier blocks are rejected per the site policy. Blocks with HTML-sourced attributes (e.g. core/paragraph `content`, core/image `url`) must include matching `innerHTML`; attribute-only inserts fail with `inner_html_required`.\n\n' +
+      'VERIFY — the response\'s inserted[] returns `ref`, `path`, and `top_level_counter`: confirm the block landed where you intended before moving on. The refs let you chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
@@ -201,7 +207,7 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         after_top_level: {
           type: ['number', 'string'],
-          description: 'top_level_counter to insert AFTER. -1/omit = append, "start" = prepend.',
+          description: 'top_level_counter to insert AFTER (omit or -1 = append). To prepend at the very top, prefer `before_top_level: 0`.',
         },
         before_top_level: {
           type: 'number',
