@@ -40,6 +40,19 @@ if [ -d "vendor_prefixed/gravitykit/foundation" ]; then
   '
 fi
 
+# Foundation's post-install script rewrites implicitly nullable parameter
+# signatures (`Type $x = null` → `?Type $x = null`) in vendor/ and
+# vendor_prefixed/ — PHP 8.4 deprecates the implicit form at compile time,
+# and the bundled illuminate/support helpers.php is files-autoloaded into
+# every process, so the deprecation otherwise lands on stderr of every
+# PHP process (including PHPUnit separate-process children, which treat
+# any stderr as a test error). Its helpers.php-namespacing step is a no-op
+# here: the sed above has already inserted the namespace. Must run before
+# the prune below, which removes vendor/gravitykit from no-dev builds.
+if [ -f "vendor/gravitykit/foundation/scripts/post-install.php" ]; then
+  php vendor/gravitykit/foundation/scripts/post-install.php
+fi
+
 # Keep only the essential dependencies/folders in the vendor directory
 if [[ -d "vendor" && "${COMPOSER_DEV_MODE}" -eq 0 ]]; then
   find ./vendor -mindepth 1 -maxdepth 1 -type d $(printf -- "-not -name %s " "${VENDOR_FOLDERS_TO_KEEP[@]}") -exec rm -rf '{}' \;
