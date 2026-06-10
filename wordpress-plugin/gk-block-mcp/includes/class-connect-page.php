@@ -275,7 +275,16 @@ class Connect_Page {
 	 * @return string Absolute URL to the Connect setup guide.
 	 */
 	private function help_url(): string {
-		return 'https://www.gravitykit.com/docs/connect-ai-assistant/';
+		$url = 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/';
+
+		/**
+		 * Filter the Connect setup-guide URL.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param string $url Absolute URL to the Connect setup guide.
+		 */
+		return apply_filters( 'gk/block-mcp/connect/help-url', $url );
 	}
 
 	/**

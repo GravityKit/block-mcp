@@ -2235,4 +2235,44 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'Posts as', $html, 'the removed byline subtext must not appear' );
 	}
 
+	/**
+	 * The "Need help?" link must point at the published doc's canonical URL.
+	 *
+	 * BetterDocs permalinks include the category segment, so the original
+	 * category-less URL (/docs/connect-ai-assistant/) 404s on the live site —
+	 * the flow would ship a dead help link. Pins the canonical
+	 * /docs/block-mcp/connect-ai-assistant/ location.
+	 */
+	public function test_help_url_points_at_canonical_doc_location() {
+		$help_url = new \ReflectionMethod( Connect_Page::class, 'help_url' );
+		$help_url->setAccessible( true );
+
+		$url = $help_url->invoke( new Connect_Page() );
+
+		$this->assertSame( 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/', $url );
+	}
+
+	/**
+	 * help_url() honors the gk/block-mcp/connect/help-url filter.
+	 *
+	 * The docblock always promised "filterable so the documentation location
+	 * can change without a release," but no filter was actually applied —
+	 * operators had no way to repoint the link. Pins that the filter now runs.
+	 */
+	public function test_help_url_is_filterable() {
+		$help_url = new \ReflectionMethod( Connect_Page::class, 'help_url' );
+		$help_url->setAccessible( true );
+
+		$repoint = static function () {
+			return 'https://example.com/my-docs/';
+		};
+		add_filter( 'gk/block-mcp/connect/help-url', $repoint );
+
+		$url = $help_url->invoke( new Connect_Page() );
+
+		remove_filter( 'gk/block-mcp/connect/help-url', $repoint );
+
+		$this->assertSame( 'https://example.com/my-docs/', $url );
+	}
+
 }
