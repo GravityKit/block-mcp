@@ -41198,6 +41198,14 @@ var READ_TOOLS = [
         persist_refs: {
           type: "boolean",
           description: "Default true. When true, missing block refs (attrs.metadata.gk_ref) are assigned and persisted silently (no revision created). Set false for read-only callers that don't want write side effects \u2014 refs in the response will not resolve in subsequent mutation calls."
+        },
+        limit: {
+          type: "number",
+          description: "Page size: top-level blocks per response. When more remain, the response carries `pagination.next_cursor` \u2014 pass it back via `cursor` to fetch the next page."
+        },
+        cursor: {
+          type: "string",
+          description: "Opaque cursor from a previous response's `pagination.next_cursor`. Omit on the first request."
         }
       }
     }
@@ -41253,6 +41261,8 @@ async function handleReadTool(toolName, args, client) {
       const summaryOnly = args.summary_only;
       const includeLegacyPaths = args.include_legacy_paths;
       const persistRefs = args.persist_refs;
+      const limit = args.limit;
+      const cursor = args.cursor;
       if ((postId === void 0 || postId === null) && !url3) {
         throw new Error("Either post_id or url is required");
       }
@@ -41268,7 +41278,9 @@ async function handleReadTool(toolName, args, client) {
         outline,
         summary_only: summaryOnly,
         include_legacy_paths: includeLegacyPaths,
-        ...persistRefs !== void 0 ? { persist_refs: persistRefs } : {}
+        ...persistRefs !== void 0 ? { persist_refs: persistRefs } : {},
+        ...limit !== void 0 ? { limit } : {},
+        ...cursor !== void 0 ? { cursor } : {}
       });
       if (summaryOnly) {
         return {
@@ -41277,12 +41289,14 @@ async function handleReadTool(toolName, args, client) {
         };
       }
       const enriched = enrichBlockList(response.blocks || []);
+      const pagination = response.pagination;
       return {
         post_id: postId,
         summary: response.summary,
         blocks: enriched.blocks,
         block_count: enriched.blocks.length,
-        warnings: enriched.warnings
+        warnings: enriched.warnings,
+        ...pagination !== void 0 ? { pagination } : {}
       };
     }
     case "get_block": {

@@ -71,6 +71,14 @@ export const READ_TOOLS = [
           type: 'boolean',
           description: 'Default true. When true, missing block refs (attrs.metadata.gk_ref) are assigned and persisted silently (no revision created). Set false for read-only callers that don\'t want write side effects — refs in the response will not resolve in subsequent mutation calls.',
         },
+        limit: {
+          type: 'number',
+          description: 'Page size: top-level blocks per response. When more remain, the response carries `pagination.next_cursor` — pass it back via `cursor` to fetch the next page.',
+        },
+        cursor: {
+          type: 'string',
+          description: "Opaque cursor from a previous response's `pagination.next_cursor`. Omit on the first request.",
+        },
       },
     },
   },
@@ -139,6 +147,8 @@ export async function handleReadTool(
       const summaryOnly = args.summary_only as boolean | undefined;
       const includeLegacyPaths = args.include_legacy_paths as boolean | undefined;
       const persistRefs = args.persist_refs as boolean | undefined;
+      const limit = args.limit as number | undefined;
+      const cursor = args.cursor as string | undefined;
 
       if ((postId === undefined || postId === null) && !url) {
         throw new Error('Either post_id or url is required');
@@ -154,6 +164,8 @@ export async function handleReadTool(
         summary_only: summaryOnly,
         include_legacy_paths: includeLegacyPaths,
         ...(persistRefs !== undefined ? { persist_refs: persistRefs } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
       });
 
       // summary_only mode: return server summary as-is.
@@ -166,12 +178,16 @@ export async function handleReadTool(
 
       const enriched = enrichBlockList(response.blocks || []);
 
+      // Surface pagination meta (incl. next_cursor) so the agent can page.
+      const pagination = (response as { pagination?: unknown }).pagination;
+
       return {
         post_id: postId,
         summary: (response as { summary?: unknown }).summary,
         blocks: enriched.blocks,
         block_count: enriched.blocks.length,
         warnings: enriched.warnings,
+        ...(pagination !== undefined ? { pagination } : {}),
       };
     }
 
