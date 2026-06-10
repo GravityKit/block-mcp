@@ -45,10 +45,9 @@ jobs:
         working-directory: wordpress-plugin/gk-block-mcp
         run: |
           set -euo pipefail
-          # Defense-in-depth: Strauss has copied Composer's home dir (auth.json,
-          # keys, cacert) into vendor_prefixed/ when a locked dependency was
-          # absent from vendor/ (see extra.strauss.exclude_from_copy). Fail the
-          # build loudly rather than ship credentials in the plugin ZIP.
+          # Strauss can copy ~/.composer (auth.json, keys) into vendor_prefixed/
+          # when a locked dep is missing from vendor/ — fail rather than ship
+          # creds (see extra.strauss.exclude_from_copy).
           leaked="$(find vendor_prefixed \( -iname 'auth.json' -o -iname 'cacert.pem' -o -iname 'keys.*.pub' \) 2>/dev/null || true)"
           if [ -n "$leaked" ]; then
             echo "::error::Credential-like files found in vendor_prefixed — aborting build."

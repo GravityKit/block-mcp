@@ -23,12 +23,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// GravityKit Foundation — auto-updates, ecosystem registration, licensing,
-// translations, TrustedLogin. Loaded UI-less (no_admin_menu). The PHPUnit
-// harness defines GK_BLOCK_MCP_DISABLE_FOUNDATION (in tests/wp-tests-config.php)
-// so Foundation's admin / licensing / remote bootstrap never runs against the
-// SQLite test drop-in — Foundation is third-party framework code with its own
-// coverage, not part of this plugin's tested surface.
+// GravityKit Foundation (bundled, Strauss-prefixed) — auto-updates, licensing,
+// i18n, TrustedLogin, loaded UI-less. Tests set GK_BLOCK_MCP_DISABLE_FOUNDATION.
 if ( ! defined( 'GK_BLOCK_MCP_DISABLE_FOUNDATION' ) ) {
 	require_once plugin_dir_path( __FILE__ ) . 'vendor_prefixed/gravitykit/foundation/src/preflight_check.php';
 
@@ -277,10 +273,6 @@ function on_activation() {
 }
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\on_activation' );
 
-// Boot Foundation last, once the plugin's own wiring is registered. The
-// Strauss-generated autoloader resolves the prefixed Foundation classes; the
-// plugin's own classes load via spl_autoload_register above, not Composer.
-// Skipped under PHPUnit (see GK_BLOCK_MCP_DISABLE_FOUNDATION at the top).
 if ( ! defined( 'GK_BLOCK_MCP_DISABLE_FOUNDATION' ) ) {
 	require_once plugin_dir_path( __FILE__ ) . 'vendor_prefixed/autoload.php';
 

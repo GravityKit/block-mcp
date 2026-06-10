@@ -50,9 +50,8 @@ define( 'WP_DEBUG_DISPLAY', true );
 // Keep GravityKit Foundation out of the test boot. The plugin's main file gates
 // its Foundation preflight + Core::register on this constant; defining it here
 // means the SQLite-backed harness never loads Foundation's admin / licensing /
-// remote subsystems (which would mirror the Yoast drop-in problems: incompatible
-// SQL, _doing_it_wrong notices that CI's E_ALL turns into failures, remote HTTP).
-// Foundation has its own test coverage.
+// remote subsystems, which break the drop-in: incompatible SQL, _doing_it_wrong
+// notices that CI's E_ALL turns into failures, and remote HTTP.
 define( 'GK_BLOCK_MCP_DISABLE_FOUNDATION', true );
 
 // Salts — wp-phpunit's bootstrap requires these to be defined.
