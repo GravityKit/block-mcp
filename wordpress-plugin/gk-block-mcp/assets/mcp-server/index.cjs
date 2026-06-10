@@ -39925,7 +39925,7 @@ function translateWpError(code, data) {
   switch (code) {
     // ── Routing / auth ─────────────────────────────────────────────
     case "rest_no_route":
-      return "REST route not found at this site. Confirm the gk-block-api plugin is active and the WORDPRESS_URL is correct.";
+      return "REST route not found at this site. Confirm the Block MCP plugin is active and the WORDPRESS_URL is correct.";
     case "rest_forbidden":
     case "rest_cannot_edit":
     case "rest_cannot_create":
@@ -53266,7 +53266,6 @@ var cp2 = __toESM(require("node:child_process"), 1);
 var VALID_CLIENTS = [
   "claude-code",
   "cursor",
-  "chatgpt-desktop",
   "claude-desktop",
   "print"
 ];
@@ -53379,7 +53378,7 @@ function buildAuthorizeUrl(params) {
   const { site, callback, state, client } = params;
   const base = `${site}/wp-admin/options-general.php`;
   const query = new URLSearchParams({
-    page: "gk-block-api-settings",
+    page: "gk-block-mcp-settings",
     tab: "connect",
     gk_authorize: "1",
     callback,
@@ -53757,13 +53756,6 @@ Warning: 'claude' binary not found or failed (${result.error}).`
 Fall back \u2014 add this to your Claude Code MCP config manually:`);
           printConfig(creds, true, args.name);
         }
-        break;
-      }
-      case "chatgpt-desktop": {
-        console.log(`
-\u2713 Authorized! Paste the following into ChatGPT Desktop's MCP config:
-`);
-        printConfig(creds, true, args.name);
         break;
       }
       case "print":

@@ -44,7 +44,7 @@ describe('translateWpError — null contract', () => {
 describe('translateWpError — routing & auth', () => {
   it('rest_no_route mentions the plugin name', () => {
     const msg = translateWpError('rest_no_route', null)!;
-    expect(msg).toMatch(/gk-block-api/);
+    expect(msg).toMatch(/Block MCP/);
     expect(msg).toMatch(/WORDPRESS_URL/);
   });
 

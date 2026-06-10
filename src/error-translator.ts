@@ -67,7 +67,7 @@ export function translateWpError(code: string | undefined, data: unknown): strin
   switch (code) {
     // ── Routing / auth ─────────────────────────────────────────────
     case 'rest_no_route':
-      return 'REST route not found at this site. Confirm the gk-block-api plugin is active and the WORDPRESS_URL is correct.';
+      return 'REST route not found at this site. Confirm the Block MCP plugin is active and the WORDPRESS_URL is correct.';
 
     case 'rest_forbidden':
     case 'rest_cannot_edit':

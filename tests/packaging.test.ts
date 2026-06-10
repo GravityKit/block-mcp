@@ -58,7 +58,7 @@ describe('package is runnable via npx', () => {
 
 describe('plugin-embedded server bundle stays in sync with dist', () => {
   const distPath = path.join(root, 'dist/index.cjs');
-  const assetPath = path.join(root, 'wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs');
+  const assetPath = path.join(root, 'wordpress-plugin/gk-block-mcp/assets/mcp-server/index.cjs');
 
   it('the embedded connector bundle is byte-identical to dist/index.cjs', () => {
     // postbuild (scripts/copy-server-bundle.sh) copies dist/index.cjs into the

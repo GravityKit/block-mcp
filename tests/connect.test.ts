@@ -83,11 +83,6 @@ describe('parseConnectArgs', () => {
     expect(args.client).toBe('claude-desktop');
   });
 
-  it('parses --client chatgpt-desktop', () => {
-    const args = parseConnectArgs(['--site', 'https://example.com', '--client', 'chatgpt-desktop']);
-    expect(args.client).toBe('chatgpt-desktop');
-  });
-
   it('rejects unknown --client values', () => {
     expect(() =>
       parseConnectArgs(['--site', 'https://example.com', '--client', 'vscode'])
@@ -201,9 +196,9 @@ describe('buildAuthorizeUrl', () => {
     expect(url).toContain('/wp-admin/options-general.php');
   });
 
-  it('includes page=gk-block-api-settings', () => {
+  it('includes page=gk-block-mcp-settings', () => {
     const url = buildAuthorizeUrl(BASE_PARAMS);
-    expect(url).toContain('page=gk-block-api-settings');
+    expect(url).toContain('page=gk-block-mcp-settings');
   });
 
   it('includes tab=connect', () => {

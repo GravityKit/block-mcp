@@ -27,7 +27,6 @@ import * as cp from 'node:child_process';
 export type ClientTarget =
   | 'claude-code'
   | 'cursor'
-  | 'chatgpt-desktop'
   | 'claude-desktop'
   | 'print';
 
@@ -35,7 +34,6 @@ export type ClientTarget =
 const VALID_CLIENTS: ClientTarget[] = [
   'claude-code',
   'cursor',
-  'chatgpt-desktop',
   'claude-desktop',
   'print',
 ];
@@ -256,7 +254,7 @@ export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
   const { site, callback, state, client } = params;
   const base = `${site}/wp-admin/options-general.php`;
   const query = new URLSearchParams({
-    page: 'gk-block-api-settings',
+    page: 'gk-block-mcp-settings',
     tab: 'connect',
     gk_authorize: '1',
     callback,
@@ -874,14 +872,6 @@ export async function runConnect(
           // Explicit fallback for a client the user chose: the secret is needed.
           printConfig(creds, true, args.name);
         }
-        break;
-      }
-
-      case 'chatgpt-desktop': {
-        // ChatGPT Desktop does not have a standardised config path yet.
-        // Print the JSON block so the user can paste it (secret needed here).
-        console.log(`\n✓ Authorized! Paste the following into ChatGPT Desktop's MCP config:\n`);
-        printConfig(creds, true, args.name);
         break;
       }
 
