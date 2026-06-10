@@ -164,7 +164,7 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 
 == Changelog ==
 
-= 2.0.0 on June 8, 2026 =
+= 2.0.0 on June 10, 2026 =
 
 Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few clicks — no terminal and no config files — using a dedicated, limited account that keeps the assistant's access separate from your own login.
 
