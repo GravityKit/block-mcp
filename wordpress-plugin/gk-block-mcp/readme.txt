@@ -180,6 +180,7 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 #### ✨ Improved
 
 * Improves the built-in guidance the AI assistant receives, so its edits land right the first time: it can now build nested layouts (groups, columns, callout boxes) in a single step, and knows exactly how to position new blocks on the page.
+* The assistant can now read very large pages in smaller chunks instead of all at once, so editing long pages is faster and more reliable.
 
 #### 🔒 Security & privacy
 
