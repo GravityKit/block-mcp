@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build & publish gk-block-api.zip
+    name: Build & publish gk-block-mcp.zip
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
           coverage: none
 
       - name: Build prefixed dependencies (Foundation via Strauss)
-        working-directory: wordpress-plugin/gk-block-api
+        working-directory: wordpress-plugin/gk-block-mcp
         env:
           # Foundation (git@github.com:gravityview/Foundation.git) is a PRIVATE
           # GravityKit repo. Composer's GitHub VCS driver authenticates with this
@@ -42,7 +42,7 @@ jobs:
           composer run-script post_update_install
 
       - name: Assert no credentials leaked into vendor_prefixed
-        working-directory: wordpress-plugin/gk-block-api
+        working-directory: wordpress-plugin/gk-block-mcp
         run: |
           set -euo pipefail
           # Defense-in-depth: Strauss has copied Composer's home dir (auth.json,
@@ -67,18 +67,18 @@ jobs:
           # patterns so it matches both top-level files and nested
           # occurrences (e.g. .DS_Store anywhere in the tree).
           stage="$(mktemp -d)"
-          mkdir -p "$stage/gk-block-api"
+          mkdir -p "$stage/gk-block-mcp"
           rsync -a \
-            --exclude-from='wordpress-plugin/gk-block-api/.distignore' \
-            wordpress-plugin/gk-block-api/ "$stage/gk-block-api/"
-          (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-api.zip" gk-block-api)
-          unzip -l gk-block-api.zip | tail -5
+            --exclude-from='wordpress-plugin/gk-block-mcp/.distignore' \
+            wordpress-plugin/gk-block-mcp/ "$stage/gk-block-mcp/"
+          (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-mcp.zip" gk-block-mcp)
+          unzip -l gk-block-mcp.zip | tail -5
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gk-block-api
-          path: gk-block-api.zip
+          name: gk-block-mcp
+          path: gk-block-mcp.zip
           retention-days: 90
 
       - name: Update rolling 'latest' release (push to main)
@@ -94,11 +94,11 @@ jobs:
 
             Install the ZIP via WordPress admin → Plugins → Add New → Upload.
           prerelease: true
-          files: gk-block-api.zip
+          files: gk-block-mcp.zip
 
       - name: Tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: gk-block-api.zip
+          files: gk-block-mcp.zip

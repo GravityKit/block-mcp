@@ -1,23 +1,23 @@
 # AGENTS.md — GK Block API + Block MCP
 
-> Block-level WordPress content CRUD for AI agents, delivered as a two-part system: an npm-published MCP server (`@gravitykit/block-mcp`) that talks to a companion WordPress plugin (`gk-block-api`) over a private REST namespace. The plugin also ships a one-click **Connect** onboarding flow that provisions a dedicated, least-privilege agent account and hands the MCP client a credential out-of-band — no copy-pasting Application Passwords.
+> Block-level WordPress content CRUD for AI agents, delivered as a two-part system: an npm-published MCP server (`@gravitykit/block-mcp`) that talks to a companion WordPress plugin (`gk-block-mcp`) over a private REST namespace. The plugin also ships a one-click **Connect** onboarding flow that provisions a dedicated, least-privilege agent account and hands the MCP client a credential out-of-band — no copy-pasting Application Passwords.
 
 ## Quick Start
 
 **What this is:** Two components that ship and version independently.
 1. **MCP server** (`src/`, built to `dist/index.cjs`) — a thin stdio MCP server that exposes ~30 tools, validates input, calls the plugin's REST API, and enriches responses with AI-friendly guidance (tier groupings, legacy warnings, error translation). Also contains the **connector** (`src/connect.ts`) — the `block-mcp connect` subcommand that drives a browser-Approve handshake and writes the client's MCP config.
-2. **WordPress plugin** (`wordpress-plugin/gk-block-api/`) — registers the `gk-block-api/v1` REST namespace, owns block parsing/serialization/mutation, the preference/scoring engine, post/term/media lifecycle, and the Connect onboarding UI + credential flow.
+2. **WordPress plugin** (`wordpress-plugin/gk-block-mcp/`) — registers the `gk-block-api/v1` REST namespace, owns block parsing/serialization/mutation, the preference/scoring engine, post/term/media lifecycle, and the Connect onboarding UI + credential flow.
 
 **Main entry points:**
 - MCP server: `src/index.ts` → built to `dist/index.cjs`; npm `bin` is `block-mcp`.
 - Connector: `src/connect.ts` (`block-mcp connect …`).
-- Plugin: `wordpress-plugin/gk-block-api/gk-block-api.php` (bootstraps on `rest_api_init` + admin hooks).
+- Plugin: `wordpress-plugin/gk-block-mcp/gk-block-mcp.php` (bootstraps on `rest_api_init` + admin hooks).
 
 **Architecture style:** Hook-driven WordPress plugin (autoload via `spl_autoload_register`) behind a typed TypeScript MCP server. No framework; plain WP + the plain MCP SDK.
 
-**Key namespaces:** PHP `GravityKit\BlockAPI`; REST `gk-block-api/v1`; npm `@gravitykit/block-mcp`.
+**Key namespaces:** PHP `GravityKit\BlockMCP`; REST `gk-block-api/v1`; npm `@gravitykit/block-mcp`.
 
-**Versions:** the MCP server and plugin version independently. `package.json` `version` is the server; `readme.txt` `Stable tag` + `gk-block-api.php` `Version`/`GK_BLOCK_API_VERSION` are the plugin (current: 2.0.0). See **Versioning & Releases**.
+**Versions:** the MCP server and plugin version independently. `package.json` `version` is the server; `readme.txt` `Stable tag` + `gk-block-mcp.php` `Version`/`GK_BLOCK_MCP_VERSION` are the plugin (current: 2.0.0). See **Versioning & Releases**.
 
 ```bash
 cd MCPs/block-mcp && npm install
@@ -46,8 +46,8 @@ MCPs/block-mcp/
 │   └── tools/                    # discovery, read, write, mutate, patterns, posts, terms, media, yoast
 ├── dist/index.cjs               # Built bundle (esbuild, single CJS file) — shipped to npm
 ├── tests/                       # Vitest tests for the server + connector (connect.*.test.ts)
-└── wordpress-plugin/gk-block-api/
-    ├── gk-block-api.php          # Bootstrap: autoloader, rest_api_init wiring, admin wiring, CLI
+└── wordpress-plugin/gk-block-mcp/
+    ├── gk-block-mcp.php          # Bootstrap: autoloader, rest_api_init wiring, admin wiring, CLI
     ├── uninstall.php             # Full data + agent teardown (multisite-aware)
     ├── readme.txt                # Canonical changelog + Upgrade Notice (WordPress plugin readme)
     ├── phpcs.xml.dist            # WordPress-Extra + WordPress-Docs + PHPCompatibilityWP (testVersion 7.4-)
@@ -63,7 +63,7 @@ MCPs/block-mcp/
 
 ```
 AI client  ──stdio──▶  MCP server (TypeScript)  ──HTTPS Basic Auth──▶  WordPress plugin (PHP)
-                       src/index.ts                                     wordpress-plugin/gk-block-api/
+                       src/index.ts                                     wordpress-plugin/gk-block-mcp/
                        validates + enriches                             parses/serializes blocks,
                                                                         manages revisions, enforces
                                                                         preferences, owns the data
@@ -73,10 +73,10 @@ The MCP server is a thin orchestration layer: it validates inputs, delegates to 
 
 ### Plugin initialization flow
 
-`gk-block-api.php` registers `spl_autoload_register` mapping `GravityKit\BlockAPI\Some_Class` → `includes/class-some-class.php`. Three wiring points:
+`gk-block-mcp.php` registers `spl_autoload_register` mapping `GravityKit\BlockMCP\Some_Class` → `includes/class-some-class.php`. Three wiring points:
 
-1. **`init_rest_api()` on `rest_api_init`** (`gk-block-api.php:129`) — builds the service graph and registers routes: `Preferences → Block_Registry(+Block_Inventory)`, `Pattern_Manager`, `Block_CRUD(Preferences, Block_Safety, HTML_Transformer, Block_Inventory)`, then `REST_Controller(...)->register_routes()`, then `Yoast_Bridge->register_routes()`, then **`( new Connect_Page() )->register_rest_routes()`** (the connector credential-exchange route).
-2. **Admin wiring on `plugins_loaded`** (`gk-block-api.php:179`) — `Settings_Page` (needs `admin_menu`, which fires before `admin_init`) and `Connect_Page` register their admin-post handlers + settings UI.
+1. **`init_rest_api()` on `rest_api_init`** (`gk-block-mcp.php:129`) — builds the service graph and registers routes: `Preferences → Block_Registry(+Block_Inventory)`, `Pattern_Manager`, `Block_CRUD(Preferences, Block_Safety, HTML_Transformer, Block_Inventory)`, then `REST_Controller(...)->register_routes()`, then `Yoast_Bridge->register_routes()`, then **`( new Connect_Page() )->register_rest_routes()`** (the connector credential-exchange route).
+2. **Admin wiring on `plugins_loaded`** (`gk-block-mcp.php:179`) — `Settings_Page` (needs `admin_menu`, which fires before `admin_init`) and `Connect_Page` register their admin-post handlers + settings UI.
 3. **WP-CLI bootstrap** — `rest_api_init` doesn't fire under `wp`, so CLI commands wire the graph explicitly.
 
 All service objects are constructed inside these hooks — no global singletons.
@@ -148,11 +148,11 @@ All under `gk-block-api/v1`. Reads require `edit_posts`; per-block writes requir
 ## Conventions
 
 ### File & class naming
-- PHP: `class-{lowercased-underscored-name}.php` for a class in `GravityKit\BlockAPI`. Service classes return `WP_Error`; `REST_Controller` wraps exceptions via `handle_error()`.
+- PHP: `class-{lowercased-underscored-name}.php` for a class in `GravityKit\BlockMCP`. Service classes return `WP_Error`; `REST_Controller` wraps exceptions via `handle_error()`.
 - TS: ESM source, `.js` import suffixes, esbuild → single CJS bundle (`dist/index.cjs`). No `dotenv` (breaks the esbuild ESM→CJS bundle; env comes from the parent process).
 
 ### Hook / filter naming
-Custom **hooks** follow the GravityKit slash convention `gk/block-mcp/{domain}/{leaf}` (e.g. `gk/block-mcp/agent/caps`, `gk/block-mcp/media/sideload-blocked-ranges`). **Option keys, constants, transients, and other global identifiers keep the `gk_block_api_*` prefix** — only `apply_filters`/`do_action`/`add_filter` hook *names* use the slash form. `WordPress.NamingConventions.PrefixAllGlobals` allows `gk_block_api`, `GK_BLOCK_API`, `GravityKit\BlockAPI`, plus the **hook-only** prefix `gk/block-mcp` (`gk/block-mcp` isn't a valid PHP identifier, so `InvalidPrefixPassed` is excluded and it's used only as a hook prefix). `ValidHookName` adds `/` and `-` as word delimiters so the slash/dash names don't trip the all-underscore rule (see `phpcs.xml.dist`). Key filters: `gk/block-mcp/agent/caps`, `gk/block-mcp/agent/role`, `gk/block-mcp/identity/allow-self`, `gk/block-mcp/post/allow-trash`, `gk/block-mcp/credential/seal-mode`, `gk/block-mcp/mcpb/manifest`, `gk/block-mcp/media/sideload-blocked-ranges`, `gk/block-mcp/media/uploads-enabled`, `gk/block-mcp/agent/remove-on-uninstall`. The one custom **action** is `gk/block-mcp/block/refs-persisted`; otherwise the plugin relies on core extension points (`rest_api_init`, `admin_post_*`, `wp_kses_post`, `parse_blocks`/`serialize_blocks`, `wp_update_post`).
+Custom **hooks** follow the GravityKit slash convention `gk/block-mcp/{domain}/{leaf}` (e.g. `gk/block-mcp/agent/caps`, `gk/block-mcp/media/sideload-blocked-ranges`). **Option keys, constants, transients, and other global identifiers keep the `gk_block_api_*` prefix** — only `apply_filters`/`do_action`/`add_filter` hook *names* use the slash form. `WordPress.NamingConventions.PrefixAllGlobals` allows `gk_block_api`, `GK_BLOCK_API`, `GravityKit\BlockMCP`, plus the **hook-only** prefix `gk/block-mcp` (`gk/block-mcp` isn't a valid PHP identifier, so `InvalidPrefixPassed` is excluded and it's used only as a hook prefix). `ValidHookName` adds `/` and `-` as word delimiters so the slash/dash names don't trip the all-underscore rule (see `phpcs.xml.dist`). Key filters: `gk/block-mcp/agent/caps`, `gk/block-mcp/agent/role`, `gk/block-mcp/identity/allow-self`, `gk/block-mcp/post/allow-trash`, `gk/block-mcp/credential/seal-mode`, `gk/block-mcp/mcpb/manifest`, `gk/block-mcp/media/sideload-blocked-ranges`, `gk/block-mcp/media/uploads-enabled`, `gk/block-mcp/agent/remove-on-uninstall`. The one custom **action** is `gk/block-mcp/block/refs-persisted`; otherwise the plugin relies on core extension points (`rest_api_init`, `admin_post_*`, `wp_kses_post`, `parse_blocks`/`serialize_blocks`, `wp_update_post`).
 
 ### Code style
 - **Assign checks to named variables before the conditional** — don't inline function calls / compound expressions in `if`/`while`/`?:`. Exception: short-circuit guards where ordering is load-bearing (a null/`isset` guard before a dereference stays inline).
@@ -203,7 +203,7 @@ Env: `WORDPRESS_URL`, `WORDPRESS_USER`, `WORDPRESS_APP_PASSWORD` (passed by the 
 
 ### Testing
 - **Server/connector:** Vitest under `tests/` (`connect.test.ts`, `connect.security.test.ts`, `connect.runconnect.test.ts` exercise the loopback handshake with `fetch` stubbed — nothing leaves the machine).
-- **Plugin:** PHPUnit (`composer test`) on a SQLite drop-in. **Regression tests are mandatory** — every bug fix ships a test that FAILS pre-fix (reproduces the real symptom), passes post-fix, and has teeth (revert the fix → it goes red). Exercise the real mechanism (live `authenticate` chain / a real `WP_REST_Request`, not just a direct method call) and cover every facet (each cap/post-type, single-site AND multisite, API AND interactive). See `wordpress-plugin/gk-block-api/tests/AGENTS.md` and the `tests/Connect/Agent*Test.php` auth-chain pattern.
+- **Plugin:** PHPUnit (`composer test`) on a SQLite drop-in. **Regression tests are mandatory** — every bug fix ships a test that FAILS pre-fix (reproduces the real symptom), passes post-fix, and has teeth (revert the fix → it goes red). Exercise the real mechanism (live `authenticate` chain / a real `WP_REST_Request`, not just a direct method call) and cover every facet (each cap/post-type, single-site AND multisite, API AND interactive). See `wordpress-plugin/gk-block-mcp/tests/AGENTS.md` and the `tests/Connect/Agent*Test.php` auth-chain pattern.
 - Local WP: gkclone (deploy = rsync the plugin to the synced plugins dir + `opcache_reset`).
 
 ### Static analysis (run before every commit)
@@ -221,8 +221,8 @@ The plugin and MCP server version independently. The plugin follows WP plugin co
 **Semver (plugin):** MAJOR = breaking REST/tool changes; MINOR = additive endpoints/tools/fields/settings; PATCH = fixes/hardening/refactors/i18n/tests.
 
 **Every plugin version bump updates all five:**
-1. `gk-block-api.php` `* Version:` header
-2. `gk-block-api.php` `GK_BLOCK_API_VERSION` constant
+1. `gk-block-mcp.php` `* Version:` header
+2. `gk-block-mcp.php` `GK_BLOCK_MCP_VERSION` constant
 3. `readme.txt` `Stable tag:`
 4. `readme.txt` `== Upgrade Notice ==` (1–3 sentences, headline value, newest at top — this is what the WP update screen shows)
 5. `readme.txt` `== Changelog ==` (grouped `New`/`Improved`/`Fixed`/etc., newest at top)
@@ -248,7 +248,7 @@ The plugin and MCP server version independently. The plugin follows WP plugin co
 ## Related Resources
 
 - `wordpress-plugin/AGENTS.md` — full REST route table + per-class plugin reference.
-- `wordpress-plugin/gk-block-api/tests/AGENTS.md` — PHPUnit conventions (naming, docblocks, regression-test discipline).
+- `wordpress-plugin/gk-block-mcp/tests/AGENTS.md` — PHPUnit conventions (naming, docblocks, regression-test discipline).
 - `README.md` — human-facing getting-started.
 - `docs/specs/` — versioned design specs.
 - WordPress Block API: https://developer.wordpress.org/block-editor/reference-guides/block-api/ · MCP: https://modelcontextprotocol.io · MCPB manifest schema: https://github.com/anthropics/mcpb

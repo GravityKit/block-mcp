@@ -4,17 +4,17 @@
 
 ## Quick Start
 
-- **Namespace:** `GravityKit\BlockAPI` · **REST prefix:** `gk-block-api/v1`
+- **Namespace:** `GravityKit\BlockMCP` · **REST prefix:** `gk-block-api/v1`
 - **Auth:** WordPress Application Passwords (Basic Auth over HTTPS). Reads require `edit_posts`; per-block writes also check `edit_post` on the post. The connect exchange route is intentionally unauthenticated (single-use sealed code).
-- **Entry point:** `gk-block-api.php` — `spl_autoload_register` (class → `includes/class-{name}.php`); `init_rest_api()` on `rest_api_init`; admin/CLI wiring on `plugins_loaded`. No global singletons — services are built inside the hooks.
+- **Entry point:** `gk-block-mcp.php` — `spl_autoload_register` (class → `includes/class-{name}.php`); `init_rest_api()` on `rest_api_init`; admin/CLI wiring on `plugins_loaded`. No global singletons — services are built inside the hooks.
 - **PHP:** 7.4+ · **WordPress:** 6.0+
 - **Quality gates (every commit):** `composer lint` (phpcs: WordPress-Extra + WordPress-Docs + PHPCompatibilityWP @ `testVersion 7.4-`) → 0/0; `composer analyze` (PHPStan level 5, PHP 8.2, WP stubs) → [OK]; `composer test` (PHPUnit + SQLite drop-in) → green.
 
 ## File Inventory
 
 ```
-gk-block-api/
-├── gk-block-api.php              # Bootstrap: autoloader, rest_api_init + admin wiring, CLI
+gk-block-mcp/
+├── gk-block-mcp.php              # Bootstrap: autoloader, rest_api_init + admin wiring, CLI
 ├── uninstall.php                 # Full data + agent teardown (multisite-aware)
 ├── readme.txt                    # Canonical changelog + Upgrade Notice
 ├── phpcs.xml.dist / phpstan.neon.dist / phpstan-bootstrap.php   # Static-analysis config
@@ -51,7 +51,7 @@ gk-block-api/
 
 ### Bootstrap & service graph
 
-`gk-block-api.php` wires everything on three hooks:
+`gk-block-mcp.php` wires everything on three hooks:
 
 1. **`init_rest_api()` on `rest_api_init`:**
    ```
@@ -190,8 +190,8 @@ All routes under `gk-block-api/v1`.
 
 ## Conventions
 
-- **Regression test required for every bug fix** — must FAIL pre-fix (real symptom), pass post-fix, and have teeth (revert → red). Exercise the real mechanism (live `authenticate` chain / a real `WP_REST_Request`, not a bare method call) and cover every facet (each cap/post-type, single-site + multisite, API + interactive). See `gk-block-api/tests/AGENTS.md`, `tests/Connect/AgentAuthTest.php`, `tests/Connect/AgentRestCapabilityTest.php`.
-- Class files `class-{lowercased-underscored}.php`; namespace `GravityKit\BlockAPI`; service classes return `WP_Error`.
+- **Regression test required for every bug fix** — must FAIL pre-fix (real symptom), pass post-fix, and have teeth (revert → red). Exercise the real mechanism (live `authenticate` chain / a real `WP_REST_Request`, not a bare method call) and cover every facet (each cap/post-type, single-site + multisite, API + interactive). See `gk-block-mcp/tests/AGENTS.md`, `tests/Connect/AgentAuthTest.php`, `tests/Connect/AgentRestCapabilityTest.php`.
+- Class files `class-{lowercased-underscored}.php`; namespace `GravityKit\BlockMCP`; service classes return `WP_Error`.
 - Write/innerHTML paths sanitize via `wp_kses_post()`; block names validated against `WP_Block_Type_Registry`.
 - **Public-facing language:** never name a concrete third-party namespace as "legacy" in comments/errors/responses/changelog — the tier is site-configurable. Use generic phrasing; resolve a legacy namespace from `Preferences::get_defaults()` at runtime in fixtures.
 - **Comments are public artifacts** — present-tense behaviour + hard contracts only; no history/journal, no off-tree spec pointers, no future-architecture speculation.
@@ -210,5 +210,5 @@ All routes under `gk-block-api/v1`.
 ## Related Resources
 
 - `../AGENTS.md` — repo-root architecture + connect overview (+ MCP server side).
-- `gk-block-api/tests/AGENTS.md` — PHPUnit conventions and regression-test discipline.
-- `gk-block-api/readme.txt` — canonical changelog + Upgrade Notice.
+- `gk-block-mcp/tests/AGENTS.md` — PHPUnit conventions and regression-test discipline.
+- `gk-block-mcp/readme.txt` — canonical changelog + Upgrade Notice.

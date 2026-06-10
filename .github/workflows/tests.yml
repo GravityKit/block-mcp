@@ -25,7 +25,7 @@ jobs:
         php-version: ['7.4', '8.2', '8.3', '8.4']
     defaults:
       run:
-        working-directory: wordpress-plugin/gk-block-api
+        working-directory: wordpress-plugin/gk-block-mcp
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: composer-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-api/composer.lock') }}
+          key: composer-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock') }}
           restore-keys: |
             composer-${{ matrix.php-version }}-
 
@@ -59,8 +59,8 @@ jobs:
         id: vendor-cache
         uses: actions/cache@v4
         with:
-          path: wordpress-plugin/gk-block-api/vendor
-          key: vendor-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-api/composer.lock', 'wordpress-plugin/gk-block-api/tests/install-sqlite-dropin.php') }}
+          path: wordpress-plugin/gk-block-mcp/vendor
+          key: vendor-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock', 'wordpress-plugin/gk-block-mcp/tests/install-sqlite-dropin.php') }}
 
       - name: Install dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
@@ -69,7 +69,7 @@ jobs:
           # GravityKit/Foundation repo. Composer authenticates via this token to
           # clone it. Configure a repo/org Actions secret FOUNDATION_REPO_TOKEN =
           # a PAT with read access to GravityKit/Foundation. (The Foundation boot
-          # itself is disabled under PHPUnit via GK_BLOCK_API_DISABLE_FOUNDATION,
+          # itself is disabled under PHPUnit via GK_BLOCK_MCP_DISABLE_FOUNDATION,
           # but composer still has to resolve the dependency tree to install.)
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -137,7 +137,7 @@ jobs:
       - name: Verify committed bundles are up to date
         run: |
           git diff --exit-code -- dist/index.cjs \
-            wordpress-plugin/gk-block-api/assets/mcp-server/index.cjs \
+            wordpress-plugin/gk-block-mcp/assets/mcp-server/index.cjs \
             || { echo "::error::dist/index.cjs or the embedded copy is stale — run 'npm run build' and commit the result."; exit 1; }
 
   ts-integration:

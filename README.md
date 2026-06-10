@@ -177,7 +177,7 @@ These can coexist. Block MCP could (and likely will) be exposed through the offi
 AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin (your site)
 ```
 
-**WordPress plugin** (`wordpress-plugin/gk-block-api/`) — REST API at `gk-block-api/v1`. Handles block parsing, serialization, safety checks, preference scoring, rate limiting, revisions. Works with any post type that stores Gutenberg blocks in `post_content`.
+**WordPress plugin** (`wordpress-plugin/gk-block-mcp/`) — REST API at `gk-block-api/v1`. Handles block parsing, serialization, safety checks, preference scoring, rate limiting, revisions. Works with any post type that stores Gutenberg blocks in `post_content`.
 
 **MCP server** (`src/`) — TypeScript stdio server that exposes the REST API as MCP tools. Authenticates as a normal WordPress user via Application Password. No special privileges, no direct DB access from the MCP side.
 
@@ -185,14 +185,14 @@ AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin 
 
 ### 1. Install the WordPress plugin
 
-**Easiest — download the latest ZIP:** [gk-block-api.zip](https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip) (auto-built from `main` on every push).
+**Easiest — download the latest ZIP:** [gk-block-mcp.zip](https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-mcp.zip) (auto-built from `main` on every push).
 
 Then in WordPress: **Plugins → Add New → Upload Plugin** and pick the ZIP.
 
-Or copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` and activate manually. Or via WP-CLI:
+Or copy `wordpress-plugin/gk-block-mcp/` to your site's `wp-content/plugins/` and activate manually. Or via WP-CLI:
 
 ```bash
-wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip --activate
+wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-mcp.zip --activate
 ```
 
 ### 2. Connect your AI assistant
@@ -395,7 +395,7 @@ The one-click Claude Desktop installer can either include your credential or lea
 | `prefill` *(default)* | The installer includes the password, so setup is one click; Claude Desktop saves it to your OS keychain. |
 | `paste` | The installer leaves the password out — you paste it in yourself, so it never lands in a downloaded file. |
 
-Developers can force paste mode with a filter, or by defining `GK_BLOCK_API_FORCE_PASTE_SECRET` as `true` in `wp-config.php`:
+Developers can force paste mode with a filter, or by defining `GK_BLOCK_MCP_FORCE_PASTE_SECRET` as `true` in `wp-config.php`:
 
 ```php
 add_filter( 'gk/block-mcp/credential/seal-mode', fn() => 'paste' );
@@ -442,7 +442,7 @@ Run all suites locally:
 npm test
 
 # PHP (PHPUnit, stub WP bootstrap) — 335 tests
-cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
+cd wordpress-plugin/gk-block-mcp && phpunit -c tests/phpunit.xml
 ```
 
 The PHP suite uses a minimal WordPress stub layer (no full WP install required) to exercise validation, error paths, mutation engine, ref resolution, HTML auto-transforms, post lifecycle, term listing, media validation, and REST summary/outline.
