@@ -35250,7 +35250,8 @@ var package_default = {
   },
   dependencies: {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    axios: "^1.7.9"
+    axios: "^1.7.9",
+    "form-data": "^4.0.1"
   },
   devDependencies: {
     "@anthropic-ai/sdk": "^0.91.1",
@@ -39989,6 +39990,19 @@ function formatPath(path2) {
 }
 
 // src/client.ts
+function mimeForFilename(filename) {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
+  const map2 = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf"
+  };
+  return map2[ext] ?? "application/octet-stream";
+}
 var MAX_RETRIES = 2;
 var IDEMPOTENT_METHODS = /* @__PURE__ */ new Set(["get", "head", "options"]);
 function sleep(ms) {
@@ -40612,17 +40626,20 @@ var WordPressBlockClient = class {
     }
     if (args.path) {
       const fs2 = await import("node:fs/promises");
-      const path2 = await import("node:path");
+      const nodePath = await import("node:path");
+      const { default: FormData3 } = await Promise.resolve().then(() => __toESM(require_form_data(), 1));
       const data = await fs2.readFile(args.path);
-      const filename = args.filename ?? path2.basename(args.path);
-      const form = new FormData();
-      form.append("file", new Blob([new Uint8Array(data)]), filename);
+      const filename = args.filename ?? nodePath.basename(args.path);
+      const form = new FormData3();
+      form.append("file", data, { filename, contentType: mimeForFilename(filename) });
       if (args.title) form.append("title", args.title);
       if (args.alt_text) form.append("alt_text", args.alt_text);
       if (args.caption) form.append("caption", args.caption);
       if (args.description) form.append("description", args.description);
       if (typeof args.post_id === "number") form.append("post_id", String(args.post_id));
-      const response2 = await this.client.post("/media", form);
+      const response2 = await this.client.post("/media", form, {
+        headers: form.getHeaders()
+      });
       return response2.data;
     }
     const response = await this.client.post("/media", args);

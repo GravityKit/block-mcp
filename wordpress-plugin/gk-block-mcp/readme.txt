@@ -181,6 +181,10 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 
 * When you connect, your site credential is never placed in a web address or left in your browser history, and any client config files are written so that only you can read them.
 
+#### 🐛 Fixed
+
+* Fixes adding an image from a file on your computer through the assistant — local-file uploads previously didn't get uploaded (adding by web address or pasted data worked).
+
 #### 🛠 Developer note
 
 * Every plugin hook now uses the GravityKit `gk/block-mcp/{area}/{name}` naming — for example, the trash filter `gk_block_api_allow_trash` is now `gk/block-mcp/post/allow-trash`. If you've customized Block MCP with your own code, rename your `add_filter()` / `add_action()` calls to match. Option names are unchanged.

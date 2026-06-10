@@ -9,6 +9,21 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 
+/** Best-effort MIME type from a filename extension, for multipart uploads. */
+function mimeForFilename(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    pdf: 'application/pdf',
+  };
+  return map[ext] ?? 'application/octet-stream';
+}
+
 /** Max retry attempts for transient server / network errors. */
 const MAX_RETRIES = 2;
 
@@ -907,19 +922,25 @@ export class WordPressBlockClient {
 
     if (args.path) {
       const fs = await import('node:fs/promises');
-      const path = await import('node:path');
+      const nodePath = await import('node:path');
+      const { default: FormData } = await import('form-data');
       const data = await fs.readFile(args.path);
-      const filename = args.filename ?? path.basename(args.path);
+      const filename = args.filename ?? nodePath.basename(args.path);
       const form = new FormData();
-      form.append('file', new Blob([new Uint8Array(data)]), filename);
+      form.append('file', data, { filename, contentType: mimeForFilename(filename) });
       if (args.title) form.append('title', args.title);
       if (args.alt_text) form.append('alt_text', args.alt_text);
       if (args.caption) form.append('caption', args.caption);
       if (args.description) form.append('description', args.description);
       if (typeof args.post_id === 'number') form.append('post_id', String(args.post_id));
 
-      // axios sets the multipart Content-Type and boundary automatically.
-      const response = await this.client.post<UploadMediaResponse>('/media', form);
+      // The shared axios instance defaults Content-Type to application/json,
+      // which makes axios JSON-serialize the form and send NO file. The
+      // form-data package's getHeaders() supplies multipart/form-data WITH the
+      // boundary, overriding that default so this is a real multipart upload.
+      const response = await this.client.post<UploadMediaResponse>('/media', form, {
+        headers: form.getHeaders(),
+      });
       return response.data;
     }
 
