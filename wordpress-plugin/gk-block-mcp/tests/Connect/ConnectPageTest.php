@@ -132,6 +132,29 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The connection label must show the friendly client name, not the slug.
+	 *
+	 * The browser-Approve path (handle_authorize) hands provision_credentials the
+	 * raw client slug straight from the request ("claude-code"), so the minted
+	 * Application Password name — which is what the "Client" column renders — must
+	 * resolve through client_label() to "Claude Code". Pre-fix the label read
+	 * "Block MCP — claude-code"; this pins the resolution so the slug never leaks
+	 * into the connections list.
+	 */
+	public function test_provision_credentials_label_resolves_slug_to_friendly_name() {
+		$page = new Connect_Page();
+		$page->provision_credentials( 'claude-code', 'agent' );
+
+		$agent     = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$passwords = WP_Application_Passwords::get_user_application_passwords( $agent->ID );
+		$this->assertCount( 1, $passwords );
+
+		$name = $passwords[0]['name'];
+		$this->assertStringContainsString( 'Claude Code', $name, 'label must use the friendly client name' );
+		$this->assertStringNotContainsString( 'claude-code', $name, 'label must not leak the raw client slug' );
+	}
+
+	/**
 	 * Default identity ('agent') mints on the dedicated agent account and records
 	 * the host + approver for the audit trail (no byline state — that subsystem was
 	 * removed with the agent_as_me identity).

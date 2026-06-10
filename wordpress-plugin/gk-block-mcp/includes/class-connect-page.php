@@ -428,11 +428,14 @@ class Connect_Page {
 	 *
 	 * @since  2.0.0
 	 *
-	 * @param  string $client Human-readable client display name.
+	 * @param  string $client Client slug — resolved to its display label via
+	 *                        client_label() so the connections list reads
+	 *                        "Claude Code", not "claude-code". An already-resolved
+	 *                        label passes through client_label() unchanged.
 	 * @return string Application Password label.
 	 */
 	private function connection_label( $client ) {
-		$label = 'Block MCP — ' . $client;
+		$label = 'Block MCP — ' . $this->client_label( $client );
 
 		if ( is_multisite() ) {
 			$site     = (string) preg_replace( '#^https?://#', '', untrailingslashit( home_url() ) );
@@ -1620,7 +1623,7 @@ class Connect_Page {
 										<input type="hidden" name="action" value="<?php echo esc_attr( self::ACTION_REVOKE ); ?>" />
 										<input type="hidden" name="uuid" value="<?php echo esc_attr( $conn['uuid'] ); ?>" />
 										<?php wp_nonce_field( self::ACTION_REVOKE ); ?>
-										<button type="submit" class="gk-block-mcp-connect__disconnect-btn button button-link"><?php esc_html_e( 'Disconnect', 'gk-block-mcp' ); ?></button>
+										<button type="submit" class="gk-block-mcp-connect__disconnect-btn button-link button-link-delete"><?php esc_html_e( 'Disconnect', 'gk-block-mcp' ); ?></button>
 									</form>
 								</td>
 							</tr>
@@ -1903,6 +1906,16 @@ class Connect_Page {
 						color: #fff;
 						background: #b32d2e;
 						border-color: #b32d2e;
+					}
+					/* Connections-table Disconnect: a red WP-style action link
+						(#b32d2e), not the default blue button-link and not the
+						bordered destructive button used in __actions above. */
+					.gk-block-mcp-connect__disconnect-btn {
+						color: #b32d2e;
+					}
+					.gk-block-mcp-connect__disconnect-btn:hover,
+					.gk-block-mcp-connect__disconnect-btn:focus {
+						color: #8a2424;
 					}
 					.gk-block-mcp-connect--authorize .gk-block-mcp-connect__help {
 						text-align: center;
