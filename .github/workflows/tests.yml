@@ -64,6 +64,14 @@ jobs:
 
       - name: Install dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          # GravityKit Foundation is a runtime require resolved from the PRIVATE
+          # GravityKit/Foundation repo. Composer authenticates via this token to
+          # clone it. Configure a repo/org Actions secret FOUNDATION_REPO_TOKEN =
+          # a PAT with read access to GravityKit/Foundation. (The Foundation boot
+          # itself is disabled under PHPUnit via GK_BLOCK_API_DISABLE_FOUNDATION,
+          # but composer still has to resolve the dependency tree to install.)
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
         run: composer install --prefer-dist --no-progress --no-interaction
 
       # composer post-install runs the SQLite installer only on a fresh

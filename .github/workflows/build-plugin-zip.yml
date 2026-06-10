@@ -16,6 +16,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Build prefixed dependencies (Foundation via Strauss)
+        working-directory: wordpress-plugin/gk-block-api
+        env:
+          # Foundation (git@github.com:gravityview/Foundation.git) is a PRIVATE
+          # GravityKit repo. Composer's GitHub VCS driver authenticates with this
+          # token to resolve and download it. Configure a repo/org Actions secret
+          # FOUNDATION_REPO_TOKEN = a PAT with read access to GravityKit/Foundation.
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
+        run: |
+          set -euo pipefail
+          # --no-scripts skips the test-tooling post-install (SQLite drop-in +
+          # core-block fixtures) which needs the dev WordPress install. We run
+          # only the two steps the shipped bundle needs: Strauss prefixing and
+          # the Illuminate-helpers namespacing.
+          composer install --no-dev --no-scripts --prefer-dist --no-progress --no-interaction
+          composer run-script prefix_vendor
+          composer run-script post_update_install
+
+      - name: Assert no credentials leaked into vendor_prefixed
+        working-directory: wordpress-plugin/gk-block-api
+        run: |
+          set -euo pipefail
+          # Defense-in-depth: Strauss has copied Composer's home dir (auth.json,
+          # keys, cacert) into vendor_prefixed/ when a locked dependency was
+          # absent from vendor/ (see extra.strauss.exclude_from_copy). Fail the
+          # build loudly rather than ship credentials in the plugin ZIP.
+          leaked="$(find vendor_prefixed \( -iname 'auth.json' -o -iname 'cacert.pem' -o -iname 'keys.*.pub' \) 2>/dev/null || true)"
+          if [ -n "$leaked" ]; then
+            echo "::error::Credential-like files found in vendor_prefixed — aborting build."
+            echo "$leaked"
+            exit 1
+          fi
+          echo "vendor_prefixed is clean."
+
       - name: Build ZIP
         run: |
           set -euo pipefail
