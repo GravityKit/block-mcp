@@ -76,7 +76,10 @@ async function login(page: Page): Promise<void> {
 /**
  * Capture a target in-situ: clip the live page to the target's bounding box
  * plus CONTEXT_PAD of surrounding page, then cap the longest side at MAX_PX.
- * The clip is clamped to the viewport so we never request off-screen pixels.
+ * The clip is clamped to the viewport so we never request off-screen pixels,
+ * and to the admin content area (#wpcontent) so the context pad pulls in the
+ * page around the target — never the admin sidebar or toolbar. Chrome isn't
+ * the context a doc reader needs; the content background is.
  */
 async function capture(
   page: Page,
@@ -89,8 +92,11 @@ async function capture(
   if (!box) throw new Error(`capture("${name}"): target has no bounding box`);
 
   const vp = page.viewportSize() ?? { width: 1340, height: 1200 };
-  const x = Math.max(0, box.x - CONTEXT_PAD);
-  const y = Math.max(0, box.y - CONTEXT_PAD);
+  const content = await page.locator('#wpcontent').boundingBox();
+  const minX = Math.max(0, content?.x ?? 0);
+  const minY = Math.max(0, content?.y ?? 0);
+  const x = Math.max(minX, box.x - CONTEXT_PAD);
+  const y = Math.max(minY, box.y - CONTEXT_PAD);
   const clip = {
     x,
     y,
