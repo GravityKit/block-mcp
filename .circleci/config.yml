@@ -112,11 +112,13 @@ jobs:
             # only an md5 hash with no signature, which the RM rejects
             # ("Signing is required for every release"). gktools is a private
             # GitHub Packages module, so authenticate npm to npm.pkg.github.com
-            # first. --use-local signs with Node crypto (no Docker pull needed).
-            # Reads GK_SIGNING_PRIVATE_KEY, GK_RELEASE_MANAGER_URL/TOKEN, and the
-            # Dropbox keys from the `shared` context.
+            # first. USE_LOCAL=true makes announce sign with Node crypto instead
+            # of the gravitykit/tools Docker image (announce reads it as an env
+            # var, not a flag). Reads GK_SIGNING_PRIVATE_KEY,
+            # GK_RELEASE_MANAGER_URL/TOKEN, and the Dropbox keys from the
+            # `shared` context.
             printf '//npm.pkg.github.com/:_authToken=%s\n@gravitykit:registry=https://npm.pkg.github.com\n' "$GH_AUTH_TOKEN" >> "$HOME/.npmrc"
-            npx -y @gravitykit/gktools@latest announce --use-local \
+            USE_LOCAL=true npx -y @gravitykit/gktools@latest announce \
               --build-file "$BUILD_FILE" \
               --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php
 
