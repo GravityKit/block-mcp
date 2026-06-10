@@ -42,14 +42,25 @@ const NAME_B = 'block-mcp-dev-test';
 const NAME_C = 'block-mcp-gkclone-orb-local';
 
 const ORIGINAL_HOME = process.env.HOME;
+let createdHome: string | undefined;
 
 function mkTmpHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gk-multisite-'));
+  createdHome = home;
   process.env.HOME = home;
   return home;
 }
 
 afterEach(() => {
+  // Best-effort removal of the temp HOME so the tests don't leak directories.
+  if (createdHome) {
+    try {
+      fs.rmSync(createdHome, { recursive: true, force: true });
+    } catch {
+      // ignore — best-effort cleanup
+    }
+    createdHome = undefined;
+  }
   if (ORIGINAL_HOME === undefined) {
     delete process.env.HOME;
   } else {

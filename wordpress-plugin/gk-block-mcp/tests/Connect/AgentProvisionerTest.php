@@ -138,7 +138,8 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 	 * the site admin actionable guidance.
 	 */
 	public function test_ensure_returns_wp_error_when_login_taken_by_nonagent() {
-		self::factory()->user->create( array( 'user_login' => Agent_Provisioner::LOGIN, 'role' => 'subscriber' ) );
+		$conflicting_user = self::factory()->user->create( array( 'user_login' => Agent_Provisioner::LOGIN, 'role' => 'subscriber' ) );
+		$this->assertGreaterThan( 0, $conflicting_user, 'precondition: the conflicting non-agent user must be created' );
 		$result = ( new Agent_Provisioner() )->ensure();
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'agent_login_taken', $result->get_error_code() );

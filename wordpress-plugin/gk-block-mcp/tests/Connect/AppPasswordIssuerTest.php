@@ -29,13 +29,13 @@ class AppPasswordIssuerTest extends WP_UnitTestCase {
 
 	private $user_id;
 
-	public function set_up() {
+	public function set_up(): void {
 		parent::set_up();
 		$this->user_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		add_filter( 'wp_is_application_passwords_available', '__return_true' );
 	}
 
-	public function tear_down() {
+	public function tear_down(): void {
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		remove_filter( 'wp_is_application_passwords_available', '__return_false' );
 		parent::tear_down();
@@ -85,7 +85,7 @@ class AppPasswordIssuerTest extends WP_UnitTestCase {
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		add_filter( 'wp_is_application_passwords_available', '__return_false' );
 		$result = ( new App_Password_Issuer() )->issue( $this->user_id, 'Block MCP — Claude Desktop' );
-		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'app_passwords_unavailable', $result->get_error_code() );
 	}
 }
