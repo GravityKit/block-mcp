@@ -3,10 +3,11 @@ version: 2.1
 # Release pipeline for the gk-block-mcp WordPress plugin.
 #
 # Builds the plugin ZIP, creates a GitHub release (main only), and — the reason
-# this exists — calls `announce_build`, which POSTs the build to the GravityKit
-# Release Manager (gravitykit.com). Foundation reads auto-updates from the
-# Release Manager, so without this step a published, registered product still
-# has no builds to serve.
+# this exists — runs `gktools announce`, which signs the build (Ed25519) and
+# POSTs the signed sha256 + ZIP to the GravityKit Release Manager
+# (gravitykit.com). The Release Manager rejects unsigned builds, and Foundation
+# reads auto-updates from it, so without this step a published, registered
+# product still has no builds to serve.
 #
 # This is a MONOREPO: the plugin lives in wordpress-plugin/gk-block-mcp/, not at
 # the repo root, so the build-tools docker wrappers (which mount $PWD) are run
@@ -18,6 +19,7 @@ version: 2.1
 # Prerequisites (org / CircleCI admin, one-time):
 #   - This repo enabled in CircleCI and attached to the `shared` context, which
 #     supplies GK_RELEASE_MANAGER_URL, GK_RELEASE_MANAGER_TOKEN, GH_AUTH_TOKEN,
+#     GK_SIGNING_PRIVATE_KEY (Ed25519, required — the RM rejects unsigned builds),
 #     CIRCLE_TOKEN, the Dropbox tokens, and CACHE_VERSION.
 #   - A CircleCI SSH key with read access to GravityKit/Foundation (composer
 #     installs it over SSH) AND GravityKit/Tooling (cloned below) — the same key
@@ -101,11 +103,22 @@ jobs:
             fi
 
       - run:
-          name: Notifying GravityKit Release Manager
+          name: Sign + announce to the GravityKit Release Manager
           command: |
-            if ! git log -n 1 | grep -q "\[skip notify\]"; then
-              /home/circleci/tooling/build-tools/build_tools.sh announce_build -o "wordpress-plugin/gk-block-mcp/gk-block-mcp.php $BUILD_FILE --with-circle"
-            fi
+            if git log -n 1 | grep -q "\[skip notify\]"; then echo "[skip notify] — skipping"; exit 0; fi
+            # gktools (the current GravityKit tooling) signs the build inline
+            # (Ed25519) and sends the sha256 + signature the Release Manager now
+            # requires. build_tools.sh announce_build is deprecated — it sends
+            # only an md5 hash with no signature, which the RM rejects
+            # ("Signing is required for every release"). gktools is a private
+            # GitHub Packages module, so authenticate npm to npm.pkg.github.com
+            # first. --use-local signs with Node crypto (no Docker pull needed).
+            # Reads GK_SIGNING_PRIVATE_KEY, GK_RELEASE_MANAGER_URL/TOKEN, and the
+            # Dropbox keys from the `shared` context.
+            printf '//npm.pkg.github.com/:_authToken=%s\n@gravitykit:registry=https://npm.pkg.github.com\n' "$GH_AUTH_TOKEN" >> "$HOME/.npmrc"
+            npx -y @gravitykit/gktools@latest announce --use-local \
+              --build-file "$BUILD_FILE" \
+              --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php
 
       - save_cache:
           key: composer-dependencies-{{ .Environment.CACHE_VERSION }}-{{ checksum "wordpress-plugin/gk-block-mcp/composer.lock" }}
