@@ -106,6 +106,8 @@ import type {
   MutationRequest,
   MutationResponse,
   ResolveUrlResponse,
+  BlockInput,
+  BlockPatch,
   CreatePostRequest,
   UpdatePostRequest,
   PostMutationResponse,
@@ -131,7 +133,17 @@ interface PatternsResponse {
 
 /** Response wrapper for page blocks. */
 interface PageBlocksResponse {
+  post_id?: number;
+  summary?: Record<string, unknown>;
   blocks: Block[];
+  /** Present when `limit` pagination is in play. */
+  pagination?: {
+    limit?: number;
+    offset?: number;
+    total?: number;
+    /** Pass back as `cursor` to fetch the next page; null on the last page. */
+    next_cursor?: string | null;
+  };
 }
 
 /**
@@ -430,6 +442,10 @@ export class WordPressBlockClient {
       include_legacy_paths?: boolean;
       /** When true (default), missing gk_refs are assigned and persisted. Pass false to skip the silent write side effect. */
       persist_refs?: boolean;
+      /** Page size: top-level blocks per response. Pairs with `cursor`. */
+      limit?: number;
+      /** Opaque pagination cursor from a prior response's `next_cursor`. */
+      cursor?: string;
     }
   ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
@@ -449,6 +465,8 @@ export class WordPressBlockClient {
     // when the param is omitted entirely.
     if (params?.persist_refs === false) queryParams.persist_refs = 'false';
     else if (params?.persist_refs === true) queryParams.persist_refs = 'true';
+    if (typeof params?.limit === 'number') queryParams.limit = String(params.limit);
+    if (params?.cursor) queryParams.cursor = params.cursor;
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,
@@ -520,7 +538,7 @@ export class WordPressBlockClient {
   async updateBlock(
     postId: number,
     index: number,
-    data: { attributes?: Record<string, unknown>; innerHTML?: string }
+    data: BlockPatch
   ): Promise<BlockUpdateResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (index < 0) throw new Error('Block index must be non-negative');
@@ -547,7 +565,7 @@ export class WordPressBlockClient {
   async updateBlockByRef(
     postId: number,
     ref: string,
-    data: { attributes?: Record<string, unknown>; innerHTML?: string }
+    data: BlockPatch
   ): Promise<BlockUpdateResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
@@ -644,11 +662,8 @@ export class WordPressBlockClient {
       before?: number;
       after_ref?: string;
       before_ref?: string;
-      blocks: Array<{
-        name: string;
-        attributes?: Record<string, unknown>;
-        innerHTML?: string;
-      }>;
+      // Recursive: containers (groups/columns) nest children via innerBlocks.
+      blocks: BlockInput[];
     }
   ): Promise<BlockWriteResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
@@ -728,11 +743,8 @@ export class WordPressBlockClient {
     data: {
       start: number;
       count: number;
-      blocks: Array<{
-        name: string;
-        attributes?: Record<string, unknown>;
-        innerHTML?: string;
-      }>;
+      // Recursive: containers (groups/columns) nest children via innerBlocks.
+      blocks: BlockInput[];
     }
   ): Promise<BlockReplaceRangeResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
@@ -765,11 +777,7 @@ export class WordPressBlockClient {
    */
   async replaceAllBlocks(
     postId: number,
-    blocks: Array<{
-      name: string;
-      attributes?: Record<string, unknown>;
-      innerHTML?: string;
-    }>
+    blocks: BlockInput[]
   ): Promise<BlockWriteResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (!blocks || blocks.length === 0) {

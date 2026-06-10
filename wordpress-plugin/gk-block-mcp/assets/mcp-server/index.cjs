@@ -40265,6 +40265,8 @@ var WordPressBlockClient = class {
     if (params?.include_legacy_paths) queryParams.include_legacy_paths = "true";
     if (params?.persist_refs === false) queryParams.persist_refs = "false";
     else if (params?.persist_refs === true) queryParams.persist_refs = "true";
+    if (typeof params?.limit === "number") queryParams.limit = String(params.limit);
+    if (params?.cursor) queryParams.cursor = params.cursor;
     const response = await this.client.get(
       `/posts/${postId}/blocks`,
       { params: queryParams }
@@ -52655,14 +52657,8 @@ var MUTATE_TOOLS = [{
       attributes: { type: "object", description: "update-attrs: attributes to merge." },
       innerHTML: { type: "string", description: "update-html: replacement innerHTML." },
       block: {
-        type: "object",
-        description: "replace-block / insert-child: { name, attributes?, innerHTML?, innerBlocks? }.",
-        properties: {
-          name: { type: "string", description: "Fully-qualified block name." },
-          attributes: { type: "object" },
-          innerHTML: { type: "string" },
-          innerBlocks: { type: "array" }
-        }
+        ...BLOCK_INPUT_SCHEMA,
+        description: "replace-block / insert-child: a block def. Nests recursively via `innerBlocks`; containers need their empty wrapper `innerHTML`."
       },
       wrapper: {
         type: "object",
