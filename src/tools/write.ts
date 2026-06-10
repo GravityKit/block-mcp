@@ -223,7 +223,7 @@ export const WRITE_TOOLS = [
         },
         blocks: {
           type: 'array',
-          description: 'Blocks to insert.',
+          description: 'Blocks to insert. Each def nests recursively via `innerBlocks` — build a whole container (group/columns/callout) with its children in this one call; give the container its empty wrapper `innerHTML` (e.g. \'<div class="wp-block-group"></div>\').',
           items: BLOCK_INPUT_SCHEMA,
         },
       },
@@ -266,7 +266,7 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         start: { type: 'number', description: 'top_level_counter of first block to replace.' },
         count: { type: 'number', description: 'How many top-level blocks to remove. Pass 0 to insert without removing.' },
-        blocks: { type: 'array', description: 'Replacement blocks. May be empty (pure delete) or any length.', items: BLOCK_INPUT_SCHEMA },
+        blocks: { type: 'array', description: 'Replacement blocks. May be empty (pure delete) or any length. Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'start', 'count', 'blocks'],
     },
@@ -303,7 +303,7 @@ export const WRITE_TOOLS = [
       type: 'object' as const,
       properties: {
         post_id: { type: 'number', description: 'Post ID.' },
-        blocks: { type: 'array', description: 'Complete blocks array (replaces all).', items: BLOCK_INPUT_SCHEMA },
+        blocks: { type: 'array', description: 'Complete blocks array (replaces all). Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'blocks'],
     },

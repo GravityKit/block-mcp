@@ -52288,7 +52288,7 @@ var WRITE_TOOLS = [
         },
         blocks: {
           type: "array",
-          description: "Blocks to insert.",
+          description: "Blocks to insert. Each def nests recursively via `innerBlocks` \u2014 build a whole container (group/columns/callout) with its children in this one call; give the container its empty wrapper `innerHTML` (e.g. '<div class=\"wp-block-group\"></div>').",
           items: BLOCK_INPUT_SCHEMA
         }
       },
@@ -52330,7 +52330,7 @@ var WRITE_TOOLS = [
         post_id: { type: "number", description: "Post ID." },
         start: { type: "number", description: "top_level_counter of first block to replace." },
         count: { type: "number", description: "How many top-level blocks to remove. Pass 0 to insert without removing." },
-        blocks: { type: "array", description: "Replacement blocks. May be empty (pure delete) or any length.", items: BLOCK_INPUT_SCHEMA }
+        blocks: { type: "array", description: "Replacement blocks. May be empty (pure delete) or any length. Each def nests recursively via `innerBlocks` for containers (group/columns/callout) \u2014 give the container its empty wrapper `innerHTML`.", items: BLOCK_INPUT_SCHEMA }
       },
       required: ["post_id", "start", "count", "blocks"]
     }
@@ -52367,7 +52367,7 @@ var WRITE_TOOLS = [
       type: "object",
       properties: {
         post_id: { type: "number", description: "Post ID." },
-        blocks: { type: "array", description: "Complete blocks array (replaces all).", items: BLOCK_INPUT_SCHEMA }
+        blocks: { type: "array", description: "Complete blocks array (replaces all). Each def nests recursively via `innerBlocks` for containers (group/columns/callout) \u2014 give the container its empty wrapper `innerHTML`.", items: BLOCK_INPUT_SCHEMA }
       },
       required: ["post_id", "blocks"]
     }
@@ -53341,6 +53341,83 @@ function levenshtein(a2, b3) {
   return prev[n];
 }
 
+// src/agent-guide.ts
+var AGENT_GUIDE_CONTENT = `# Block MCP \u2014 Agent Guide
+
+## URL \u2192 post ID resolution
+
+NEVER run curl, wget, or any bash/shell command to hit wp-json or resolve a URL to a post ID.
+The MCP does this for you:
+
+- \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
+- For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
+
+If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
+
+## Moving / reordering blocks
+
+NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls \u2014 if the delete is skipped or fails, the page ends up with an orphaned clone of the original. The atomic primitive is the \`move\` op on \`edit_block_tree\`:
+
+- Target the source with \`ref\` (the \`gk_ref\` from \`get_page_blocks\`) or \`path\`. Prefer \`ref\` \u2014 it survives sibling shifts; paths go stale the moment any earlier block is inserted or removed.
+- Express the destination with \`destination_ref\` or \`destination\` (path). For path destinations, use **pre-move** indexing \u2014 write the path as if the source were still in place; the server adjusts indices after the removal.
+- Use \`count\` to move N consecutive siblings in a single op.
+- The server rejects moves into the source itself or any of its descendants.
+- The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
+
+If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
+
+## Building container blocks (groups, columns, callouts)
+
+Every block def accepted by \`insert_blocks\`, \`replace_block_range\`, and \`rewrite_post_blocks\` nests recursively via \`innerBlocks\` \u2014 build a whole container (and its children) in ONE call instead of inserting pieces and moving them around.
+
+- The container's \`innerHTML\` is its wrapper element only \u2014 an empty wrapper; children render inside it. E.g. \`core/group\` \u2192 \`<div class="wp-block-group"></div>\`, \`core/list\` \u2192 \`<ul class="wp-block-list"></ul>\`.
+- Each entry in \`innerBlocks\` is a full block def and may nest further (columns \u2192 column \u2192 content).
+- Include any style class in BOTH the \`className\` attribute and the wrapper \`innerHTML\`.
+
+Example \u2014 a styled callout (a \`core/group\` wrapping a paragraph):
+
+\`\`\`json
+{
+  "name": "core/group",
+  "attributes": { "className": "is-style-callout-info", "layout": { "type": "constrained" } },
+  "innerHTML": "<div class=\\"wp-block-group is-style-callout-info\\"></div>",
+  "innerBlocks": [
+    { "name": "core/paragraph", "innerHTML": "<p>Tip text here.</p>" }
+  ]
+}
+\`\`\`
+
+Site-specific style conventions (e.g. callout class names) come from this site's instructions addendum \u2014 prefer those over inventing classes.
+
+## Verifying writes
+
+Every write echoes the canonical post-save snapshot. Use it. Do not fetch the public page to verify what saved.
+
+- \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` \u2014 the exact content that just landed in post_content. The write call IS the verification round-trip.
+- \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
+- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` \u2014 returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
+
+For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time \u2014 not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
+
+## Block preferences (site-defined)
+
+Block preference policy is configured per-site in the WordPress admin (the
+gk-block-api Preferences option) and exposed dynamically. There is no
+client-side hardcoded list of "good" vs "bad" namespaces.
+
+How to discover the policy at runtime:
+
+1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
+2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields \u2014 they reflect the live config.
+3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
+
+How to behave:
+
+- Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
+- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
+- For patterns that need per-page customization, use \`synced: false\` to inline them.
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
 var crypto2 = __toESM(require("node:crypto"), 1);
@@ -53895,58 +53972,6 @@ for (const { tools, handle: handle2 } of TOOL_GROUPS) {
 }
 var AGENT_GUIDE_RESOURCE_URI = "block-mcp://agent-guide";
 var LEGACY_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-var AGENT_GUIDE_CONTENT = `# Block MCP \u2014 Agent Guide
-
-## URL \u2192 post ID resolution
-
-NEVER run curl, wget, or any bash/shell command to hit wp-json or resolve a URL to a post ID.
-The MCP does this for you:
-
-- \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
-- For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
-
-If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
-
-## Moving / reordering blocks
-
-NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls \u2014 if the delete is skipped or fails, the page ends up with an orphaned clone of the original. The atomic primitive is the \`move\` op on \`edit_block_tree\`:
-
-- Target the source with \`ref\` (the \`gk_ref\` from \`get_page_blocks\`) or \`path\`. Prefer \`ref\` \u2014 it survives sibling shifts; paths go stale the moment any earlier block is inserted or removed.
-- Express the destination with \`destination_ref\` or \`destination\` (path). For path destinations, use **pre-move** indexing \u2014 write the path as if the source were still in place; the server adjusts indices after the removal.
-- Use \`count\` to move N consecutive siblings in a single op.
-- The server rejects moves into the source itself or any of its descendants.
-- The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
-
-If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
-
-## Verifying writes
-
-Every write echoes the canonical post-save snapshot. Use it. Do not fetch the public page to verify what saved.
-
-- \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` \u2014 the exact content that just landed in post_content. The write call IS the verification round-trip.
-- \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
-- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` \u2014 returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
-
-For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time \u2014 not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
-
-## Block preferences (site-defined)
-
-Block preference policy is configured per-site in the WordPress admin (the
-gk-block-api Preferences option) and exposed dynamically. There is no
-client-side hardcoded list of "good" vs "bad" namespaces.
-
-How to discover the policy at runtime:
-
-1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
-2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields \u2014 they reflect the live config.
-3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
-
-How to behave:
-
-- Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
-- For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
 function registerHandlers(server, client) {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: ALL_TOOLS };
