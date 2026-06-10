@@ -2252,27 +2252,4 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/', $url );
 	}
 
-	/**
-	 * help_url() honors the gk/block-mcp/connect/help-url filter.
-	 *
-	 * The docblock always promised "filterable so the documentation location
-	 * can change without a release," but no filter was actually applied —
-	 * operators had no way to repoint the link. Pins that the filter now runs.
-	 */
-	public function test_help_url_is_filterable() {
-		$help_url = new \ReflectionMethod( Connect_Page::class, 'help_url' );
-		$help_url->setAccessible( true );
-
-		$repoint = static function () {
-			return 'https://example.com/my-docs/';
-		};
-		add_filter( 'gk/block-mcp/connect/help-url', $repoint );
-
-		$url = $help_url->invoke( new Connect_Page() );
-
-		remove_filter( 'gk/block-mcp/connect/help-url', $repoint );
-
-		$this->assertSame( 'https://example.com/my-docs/', $url );
-	}
-
 }

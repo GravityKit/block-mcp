@@ -268,23 +268,12 @@ class Connect_Page {
 	/**
 	 * Return the setup-guide URL shown as the "Need help?" link on the flow.
 	 *
-	 * Filterable so the documentation location can change without a release.
-	 *
 	 * @since 2.0.0
 	 *
 	 * @return string Absolute URL to the Connect setup guide.
 	 */
 	private function help_url(): string {
-		$url = 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/';
-
-		/**
-		 * Filter the Connect setup-guide URL.
-		 *
-		 * @since 2.0.0
-		 *
-		 * @param string $url Absolute URL to the Connect setup guide.
-		 */
-		return apply_filters( 'gk/block-mcp/connect/help-url', $url );
+		return 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/';
 	}
 
 	/**
