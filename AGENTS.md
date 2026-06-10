@@ -29,7 +29,7 @@ The plugin must be active on the target site for the server to reach `gk-block-a
 
 ## Repository Map
 
-```
+```text
 MCPs/block-mcp/
 ├── AGENTS.md / CLAUDE.md (→ @AGENTS.md) / README.md
 ├── package.json                 # @gravitykit/block-mcp; esbuild build; bin: block-mcp
@@ -61,7 +61,7 @@ MCPs/block-mcp/
 
 ### Two-Component Design
 
-```
+```text
 AI client  ──stdio──▶  MCP server (TypeScript)  ──HTTPS Basic Auth──▶  WordPress plugin (PHP)
                        src/index.ts                                     wordpress-plugin/gk-block-mcp/
                        validates + enriches                             parses/serializes blocks,
@@ -102,6 +102,7 @@ The headline 2.0 feature. Goal: connect an AI client in a few clicks, **without 
 **The .mcpb path (Claude Desktop):** one-click download. `handle_connect()` (admin-post `ACTION_CONNECT`) → `provision_credentials()` → `MCPB_Generator::build()` streams the bundle with the credential pre-filled; the user double-clicks to install.
 
 **Identity model (two options on the Approve screen):**
+
 | Option | Credential minted on | Caps | Byline (`post_author` on created posts) |
 |---|---|---|---|
 | `agent` *(default, recommended)* | the dedicated `block-mcp` user | least-privilege | "Block MCP" |

@@ -12,7 +12,7 @@
 
 ## File Inventory
 
-```
+```text
 gk-block-mcp/
 ├── gk-block-mcp.php              # Bootstrap: autoloader, rest_api_init + admin wiring, CLI
 ├── uninstall.php                 # Full data + agent teardown (multisite-aware)
@@ -54,7 +54,7 @@ gk-block-mcp/
 `gk-block-mcp.php` wires everything on three hooks:
 
 1. **`init_rest_api()` on `rest_api_init`:**
-   ```
+   ```text
    Preferences → Block_Registry(+Block_Inventory)
    Preferences → Pattern_Manager
    Preferences + Block_Safety + HTML_Transformer + Block_Inventory → Block_CRUD
@@ -70,7 +70,7 @@ gk-block-mcp/
 
 `Block_CRUD` is a **facade**. Its constructor builds `Block_Reader` (reads/formatting) and `Block_Writer` (writes/save), and the REST controller also holds a `Block_Mutator` (path mutations). Callers go through `Block_CRUD`'s public methods or the controller; the three engines share state via the owning `Block_CRUD` instance (`build_block_from_def`, `assign_missing_refs_recursive`, rate-limit transients, revision tracking).
 
-```
+```text
 REST_Controller
 ├── Block_CRUD (facade)
 │   ├── Block_Reader   (Preferences, Block_Inventory)
@@ -120,6 +120,7 @@ The single-use exchange code + paste-mode password are sealed (AES-256-GCM, HKDF
 All routes under `gk-block-api/v1`.
 
 ### Discovery / read
+
 | Method | Route | Handler |
 |---|---|---|
 | GET | `/block-types` · `/block-types/{namespace}` | block types + preference scores |
@@ -129,6 +130,7 @@ All routes under `gk-block-api/v1`.
 | GET | `/site-usage` | block/pattern usage stats |
 
 ### Write / mutation
+
 | Method | Route | Handler |
 |---|---|---|
 | POST | `/posts/{id}/blocks` | `insert_blocks` |
@@ -143,6 +145,7 @@ All routes under `gk-block-api/v1`.
 | POST | `/storage-modes/scan` | dual-storage classification scan (`manage_options`) |
 
 ### Integrations / connect
+
 | Method | Route | Handler / notes |
 |---|---|---|
 | GET | `/instructions` | MCP instructions addendum — served **unauthenticated**, per-IP rate-limited |
