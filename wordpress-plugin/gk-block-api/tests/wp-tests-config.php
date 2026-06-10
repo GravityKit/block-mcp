@@ -47,6 +47,14 @@ $table_prefix = 'wptests_';
 define( 'WP_DEBUG',         true );
 define( 'WP_DEBUG_DISPLAY', true );
 
+// Keep GravityKit Foundation out of the test boot. The plugin's main file gates
+// its Foundation preflight + Core::register on this constant; defining it here
+// means the SQLite-backed harness never loads Foundation's admin / licensing /
+// remote subsystems (which would mirror the Yoast drop-in problems: incompatible
+// SQL, _doing_it_wrong notices that CI's E_ALL turns into failures, remote HTTP).
+// Foundation has its own test coverage.
+define( 'GK_BLOCK_API_DISABLE_FOUNDATION', true );
+
 // Salts — wp-phpunit's bootstrap requires these to be defined.
 define( 'AUTH_KEY',         'test-auth-key' );
 define( 'SECURE_AUTH_KEY',  'test-secure-auth-key' );

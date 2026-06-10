@@ -16,7 +16,13 @@
 node_modules
 scripts
 tests
+# `vendor` ships nothing — the plugin autoloads its own classes by hand and
+# its only runtime dependency (GravityKit Foundation) is Strauss-prefixed into
+# `vendor_prefixed/`, which IS shipped (it is not listed here). The Strauss
+# binary + its post-install helper are build-time only and excluded below.
 vendor
+strauss.phar
+composer_post_update_install.sh
 phpunit.xml
 phpunit.xml.dist
 composer.json

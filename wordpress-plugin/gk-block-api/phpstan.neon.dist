@@ -32,6 +32,7 @@ parameters:
 	excludePaths:
 		- tests/*
 		- vendor/*
+		- vendor_prefixed/*
 		- dist/*
 
 	ignoreErrors:
@@ -40,5 +41,12 @@ parameters:
 		# at runtime (e.g. is_dir( ABSPATH . 'wp-admin' )); the literal path can't be
 		# resolved statically against the placeholder ABSPATH in phpstan-bootstrap.php.
 		- identifier: requireOnce.fileNotFound
+
+		# GravityKit Foundation is Strauss-prefixed into vendor_prefixed/ at
+		# `composer install` time, so its classes don't exist when PHPStan
+		# analyzes the bootstrap. The two references are the documented UI-less
+		# entry points (should_load gate + Core::register).
+		- '#Function GravityKit\\BlockAPI\\Foundation\\should_load not found\.#'
+		- '#Call to static method register\(\) on an unknown class GravityKit\\BlockAPI\\Foundation\\Core\.#'
 
 	treatPhpDocTypesAsCertain: false

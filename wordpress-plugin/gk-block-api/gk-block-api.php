@@ -23,6 +23,22 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+// GravityKit Foundation — auto-updates, ecosystem registration, licensing,
+// translations, TrustedLogin. Loaded UI-less (no_admin_menu). The PHPUnit
+// harness defines GK_BLOCK_API_DISABLE_FOUNDATION (in tests/wp-tests-config.php)
+// so Foundation's admin / licensing / remote bootstrap never runs against the
+// SQLite test drop-in — Foundation is third-party framework code with its own
+// coverage, not part of this plugin's tested surface.
+if ( ! defined( 'GK_BLOCK_API_DISABLE_FOUNDATION' ) ) {
+	require_once plugin_dir_path( __FILE__ ) . 'vendor_prefixed/gravitykit/foundation/src/preflight_check.php';
+
+	// Bail when the host PHP is too old or an admin disabled loading via
+	// ?gk_disable_loading — Foundation surfaces the appropriate notice.
+	if ( ! Foundation\should_load( __FILE__ ) ) {
+		return;
+	}
+}
+
 define( 'GK_BLOCK_API_VERSION', '2.0.0' );
 define( 'GK_BLOCK_API_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_API_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -260,3 +276,13 @@ function on_activation() {
 	Agent_Provisioner::register_role();
 }
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\on_activation' );
+
+// Boot Foundation last, once the plugin's own wiring is registered. The
+// Strauss-generated autoloader resolves the prefixed Foundation classes; the
+// plugin's own classes load via spl_autoload_register above, not Composer.
+// Skipped under PHPUnit (see GK_BLOCK_API_DISABLE_FOUNDATION at the top).
+if ( ! defined( 'GK_BLOCK_API_DISABLE_FOUNDATION' ) ) {
+	require_once plugin_dir_path( __FILE__ ) . 'vendor_prefixed/autoload.php';
+
+	Foundation\Core::register( __FILE__, array( 'no_admin_menu' => true ) );
+}

@@ -3,8 +3,11 @@
     "description": "GravityKit Block API — WordPress plugin exposing block-level REST endpoints.",
     "type": "wordpress-plugin",
     "license": "GPL-2.0-or-later",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
     "require": {
-        "php": ">=7.4"
+        "php": ">=7.4",
+        "gravitykit/foundation": "dev-main"
     },
     "require-dev": {
         "composer/installers": "^2.2",
@@ -24,6 +27,10 @@
     "repositories": [
         {
             "type": "vcs",
+            "url": "git@github.com:gravityview/Foundation.git"
+        },
+        {
+            "type": "vcs",
             "url": "https://github.com/WordPress/sqlite-database-integration"
         },
         {
@@ -37,13 +44,21 @@
     ],
     "scripts": {
         "post-install-cmd": [
+            "@prefix_vendor",
+            "@post_update_install",
+            "composer dump-autoload -o",
             "@install-sqlite-dropin",
             "@refresh-core-blocks-if-missing"
         ],
         "post-update-cmd": [
+            "@prefix_vendor",
+            "@post_update_install",
+            "composer dump-autoload -o",
             "@install-sqlite-dropin",
             "@refresh-core-blocks-if-missing"
         ],
+        "prefix_vendor": "@php strauss.phar",
+        "post_update_install": "./composer_post_update_install.sh",
         "install-sqlite-dropin": "php tests/install-sqlite-dropin.php",
         "refresh-core-blocks": "bash scripts/refresh-core-blocks.sh",
         "refresh-core-blocks-if-missing": "php scripts/ensure-core-blocks.php",
@@ -80,6 +95,43 @@
             "vendor/wordpress/wordpress/wp-content/plugins/{$name}/": [
                 "type:wordpress-plugin"
             ]
+        },
+        "strauss": {
+            "target_directory": "vendor_prefixed",
+            "namespace_prefix": "GravityKit\\BlockAPI\\",
+            "classmap_prefix": "GravityKit_BlockAPI_",
+            "packages": [
+                "gravitykit/foundation"
+            ],
+            "namespace_replacement_patterns": {
+                "/^Illuminate/": "GravityKit\\BlockAPI\\Foundation\\ThirdParty\\Illuminate",
+                "/^TrustedLogin/": "GravityKit\\BlockAPI\\Foundation\\ThirdParty\\TrustedLogin",
+                "/^Psr/": "GravityKit\\BlockAPI\\Foundation\\ThirdParty\\Psr",
+                "/^Monolog/": "GravityKit\\BlockAPI\\Foundation\\ThirdParty\\Monolog",
+                "/^Gettext/": "GravityKit\\BlockAPI\\Foundation\\ThirdParty\\Gettext",
+                "/^GravityKit\\\\Foundation/": "GravityKit\\BlockAPI\\Foundation"
+            },
+            "override_autoload": {
+                "gravitykit/foundation": {
+                    "psr-4": {
+                        "GravityKit\\Foundation\\": "src"
+                    },
+                    "files": [
+                        "assets"
+                    ]
+                }
+            },
+            "exclude_from_prefix": {
+                "file_patterns": []
+            },
+            "exclude_from_copy": {
+                "packages": [
+                    "paragonie/random_compat",
+                    "paragonie/sodium_compat",
+                    "symfony/polyfill-php70",
+                    "woocommerce/action-scheduler"
+                ]
+            }
         }
     }
 }
