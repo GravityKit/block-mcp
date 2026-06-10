@@ -520,24 +520,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * setup_artifact() for the 'chatgpt-desktop' slug must return a bash command
-	 * containing `npx -y @gravitykit/block-mcp connect`, the site URL, and
-	 * `--client chatgpt-desktop`. The body must NOT contain WORDPRESS_APP_PASSWORD
-	 * or any password.
-	 */
-	public function test_setup_artifact_chatgpt_desktop_is_npx_connect_command_no_secret() {
-		$page     = new Connect_Page();
-		$artifact = $page->setup_artifact( 'chatgpt-desktop', 'https://example.com' );
-
-		$this->assertSame( 'bash', $artifact['language'] );
-		$this->assertStringContainsString( 'npx -y @gravitykit/block-mcp connect', $artifact['body'], 'body must contain the npx connect command' );
-		$this->assertStringContainsString( 'https://example.com', $artifact['body'], 'body must contain the site URL' );
-		$this->assertStringContainsString( '--client chatgpt-desktop', $artifact['body'], 'body must contain --client chatgpt-desktop slug' );
-		$this->assertStringNotContainsString( 'WORDPRESS_APP_PASSWORD', $artifact['body'], 'body must NOT contain WORDPRESS_APP_PASSWORD' );
-		$this->assertStringNotContainsString( 'password', strtolower( $artifact['body'] ), 'body must NOT contain any password text' );
-	}
-
-	/**
 	 * setup_artifact() for 'ai-prompt' must return a plain-text instruction for the
 	 * AI to run the npx connect command, containing the site URL and the approve
 	 * instruction. The body must NOT contain WORDPRESS_APP_PASSWORD or any password.
@@ -1552,7 +1534,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * and must NOT contain the .mcpb download steps.
 	 *
 	 * The six required slugs: CLIENT_CLAUDE_DESKTOP, CLIENT_CLAUDE_CODE,
-	 * CLIENT_CURSOR, CLIENT_CHATGPT, CLIENT_AI_PROMPT, CLIENT_OTHER.
+	 * CLIENT_CURSOR, CLIENT_AI_PROMPT, CLIENT_OTHER.
 	 * The "Let my AI set it up" card must carry the is-ai class.
 	 *
 	 * Wrapping markup uses <div class="gk-block-mcp-connect"> + <div class="gk-block-mcp-connect__card">
@@ -1592,7 +1574,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 *  - The scoped wrapper/card containers exist (so the CSS applies).
 	 *  - The picker is radio cards keyed by name="client", NOT a <select>.
 	 *  - Each of the six clients exposes a STABLE SLUG as its radio value
-	 *    (claude-desktop / claude-code / cursor / chatgpt-desktop / ai-prompt /
+	 *    (claude-desktop / claude-code / cursor / ai-prompt /
 	 *    other) — never a translated label, which would break handle_connect()'s
 	 *    slug matching once the admin UI is localized — alongside its human label.
 	 *  - Claude Desktop is the default-checked client and its next-steps block is
@@ -1622,11 +1604,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'type="radio"', $html, 'Radio inputs must be present' );
 		$this->assertStringContainsString( 'name="client"', $html, 'Radio inputs must carry name="client"' );
 
-		// All six radio values must be stable slugs — NOT translated labels.
+		// All five radio values must be stable slugs — NOT translated labels.
 		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '"', $html, 'claude-desktop slug must be the radio value' );
 		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CLAUDE_CODE . '"', $html, 'claude-code slug must be the radio value' );
 		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CURSOR . '"', $html, 'cursor slug must be the radio value' );
-		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_CHATGPT . '"', $html, 'chatgpt-desktop slug must be the radio value' );
 		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_AI_PROMPT . '"', $html, 'ai-prompt slug must be the radio value' );
 		$this->assertStringContainsString( 'value="' . Connect_Page::CLIENT_OTHER . '"', $html, 'other slug must be the radio value' );
 
@@ -1634,7 +1615,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Claude Desktop app', $html, 'Claude Desktop card label must be present as card text' );
 		$this->assertStringContainsString( 'Claude Code', $html, 'Claude Code card label must be present as card text' );
 		$this->assertStringContainsString( 'Cursor', $html, 'Cursor card label must be present as card text' );
-		$this->assertStringContainsString( 'ChatGPT Desktop', $html, 'ChatGPT Desktop card label must be present as card text' );
 		$this->assertStringContainsString( 'Let my AI set it up', $html, '"Let my AI" card label must be present as card text' );
 		$this->assertStringContainsString( 'Configure it myself', $html, '"Configure it myself" card label must be present as card text' );
 
@@ -1653,12 +1633,11 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		// ── Per-client next-steps blocks ──────────────────────────────────────
 
-		// All six data-client blocks must be in the DOM.
+		// All five data-client blocks must be in the DOM.
 		$slugs = array(
 			Connect_Page::CLIENT_CLAUDE_DESKTOP,
 			Connect_Page::CLIENT_CLAUDE_CODE,
 			Connect_Page::CLIENT_CURSOR,
-			Connect_Page::CLIENT_CHATGPT,
 			Connect_Page::CLIENT_AI_PROMPT,
 			Connect_Page::CLIENT_OTHER,
 		);
@@ -1671,7 +1650,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		}
 
 		// Exactly one block — claude-desktop — must be visible by default;
-		// the other five must carry display:none and aria-hidden="true".
+		// the other four must carry display:none and aria-hidden="true".
 		$this->assertStringNotContainsString(
 			'data-client="' . Connect_Page::CLIENT_CLAUDE_DESKTOP . '" style="display:none;"',
 			$html,
@@ -1686,7 +1665,6 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$hidden_slugs = array(
 			Connect_Page::CLIENT_CLAUDE_CODE,
 			Connect_Page::CLIENT_CURSOR,
-			Connect_Page::CLIENT_CHATGPT,
 			Connect_Page::CLIENT_AI_PROMPT,
 			Connect_Page::CLIENT_OTHER,
 		);
@@ -2084,7 +2062,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * [F5] The command-line (Claude Code / Cursor / ChatGPT) path gives a
+	 * [F5] The command-line (Claude Code / Cursor) path gives a
 	 * non-developer a plain-language escape hatch instead of a bare npx command.
 	 */
 	public function test_render_section_cli_path_offers_escape_hatch() {

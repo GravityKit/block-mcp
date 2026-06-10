@@ -170,7 +170,7 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 
 #### 🚀 Added
 
-* **Connect an AI assistant in a few clicks.** A new Connect screen at Settings → Block MCP walks you through linking an AI app to your site — no command line, no editing files. Pick a one-click **Claude Desktop** installer, a browser **Approve** step for **Cursor**, **Claude Code**, or **ChatGPT** that sets everything up for you, or **Configure it myself** for any other MCP client.
+* **Connect an AI assistant in a few clicks.** A new Connect screen at Settings → Block MCP walks you through linking an AI app to your site — no command line, no editing files. Pick a one-click **Claude Desktop** installer, a browser **Approve** step for **Cursor** or **Claude Code** that sets everything up for you, or **Configure it myself** for any other MCP client.
 * **A separate, limited account for the AI.** Block MCP gives the assistant its own account to write and edit your posts and pages. It can't change your site settings, delete other people's content, or be used to log in — so the AI never has more access than it needs.
 * **Or connect through your own account.** Most sites should use the dedicated account above. If the assistant needs the same access your own account has, you can connect through your account instead — it's clearly flagged as the higher-risk choice and asks you to confirm you understand before finishing.
 * **Stay in control of your connections.** See every connected app on the Connect screen — including which account it uses and who approved it — and **Disconnect** any of them instantly to revoke its access.

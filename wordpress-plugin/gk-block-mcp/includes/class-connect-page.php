@@ -64,14 +64,6 @@ class Connect_Page {
 	const CLIENT_CURSOR = 'cursor';
 
 	/**
-	 * Stable slug for the ChatGPT Desktop client.
-	 *
-	 * @since 2.0.0
-	 * @var string
-	 */
-	const CLIENT_CHATGPT = 'chatgpt-desktop';
-
-	/**
 	 * Stable slug for the "let my AI set it up" path.
 	 *
 	 * Selecting this option presents a natural-language prompt the user pastes
@@ -245,10 +237,6 @@ class Connect_Page {
 			self::CLIENT_CURSOR         => array(
 				'label'       => __( 'Cursor', 'gk-block-mcp' ),
 				'description' => __( 'AI code editor.', 'gk-block-mcp' ),
-			),
-			self::CLIENT_CHATGPT        => array(
-				'label'       => __( 'ChatGPT Desktop', 'gk-block-mcp' ),
-				'description' => __( 'OpenAI desktop app.', 'gk-block-mcp' ),
 			),
 			self::CLIENT_AI_PROMPT      => array(
 				'label'       => __( 'Let my AI set it up for me', 'gk-block-mcp' ),
@@ -555,7 +543,7 @@ class Connect_Page {
 	 * @since  2.0.0
 	 * @since  2.0.0 Parameter renamed from label string to stable slug.
 	 *
-	 * @param  string $slug     One of: 'claude-code', 'cursor', 'chatgpt-desktop', 'ai-prompt'.
+	 * @param  string $slug     One of: 'claude-code', 'cursor', 'ai-prompt'.
 	 * @param  string $site_url Untrailed home_url() base to embed in the command.
 	 * @return array {
 	 *     @type string $label    Short description shown above the textarea. Raw text — escape at output.
@@ -579,13 +567,6 @@ class Connect_Page {
 					'label'    => $terminal_label,
 					'language' => 'bash',
 					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client " . self::CLIENT_CURSOR,
-				);
-
-			case self::CLIENT_CHATGPT:
-				return array(
-					'label'    => $terminal_label,
-					'language' => 'bash',
-					'body'     => "npx -y @gravitykit/block-mcp connect --site {$site_url} --client " . self::CLIENT_CHATGPT,
 				);
 
 			case self::CLIENT_AI_PROMPT:
@@ -739,7 +720,7 @@ class Connect_Page {
 	 * For the claude-desktop slug: provisions credentials, builds the .mcpb
 	 * bundle, and streams it as an octet-stream download.
 	 *
-	 * For claude-code, cursor, chatgpt-desktop, and ai-prompt: does NOT provision
+	 * For claude-code, cursor, and ai-prompt: does NOT provision
 	 * any credential. Redirects back to the connect tab with ?setup=<slug> so
 	 * render_section() can display the secret-free CLI command for that client.
 	 * The credential is delivered later via the browser-Approve handshake when the
@@ -770,7 +751,7 @@ class Connect_Page {
 		// Command-artifact clients: no provisioning — redirect back with the slug
 		// so render_section() can display the secret-free npx command.
 		// add_query_arg() encodes query values; no rawurlencode() wrapper needed.
-		$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
+		$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
 		if ( in_array( $slug, $artifact_clients, true ) ) {
 			wp_safe_redirect(
 				add_query_arg(
@@ -1428,7 +1409,7 @@ class Connect_Page {
 		$setup_client = ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( isset( $_GET['setup'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			$raw_setup        = sanitize_key( wp_unslash( $_GET['setup'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_CHATGPT, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
+			$artifact_clients = array( self::CLIENT_CLAUDE_CODE, self::CLIENT_CURSOR, self::CLIENT_AI_PROMPT, self::CLIENT_OTHER );
 			if ( in_array( $raw_setup, $artifact_clients, true ) ) {
 				$setup_client = $raw_setup;
 			}
@@ -2031,8 +2012,8 @@ class Connect_Page {
 	 *
 	 * The picker is a fieldset of radio cards so keyboard navigation, screen
 	 * readers, and pointer devices all work with standard browser behaviour.
-	 * Six clients are offered: claude-desktop (.mcpb download), claude-code,
-	 * cursor, chatgpt-desktop, ai-prompt, and other. The ai-prompt card is
+	 * Five clients are offered: claude-desktop (.mcpb download), claude-code,
+	 * cursor, ai-prompt, and other. The ai-prompt card is
 	 * visually prominent with an accent left-border modifier so it is an obvious
 	 * choice for users who are already in an AI session.
 	 *
@@ -2338,7 +2319,6 @@ class Connect_Page {
 				var artifactClients = [
 					'<?php echo esc_js( self::CLIENT_CLAUDE_CODE ); ?>',
 					'<?php echo esc_js( self::CLIENT_CURSOR ); ?>',
-					'<?php echo esc_js( self::CLIENT_CHATGPT ); ?>',
 					'<?php echo esc_js( self::CLIENT_AI_PROMPT ); ?>',
 					'<?php echo esc_js( self::CLIENT_OTHER ); ?>'
 				];
@@ -2421,7 +2401,6 @@ class Connect_Page {
 			self::CLIENT_CLAUDE_DESKTOP,
 			self::CLIENT_CLAUDE_CODE,
 			self::CLIENT_CURSOR,
-			self::CLIENT_CHATGPT,
 			self::CLIENT_AI_PROMPT,
 			self::CLIENT_OTHER,
 		);
@@ -2513,7 +2492,6 @@ class Connect_Page {
 
 			case self::CLIENT_CLAUDE_CODE:
 			case self::CLIENT_CURSOR:
-			case self::CLIENT_CHATGPT:
 				?>
 				<h3><?php esc_html_e( 'How it works', 'gk-block-mcp' ); ?></h3>
 				<?php $this->render_artifact_card( $slug, $this->setup_artifact( $slug, untrailingslashit( home_url() ) ) ); ?>
