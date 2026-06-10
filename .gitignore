@@ -17,6 +17,7 @@ reports/
 docs/plans/
 docs/specs/
 docs/identity-modes.md
+docs/strauss-credential-leak/
 
 # Local capture artifacts.
 docs/screenshots/
