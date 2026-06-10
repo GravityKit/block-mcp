@@ -275,8 +275,12 @@ export interface BlockWriteResponse {
 /** Response from block delete (DELETE) operations. */
 export interface BlockDeleteResponse {
   success: boolean;
+  /** Flat index of the first removed block */
+  deleted_index: number;
   /** Number of blocks removed */
-  removed: number;
+  deleted_count: number;
+  /** Non-fatal warnings emitted by the delete */
+  warnings: unknown[];
   /** WordPress revision ID of the pre-edit snapshot */
   before_revision_id: number;
   /** WordPress revision ID of the post-edit state */
@@ -566,16 +570,8 @@ export interface MutationRequest {
   ref?: string;
   attributes?: Record<string, unknown>;
   innerHTML?: string;
-  block?: {
-    name: string;
-    attributes?: Record<string, unknown>;
-    innerHTML?: string;
-    innerBlocks?: Array<{
-      name: string;
-      attributes?: Record<string, unknown>;
-      innerHTML?: string;
-    }>;
-  };
+  /** replace-block / insert-child payload. Nests recursively via innerBlocks. */
+  block?: BlockInput;
   wrapper?: {
     name?: string;
     attributes?: Record<string, unknown>;
@@ -584,12 +580,10 @@ export interface MutationRequest {
   destination?: number[];
   /** Alternative to `destination` — resolve from a ref instead of a path. */
   destination_ref?: string;
-  /** Alias for destination — path of block to insert BEFORE (pre-move indexing). */
-  before?: number[];
-  /** Alternative to `before` — resolve from a ref instead of a path. */
-  before_ref?: string;
   /** Number of consecutive blocks to move/operate on. Default: 1. */
   count?: number;
+  /** Preview the mutation without writing. */
+  dry_run?: boolean;
 }
 
 /** Warning about static block markup staleness. */
@@ -622,13 +616,23 @@ export interface MutationResponse {
 // v1.2 — Docs Lifecycle: Posts
 // ============================================
 
-/** A block in structured form, suitable for create_post's `blocks` input. */
+/**
+ * A block in structured form — the def shape accepted by every write that
+ * creates blocks (create_post `blocks`, insert_blocks, replace ranges/all,
+ * mutate replace-block / insert-child). Nests recursively via `innerBlocks`.
+ */
 export interface BlockInput {
   name: string;
   attributes?: Record<string, unknown>;
   innerBlocks?: BlockInput[];
   innerHTML?: string;
   innerContent?: unknown[];
+}
+
+/** Partial-update payload for a single existing block (update_block / by-ref / batch items). */
+export interface BlockPatch {
+  attributes?: Record<string, unknown>;
+  innerHTML?: string;
 }
 
 export type CreatePostStatus = 'draft' | 'pending' | 'private' | 'publish' | 'future';
@@ -857,6 +861,6 @@ export interface YoastBulkUpdateItem extends YoastSEOFields {
 }
 
 export type YoastBulkUpdateResponse = Array<
-  | { post_id: number; success: true; seo: YoastSEOMeta }
-  | { post_id: number; success: false; error: string }
+  | YoastSEOMeta
+  | { post_id?: number; error: string }
 >;

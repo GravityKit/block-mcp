@@ -191,12 +191,9 @@ describe('Client — mutateBlockTree ref/path body', () => {
     expect(body).not.toHaveProperty('ref');
   });
 
-  it('forwards before_ref in move body', async () => {
-    const client = makeClient();
-    await client.mutateBlockTree(42, { op: 'move', ref: 'blk_source', before_ref: 'blk_anchor' });
-    const req = captured.find((r) => r.method === 'POST' && r.url === '/posts/42/mutate');
-    expect((req!.data as Record<string, unknown>).before_ref).toBe('blk_anchor');
-  });
+  // NOTE: `before_ref`/`before` were removed from MutationRequest — the REST
+  // route only accepts `destination`/`destination_ref`, so forwarding the
+  // aliases pinned a param the server silently dropped.
 
   it('forwards destination_ref in move body', async () => {
     const client = makeClient();

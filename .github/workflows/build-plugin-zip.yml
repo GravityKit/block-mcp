@@ -11,10 +11,55 @@ permissions:
 
 jobs:
   build:
-    name: Build & publish gk-block-api.zip
+    name: Build & publish gk-block-mcp.zip
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # No step does authenticated git ops (Foundation clones via COMPOSER_AUTH;
+          # releases use the gh-release action's token), so don't leave the
+          # checkout credential in the workspace.
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Build prefixed dependencies (Foundation via Strauss)
+        working-directory: wordpress-plugin/gk-block-mcp
+        env:
+          # Foundation (git@github.com:gravityview/Foundation.git) is a PRIVATE
+          # GravityKit repo. Composer's GitHub VCS driver authenticates with this
+          # token to resolve and download it. Configure a repo/org Actions secret
+          # FOUNDATION_REPO_TOKEN = a PAT with read access to GravityKit/Foundation.
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
+        run: |
+          set -euo pipefail
+          # --no-scripts skips the test-tooling post-install (SQLite drop-in +
+          # core-block fixtures) which needs the dev WordPress install. We run
+          # only the two steps the shipped bundle needs: Strauss prefixing and
+          # the Illuminate-helpers namespacing.
+          composer install --no-dev --no-scripts --prefer-dist --no-progress --no-interaction
+          composer run-script prefix_vendor
+          composer run-script post_update_install
+
+      - name: Assert no credentials leaked into vendor_prefixed
+        working-directory: wordpress-plugin/gk-block-mcp
+        run: |
+          set -euo pipefail
+          # Strauss can copy ~/.composer (auth.json, keys) into vendor_prefixed/
+          # when a locked dep is missing from vendor/ — fail rather than ship
+          # creds (see extra.strauss.exclude_from_copy).
+          leaked="$(find vendor_prefixed \( -iname 'auth.json' -o -iname 'cacert.pem' -o -iname 'keys.*.pub' \) 2>/dev/null || true)"
+          if [ -n "$leaked" ]; then
+            echo "::error::Credential-like files found in vendor_prefixed — aborting build."
+            echo "$leaked"
+            exit 1
+          fi
+          echo "vendor_prefixed is clean."
 
       - name: Build ZIP
         run: |
@@ -26,23 +71,29 @@ jobs:
           # patterns so it matches both top-level files and nested
           # occurrences (e.g. .DS_Store anywhere in the tree).
           stage="$(mktemp -d)"
-          mkdir -p "$stage/gk-block-api"
+          mkdir -p "$stage/gk-block-mcp"
           rsync -a \
-            --exclude-from='wordpress-plugin/gk-block-api/.distignore' \
-            wordpress-plugin/gk-block-api/ "$stage/gk-block-api/"
-          (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-api.zip" gk-block-api)
-          unzip -l gk-block-api.zip | tail -5
+            --exclude-from='wordpress-plugin/gk-block-mcp/.distignore' \
+            wordpress-plugin/gk-block-mcp/ "$stage/gk-block-mcp/"
+          rm -f "$stage/gk-block-mcp/vendor_prefixed/gravitykit/foundation/src/translations.js.php"
+          # Ship Action Scheduler: a non-prefixed runtime dep Foundation requires
+          # at vendor/woocommerce/action-scheduler/ — .distignore excludes vendor/,
+          # so copy it in explicitly.
+          mkdir -p "$stage/gk-block-mcp/vendor/woocommerce"
+          cp -R wordpress-plugin/gk-block-mcp/vendor/woocommerce/action-scheduler "$stage/gk-block-mcp/vendor/woocommerce/"
+          (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-mcp.zip" gk-block-mcp)
+          unzip -l gk-block-mcp.zip | tail -5
 
       - name: Upload as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gk-block-api
-          path: gk-block-api.zip
+          name: gk-block-mcp
+          path: gk-block-mcp.zip
           retention-days: 90
 
       - name: Update rolling 'latest' release (push to main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: latest
           name: Latest build (main)
@@ -53,11 +104,11 @@ jobs:
 
             Install the ZIP via WordPress admin → Plugins → Add New → Upload.
           prerelease: true
-          files: gk-block-api.zip
+          files: gk-block-mcp.zip
 
       - name: Tagged release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
-          files: gk-block-api.zip
+          files: gk-block-mcp.zip

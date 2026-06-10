@@ -12,6 +12,7 @@
 import type { WordPressBlockClient } from '../client.js';
 import type { MutationOp, MutationRequest, MutationResponse, StaticBlockWarning } from '../types.js';
 import { formatPreferenceWarning } from '../preferences.js';
+import { BLOCK_INPUT_SCHEMA } from './write.js';
 
 const OPS: readonly MutationOp[] = [
   'update-attrs',
@@ -61,14 +62,8 @@ export const MUTATE_TOOLS = [{
       attributes:  { type: 'object',  description: 'update-attrs: attributes to merge.' },
       innerHTML:   { type: 'string',  description: 'update-html: replacement innerHTML.' },
       block: {
-        type: 'object',
-        description: 'replace-block / insert-child: { name, attributes?, innerHTML?, innerBlocks? }.',
-        properties: {
-          name:        { type: 'string', description: 'Fully-qualified block name.' },
-          attributes:  { type: 'object' },
-          innerHTML:   { type: 'string' },
-          innerBlocks: { type: 'array' },
-        },
+        ...BLOCK_INPUT_SCHEMA,
+        description: 'replace-block / insert-child: a block def. Nests recursively via `innerBlocks`; containers need their empty wrapper `innerHTML`.',
       },
       wrapper: {
         type: 'object',

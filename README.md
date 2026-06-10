@@ -23,8 +23,8 @@
 * [How It Works](#how-it-works)
 * [Quick Start](#quick-start)
   * [1. Install the WordPress plugin](#1-install-the-wordpress-plugin)
-  * [2. Create an Application Password](#2-create-an-application-password)
-  * [3. Install and configure the MCP server](#3-install-and-configure-the-mcp-server)
+  * [2. Connect your AI assistant](#2-connect-your-ai-assistant)
+  * [3. Manual setup (advanced)](#3-manual-setup-advanced)
   * [4. (Optional) Tune the settings](#4-optional-tune-the-settings)
 * [MCP Tools](#mcp-tools)
 * [Stable Refs](#stable-refs)
@@ -34,6 +34,8 @@
   * [Blocks that store data in two places](#blocks-that-store-data-in-two-places)
   * [Post types AI agents can create](#post-types-ai-agents-can-create)
   * [Storage-mode scan + reset](#storage-mode-scan--reset)
+* [Security](#security)
+  * [Seal mode (Claude Desktop)](#seal-mode-claude-desktop)
 * [Examples](#examples)
 * [Testing](#testing)
 * [Requirements](#requirements)
@@ -175,7 +177,7 @@ These can coexist. Block MCP could (and likely will) be exposed through the offi
 AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin (your site)
 ```
 
-**WordPress plugin** (`wordpress-plugin/gk-block-api/`) — REST API at `gk-block-api/v1`. Handles block parsing, serialization, safety checks, preference scoring, rate limiting, revisions. Works with any post type that stores Gutenberg blocks in `post_content`.
+**WordPress plugin** (`wordpress-plugin/gk-block-mcp/`) — REST API at `gk-block-api/v1`. Handles block parsing, serialization, safety checks, preference scoring, rate limiting, revisions. Works with any post type that stores Gutenberg blocks in `post_content`.
 
 **MCP server** (`src/`) — TypeScript stdio server that exposes the REST API as MCP tools. Authenticates as a normal WordPress user via Application Password. No special privileges, no direct DB access from the MCP side.
 
@@ -183,17 +185,47 @@ AI Agent  ←stdio→  MCP server (your machine)  ←HTTPS→  WordPress plugin 
 
 ### 1. Install the WordPress plugin
 
-**Easiest — download the latest ZIP:** [gk-block-api.zip](https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip) (auto-built from `main` on every push).
+**Easiest — download the latest ZIP:** [gk-block-mcp.zip](https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-mcp.zip) (auto-built from `main` on every push).
 
 Then in WordPress: **Plugins → Add New → Upload Plugin** and pick the ZIP.
 
-Or copy `wordpress-plugin/gk-block-api/` to your site's `wp-content/plugins/` and activate manually. Or via WP-CLI:
+Or copy `wordpress-plugin/gk-block-mcp/` to your site's `wp-content/plugins/` and activate manually. Or via WP-CLI:
 
 ```bash
-wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-api.zip --activate
+wp plugin install https://github.com/GravityKit/block-mcp/releases/download/latest/gk-block-mcp.zip --activate
 ```
 
-### 2. Create an Application Password
+### 2. Connect your AI assistant
+
+The fastest path provisions everything for you — a dedicated `block-mcp` service
+account, a minimal-capability role, and an Application Password — from inside
+WordPress. Go to **Settings → Block MCP → Connect** and pick your client.
+
+**Claude Desktop (one-click).** Download the generated `.mcpb` file and open it;
+Claude Desktop installs the server and stores the credential in your OS keychain.
+The `.mcpb` is self-contained — it bundles the server, so there's nothing else to
+install.
+
+**Cursor, Claude Code, ChatGPT Desktop (browser approve).** Run the connector and
+click **Approve** in the browser that opens:
+
+```bash
+npx -y @gravitykit/block-mcp connect --site https://example.com
+```
+
+It writes your client's MCP config for you (owner-only, mode `0600`), so the
+site-wide password never lands in your shell history or a hand-edited file. Add
+`--client cursor|claude-code|claude-desktop|print` to target a specific client.
+Each site you connect gets its own server entry, so one assistant can point at
+several sites.
+
+> **Runtime:** the common path runs the server with `npx -y @gravitykit/block-mcp`
+> — nothing to clone or build. The Claude Desktop `.mcpb` embeds the same bundle.
+
+### 3. Manual setup (advanced)
+
+Prefer to wire it up by hand? Create an Application Password and register the
+server yourself.
 
 In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
 
@@ -201,9 +233,9 @@ In WordPress admin: **Users → Profile → Application Passwords**. Or via CLI:
 wp user application-password create <username> "Block MCP" --porcelain
 ```
 
-The user needs at minimum the `edit_posts` capability for any post you want to read or write.
-
-### 3. Install and configure the MCP server
+Read endpoints require the `edit_posts` capability; write endpoints require
+`edit_post` on the specific post being changed. Then build and register the
+server:
 
 ```bash
 git clone https://github.com/GravityKit/block-mcp
@@ -345,6 +377,30 @@ The scan walks every published post and classifies each distinct block as static
 
 ![Storage scan and reset](docs/screenshots/settings-scan-reset.png)
 
+## Security
+
+Block MCP gives an AI assistant exactly the access it needs to edit content — and nothing more.
+
+- **A separate, limited account.** Connecting creates a dedicated account just for the assistant. It can write and edit your posts, pages, and media, but it can't change site settings, delete other people's content, or sign in to your dashboard — and disconnecting it removes all of that access at once. (You can connect through your own account instead; it's clearly marked as the higher-access option, and a site owner can turn that option off entirely.)
+- **Your password stays private.** It's never shown in a web address or saved to your browser history, and the connection is set up locally on your own computer. Any config files written are readable only by you.
+- **Stored secrets are encrypted.** Any credential held between setup steps is encrypted (AES‑256‑GCM) before it's saved, and cleared once it's used — never kept as plain text.
+- **The assistant can't inject code.** Everything it writes is sanitized, so it can't slip scripts or trackers into your pages.
+
+### Seal mode (Claude Desktop)
+
+The one-click Claude Desktop installer can either include your credential or leave it out:
+
+| Mode | What happens |
+|---|---|
+| `prefill` *(default)* | The installer includes the password, so setup is one click; Claude Desktop saves it to your OS keychain. |
+| `paste` | The installer leaves the password out — you paste it in yourself, so it never lands in a downloaded file. |
+
+Developers can force paste mode with a filter, or by defining `GK_BLOCK_MCP_FORCE_PASTE_SECRET` as `true` in `wp-config.php`:
+
+```php
+add_filter( 'gk/block-mcp/credential/seal-mode', fn() => 'paste' );
+```
+
 ## Examples
 
 **Update a heading by URL**
@@ -386,7 +442,7 @@ Run all suites locally:
 npm test
 
 # PHP (PHPUnit, stub WP bootstrap) — 335 tests
-cd wordpress-plugin/gk-block-api && phpunit -c tests/phpunit.xml
+cd wordpress-plugin/gk-block-mcp && phpunit -c tests/phpunit.xml
 ```
 
 The PHP suite uses a minimal WordPress stub layer (no full WP install required) to exercise validation, error paths, mutation engine, ref resolution, HTML auto-transforms, post lifecycle, term listing, media validation, and REST summary/outline.

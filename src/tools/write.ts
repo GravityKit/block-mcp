@@ -192,7 +192,13 @@ export const WRITE_TOOLS = [
   {
     name: 'insert_blocks',
     description:
-      'Insert blocks at a top-level position. Anchoring options (use one): `after_ref`/`before_ref` (stable gk_ref — recommended), or `after_top_level`/`before_top_level` (top_level_counter). Omit anchors or set after_top_level:-1 to append; "start" prepends. Legacy-tier blocks rejected per the site policy. Blocks whose attribute schema is HTML-sourced (e.g. core/paragraph `content`, core/image `url`) must include `innerHTML` matching the attribute(s) — attribute-only inserts are rejected with `inner_html_required` to prevent the self-closing-block / "invalid content" failure mode. Response.inserted[] carries `ref`, `path`, and `top_level_counter` so you can chain edit_block_tree without re-reading.',
+      'Insert top-level blocks into a post.\n\n' +
+      'POSITIONING — use exactly ONE anchor (any other key, e.g. `after`, `before`, `position`, is rejected):\n' +
+      '- `before_ref` / `after_ref` — gk_ref from get_page_blocks. Recommended: refs survive sibling shifts.\n' +
+      '- `before_top_level` / `after_top_level` — top_level_counter position.\n' +
+      '- Prepend at the very top: `before_top_level: 0`. Append at the end: omit all anchors.\n\n' +
+      'CONTENT — legacy-tier blocks are rejected per the site policy. Blocks with HTML-sourced attributes (e.g. core/paragraph `content`, core/image `url`) must include matching `innerHTML`; attribute-only inserts fail with `inner_html_required`.\n\n' +
+      'VERIFY — the response\'s inserted[] returns `ref`, `path`, and `top_level_counter`: confirm the block landed where you intended before moving on. The refs let you chain edit_block_tree without re-reading.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Insert blocks' },
     outputSchema: INSERTED_REFS_SCHEMA,
     inputSchema: {
@@ -201,7 +207,7 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         after_top_level: {
           type: ['number', 'string'],
-          description: 'top_level_counter to insert AFTER. -1/omit = append, "start" = prepend.',
+          description: 'top_level_counter to insert AFTER (omit or -1 = append). To prepend at the very top, prefer `before_top_level: 0`.',
         },
         before_top_level: {
           type: 'number',
@@ -217,7 +223,7 @@ export const WRITE_TOOLS = [
         },
         blocks: {
           type: 'array',
-          description: 'Blocks to insert.',
+          description: 'Blocks to insert. Each def nests recursively via `innerBlocks` — build a whole container (group/columns/callout) with its children in this one call; give the container its empty wrapper `innerHTML` (e.g. \'<div class="wp-block-group"></div>\').',
           items: BLOCK_INPUT_SCHEMA,
         },
       },
@@ -230,7 +236,7 @@ export const WRITE_TOOLS = [
     // idempotentHint is false: deleting at counter N twice removes a
     // *different* block the second time (indices shift after the first).
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Delete blocks' },
-    outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, removed: { type: 'number' } } },
+    outputSchema: { type: 'object', properties: { ...REVISION_ONLY_SCHEMA.properties, deleted_index: { type: 'number' }, deleted_count: { type: 'number' } } },
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -260,7 +266,7 @@ export const WRITE_TOOLS = [
         post_id: { type: 'number', description: 'Post ID.' },
         start: { type: 'number', description: 'top_level_counter of first block to replace.' },
         count: { type: 'number', description: 'How many top-level blocks to remove. Pass 0 to insert without removing.' },
-        blocks: { type: 'array', description: 'Replacement blocks. May be empty (pure delete) or any length.', items: BLOCK_INPUT_SCHEMA },
+        blocks: { type: 'array', description: 'Replacement blocks. May be empty (pure delete) or any length. Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'start', 'count', 'blocks'],
     },
@@ -271,12 +277,33 @@ export const WRITE_TOOLS = [
     // idempotentHint is false for the same reason as update_block: every
     // call creates a revision; history is observable.
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Rewrite the entire post' },
-    outputSchema: INSERTED_REFS_SCHEMA,
+    // PUT /posts/{id}/blocks returns a flat { blocks: [{ index, name, attributes }] }
+    // summary — not the { inserted: [...] } shape of the insert/replace tools.
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        blocks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              index:      { type: 'number' },
+              name:       { type: 'string' },
+              attributes: { type: 'object' },
+            },
+          },
+        },
+        warnings:           { type: 'array' },
+        before_revision_id: { type: 'number' },
+        revision_id:        { type: 'number' },
+      },
+    },
     inputSchema: {
       type: 'object' as const,
       properties: {
         post_id: { type: 'number', description: 'Post ID.' },
-        blocks: { type: 'array', description: 'Complete blocks array (replaces all).', items: BLOCK_INPUT_SCHEMA },
+        blocks: { type: 'array', description: 'Complete blocks array (replaces all). Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.', items: BLOCK_INPUT_SCHEMA },
       },
       required: ['post_id', 'blocks'],
     },

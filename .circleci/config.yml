@@ -1,0 +1,147 @@
+version: 2.1
+
+# Release pipeline for the gk-block-mcp WordPress plugin.
+#
+# Builds the plugin ZIP, creates a GitHub release (main only), and — the reason
+# this exists — runs `gktools announce`, which signs the build (Ed25519) and
+# POSTs the signed sha256 + ZIP to the GravityKit Release Manager
+# (gravitykit.com). The Release Manager rejects unsigned builds, and Foundation
+# reads auto-updates from it, so without this step a published, registered
+# product still has no builds to serve.
+#
+# This is a MONOREPO: the plugin lives in wordpress-plugin/gk-block-mcp/, not at
+# the repo root, so the build-tools docker wrappers (which mount $PWD) are run
+# from inside that subdir, and the ZIP is staged with the plugin's own
+# .distignore (the same source of truth build-plugin-zip.yml uses) rather than
+# build-tools' git-archive-based package_build (which can't target a subtree and
+# ignores .distignore).
+#
+# Prerequisites (org / CircleCI admin, one-time):
+#   - This repo enabled in CircleCI and attached to the `shared` context, which
+#     supplies GK_RELEASE_MANAGER_URL, GK_RELEASE_MANAGER_TOKEN, GH_AUTH_TOKEN,
+#     GK_SIGNING_PRIVATE_KEY (Ed25519, required — the RM rejects unsigned builds),
+#     CIRCLE_TOKEN, the Dropbox tokens, and CACHE_VERSION.
+#   - A CircleCI SSH key with read access to GravityKit/Foundation (composer
+#     installs it over SSH) AND GravityKit/Tooling (cloned below) — the same key
+#     the rest of the GravityKit fleet uses.
+#
+# Commit-message switches (read by build-tools): [skip release] skips the GitHub
+# release; [skip notify] skips the Release-Manager announce.
+
+anchors:
+  context: &context
+    context: shared
+
+  default_job_config: &default_job_config
+    working_directory: /home/circleci/project
+    machine:
+      image: default
+
+jobs:
+  build_package_release:
+    <<: *default_job_config
+    steps:
+      - checkout
+
+      - run:
+          name: Getting GK build tools
+          command: git clone git@github.com:GravityKit/Tooling.git /home/circleci/tooling
+
+      - restore_cache:
+          key: composer-dependencies-{{ .Environment.CACHE_VERSION }}-{{ checksum "wordpress-plugin/gk-block-mcp/composer.lock" }}
+
+      - run:
+          name: Build prefixed dependencies (Foundation via Strauss)
+          command: |
+            cd wordpress-plugin/gk-block-mcp
+            # --no-scripts skips the test-tooling post-install (SQLite drop-in +
+            # core-block fixtures) that needs the dev WordPress install. Run only
+            # the two steps the shipped bundle needs: Strauss prefixing and the
+            # Illuminate-helpers namespacing. Foundation resolves over SSH.
+            /home/circleci/tooling/build-tools/build_tools.sh composer -o "install --no-dev --no-scripts --prefer-dist --no-progress"
+            /home/circleci/tooling/build-tools/build_tools.sh composer -o "run-script prefix_vendor"
+            /home/circleci/tooling/build-tools/build_tools.sh composer -o "run-script post_update_install"
+
+      - run:
+          name: Assert no credentials leaked into vendor_prefixed
+          command: |
+            cd wordpress-plugin/gk-block-mcp
+            # Strauss can copy ~/.composer (auth.json, keys) into vendor_prefixed/
+            # when a locked dep is missing from vendor/ — fail rather than ship
+            # creds (see extra.strauss.exclude_from_copy).
+            leaked="$(find vendor_prefixed \( -iname 'auth.json' -o -iname 'cacert.pem' -o -iname 'keys.*.pub' \) 2>/dev/null || true)"
+            if [ -n "$leaked" ]; then echo "Credential-like files in vendor_prefixed:"; echo "$leaked"; exit 1; fi
+            echo "vendor_prefixed is clean."
+
+      - run:
+          name: Package the plugin ZIP
+          command: |
+            set -euo pipefail
+            plugin_dir="wordpress-plugin/gk-block-mcp"
+            version=$(sed -n 's/^[[:space:]]*\*[[:space:]]*Version:[[:space:]]*\(.*\)/\1/p' "$plugin_dir/gk-block-mcp.php" | head -1 | tr -d '[:space:]')
+            # Release builds off main ship a clean version; every other branch
+            # carries the commit hash so betas/untagged builds are distinguishable.
+            if [ "$CIRCLE_BRANCH" = "main" ]; then hash=""; else hash="-$(git rev-parse --short HEAD)"; fi
+            build_file="gk-block-mcp-${version}${hash}.zip"
+            echo "export BUILD_FILE=$build_file" >> "$BASH_ENV"
+            # Stage with the plugin's own .distignore (single source of truth with
+            # build-plugin-zip.yml), then drop the Foundation translations shim the
+            # rest of the fleet excludes.
+            stage="$(mktemp -d)"; mkdir -p "$stage/gk-block-mcp"
+            rsync -a --exclude-from="$plugin_dir/.distignore" "$plugin_dir/" "$stage/gk-block-mcp/"
+            rm -f "$stage/gk-block-mcp/vendor_prefixed/gravitykit/foundation/src/translations.js.php"
+            # Ship Action Scheduler: a non-prefixed runtime dep Foundation requires
+            # at vendor/woocommerce/action-scheduler/ — .distignore excludes vendor/,
+            # so copy it in explicitly.
+            mkdir -p "$stage/gk-block-mcp/vendor/woocommerce"
+            cp -R "$plugin_dir/vendor/woocommerce/action-scheduler" "$stage/gk-block-mcp/vendor/woocommerce/"
+            (cd "$stage" && zip -rq "/home/circleci/project/$build_file" gk-block-mcp)
+            unzip -l "$build_file" | tail -3
+
+      - run:
+          name: Creating a GitHub release
+          command: |
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              git config user.email "support@gravitykit.com"
+              git config user.name "GravityKit - CI"
+              /home/circleci/tooling/build-tools/build_tools.sh create_release -o "wordpress-plugin/gk-block-mcp/gk-block-mcp.php $BUILD_FILE"
+            fi
+
+      - run:
+          name: Sign + announce to the GravityKit Release Manager
+          command: |
+            if git log -n 1 | grep -q "\[skip notify\]"; then echo "[skip notify] — skipping"; exit 0; fi
+            # gktools (the current GravityKit tooling) signs the build inline
+            # (Ed25519) and sends the sha256 + signature the Release Manager now
+            # requires. build_tools.sh announce_build is deprecated — it sends
+            # only an md5 hash with no signature, which the RM rejects
+            # ("Signing is required for every release"). gktools is a private
+            # GitHub Packages module, so authenticate npm to npm.pkg.github.com
+            # first. Signing shells out to `php`, which gktools runs inside the
+            # gravitykit/tools Docker image — the machine executor has no local
+            # php, so do NOT set USE_LOCAL (that would run php locally and fail
+            # with "php: command not found"). Docker is available on the machine
+            # executor, and the image is already pulled by the composer step.
+            # Reads GK_SIGNING_PRIVATE_KEY, GK_RELEASE_MANAGER_URL/TOKEN, and the
+            # Dropbox keys from the `shared` context.
+            printf '//npm.pkg.github.com/:_authToken=%s\n@gravitykit:registry=https://npm.pkg.github.com\n' "$GH_AUTH_TOKEN" >> "$HOME/.npmrc"
+            npx -y @gravitykit/gktools@latest announce \
+              --build-file "$BUILD_FILE" \
+              --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php
+
+      - save_cache:
+          key: composer-dependencies-{{ .Environment.CACHE_VERSION }}-{{ checksum "wordpress-plugin/gk-block-mcp/composer.lock" }}
+          paths:
+            - wordpress-plugin/gk-block-mcp/vendor
+            - wordpress-plugin/gk-block-mcp/vendor_prefixed
+
+      - store_artifacts:
+          path: /home/circleci/project/gk-block-mcp-*.zip
+          destination: release
+
+workflows:
+  version: 2
+  build_and_release:
+    jobs:
+      - build_package_release:
+          <<: *context

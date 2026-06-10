@@ -25,12 +25,12 @@ jobs:
         php-version: ['7.4', '8.2', '8.3', '8.4']
     defaults:
       run:
-        working-directory: wordpress-plugin/gk-block-api
+        working-directory: wordpress-plugin/gk-block-mcp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: ${{ matrix.php-version }}
           tools: composer:v2
@@ -44,26 +44,37 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: composer-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-api/composer.lock') }}
+          key: composer-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock') }}
           restore-keys: |
             composer-${{ matrix.php-version }}-
 
       # vendor/ itself, so the install step is a no-op when composer.lock
-      # AND the SQLite-drop-in installer script are both unchanged. The
-      # script's hash is part of the key because it decides which commit
-      # of the upstream SQLite plugin gets cloned.
+      # AND the scripts that shape vendor content are all unchanged. The
+      # SQLite installer's hash is part of the key because it decides which
+      # commit of the upstream SQLite plugin gets cloned; the post-install
+      # script's hash is part of the key because it patches vendor/ in place
+      # (Foundation's PHP 8.4 implicit-nullable fixes), so a cached vendor/
+      # built by an older script would silently miss those patches.
       - name: Cache vendor/
         id: vendor-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: wordpress-plugin/gk-block-api/vendor
-          key: vendor-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-api/composer.lock', 'wordpress-plugin/gk-block-api/tests/install-sqlite-dropin.php') }}
+          path: wordpress-plugin/gk-block-mcp/vendor
+          key: vendor-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock', 'wordpress-plugin/gk-block-mcp/tests/install-sqlite-dropin.php', 'wordpress-plugin/gk-block-mcp/composer_post_update_install.sh') }}
 
       - name: Install dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          # GravityKit Foundation is a runtime require resolved from the PRIVATE
+          # GravityKit/Foundation repo. Composer authenticates via this token to
+          # clone it. Configure a repo/org Actions secret FOUNDATION_REPO_TOKEN =
+          # a PAT with read access to GravityKit/Foundation. (The Foundation boot
+          # itself is disabled under PHPUnit via GK_BLOCK_MCP_DISABLE_FOUNDATION,
+          # but composer still has to resolve the dependency tree to install.)
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
         run: composer install --prefer-dist --no-progress --no-interaction
 
       # composer post-install runs the SQLite installer only on a fresh
@@ -72,8 +83,23 @@ jobs:
       - name: Ensure SQLite drop-in is installed
         run: composer run-script install-sqlite-dropin
 
-      - name: Run PHPUnit
+      - name: Run PHPUnit (single-site)
         run: vendor/bin/phpunit -c tests/phpunit.xml --colors=never
+
+      # The yoast group is excluded from the single-site config (it needs a
+      # loaded Yoast SEO plugin). This config sets GK_LOAD_YOAST so the
+      # bootstrap loads Yoast and runs exactly that group — keeping Yoast's DB
+      # migrations and wp_is_block_theme() call out of the general suite's
+      # process-isolated children.
+      - name: Run PHPUnit (Yoast — yoast group)
+        run: vendor/bin/phpunit -c tests/phpunit/yoast.xml --colors=never
+
+      # The ms-required group is excluded from the single-site config (it would
+      # self-skip there). The multisite config runs exactly that group under a
+      # real multisite install, so the multisite-only contracts (per-blog cap
+      # provisioning, per-blog agent purge) are exercised in CI, not skipped.
+      - name: Run PHPUnit (multisite — ms-required group)
+        run: vendor/bin/phpunit -c tests/phpunit/multisite.xml --colors=never
 
       # phpcs gate. We carry zero errors AND zero warnings on the includes/
       # tree (see phpcs.xml.dist); CI enforces that contract so the next PR
@@ -85,9 +111,9 @@ jobs:
     name: TypeScript MCP server (Vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -105,6 +131,18 @@ jobs:
 
       - run: npm run build
 
+      # The committed dist/index.cjs and the plugin-embedded copy
+      # (assets/mcp-server/index.cjs, written by postbuild) are shipped
+      # artifacts. A fresh build off the locked esbuild must reproduce them
+      # byte-for-byte; a diff means a source change was committed without
+      # rebuilding, so npx users and Claude Desktop users would run different
+      # server versions. Fail the build instead of shipping a stale bundle.
+      - name: Verify committed bundles are up to date
+        run: |
+          git diff --exit-code -- dist/index.cjs \
+            wordpress-plugin/gk-block-mcp/assets/mcp-server/index.cjs \
+            || { echo "::error::dist/index.cjs or the embedded copy is stale — run 'npm run build' and commit the result."; exit 1; }
+
   ts-integration:
     name: TypeScript MCP server (integration — live WP)
     runs-on: ubuntu-latest
@@ -119,9 +157,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') ||
       contains(github.event.head_commit.message, '[integration]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'

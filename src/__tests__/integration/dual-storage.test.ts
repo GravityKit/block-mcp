@@ -49,7 +49,7 @@ describe.skipIf(skip)('dual-storage enforcement (integration)', () => {
     }
   });
 
-  it('update with only attributes on a dual-storage block returns 400 or 200 (requires scan)', async () => {
+  it('innerHTML-only update on a dual-storage block is rejected; attributes-only is allowed', async () => {
     if (!yoastInstalled || !dualBlockName) {
       console.log('[integration] No dual-storage block found (Yoast not installed or no dual blocks) — skipping');
       return;
@@ -78,46 +78,42 @@ describe.skipIf(skip)('dual-storage enforcement (integration)', () => {
       const blockIndex = inserted.inserted[0]?.index;
       expect(blockIndex).toBeGreaterThanOrEqual(0);
 
-      // Try to update with ONLY attributes — dual enforcement should reject it.
+      // The enforced direction (BLOCK-14): innerHTML ALONE desyncs the
+      // structured attributes (questions[] et al.) and must be rejected with
+      // dual_storage_requires_both. Attributes-only is allowed by design —
+      // the documented contract is "innerHTML-only is rejected".
       const credentials = Buffer.from(
         `${LIVE_ENV.user}:${LIVE_ENV.password}`
       ).toString('base64');
       const url = `${LIVE_ENV.url.replace(/\/+$/, '')}/wp-json/gk-block-api/v1/posts/${postId}/blocks/${blockIndex}`;
-
-      const response = await axios.patch(
-        url,
-        { attributes: faqAttributes },
-        {
+      const patch = (body: unknown) =>
+        axios.patch(url, body, {
           headers: {
             Authorization: `Basic ${credentials}`,
             'Content-Type': 'application/json',
           },
           timeout: 15_000,
           validateStatus: () => true,
-        }
-      );
+        });
 
-      if (response.status === 400) {
-        // Dual-storage enforcement is active — verify the error code.
-        const body = response.data as Record<string, unknown>;
-        expect(body.code).toBe('dual_storage_requires_both');
-        expect(body.message).toBeTruthy();
-      } else if (response.status === 200) {
-        // The plugin returned a 200 because the storage-mode scan classifying
-        // this block as `dual` had not been run on this site. Silently
-        // logging-and-continuing turns the test green even though the
-        // enforcement path was never exercised — the same outcome a real
-        // regression that broke enforcement would produce. Fail loudly so
-        // CI surfaces the missing precondition instead of papering over it.
+      const htmlOnly = await patch({ innerHTML: faqInnerHtml });
+      if (htmlOnly.status === 200) {
+        // A 200 here means the block is not classified dual on this site —
+        // the enforcement path was never exercised. Fail loudly so CI
+        // surfaces the missing precondition instead of papering over it.
         throw new Error(
           `[integration] dual-storage not enforced for ${dualBlockName} ` +
-            '— call scan_storage_modes to classify the block as dual, then re-run this suite. ' +
-            'The 200 response means the precondition for this test is not met, not that the test passed.'
+            '— call scan_storage_modes (or add the block to the dual-storage list), then re-run.'
         );
-      } else {
-        // Any other status is unexpected.
-        throw new Error(`Unexpected status ${response.status} from dual-storage update`);
       }
+      expect(htmlOnly.status).toBe(400);
+      const body = htmlOnly.data as Record<string, unknown>;
+      expect(body.code).toBe('dual_storage_requires_both');
+      expect(body.message).toBeTruthy();
+
+      // The permitted direction: attributes-only succeeds.
+      const attrsOnly = await patch({ attributes: faqAttributes });
+      expect(attrsOnly.status).toBe(200);
     });
   }, 45_000);
 

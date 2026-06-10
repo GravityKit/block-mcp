@@ -1,0 +1,143 @@
+{
+    "name": "gravitykit/gk-block-mcp",
+    "description": "GravityKit Block API — WordPress plugin exposing block-level REST endpoints.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "php": ">=7.4",
+        "gravitykit/foundation": "dev-main"
+    },
+    "require-dev": {
+        "composer/installers": "^2.2",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "doctrine/instantiator": "^1.5",
+        "php-stubs/wordpress-stubs": "^6.7",
+        "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^9.6",
+        "roots/wordpress": "^6.7",
+        "squizlabs/php_codesniffer": "^3.10",
+        "wp-coding-standards/wpcs": "^3.0",
+        "wp-phpunit/wp-phpunit": "^6.7",
+        "wpackagist-plugin/wordpress-seo": ">=23.0",
+        "yoast/phpunit-polyfills": "^2.0 || ^3.0"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "git@github.com:gravityview/Foundation.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/WordPress/sqlite-database-integration"
+        },
+        {
+            "type": "composer",
+            "url": "https://wpackagist.org",
+            "only": [
+                "wpackagist-plugin/*",
+                "wpackagist-theme/*"
+            ]
+        }
+    ],
+    "scripts": {
+        "post-install-cmd": [
+            "@prefix_vendor",
+            "@post_update_install",
+            "composer dump-autoload -o",
+            "@install-sqlite-dropin",
+            "@refresh-core-blocks-if-missing"
+        ],
+        "post-update-cmd": [
+            "@prefix_vendor",
+            "@post_update_install",
+            "composer dump-autoload -o",
+            "@install-sqlite-dropin",
+            "@refresh-core-blocks-if-missing"
+        ],
+        "prefix_vendor": "@php strauss.phar",
+        "post_update_install": "./composer_post_update_install.sh",
+        "install-sqlite-dropin": "php tests/install-sqlite-dropin.php",
+        "refresh-core-blocks": "bash scripts/refresh-core-blocks.sh",
+        "refresh-core-blocks-if-missing": "php scripts/ensure-core-blocks.php",
+        "test": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit.xml",
+            "phpunit -c tests/phpunit/yoast.xml",
+            "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "test:yoast": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/yoast.xml"
+        ],
+        "test:multisite": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "lint": "phpcs",
+        "lint:fix": "phpcbf",
+        "analyze": "phpstan analyse",
+        "analyse": "phpstan analyse"
+    },
+    "config": {
+        "allow-plugins": {
+            "roots/wordpress-core-installer": true,
+            "composer/installers": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        },
+        "sort-packages": true
+    },
+    "extra": {
+        "wordpress-install-dir": "vendor/wordpress/wordpress",
+        "installer-paths": {
+            "vendor/woocommerce/action-scheduler/": [
+                "woocommerce/action-scheduler"
+            ],
+            "vendor/wordpress/wordpress/wp-content/plugins/{$name}/": [
+                "type:wordpress-plugin"
+            ]
+        },
+        "strauss": {
+            "target_directory": "vendor_prefixed",
+            "namespace_prefix": "GravityKit\\BlockMCP\\",
+            "classmap_prefix": "GravityKit_BlockMCP_",
+            "packages": [
+                "gravitykit/foundation"
+            ],
+            "namespace_replacement_patterns": {
+                "/^Illuminate/": "GravityKit\\BlockMCP\\Foundation\\ThirdParty\\Illuminate",
+                "/^TrustedLogin/": "GravityKit\\BlockMCP\\Foundation\\ThirdParty\\TrustedLogin",
+                "/^Psr/": "GravityKit\\BlockMCP\\Foundation\\ThirdParty\\Psr",
+                "/^Monolog/": "GravityKit\\BlockMCP\\Foundation\\ThirdParty\\Monolog",
+                "/^Gettext/": "GravityKit\\BlockMCP\\Foundation\\ThirdParty\\Gettext",
+                "/^GravityKit\\\\Foundation/": "GravityKit\\BlockMCP\\Foundation"
+            },
+            "override_autoload": {
+                "gravitykit/foundation": {
+                    "psr-4": {
+                        "GravityKit\\Foundation\\": "src"
+                    },
+                    "files": [
+                        "assets"
+                    ]
+                }
+            },
+            "exclude_from_prefix": {
+                "file_patterns": []
+            },
+            "exclude_from_copy": {
+                "packages": [
+                    "paragonie/random_compat",
+                    "paragonie/sodium_compat",
+                    "symfony/polyfill-php70",
+                    "woocommerce/action-scheduler"
+                ],
+                "file_patterns": [
+                    "#gravitykit/foundation/phpstan/#"
+                ]
+            }
+        }
+    }
+}

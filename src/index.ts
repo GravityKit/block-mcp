@@ -15,6 +15,11 @@
  * Connects to the gk-block-api WordPress plugin via REST API with
  * Application Password authentication.
  *
+ * Sub-commands:
+ *   connect  — Browser-Approve handoff: opens WP admin authorize URL in the
+ *              browser, receives credentials via loopback callback, writes the
+ *              chosen AI client's MCP config. Credentials are never logged.
+ *
  * @see AGENTS.md and docs/specs/ for architecture and endpoint documentation
  */
 
@@ -43,6 +48,9 @@ import { POST_TOOLS, handlePostTool } from './tools/posts.js';
 import { TERM_TOOLS, handleTermTool } from './tools/terms.js';
 import { MEDIA_TOOLS, handleMediaTool } from './tools/media.js';
 import { YOAST_TOOLS, handleYoastTool } from './tools/yoast.js';
+import { validateToolArgs } from './validate-args.js';
+import { AGENT_GUIDE_CONTENT } from './agent-guide.js';
+import { runConnect } from './connect.js';
 
 // Environment variables are passed by the parent process (Claude Code, Hermes, etc.)
 // No dotenv.config() needed — it breaks esbuild ESM bundles due to CJS dynamic require('fs').
@@ -66,38 +74,6 @@ function readEnv(primary: string, legacy: string): string | undefined {
   return undefined;
 }
 
-const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
-const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
-const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
-
-if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
-  console.error(
-    'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
-  );
-  process.exit(1);
-}
-
-const client = new WordPressBlockClient({
-  wordpress_url: WORDPRESS_URL,
-  auth: {
-    username: WORDPRESS_USER,
-    application_password: WORDPRESS_APP_PASSWORD,
-  },
-});
-
-// ============================================
-// MCP server construction is deferred to main() so the per-site
-// instructions addendum can be fetched from WordPress before the
-// `McpServer` constructor is called. Constructing once with the final
-// instructions string uses the SDK's public API; an earlier draft
-// mutated `server.server._instructions` post-construction, which
-// depended on a private SDK field and would silently degrade to
-// baseline-only if the field were ever renamed.
-//
-// The baseline string is imported from `./instructions.ts` and combined
-// with the remote addendum inside main(). All request handlers are
-// registered in `registerHandlers(server)` (defined below) which main()
-// calls after constructing the server.
 // ============================================
 // Aggregate all tool definitions
 // ============================================
@@ -163,58 +139,8 @@ const AGENT_GUIDE_RESOURCE_URI = 'block-mcp://agent-guide';
 // integrations resolving the old URI don't 404.
 const LEGACY_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
 
-const AGENT_GUIDE_CONTENT = `# Block MCP — Agent Guide
-
-## URL → post ID resolution
-
-NEVER run curl, wget, or any bash/shell command to hit wp-json or resolve a URL to a post ID.
-The MCP does this for you:
-
-- \`get_page_blocks\` accepts \`url\` as an alternative to \`post_id\`. Pass the full URL or path; the server resolves it via \`url_to_postid\`.
-- For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
-
-If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` — not a shell command.
-
-## Moving / reordering blocks
-
-NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls — if the delete is skipped or fails, the page ends up with an orphaned clone of the original. The atomic primitive is the \`move\` op on \`edit_block_tree\`:
-
-- Target the source with \`ref\` (the \`gk_ref\` from \`get_page_blocks\`) or \`path\`. Prefer \`ref\` — it survives sibling shifts; paths go stale the moment any earlier block is inserted or removed.
-- Express the destination with \`destination_ref\` or \`destination\` (path). For path destinations, use **pre-move** indexing — write the path as if the source were still in place; the server adjusts indices after the removal.
-- Use \`count\` to move N consecutive siblings in a single op.
-- The server rejects moves into the source itself or any of its descendants.
-- The whole \`edit_block_tree\` call is one revision, reversible via \`revert_to_revision\`.
-
-If you must fall back to the flat-index tools, do \`insert_blocks\` + \`delete_block\` in the same turn and re-fetch \`get_page_blocks\` afterward to confirm exactly one copy remains.
-
-## Verifying writes
-
-Every write echoes the canonical post-save snapshot. Use it. Do not fetch the public page to verify what saved.
-
-- \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` — the exact content that just landed in post_content. The write call IS the verification round-trip.
-- \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
-- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` — returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
-
-For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time — not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
-
-## Block preferences (site-defined)
-
-Block preference policy is configured per-site in the WordPress admin (the
-gk-block-api Preferences option) and exposed dynamically. There is no
-client-side hardcoded list of "good" vs "bad" namespaces.
-
-How to discover the policy at runtime:
-
-1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
-2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields — they reflect the live config.
-3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
-
-How to behave:
-
-- Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch — call \`list_patterns\` first.
-- For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+// AGENT_GUIDE_CONTENT lives in src/agent-guide.ts so the discoverability
+// contract is testable (index.ts boots the server on import).
 
 // ============================================
 // Handler registration
@@ -226,7 +152,7 @@ How to behave:
 // `_instructions` field — see the construction note above).
 // ============================================
 
-function registerHandlers(server: McpServer): void {
+function registerHandlers(server: McpServer, client: WordPressBlockClient): void {
 
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
@@ -245,6 +171,16 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!handle) {
       throw new Error(`Unknown tool: ${name}`);
     }
+
+    // Reject unknown / misnamed arguments before the handler runs. The MCP SDK
+    // does not validate against inputSchema, so without this an unrecognized key
+    // (e.g. `after` instead of `after_top_level`) is silently dropped and the
+    // tool runs with defaults — a silent wrong-place write rather than an error.
+    const def = ALL_TOOLS.find((t) => t.name === name) as
+      | { inputSchema?: { properties?: Record<string, unknown>; required?: string[]; additionalProperties?: unknown } }
+      | undefined;
+    validateToolArgs(name, def?.inputSchema, toolArgs);
+
     const result = await handle(name, toolArgs, client);
 
     // Emit `structuredContent` alongside the text fallback when the tool
@@ -400,12 +336,53 @@ server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ============================================
 
 async function main(): Promise<void> {
+  // ── Node version preflight ──────────────────────────────────────────────
+  // engines.node already warns at install time, but a non-technical user who
+  // runs the connector anyway should get a clear, actionable message rather than
+  // a cryptic runtime crash on an unsupported Node.
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  if (Number.isFinite(nodeMajor) && nodeMajor < 20) {
+    console.error(
+      `Block MCP requires Node.js 20 or newer — you are running ${process.version}. ` +
+        'Please upgrade Node.js and try again: https://nodejs.org/'
+    );
+    process.exit(1);
+  }
+
+  // ── connect sub-command ─────────────────────────────────────────────────
+  // Checked first so `npx @gravitykit/block-mcp connect` works without the
+  // WORDPRESS_* env vars that the MCP server requires.
+  if (process.argv[2] === 'connect') {
+    await runConnect(process.argv.slice(3));
+    process.exit(0);
+  }
+
+  // ── env-var validation ──────────────────────────────────────────────────
+  const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
+  const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
+  const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
+
+  if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
+    console.error(
+      'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
+    );
+    process.exit(1);
+  }
+
+  const client = new WordPressBlockClient({
+    wordpress_url: WORDPRESS_URL,
+    auth: {
+      username: WORDPRESS_USER,
+      application_password: WORDPRESS_APP_PASSWORD,
+    },
+  });
+
   // Fetch the per-site instructions addendum BEFORE constructing the
   // server so the initialize handshake includes the combined string
   // from the start — no post-construction mutation of SDK internals.
   // `getInstructions` never throws: on any failure it logs to stderr
   // and returns the baseline only.
-  const instructions = await getInstructions(WORDPRESS_URL as string);
+  const instructions = await getInstructions(WORDPRESS_URL);
 
   const server = new McpServer(
     {
@@ -422,7 +399,7 @@ async function main(): Promise<void> {
     }
   );
 
-  registerHandlers(server);
+  registerHandlers(server, client);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -67,7 +67,7 @@ export function translateWpError(code: string | undefined, data: unknown): strin
   switch (code) {
     // ── Routing / auth ─────────────────────────────────────────────
     case 'rest_no_route':
-      return 'REST route not found at this site. Confirm the gk-block-api plugin is active and the WORDPRESS_URL is correct.';
+      return 'REST route not found at this site. Confirm the Block MCP plugin is active and the WORDPRESS_URL is correct.';
 
     case 'rest_forbidden':
     case 'rest_cannot_edit':
@@ -135,7 +135,7 @@ export function translateWpError(code: string | undefined, data: unknown): strin
       return 'Post type not allowed by this site\'s gk_block_api_post_types_allowlist option. Ask the site admin to add it, or pick a supported type.';
 
     case 'invalid_status':
-      return 'Post status not allowed. Valid values: draft, pending, publish, future, private (trash via DELETE only).';
+      return 'Post status not allowed. Valid values: draft, pending, publish, future, private. To trash, call update_post with status:"trash" (on its own, not combined with other fields).';
 
     // ── Media uploads ──────────────────────────────────────────────
     case 'invalid_url':

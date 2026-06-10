@@ -9,11 +9,33 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 
+/** Best-effort MIME type from a filename extension, for multipart uploads. */
+function mimeForFilename(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    pdf: 'application/pdf',
+  };
+  return map[ext] ?? 'application/octet-stream';
+}
+
 /** Max retry attempts for transient server / network errors. */
 const MAX_RETRIES = 2;
 
-/** Idempotent HTTP verbs — safe to retry without risking duplicate work. */
-const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options', 'delete']);
+/**
+ * Verbs safe to retry without risking duplicate or wrong work.
+ *
+ * DELETE is intentionally NOT here: `delete_block` deletes by flat index, so if
+ * the server commits the delete but the response is lost (timeout / 502), a
+ * replay removes the *next* block (indices shift after the first delete). The
+ * delete_block tool mirrors this with `idempotentHint: false`.
+ */
+const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options']);
 
 /** Sleep for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
@@ -47,7 +69,7 @@ function backoffMs(attempt: number): number {
  *
  * Anything else is a real error that the caller needs to see.
  */
-function isRetryable(error: AxiosError): boolean {
+export function isRetryable(error: AxiosError): boolean {
   const method = (error.config?.method ?? 'get').toLowerCase();
   const idempotent = IDEMPOTENT_METHODS.has(method);
 
@@ -84,6 +106,8 @@ import type {
   MutationRequest,
   MutationResponse,
   ResolveUrlResponse,
+  BlockInput,
+  BlockPatch,
   CreatePostRequest,
   UpdatePostRequest,
   PostMutationResponse,
@@ -109,7 +133,17 @@ interface PatternsResponse {
 
 /** Response wrapper for page blocks. */
 interface PageBlocksResponse {
+  post_id?: number;
+  summary?: Record<string, unknown>;
   blocks: Block[];
+  /** Present when `limit` pagination is in play. */
+  pagination?: {
+    limit?: number;
+    offset?: number;
+    total?: number;
+    /** Pass back as `cursor` to fetch the next page; null on the last page. */
+    next_cursor?: string | null;
+  };
 }
 
 /**
@@ -408,6 +442,10 @@ export class WordPressBlockClient {
       include_legacy_paths?: boolean;
       /** When true (default), missing gk_refs are assigned and persisted. Pass false to skip the silent write side effect. */
       persist_refs?: boolean;
+      /** Page size: top-level blocks per response. Pairs with `cursor`. */
+      limit?: number;
+      /** Opaque pagination cursor from a prior response's `next_cursor`. */
+      cursor?: string;
     }
   ): Promise<PageBlocksResponse> {
     if (postId === undefined || postId === null) {
@@ -427,6 +465,8 @@ export class WordPressBlockClient {
     // when the param is omitted entirely.
     if (params?.persist_refs === false) queryParams.persist_refs = 'false';
     else if (params?.persist_refs === true) queryParams.persist_refs = 'true';
+    if (typeof params?.limit === 'number') queryParams.limit = String(params.limit);
+    if (params?.cursor) queryParams.cursor = params.cursor;
 
     const response = await this.client.get<PageBlocksResponse>(
       `/posts/${postId}/blocks`,
@@ -498,7 +538,7 @@ export class WordPressBlockClient {
   async updateBlock(
     postId: number,
     index: number,
-    data: { attributes?: Record<string, unknown>; innerHTML?: string }
+    data: BlockPatch
   ): Promise<BlockUpdateResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (index < 0) throw new Error('Block index must be non-negative');
@@ -525,7 +565,7 @@ export class WordPressBlockClient {
   async updateBlockByRef(
     postId: number,
     ref: string,
-    data: { attributes?: Record<string, unknown>; innerHTML?: string }
+    data: BlockPatch
   ): Promise<BlockUpdateResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
@@ -622,11 +662,8 @@ export class WordPressBlockClient {
       before?: number;
       after_ref?: string;
       before_ref?: string;
-      blocks: Array<{
-        name: string;
-        attributes?: Record<string, unknown>;
-        innerHTML?: string;
-      }>;
+      // Recursive: containers (groups/columns) nest children via innerBlocks.
+      blocks: BlockInput[];
     }
   ): Promise<BlockWriteResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
@@ -706,11 +743,8 @@ export class WordPressBlockClient {
     data: {
       start: number;
       count: number;
-      blocks: Array<{
-        name: string;
-        attributes?: Record<string, unknown>;
-        innerHTML?: string;
-      }>;
+      // Recursive: containers (groups/columns) nest children via innerBlocks.
+      blocks: BlockInput[];
     }
   ): Promise<BlockReplaceRangeResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
@@ -743,11 +777,7 @@ export class WordPressBlockClient {
    */
   async replaceAllBlocks(
     postId: number,
-    blocks: Array<{
-      name: string;
-      attributes?: Record<string, unknown>;
-      innerHTML?: string;
-    }>
+    blocks: BlockInput[]
   ): Promise<BlockWriteResponse> {
     if (postId === undefined || postId === null) throw new Error('Post ID is required');
     if (!blocks || blocks.length === 0) {
@@ -900,19 +930,25 @@ export class WordPressBlockClient {
 
     if (args.path) {
       const fs = await import('node:fs/promises');
-      const path = await import('node:path');
+      const nodePath = await import('node:path');
+      const { default: FormData } = await import('form-data');
       const data = await fs.readFile(args.path);
-      const filename = args.filename ?? path.basename(args.path);
+      const filename = args.filename ?? nodePath.basename(args.path);
       const form = new FormData();
-      form.append('file', new Blob([new Uint8Array(data)]), filename);
+      form.append('file', data, { filename, contentType: mimeForFilename(filename) });
       if (args.title) form.append('title', args.title);
       if (args.alt_text) form.append('alt_text', args.alt_text);
       if (args.caption) form.append('caption', args.caption);
       if (args.description) form.append('description', args.description);
       if (typeof args.post_id === 'number') form.append('post_id', String(args.post_id));
 
-      // axios sets the multipart Content-Type and boundary automatically.
-      const response = await this.client.post<UploadMediaResponse>('/media', form);
+      // The shared axios instance defaults Content-Type to application/json,
+      // which makes axios JSON-serialize the form and send NO file. The
+      // form-data package's getHeaders() supplies multipart/form-data WITH the
+      // boundary, overriding that default so this is a real multipart upload.
+      const response = await this.client.post<UploadMediaResponse>('/media', form, {
+        headers: form.getHeaders(),
+      });
       return response.data;
     }
 

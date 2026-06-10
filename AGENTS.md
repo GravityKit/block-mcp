@@ -1,615 +1,255 @@
-# AGENTS.md — GK Block API + MCP Server
+# AGENTS.md — GK Block API + Block MCP
 
-> Block-level WordPress content CRUD with path-based mutations, preference scoring, and AI-friendly tooling via MCP.
+> Block-level WordPress content CRUD for AI agents, delivered as a two-part system: an npm-published MCP server (`@gravitykit/block-mcp`) that talks to a companion WordPress plugin (`gk-block-mcp`) over a private REST namespace. The plugin also ships a one-click **Connect** onboarding flow that provisions a dedicated, least-privilege agent account and hands the MCP client a credential out-of-band — no copy-pasting Application Passwords.
 
 ## Quick Start
 
+**What this is:** Two components that ship and version independently.
+1. **MCP server** (`src/`, built to `dist/index.cjs`) — a thin stdio MCP server that exposes ~30 tools, validates input, calls the plugin's REST API, and enriches responses with AI-friendly guidance (tier groupings, legacy warnings, error translation). Also contains the **connector** (`src/connect.ts`) — the `block-mcp connect` subcommand that drives a browser-Approve handshake and writes the client's MCP config.
+2. **WordPress plugin** (`wordpress-plugin/gk-block-mcp/`) — registers the `gk-block-api/v1` REST namespace, owns block parsing/serialization/mutation, the preference/scoring engine, post/term/media lifecycle, and the Connect onboarding UI + credential flow.
+
+**Main entry points:**
+- MCP server: `src/index.ts` → built to `dist/index.cjs`; npm `bin` is `block-mcp`.
+- Connector: `src/connect.ts` (`block-mcp connect …`).
+- Plugin: `wordpress-plugin/gk-block-mcp/gk-block-mcp.php` (bootstraps on `rest_api_init` + admin hooks).
+
+**Architecture style:** Hook-driven WordPress plugin (autoload via `spl_autoload_register`) behind a typed TypeScript MCP server. No framework; plain WP + the plain MCP SDK.
+
+**Key namespaces:** PHP `GravityKit\BlockMCP`; REST `gk-block-api/v1`; npm `@gravitykit/block-mcp`.
+
+**Versions:** the MCP server and plugin version independently. `package.json` `version` is the server; `readme.txt` `Stable tag` + `gk-block-mcp.php` `Version`/`GK_BLOCK_MCP_VERSION` are the plugin (current: 2.0.0). See **Versioning & Releases**.
+
 ```bash
-# 1. Install dependencies
 cd MCPs/block-mcp && npm install
-
-# 2. Build the MCP server (esbuild, single CJS bundle)
-npm run build          # → dist/index.cjs
-
-# 3. Set environment variables (or copy .env.example → .env)
-export WORDPRESS_URL=https://www.gravitykit.com
-export WORDPRESS_USER=<wordpress-username>
-export WORDPRESS_APP_PASSWORD=<app-password>
-
-# 4. Start the server (stdio transport — used by Claude Code / Hermes)
-npm start              # node dist/index.cjs
-
-# 5. Inspect with MCP Inspector (interactive debugging UI)
-npm run inspect
+npm run build          # esbuild → dist/index.cjs
+export WORDPRESS_URL=… WORDPRESS_USER=… WORDPRESS_APP_PASSWORD=…
+npm start              # node dist/index.cjs (stdio)
 ```
-
-The WordPress plugin (`wordpress-plugin/gk-block-api/`) must be active on the target site. It registers the `gk-block-api/v1` REST namespace.
+The plugin must be active on the target site for the server to reach `gk-block-api/v1`.
 
 ## Repository Map
 
-```
+```text
 MCPs/block-mcp/
-├── AGENTS.md                          # This file
-├── CLAUDE.md                          # Points Claude at AGENTS.md
-├── docs/specs/                        # Versioned design specs (v1.2: docs lifecycle)
-├── package.json                       # @gravitykit/block-mcp, esbuild build
-├── tsconfig.json                      # ES2022, bundler resolution
-├── .env.example                       # Required env vars template
+├── AGENTS.md / CLAUDE.md (→ @AGENTS.md) / README.md
+├── package.json                 # @gravitykit/block-mcp; esbuild build; bin: block-mcp
+├── tsconfig.json                # ES2022, bundler resolution
 ├── src/
-│   ├── index.ts                       # MCP server entry — aggregates tools, wires handlers
-│   ├── client.ts                      # WordPressBlockClient — HTTP client for REST API
-│   ├── types.ts                       # All TypeScript interfaces (config, blocks, mutations, responses)
-│   ├── preferences.ts                 # Client-side enrichment: legacy warnings, tier grouping
-│   └── tools/
-│       ├── discovery.ts               # list_block_types, list_patterns, get_pattern, get_site_usage
-│       ├── read.ts                    # get_page_blocks
-│       ├── write.ts                   # update_block, insert_blocks, delete_block, rewrite_post_blocks
-│       ├── mutate.ts                  # edit_block_tree (9 operations)
-│       └── patterns.ts               # insert_pattern
-├── dist/
-│   └── index.cjs                      # Built bundle (esbuild, CJS, single file)
-└── wordpress-plugin/
-    └── gk-block-api/
-        ├── gk-block-api.php           # Plugin bootstrap — autoloader, rest_api_init wiring
-        ├── uninstall.php              # Cleanup: deletes option + transient
-        └── includes/
-            ├── class-rest-controller.php    # All REST route registration + endpoint handlers
-            ├── class-block-crud.php         # Core CRUD + mutation engine + auto-transform
-            ├── class-block-safety.php       # Static block markup staleness detection
-            ├── class-block-registry.php     # Block type discovery with preference enrichment
-            ├── class-pattern-manager.php    # Pattern listing, scoring, legacy detection
-            ├── class-preferences.php        # Namespace scoring, tier system, replacement map
-            └── class-block-inventory.php    # Site-wide block + pattern inventory (cached)
+│   ├── index.ts                 # MCP server entry — aggregates tools, routes calls
+│   ├── connect.ts               # `block-mcp connect` — loopback browser-Approve handshake + config write
+│   ├── client.ts                # WordPressBlockClient — typed HTTP wrapper (axios, Basic Auth)
+│   ├── types.ts                 # All TS interfaces
+│   ├── enrichers.ts             # Syntax-highlight / response enrichment (shiki/core)
+│   ├── error-translator.ts      # Maps REST error codes → actionable agent hints
+│   ├── instructions.ts          # MCP server instructions / handshake addendum
+│   ├── preferences.ts           # Client-side preference annotation (mirrors PHP)
+│   └── tools/                    # discovery, read, write, mutate, patterns, posts, terms, media, yoast
+├── dist/index.cjs               # Built bundle (esbuild, single CJS file) — shipped to npm
+├── tests/                       # Vitest tests for the server + connector (connect.*.test.ts)
+└── wordpress-plugin/gk-block-mcp/
+    ├── gk-block-mcp.php          # Bootstrap: autoloader, rest_api_init wiring, admin wiring, CLI
+    ├── uninstall.php             # Full data + agent teardown (multisite-aware)
+    ├── readme.txt                # Canonical changelog + Upgrade Notice (WordPress plugin readme)
+    ├── phpcs.xml.dist            # WordPress-Extra + WordPress-Docs + PHPCompatibilityWP (testVersion 7.4-)
+    ├── phpstan.neon.dist         # PHPStan level 5, analyze-as-PHP-8.2, WP stubs
+    ├── phpstan-bootstrap.php     # Placeholder constants for static analysis
+    ├── includes/                 # 22 classes (see Core Classes)
+    └── tests/                    # PHPUnit suite (SQLite drop-in) — see tests/AGENTS.md
 ```
 
 ## Architecture
 
 ### Two-Component Design
 
+```text
+AI client  ──stdio──▶  MCP server (TypeScript)  ──HTTPS Basic Auth──▶  WordPress plugin (PHP)
+                       src/index.ts                                     wordpress-plugin/gk-block-mcp/
+                       validates + enriches                             parses/serializes blocks,
+                                                                        manages revisions, enforces
+                                                                        preferences, owns the data
 ```
-AI Agent  ←→  MCP Server (TypeScript, stdio)  ←→  WordPress REST API (PHP plugin)
-              src/index.ts                          wordpress-plugin/gk-block-api/
-              Enriches responses with                Parses/serializes blocks, manages
-              natural-language guidance               revisions, enforces preferences
-```
 
-The MCP server is a thin orchestration layer. It validates inputs, delegates to the WordPress REST API, and enriches responses with AI-friendly annotations (tier groupings, legacy warnings, replacement suggestions). The heavy lifting — block parsing, serialization, safety checks, rate limiting, revision tracking — lives in the PHP plugin.
+The MCP server is a thin orchestration layer: it validates inputs, delegates to the REST API via `WordPressBlockClient` (`src/client.ts`), and annotates responses (`src/enrichers.ts`, `src/preferences.ts`, `src/error-translator.ts`). All heavy lifting — block parsing, serialization, mutation, safety checks, rate limiting, revision tracking — lives in the PHP plugin.
 
-### WordPress Plugin: Initialization Flow
+### Plugin initialization flow
 
-Defined in `gk-block-api.php` (lines 54-76). On `rest_api_init`:
+`gk-block-mcp.php` registers `spl_autoload_register` mapping `GravityKit\BlockMCP\Some_Class` → `includes/class-some-class.php`. Three wiring points:
 
-1. `Preferences` — loads namespace scores and replacement map from `wp_options`
-2. `Block_Inventory` — cached site-wide block + pattern inventory (1-hour transient)
-3. `Block_Registry(Preferences, Block_Inventory)` — enriched block type discovery
-4. `Pattern_Manager(Preferences)` — pattern listing with scoring
-5. `Block_Safety` — static block markup staleness checker
-6. `Block_CRUD(Preferences, Block_Safety)` — all read/write operations
-7. `REST_Controller(Block_Registry, Pattern_Manager, Block_CRUD, Block_Inventory, Block_Mutator, Post_Manager, Term_Manager, Media_Manager, Preferences)` — registers routes
+1. **`init_rest_api()` on `rest_api_init`** (`gk-block-mcp.php:129`) — builds the service graph and registers routes: `Preferences → Block_Registry(+Block_Inventory)`, `Pattern_Manager`, `Block_CRUD(Preferences, Block_Safety, HTML_Transformer, Block_Inventory)`, then `REST_Controller(...)->register_routes()`, then `Yoast_Bridge->register_routes()`, then **`( new Connect_Page() )->register_rest_routes()`** (the connector credential-exchange route).
+2. **Admin wiring on `plugins_loaded`** (`gk-block-mcp.php:179`) — `Settings_Page` (needs `admin_menu`, which fires before `admin_init`) and `Connect_Page` register their admin-post handlers + settings UI.
+3. **WP-CLI bootstrap** — `rest_api_init` doesn't fire under `wp`, so CLI commands wire the graph explicitly.
 
-All classes use the `GravityKit\BlockAPI` namespace with PSR-4-style autoloading via `spl_autoload_register` (class name → `includes/class-{name}.php`).
+All service objects are constructed inside these hooks — no global singletons.
 
-### WordPress Plugin: REST Endpoints
+### Connect / onboarding flow (the credential handshake)
 
-All routes are under `gk-block-api/v1`. Read endpoints require `edit_posts`; write endpoints require `edit_post` on the specific post.
+The headline 2.0 feature. Goal: connect an AI client in a few clicks, **without the user ever copy-pasting an Application Password**, and with the AI confined to a dedicated least-privilege account.
 
-| Method | Route | Handler | Purpose |
-|--------|-------|---------|---------|
-| GET | `/block-types` | `get_block_types` | List all registered block types with preference scores |
-| GET | `/block-types/{namespace}` | `get_block_types_by_namespace` | Filter block types by namespace |
-| GET | `/patterns` | `get_patterns` | List patterns with scoring, filtering, sorting |
-| GET | `/patterns/search?q={term}` | `search_patterns` | Search patterns by name/keyword |
-| GET | `/patterns/{id}` | `get_pattern` | Single pattern with parsed block content |
-| GET | `/site-usage` | `get_site_usage` | Block/pattern usage analytics |
-| GET | `/resolve?url={path}` | `resolve_url` | URL path → post ID resolver |
-| GET | `/posts/{id}/blocks` | `get_post_blocks` | Page blocks as structured JSON |
-| PATCH | `/posts/{id}/blocks/{index}` | `update_block` | Update single block attrs/HTML |
-| POST | `/posts/{id}/blocks/batch-update` | `update_blocks_batch` | Apply N independent updates atomically in ONE revision |
-| POST | `/posts/{id}/blocks` | `insert_blocks` | Insert blocks at position |
-| DELETE | `/posts/{id}/blocks/{index}` | `delete_block` | Remove block(s) |
-| PUT | `/posts/{id}/blocks` | `replace_all_blocks` | Full page rewrite |
-| POST | `/posts/{id}/insert-pattern` | `insert_pattern` | Insert pattern (synced or inline) |
-| POST | `/posts/{id}/mutate` | `mutate_block_tree` | Path-based structural mutations |
-| POST | `/posts` | `create_post` | (v1.2) Create a new post or page |
-| PATCH | `/posts/{id}` | `update_post` | (v1.2) Update post metadata, status, or terms |
-| GET | `/terms` | `list_terms` | (v1.2) List taxonomy terms |
-| POST | `/media` | `upload_media` | (v1.2) Upload to media library (multipart, URL sideload, or base64) |
+**Actors:**
+- **`Agent_Provisioner`** (`class-agent-provisioner.php`) — ensures a dedicated WP user `block-mcp` (`LOGIN`), with a custom role `block_mcp_agent` (`ROLE`). The role's caps come through the `gk/block-mcp/agent/caps` filter: `read`, `edit_posts`, `edit_others_posts`, `edit_published_posts`, `publish_posts`, the `*_pages` equivalents, plus `upload_files`. **Deliberately NO `delete_*`, NO `unfiltered_html`, NO `manage_options`.** An `authenticate` filter blocks interactive sign-in (fail-closed). The role lives in `wp_user_roles` so it survives plugin deactivation. `gk/block-mcp/agent/role` lets an operator manage their own role slug.
+- **`App_Password_Issuer`** (`class-app-password-issuer.php`) — mints an Application Password on a target user via core `WP_Application_Passwords`. The one-time plaintext is surfaced to the caller exactly once and never persisted in the clear.
+- **`Connections`** (`class-connections.php`) — lists/revokes Block-MCP-prefixed Application Passwords (`NAME_PREFIX = 'Block MCP'`) and stores the facts core can't: which account holds each connection and who approved it (`META_OPTION = gk_block_api_connection_meta`, a **network** option keyed by app-password UUID → `{ user_id, created_by, created_at }`).
+- **`MCPB_Generator`** (`class-mcpb-generator.php`) — builds a Claude Desktop `.mcpb` bundle (manifest_version `0.3`) whose `user_config` is pre-filled with the issued credential. Each `user_config` option MUST carry `type` + `title` + `description` (all three required by the v0.3 schema).
+- **`Connect_Page`** (`class-connect-page.php`, the largest class) — the onboarding UI + four admin-post handlers (`ACTION_CONNECT`, `ACTION_AUTHORIZE`, `ACTION_REVOKE`, `ACTION_EXCHANGE` + its `_nopriv` variant) + the REST exchange route.
 
-GET `/posts/{id}/blocks` supports query params:
-- `fields` — comma-separated field filter (e.g., `path,name,attributes`)
-- `search` — text search in innerHTML
-- `block_name` — filter by block name
-- `render` — include rendered output, expand shortcodes, resolve synced patterns
+**The browser-Approve handshake (Claude Code / Cursor / ChatGPT / "configure myself"):**
+1. The connector (`src/connect.ts`) starts a loopback HTTP server on `127.0.0.1:<port>`, opens the admin authorize URL (`?gk_authorize=1&callback=…&state=…&client=…`), and waits.
+2. `Connect_Page::render_page()` detects `?gk_authorize` and renders a **focused consent screen** (no settings tabs/chrome) via `render_authorize_screen()`. The admin picks an **identity** (below) and clicks Approve.
+3. `handle_authorize()` (admin-post `ACTION_AUTHORIZE`, nonce + `manage_options`) validates the callback resolves to a loopback address (`is_loopback_callback()` — refuses `127.0.0.1.evil.com`, `localhost@evil.com`, missing port, userinfo), calls `provision_credentials($client, $identity)`, then stores the credential under a **single-use, short-TTL code** and redirects only the *code* (never the password) to the loopback callback.
+4. The connector POSTs the code to the REST route **`POST /wp-json/gk-block-api/v1/connect/exchange`** (`permission_callback => __return_true`; security is the single-use code, not auth) via the permalink-independent `?rest_route=` form. `handle_exchange()` redeems it once and returns `{ success, data: { site, user, password } }`.
+5. The connector writes `WORDPRESS_URL` / `WORDPRESS_USER` / `WORDPRESS_APP_PASSWORD` into the client's MCP config (`creds.user` — so own-account connections write the human's login).
 
-### WordPress Plugin: Core Classes
+**The .mcpb path (Claude Desktop):** one-click download. `handle_connect()` (admin-post `ACTION_CONNECT`) → `provision_credentials()` → `MCPB_Generator::build()` streams the bundle with the credential pre-filled; the user double-clicks to install.
 
-**`Block_CRUD`** (`class-block-crud.php`, ~1184 lines) — the block-level engine.
-- `get_blocks($post_id, $render)` — parses `post_content`, formats with path tracking
-- `update_block()` — merges attributes and/or replaces innerHTML at flat index
-- `update_blocks_batch()` — applies N independent updates atomically (ONE revision); validates all-or-nothing, server-side cap of `Block_CRUD::MAX_BATCH_SIZE` (50)
-- `insert_blocks()` — validates block names against registry, checks preference tier, splices into content
-- `delete_blocks()` — removes consecutive blocks, warns on synced pattern removal
-- `replace_all_blocks()` — full page rewrite with block validation
-- `insert_pattern()` — synced (core/block ref) or inline pattern insertion
-- `mutate_block_tree()` — 9 path-based operations (see Key Concepts)
-- `auto_transform_html()` — automatically updates innerHTML when attributes change (see Key Concepts)
-- `save_post_content()` — saves via `wp_update_post`, tracks before/after revision IDs
-- Rate limiting: 10 writes/min/post, 2 full rewrites/min/post (transient-based)
+**Identity model (two options on the Approve screen):**
 
-**`Preferences`** (`class-preferences.php`) — scoring engine.
-- Stored in `wp_options` as `gk_block_api_preferences`
-- `get_block_score($name)` → `{ score, tier, namespace_policy }`
-- `get_pattern_score($input)` → `{ score, tier, reasons[] }`
-- `get_replacement($name)` → replacement block name or null
-- Score-to-tier mapping: `>=80` preferred, `>=50` acceptable, `>=10` avoid, `<10` legacy
+| Option | Credential minted on | Caps | Byline (`post_author` on created posts) |
+|---|---|---|---|
+| `agent` *(default, recommended)* | the dedicated `block-mcp` user | least-privilege | "Block MCP" |
+| `self` ("Your own account") | **the approving user** | their full caps | the approving human |
 
-**`Block_Safety`** (`class-block-safety.php`) — mutation guard.
-- `check_mutation($block_name, $changed_attrs, $has_new_html)` → warning array
-- Editor-only attrs (always safe): `lock`, `templateLock`, `allowedBlocks`, `metadata`, `className`, `anchor`, `align`, `fontFamily`, `fontSize`
-- Dynamic blocks are always safe (render via PHP at runtime)
-- Only warns on static blocks when render-affecting attrs change without innerHTML
+`provision_credentials($client, $identity)` validates the identity (`array( 'agent', 'self' )`, falling back to `agent`), chooses the target user, mints the password, and records the choice via `Connections::record_meta()`. There is **no byline subsystem** — `Connections::author_to_credit()` was removed and `Post_Manager::create_post()` no longer remaps `post_author` from connection meta; created content authors as the authenticating account. An explicit `author` argument on create still sets authorship (gated on the actor holding `edit_others_{type}`). Two related controls govern the high-risk `self` mode: the **`gk/block-mcp/identity/allow-self`** filter (default `true`) removes the "Your own account" option AND clamps any `self` request back to the agent when it returns false; and a JS **confirm-gate** (an acknowledgment checkbox) disables Approve until the user accepts that `self` mints an Application Password with their account's full access (the server validates the identity independently). The connections list spans both hosts (`Connections::list()` + `list_self_hosted()`); revoke resolves the host from meta (`revoke_by_uuid()`); uninstall revokes own-account credentials at the source (`purge_all_recorded()`).
 
-**`Block_Registry`** (`class-block-registry.php`) — discovery with enrichment.
-- Wraps `WP_Block_Type_Registry`, adds preference scores, usage counts, replacement info
-- Supports namespace, category, and preferred_only filtering
+**Credential at rest:** the single-use exchange code and paste-mode password are sealed (AES-256-GCM, HKDF key from `wp_salt('auth')`) and stored as non-autoloaded `wp_options` (`gk_block_api_xchg_*`, `gk_block_api_paste_pw_*`) with embedded `expires_at` + opportunistic GC (`gk_block_api_cred_gc_at`). Seal mode is filterable via `gk/block-mcp/credential/seal-mode`. The minted password must NEVER reach JS, URLs, browser history, or be POSTed off-origin.
 
-**`Pattern_Manager`** (`class-pattern-manager.php`) — pattern intelligence.
-- Queries both synced patterns (`wp_block` CPT) and registered patterns (`WP_Block_Patterns_Registry`)
-- Scores patterns by: recency bonus, reference count multiplier, legacy block penalty
-- Counts cross-site pattern references via `wpdb` query
+### Block CRUD engine
 
-**`Block_Inventory`** (`class-block-inventory.php`) — site-wide block + pattern inventory.
-- Scans all published content, counts blocks per post, tracks namespace totals
-- Detects legacy patterns (synced patterns containing avoid/legacy blocks)
-- Cached in transient `gk_block_inventory` (1-hour TTL)
+`Block_CRUD` (`class-block-crud.php`) is a **facade** over three engines built in its ctor:
+- **`Block_Reader`** — `get_blocks()` / `format_blocks()`: parse `post_content`, format with flat index + nested path, optional render mode, sourced-attribute extraction.
+- **`Block_Writer`** — `update_block(s)`, `insert_blocks`, `delete_blocks`, `replace_all_blocks`, `insert_pattern`, `build_block_from_def`, `save_post_content` (revision tracking), rate limiting.
+- **`Block_Mutator`** (`class-block-mutator.php`) — the 9-operation path-based mutation engine (`update-attrs`, `update-html`, `replace-block`, `remove-block`, `wrap-in-group`, `unwrap-group`, `insert-child`, `duplicate`, `move`).
 
-**`Post_Manager`** (`class-post-manager.php`, v1.2, ~696 lines) — post lifecycle.
-- `create_post( $args )` — create a new post or page. Validates: title required, post_type allow-list (overridable via `gk_block_api_post_types_allowlist` option), status enum (no `trash` on create), `future` status requires future `date`, parent must be hierarchical type and not self, terms must exist in their taxonomy, featured_media must be an image attachment.
-- `update_post( $post_id, $args )` — partial update. Routes status transitions through `wp_trash_post`/`wp_untrash_post` so trash hooks fire. Rejects `mixed_trash_payload` (status:trash + other fields). Uses `Block_CRUD::check_rate_limit` (10 writes/min/post bucket) — shared with the per-block write tools.
-- Block validation delegates to `Block_CRUD::validate_block_def()` — single source of truth for tier policy and replacement messaging.
+Supporting: `HTML_Transformer` (auto-transform innerHTML on attr change via `WP_HTML_Tag_Processor` + regex), `Block_Safety` (static-block staleness guard), `Block_Registry` / `Pattern_Manager` / `Block_Inventory` (discovery + scoring), `Preferences` (namespace scoring, replacement map). `Post_Manager` / `Term_Manager` / `Media_Manager` own post/term/media lifecycle (v1.2). `Instructions` + `Yoast_Bridge` are the instructions endpoint and the Yoast SEO REST bridge.
 
-**`Term_Manager`** (`class-term-manager.php`, v1.2, ~107 lines) — read-only term listing.
-- `list_terms( $args )` — wraps `get_terms()` + `wp_count_terms()`. Returns `{ taxonomy, total, page, per_page, terms[] }`. Per-page caps at 200.
+### Data model & storage
 
-**`Media_Manager`** (`class-media-manager.php`, v1.2, ~404 lines) — media uploads.
-- Three input modes (mutually exclusive): multipart `file` field, URL sideload, base64 (with `filename`).
-- **SSRF guard** (`guard_ssrf`): URL host is DNS-resolved; reserved/private/link-local IPv4 ranges (RFC1918, 169.254/16 cloud metadata, 127/8 loopback, 0/8, 224/4 multicast) are rejected with `400 invalid_url` *before* `download_url()` runs. Block list is admin-extensible via the `gk_block_api_url_sideload_blocked_ranges` filter.
-- Size cap: URL sideload limited to `URL_DOWNLOAD_MAX_BYTES` (25 MB). Base64 size is checked twice — encoded length first (cheap), then decoded length — so memory consumption is bounded before any disk write.
-- MIME via `wp_check_filetype_and_ext`. Disallowed types rejected with `400 disallowed_mime`; tmp file is `@unlink`'d on every error path.
-- `download_url()` timeout reduced from default 300s to 10s.
+| What | Where | Notes |
+|---|---|---|
+| Block content | `post_content` (HTML block comments) | always round-tripped through `parse_blocks()`/`serialize_blocks()` |
+| Preferences | option `gk_block_api_preferences` | namespace scores, replacement map |
+| Post-type allow-list | option `gk_block_api_post_types_allowlist` | gates `create_post` |
+| Trash toggle | option `gk_block_api_allow_trash` ('0'/'1', default off) | gates `update_post(status:trash)` |
+| Media uploads switch | option `gk_block_api_uploads_enabled` ('0'/'1') | |
+| MCP instructions addendum | options `gk_block_api_instructions(_updated_at)` | served unauthenticated at handshake |
+| Storage-mode scan | options `gk_block_api_storage_modes(_last_run)` + `_manual` | dual-storage classification |
+| Agent user id | option `gk_block_api_agent_user_id` (autoload off) | persists across revokes |
+| Connection meta | **network** option `gk_block_api_connection_meta` | UUID → approver + byline + host |
+| Sealed credentials | options `gk_block_api_xchg_*`, `gk_block_api_paste_pw_*` + `gk_block_api_cred_gc_at` | single-use, TTL, sealed |
+| Inventory cache | transient `gk_block_inventory` | 1-hour TTL |
+| Rate limits | transients `gk_block_api_rate_{post_id}`, `gk_block_api_instr_rl_{ip}` | sliding window |
 
-### MCP Server: Tool Architecture
+### REST API
 
-The server (`src/index.ts`) aggregates tools from five modules, each exporting a `*_TOOLS` array and a `handle*Tool()` dispatcher:
+All under `gk-block-api/v1`. Reads require `edit_posts`; per-block writes require `edit_post` on the post. Highlights: `/posts/{id}/blocks` (GET/POST/PUT/DELETE/PATCH + `/batch-update`, `/mutate`, `/insert-pattern`), `/posts` + `/posts/{id}` (create/update), `/block-types`, `/patterns(/search|/{id})`, `/site-usage`, `/resolve`, `/terms`, `/media`, and the unauthenticated **`POST /connect/exchange`** (single-use-code redemption — the only `__return_true` route, by design). See `wordpress-plugin/AGENTS.md` for the full route table.
 
-| Module | Tools | Category |
-|--------|-------|----------|
-| `discovery.ts` | `list_block_types`, `list_patterns`, `get_pattern`, `get_site_usage` | Read-only exploration |
-| `read.ts` | `get_page_blocks` | Page content reading |
-| `write.ts` | `update_block`, `update_blocks`, `insert_blocks`, `delete_block`, `replace_block_range`, `rewrite_post_blocks`, `revert_to_revision` | Index-based CRUD |
-| `mutate.ts` | `edit_block_tree` | Path-based structural operations |
-| `patterns.ts` | `insert_pattern` | Pattern insertion |
-| `posts.ts` (v1.2) | `create_post`, `update_post` | Post lifecycle |
-| `terms.ts` (v1.2) | `list_terms` | Taxonomy term discovery |
-| `media.ts` (v1.2) | `upload_media` | Media library upload |
-| `yoast.ts` (v1.2) | `yoast_get_seo`, `yoast_update_seo`, `yoast_bulk_update_seo` | Yoast SEO metadata (separate REST namespace) |
+### MCP server tools
 
-Tool routing in `index.ts` uses `Set<string>` lookups per category (lines 92-104). Each handler:
-1. Validates and casts input arguments
-2. Calls `WordPressBlockClient` methods
-3. Enriches results via `preferences.ts` functions (`enrichBlockTypes`, `enrichBlockList`, `enrichPatternList`)
-4. Returns JSON stringified in MCP text content format
-
-The server also exposes a **resource** (`block-mcp://block-preferences`) containing block preference rules as a system prompt context.
-
-**Client** (`src/client.ts`) — typed HTTP wrapper using axios.
-- Base URL: `{WORDPRESS_URL}/wp-json/gk-block-api/v1`
-- Auth: Basic Auth with Application Password (base64-encoded)
-- 30-second timeout, meaningful error formatting for connection/timeout/HTTP errors
-- Response interceptor converts `AxiosError` into human-readable messages
-
-**Preference Enrichment** (`src/preferences.ts`) — client-side annotation layer.
-- `enrichBlockList(blocks)` — scans blocks for legacy namespaces, returns warnings with suggested replacements
-- `enrichPatternList(patterns)` — sorts by score, groups into recommended/avoid tiers, generates summary
-- `enrichBlockTypes(types)` — groups by tier (preferred/standard/acceptable/avoid/legacy), generates guidance text
-- `formatPreferenceWarning(warning)` — single-line warning message
-- Mirrors the PHP replacement map (lines 22-43) for client-side lookups
-- Legacy namespace set: `stackable`, `ugb`, `jetpack`
-
-**Data Flow** (example: `get_page_blocks`):
-1. Agent calls `get_page_blocks({ post_id: 123 })`
-2. `handleReadTool()` validates args, calls `client.getPageBlocks(123)`
-3. Client sends `GET /wp-json/gk-block-api/v1/posts/123/blocks`
-4. PHP plugin: `Block_CRUD::get_blocks()` → `parse_blocks()` → `format_blocks_recursive()`
-5. REST response returns structured JSON with index, path, name, attributes, innerHTML
-6. MCP server: `enrichBlockList()` adds legacy warnings and summary
-7. Agent receives blocks + warnings + natural-language summary
+`src/index.ts` aggregates `*_TOOLS` arrays from `src/tools/*.ts` and routes via `Set<string>` lookups: `discovery` (list/get block types, patterns, site usage), `read` (get_page_blocks), `write` (update/insert/delete/replace/rewrite/revert), `mutate` (edit_block_tree), `patterns` (insert_pattern), `posts` (create/update_post), `terms` (list_terms), `media` (upload_media), `yoast` (get/update/bulk_update SEO). Each handler validates args, calls a `WordPressBlockClient` method, enriches, and returns MCP text content.
 
 ## Conventions
 
-### PHP (WordPress Plugin)
+### File & class naming
+- PHP: `class-{lowercased-underscored-name}.php` for a class in `GravityKit\BlockMCP`. Service classes return `WP_Error`; `REST_Controller` wraps exceptions via `handle_error()`.
+- TS: ESM source, `.js` import suffixes, esbuild → single CJS bundle (`dist/index.cjs`). No `dotenv` (breaks the esbuild ESM→CJS bundle; env comes from the parent process).
 
-- **Namespace**: `GravityKit\BlockAPI`
-- **Autoloading**: `class-{lowercased-underscored-name}.php` convention
-- **Error handling**: Return `\WP_Error` from service classes; `REST_Controller` wraps exceptions via `handle_error()`
-- **Sanitization**: `sanitize_text_field()` for strings, `absint()` for IDs, `wp_kses_post()` for innerHTML
-- **Rate limiting**: Transient-based per-post (`gk_block_api_rate_{post_id}`), sliding 60-second window
-- **Revisions**: Every write operation tracks `before_revision_id` and `revision_id`
-- **Permissions**: Read = `edit_posts` capability; Write = `edit_post` on specific post
-- **Text domain**: `gk-block-api`
+### Hook / filter naming
+Custom **hooks** follow the GravityKit slash convention `gk/block-mcp/{domain}/{leaf}` (e.g. `gk/block-mcp/agent/caps`, `gk/block-mcp/media/sideload-blocked-ranges`). **Option keys, constants, transients, and other global identifiers keep the `gk_block_api_*` prefix** — only `apply_filters`/`do_action`/`add_filter` hook *names* use the slash form. `WordPress.NamingConventions.PrefixAllGlobals` allows `gk_block_api`, `GK_BLOCK_API`, `GravityKit\BlockMCP`, plus the **hook-only** prefix `gk/block-mcp` (`gk/block-mcp` isn't a valid PHP identifier, so `InvalidPrefixPassed` is excluded and it's used only as a hook prefix). `ValidHookName` adds `/` and `-` as word delimiters so the slash/dash names don't trip the all-underscore rule (see `phpcs.xml.dist`). Key filters: `gk/block-mcp/agent/caps`, `gk/block-mcp/agent/role`, `gk/block-mcp/identity/allow-self`, `gk/block-mcp/post/allow-trash`, `gk/block-mcp/credential/seal-mode`, `gk/block-mcp/mcpb/manifest`, `gk/block-mcp/media/sideload-blocked-ranges`, `gk/block-mcp/media/uploads-enabled`, `gk/block-mcp/agent/remove-on-uninstall`. The one custom **action** is `gk/block-mcp/block/refs-persisted`; otherwise the plugin relies on core extension points (`rest_api_init`, `admin_post_*`, `wp_kses_post`, `parse_blocks`/`serialize_blocks`, `wp_update_post`).
 
-### TypeScript (MCP Server)
+### Code style
+- **Assign checks to named variables before the conditional** — don't inline function calls / compound expressions in `if`/`while`/`?:`. Exception: short-circuit guards where ordering is load-bearing (a null/`isset` guard before a dereference stays inline).
+- `sanitize_text_field()` for strings, `absint()` for IDs, `wp_kses_post()` for innerHTML on every write path.
+- Boolean settings stored as the strings `'0'`/`'1'` (a hidden `'0'` input pairs with the `'1'` checkbox) — `update_option()` can't reliably persist literal `false` against a missing option. Normalize via `Settings_Page::normalize_checkbox_option()`.
+- **Don't use `wp_generate_password()` as a random seed** (filterable; not a CSPRNG). Use `random_bytes()` / `wp_generate_uuid4()` / `wp_hash($seed, 'nonce')`.
 
-- **Module system**: ESM source (`"type": "module"` in package.json), esbuild bundles to CJS (`dist/index.cjs`)
-- **Import extensions**: All imports use `.js` suffix (TypeScript with ESM resolution)
-- **Build tool**: esbuild (not tsc) — single-file bundle, no separate declaration emit at build time
-- **No dotenv**: Environment variables passed by parent process; dotenv breaks esbuild ESM bundles
-- **Error format**: `{ error: true, message, statusCode, tool }` with `isError: true` in MCP response
-- **Type safety**: Strict mode, all API responses fully typed in `types.ts`
+### Comments & docblocks are public artifacts
+Write them as standalone documentation of what the code does **today** — never as a journal of how it got there. No review-tool attributions, no `docs/specs/…` load-bearing pointers, no Linear/issue numbers, no "future SaaS revision will…" speculation, no internal scale assumptions ("≤ a few hundred posts"). Three tests before writing a comment: would it belong in a PR/ticket/postmortem? does it describe history or speculate about future architecture? does it require knowing an off-tree artifact to parse? If yes — rewrite or move it. Document hard contracts, non-obvious WHY, and present-tense behaviour.
 
-### Comments and docblocks
+### Public-facing language
+Don't name specific third-party block namespaces as "legacy" in comments, error messages, REST responses, or changelog text — the legacy tier is site-configurable via `Preferences`. Use generic phrasing ("the namespace is configured as legacy"). Test *fixtures* may use a concrete namespace, but resolve it from `Preferences::get_defaults()` at runtime rather than hardcoding.
 
-Code comments, docblocks, and commit messages are **public artifacts**. They must read as standalone documentation of what the code does today — never as a journal of how it got there.
-
-#### Internal-process references
-
-Don't reference internal plans, specs, tickets, or review processes from inside source files:
-
-- No CodeRabbit / review-tool attributions ("review found", "as flagged by …"). Apply the fix; write the comment from the perspective of the code's current behaviour.
-- No `docs/specs/…` path pointers as the load-bearing reason a piece of code exists. The code is the source of truth — if a comment only makes sense once you've opened an off-tree spec, the comment is wrong. (It's fine to *cite* a spec for the curious; it's not fine to require it for comprehension.)
-- No Linear / GitHub-issue numbers in source (`# fixes ABC-123`). Belong in PR descriptions and commit trailers, not in source.
-- No "TODO(<initiative>-followup)" tags referencing internal initiative names. Plain `TODO:` is fine when the gap itself is described concretely; an initiative-name-only TODO is noise.
-- No "future SaaS revision will…" or "when X lands we'll switch on…" speculation. File a ticket; don't seed a code comment that rots into a stale promise.
-
-| Avoid | Prefer |
-|---|---|
-| `// Pre-fix, find_posts ran without perm:'readable' …` | `// perm:'readable' pushes the cap filter into posts_where_paged.` |
-| `// Per spec section 3.3 — only assign refs when persist_refs=true` | `// Only persist refs when persist_refs=true; otherwise refs live in-memory only.` |
-| `// TODO(planB-followup): test harness fix needed` | `// TODO: form posts from about:blank end up at wp-login.php; need a different submit path.` |
-| `// CodeRabbit flagged: secrets in job-level if invalid` | *(delete; the workflow file's structure is the documentation)* |
-
-#### Engineering planning, scale, and architecture speculation
-
-Source files are not the place for capacity planning or future-architecture suggestions:
-
-- **Internal scale assumptions.** No "≤ a few hundred posts per site", "we expect <50 blocks per page", "typical install has fewer than 10 patterns". Load-bearing numbers belong in benchmarks or capacity-planning docs; non-load-bearing ones don't belong anywhere.
-- **Future-architecture suggestions.** No "promote pattern_refs to a custom table later", "switch the inventory transient to options when sites scale", "v2 should do X". File a ticket; plans evolve cleanly there and rot in source.
-- **Speculative thresholds.** "If we ever exceed N…", "when this becomes a bottleneck…" — same problem. Measure and act, or file a ticket.
-
-#### What to write instead
-
-1. **Describe behaviour in the present tense.** "Coalesces same-block writes inside a single revision," not "we used to write a revision per call but now we batch."
-2. **Document hard contracts callers MUST honor.** "Each block name must be registered with `WP_Block_Type_Registry::is_registered` before insertion." "innerContent null positions must be preserved across mutations." "Not atomic — last write wins on the per-post rate-limit transient."
-3. **Document non-obvious WHY when behaviour is surprising.** If `is_post_readable` cap-elevates password-protected posts to `edit_post`, the one-line "passwords are cookie-checked, not cap-checked, so we require a stronger cap for that branch" earns its keep. The reader's question is "why does this look stronger than needed?"; the comment answers it without requiring an off-tree doc.
-
-Three quick tests before writing any comment or docblock — if any answer is yes, rewrite or move it:
-
-- Would this be a sentence in a Linear ticket / PR description / postmortem? Put it there instead.
-- Does it describe history ("pre-fix", "we used to") or speculate about future architecture ("if we ever", "promote to X later")? Git blame handles history; the issue tracker handles plans.
-- Does it require the reader to know about an internal artifact (a spec path, a review tool's flag, an initiative codename) to make sense? Rewrite from the code's standpoint.
-
-## Key Concepts
-
-### Block Paths
-
-Blocks are addressed two ways:
-
-1. **Flat index** — sequential counter across all blocks (skipping empty/whitespace). Used by `update_block`, `insert_blocks`, `delete_block` (the write tools).
-2. **Path** — integer array describing position in the nested tree. `[0, 2, 1]` means "top-level block 0 → innerBlock 2 → innerBlock 1". Used by `edit_block_tree`.
-
-Both are returned by `get_page_blocks`. The `path` field uses raw `parse_blocks()` indices (preserving whitespace-only block positions), while `index` is a sequential counter that skips empty blocks.
-
-The mutate endpoint supports nine operations:
-
-| Operation | Required Fields | Effect |
-|-----------|----------------|--------|
-| `update-attrs` | `attributes` | Merge attributes; auto-transform innerHTML if possible |
-| `update-html` | `innerHTML` | Replace innerHTML; preserve innerBlock placeholders |
-| `replace-block` | `block` | Swap entire block at path |
-| `remove-block` | — | Delete block, re-index siblings |
-| `wrap-in-group` | (optional `wrapper`) | Wrap block in core/group or custom container |
-| `unwrap-group` | — | Promote innerBlocks to parent level |
-| `insert-child` | `block`, (optional `position`) | Add child to container block |
-| `duplicate` | — | Deep-clone block, insert after original |
-| `move` | `before` or `destination`, (optional `count`) | Relocate block(s) with pre-move index adjustment |
-
-### Preference Scoring & Tiers
-
-Namespace-based scores (from `Preferences::get_defaults()`, `class-preferences.php` lines 46-59):
-
-| Namespace | Score | Tier | Policy |
-|-----------|-------|------|--------|
-| `filter` (theme) | 100 | preferred | always_prefer |
-| `core` | 90 | preferred | always_prefer |
-| `gravityforms`, `gk-*` | 80 | preferred | always_prefer |
-| `outermost` | 60 | acceptable | use_if_needed |
-| `kevinbatdorf` | 50 | acceptable | use_if_needed |
-| `stackable` | 10 | avoid | migrate_away |
-| `ugb`, `jetpack` | 0 | legacy | never_use |
-| Unknown | 30 | acceptable | — |
-
-**Enforcement**:
-- `legacy` blocks are **hard-rejected** on insert/replace (HTTP 400)
-- `avoid` blocks generate warnings but are allowed
-- `preferred` and `acceptable` pass silently
-
-Pattern scoring (`class-preferences.php` lines 199-246) combines:
-- Recency bonus: 2026 → +50, 2025 → +30, 2024 → +10
-- Reference multiplier: refs x 5
-- Legacy penalty: -100 if pattern contains legacy blocks; +20 bonus if clean
-
-### Static Block Safety
-
-When `edit_block_tree` runs `update-attrs` on a static block (no PHP render callback), `Block_Safety::check_mutation()` checks whether the changed attributes affect rendered markup. If they do and no new innerHTML is provided, a `static_markup_stale_risk` warning is returned.
-
-**Editor-only attributes** (never affect innerHTML): `lock`, `templateLock`, `allowedBlocks`, `metadata`, `className`, `anchor`, `align`, `fontFamily`, `fontSize`.
-
-Dynamic blocks (those with `is_dynamic() === true` or unregistered blocks) skip this check entirely.
-
-### Auto-Transform
-
-`Block_CRUD::auto_transform_html()` (`class-block-crud.php`, lines 1392-1608) automatically updates innerHTML when attribute changes imply structural HTML changes. This prevents the static block staleness warning for known patterns.
-
-Four categories of transforms:
-
-1. **Tag name swaps** (regex — WP_HTML_Tag_Processor cannot change tag names):
-   - `core/list` + `ordered` → `<ul>` ↔ `<ol>`
-   - `core/heading` + `level` → `<h1>` through `<h6>`
-   - `core/group` + `tagName` → `<div>`, `<section>`, `<aside>`, etc.
-
-2. **HTML attribute transforms** (WP_HTML_Tag_Processor):
-   - `url` → `href`/`src` on links, images, media
-   - `src` → `src` on media elements
-   - `alt` → `alt` on images
-   - Boolean attributes: `autoplay`, `loop` on audio/video
-   - `core/details` + `showContent` → `open` attribute
-
-3. **CSS inline style transforms** (WP_HTML_Tag_Processor):
-   - `height`, `width` → inline style property replacement
-
-4. **Text content transforms** (regex):
-   - `core/quote`/`core/pullquote` + `citation` → `<cite>` inner text
-
-When auto-transform succeeds, it also updates `innerContent` (the array with null placeholders for innerBlocks) to match, preserving container block structure.
-
-### Render Mode
-
-GET `/posts/{id}/blocks?render=true` activates render mode in `format_blocks_recursive()`:
-- Dynamic blocks get `rendered_html` (full HTML) and `rendered_text` (plain text, max 500 chars)
-- Shortcodes in innerHTML are expanded via `do_shortcode()`
-- Synced pattern references (`core/block`) include the pattern's parsed block tree
-- Each block is tagged `dynamic: true/false`
-
-Post context is set up before rendering (`setup_postdata`) so shortcodes like `[filter_edd_version_number]` resolve correctly.
+### Version annotations
+`@since {version}` for released members; update `@since` when adding members. New connect/identity code uses `@since 2.1.0` as a placeholder until the release version is settled.
 
 ## Extension Patterns
 
-### Adding a New REST Endpoint
+### Add a REST endpoint
+1. `register_rest_route( self::NAMESPACE, '/my-endpoint', [...] )` in `REST_Controller::register_routes()`.
+2. Add the handler (try/catch → `handle_error()`). Use `check_permissions()` (read) or `check_edit_permissions()` + `check_post_edit_permission($id)` (write).
+3. Delegate to a service class; add the client method + types to `src/client.ts` / `src/types.ts`.
 
-1. Register the route in `REST_Controller::register_routes()` (`class-rest-controller.php`):
+### Add an MCP tool
+1. Add the tool def to the right `*_TOOLS` array in `src/tools/*.ts` (`name`, `description`, `inputSchema`).
+2. Add the `case` to the module's `handle*Tool()`; call a `WordPressBlockClient` method; enrich.
+3. `npm run build`.
 
-```php
-register_rest_route(
-    self::NAMESPACE,
-    '/my-endpoint',
-    array(
-        'methods'             => \WP_REST_Server::READABLE,
-        'callback'            => array( $this, 'my_handler' ),
-        'permission_callback' => array( $this, 'check_permissions' ),
-        'args'                => array( /* schema */ ),
-    )
-);
-```
+### Add a mutation operation
+Add to the `MutationOp` union (`src/types.ts`), the `enum` in `REST_Controller` + the `edit_block_tree` `inputSchema` + `VALID_OPS` (`src/tools/mutate.ts`), and a `case` in `Block_Mutator::mutate()`. Maintain the `innerContent` null-placeholder invariant when child count changes.
 
-2. Add the handler method to `REST_Controller` following the try/catch + `handle_error()` pattern
-3. Use `check_permissions()` for read, `check_edit_permissions()` + `check_post_edit_permission($post_id)` for write
-4. Delegate to the appropriate service class (Block_CRUD, Pattern_Manager, etc.)
+### Add an auto-transform
+Add a branch to `HTML_Transformer::auto_transform_html()` — tag swaps use regex (`WP_HTML_Tag_Processor` can't rename tags); attribute/style transforms use the processor (never pre-escape values); return `null` when nothing applies (so the safety warning fires).
 
-### Adding a New MCP Tool
-
-1. Add the tool definition to the appropriate `*_TOOLS` array in `src/tools/*.ts`:
-
-```typescript
-{
-  name: 'my_tool',
-  description: 'Clear description of what this tool does for an AI agent.',
-  inputSchema: {
-    type: 'object' as const,
-    properties: {
-      post_id: { type: 'number', description: 'WordPress post or page ID.' },
-    },
-    required: ['post_id'],
-  },
-}
-```
-
-2. Add the case to the corresponding `handle*Tool()` switch
-3. If it calls a new REST endpoint, add the client method to `src/client.ts` with full types
-4. Add response types to `src/types.ts`
-5. Rebuild: `npm run build`
-
-### Adding a New Mutation Operation
-
-1. Add the op name to the `MutationOp` union type in `src/types.ts` (line 279)
-2. Add validation fields to `MutationRequest` interface in `src/types.ts` (line 291)
-3. Add the `case` in `Block_CRUD::mutate_block_tree()` (`class-block-crud.php`, around line 801):
-
-```php
-case 'my-op':
-    // Validate params
-    // Modify $parent[$target_index]
-    $result_block = array( 'name' => ..., 'attributes' => ... );
-    break;
-```
-
-4. Add the op to the `enum` in `REST_Controller::register_routes()` (`class-rest-controller.php`, line 401)
-5. Add client-side validation in `handleMutateTool()` (`src/tools/mutate.ts`)
-6. Add the op to `VALID_OPS` set in `src/tools/mutate.ts` (line 16)
-7. Add the op to the `enum` in the `edit_block_tree` tool's `inputSchema` (`src/tools/mutate.ts`, line 50)
-
-### Adding a New Auto-Transform
-
-In `Block_CRUD::auto_transform_html()` (`class-block-crud.php`, starting line 1392):
-
-1. Choose the category (tag swap, HTML attr, CSS style, or text content)
-2. Add a conditional block matching `$block_name` and `$changed_attrs`
-3. For HTML attributes: use `WP_HTML_Tag_Processor` (never escape values — it handles that internally)
-4. For tag swaps: use regex (the processor cannot change tag names)
-5. The method returns `null` if no transform applies (safety warning fires instead)
-
-Example — adding a transform for `core/button` link text:
-
-```php
-// In auto_transform_html(), under section 4 (text content transforms):
-if ( 'core/button' === $block_name && array_key_exists( 'text', $changed_attrs ) ) {
-    $new_text = wp_kses_post( $changed_attrs['text'] );
-    $html = preg_replace_callback(
-        '/(<a[^>]*>).*?(<\/a>)/is',
-        function ( $matches ) use ( $new_text ) {
-            return $matches[1] . $new_text . $matches[2];
-        },
-        $html
-    );
-}
-```
-
-## Hook Reference (WordPress)
-
-The plugin does not define custom action/filter hooks. It relies on these WordPress extension points:
-
-- **`rest_api_init`** — plugin initialization happens here (`gk-block-api.php`, line 54). All classes are instantiated on this hook (not on `plugins_loaded`) to ensure the REST infrastructure is ready.
-- **`wp_kses_post`** — all innerHTML passes through this filter on write operations for XSS sanitization
-- **`parse_blocks()` / `serialize_blocks()`** — WordPress core functions for block parsing/serialization. The plugin never manipulates raw `post_content` strings directly.
-- **`wp_update_post()`** — used for all saves, which triggers WordPress revision creation automatically
-- **`wp_get_post_revisions()`** — queried before and after saves to track revision IDs
-- **`WP_Block_Type_Registry::is_registered()`** — validates block names on all insert/replace operations
-- **`WP_HTML_Tag_Processor`** — used in `auto_transform_html()` for safe HTML attribute manipulation
-
-**Stored data**:
-- `wp_options` key `gk_block_api_preferences` — preference config (namespace scores, pattern scoring, replacement map)
-- Transient `gk_block_inventory` — cached site-wide block + pattern inventory (1-hour TTL)
-- Transient `gk_block_api_rate_{post_id}` — per-post rate limiting data (auto-expires)
+### Restrict / extend the agent
+Filter `gk/block-mcp/agent/caps` to add/remove capabilities (e.g. grant `delete_posts` to allow hard deletes), or `gk/block-mcp/agent/role` to manage your own role slug. Enabling **Move posts to trash** in Settings flips the option `gk_block_api_allow_trash` (also filterable via `gk/block-mcp/post/allow-trash`), which gates `Post_Manager::update_post(status:trash)` at the application layer (the agent has no `delete_*` cap, but `wp_trash_post()` doesn't check caps, so the toggle is the real gate).
 
 ## Development
 
-### Prerequisites
-
-- Node.js >= 20
-- npm
-- WordPress 6.0+ site with Application Passwords enabled
-- PHP 7.4+
-
-### Building the MCP Server
-
+### Setup & build
 ```bash
-npm run build     # One-shot build → dist/index.cjs
-npm run dev       # Watch mode (esbuild --watch)
+cd MCPs/block-mcp && npm install
+npm run build      # esbuild → dist/index.cjs (shipped to npm)
+npm run dev        # watch
+npm start          # node dist/index.cjs (stdio)
 ```
+Env: `WORDPRESS_URL`, `WORDPRESS_USER`, `WORDPRESS_APP_PASSWORD` (passed by the parent process). The plugin must be active on the target site.
 
-The build uses esbuild to create a single CJS bundle. TypeScript compilation (`tsc`) is available via tsconfig.json but is not used for the production build — esbuild handles both bundling and transpilation.
+### Testing
+- **Server/connector:** Vitest under `tests/` (`connect.test.ts`, `connect.security.test.ts`, `connect.runconnect.test.ts` exercise the loopback handshake with `fetch` stubbed — nothing leaves the machine).
+- **Plugin:** PHPUnit (`composer test`) on a SQLite drop-in. **Regression tests are mandatory** — every bug fix ships a test that FAILS pre-fix (reproduces the real symptom), passes post-fix, and has teeth (revert the fix → it goes red). Exercise the real mechanism (live `authenticate` chain / a real `WP_REST_Request`, not just a direct method call) and cover every facet (each cap/post-type, single-site AND multisite, API AND interactive). See `wordpress-plugin/gk-block-mcp/tests/AGENTS.md` and the `tests/Connect/Agent*Test.php` auth-chain pattern.
+- Local WP: gkclone (deploy = rsync the plugin to the synced plugins dir + `opcache_reset`).
 
-Build output is a single `dist/index.cjs` file (~50KB) with all dependencies bundled except `node_modules` externals. The `@modelcontextprotocol/sdk` and `axios` are bundled inline.
-
-**Why CJS output?** The MCP SDK's stdio transport uses `process.stdin`/`process.stdout` which work more reliably with CJS require chains than ESM dynamic imports in some Node.js configurations.
-
-### Testing Locally (gkclone)
-
-1. Start the gkclone local WordPress environment
-2. Symlink or copy the plugin: `wordpress-plugin/gk-block-api/` → gkclone's `wp-content/plugins/`
-3. Activate the plugin in WordPress admin
-4. Create an Application Password for a user with `edit_posts` capability
-5. Set env vars and run `npm start`
-
-### Deploying the Plugin
-
-Copy the `wordpress-plugin/gk-block-api/` directory to the target site's `wp-content/plugins/` and activate. No build step required for the PHP plugin — it is pure PHP with no Composer dependencies.
+### Static analysis (run before every commit)
+```bash
+composer lint      # phpcs: WordPress-Extra + WordPress-Docs + PHPCompatibilityWP (testVersion 7.4-)
+composer lint:fix  # phpcbf
+composer analyze   # PHPStan (level 5, analyze-as-PHP-8.2, WordPress stubs)
+```
+`composer lint` must finish with **0 errors / 0 warnings**; `composer analyze` must finish **[OK]**; `composer test` must finish **green** — at every commit. `phpcs.xml.dist` excludes `tests/`, `scripts/`, and `phpstan-bootstrap.php` (test/CLI/tooling code follows its own conventions; web-context sniffs don't apply). PHPStan config lives in `phpstan.neon.dist` + `phpstan-bootstrap.php` (placeholder constants); `WP_DEBUG`/`WP_DEBUG_LOG`/`WP_CLI` are marked `dynamicConstantNames` so config-constant guards aren't reported as always-true/false.
 
 ## Versioning & Releases
 
-The WordPress plugin (`wordpress-plugin/gk-block-api/`) and the MCP server (`package.json`) version independently. The plugin follows WordPress plugin conventions (`readme.txt` is the canonical changelog); the MCP server is just the bundle that talks to it.
+The plugin and MCP server version independently. The plugin follows WP plugin conventions (`readme.txt` is the canonical changelog).
 
-### Semver policy (plugin)
+**Semver (plugin):** MAJOR = breaking REST/tool changes; MINOR = additive endpoints/tools/fields/settings; PATCH = fixes/hardening/refactors/i18n/tests.
 
-- **MAJOR** (`x.0.0`) — breaking REST changes: removed endpoints, renamed routes, removed response fields, changed permission semantics, broken backwards compatibility on existing tool signatures. Bump only with a migration note.
-- **MINOR** (`x.y.0`) — new endpoints, new tools, new request/response fields, new shortcode-attr filters, new admin settings. Additive only — existing consumers must continue to work unchanged.
-- **PATCH** (`x.y.z`) — bug fixes, security patches, hardening, internal refactors, doc-only changes, test additions, i18n. No surface-area changes.
+**Every plugin version bump updates all five:**
+1. `gk-block-mcp.php` `* Version:` header
+2. `gk-block-mcp.php` `GK_BLOCK_MCP_VERSION` constant
+3. `readme.txt` `Stable tag:`
+4. `readme.txt` `== Upgrade Notice ==` (1–3 sentences, headline value, newest at top — this is what the WP update screen shows)
+5. `readme.txt` `== Changelog ==` (grouped `New`/`Improved`/`Fixed`/etc., newest at top)
 
-### Required updates on every plugin version bump
+**MCP server bump:** `package.json` `version` (+ optional readme mention if a TS change is user-observable).
 
-A version bump is not done until **all five** of these are updated to the new version:
-
-1. `wordpress-plugin/gk-block-api/gk-block-api.php` — `* Version:` plugin header
-2. `wordpress-plugin/gk-block-api/gk-block-api.php` — `GK_BLOCK_API_VERSION` constant
-3. `wordpress-plugin/gk-block-api/readme.txt` — `Stable tag:` line
-4. `wordpress-plugin/gk-block-api/readme.txt` — `== Upgrade Notice ==` section (one-paragraph summary, newest at top)
-5. `wordpress-plugin/gk-block-api/readme.txt` — `== Changelog ==` section (bulleted list of every notable change, grouped by `* New:` / `* Improved:` / `* Fixed:` / `* Deprecated:` / `* i18n:` / `* Tests:` / `* Doc:`, newest at top)
-
-The `Upgrade Notice` block is what WordPress.org shows to admins on the update screen — keep it scannable (1–3 sentences, headline value only). The `Changelog` block is the durable record — be specific.
-
-### Required updates on every MCP server version bump
-
-1. `package.json` — `"version"` field
-2. Optional: mention in the plugin's `readme.txt` Changelog if a server-side TS change is user-observable
-
-The MCP server version is informational; the plugin version is what site owners track.
-
-### Process
-
-1. Land feature/fix commits normally with descriptive messages.
-2. When ready to cut a release, in a single `chore(plugin): bump gk-block-api to X.Y.Z` commit:
-   - Update items 1–3 above
-   - Append the new `Upgrade Notice` and `Changelog` entries
-   - If the MCP server side also moved, bump `package.json` in the same commit
-3. Push.
-
-### Tagging the release
-
-Every plugin version bump gets a matching annotated git tag. Tags live on the merge commit on `main`; never on a feature branch tip.
-
-- **Format**: `v{plugin-version}` — e.g. `v1.7.0`. Match the plugin version, not the MCP server version. (When the MCP server bumps independently without a plugin bump, no tag — server versions are informational.)
-- **Annotated, not lightweight**: `git tag -a v1.7.0 -m "<release notes>"`. Lightweight tags don't carry a message and don't show up in `git show`.
-- **Tag message**: the same prose as the `readme.txt` `Upgrade Notice` for that version, plus a `Highlights:` bulleted list of the headline changes. Look at `git show v1.6.0` for the canonical shape.
-- **Push the tag explicitly**: `git push origin v1.7.0`. Bare `git push` does not push tags. Without this step the tag exists locally only and `gh release create` can't find it.
-- **When to tag**: after the version-bump commit has landed on `main` (via PR merge or direct push). Tagging on the feature branch and merging via squash strands the tag on a dead commit.
-- **GitHub release**: optional, but if you create one, attach it to the tag (`gh release create v1.7.0 --notes-file …` or via the UI). The marketplace pin / Composer installer reads the tag, not the release.
-
-### Backfilling missing entries
-
-If a version was bumped without a corresponding `readme.txt` entry (it happens — historically `1.4.1`, `1.4.2`, and `1.5.0` all shipped without changelog updates), audit the commits that landed between the previous bump and the version bump commit (`git log <prev-bump>..<this-bump> -- wordpress-plugin/gk-block-api/`) and write the missing entries. Keep the Upgrade Notice and Changelog sections in strict reverse-chronological order across all versions.
+**Tagging:** annotated tag `v{plugin-version}` on the merge commit on `main` (never a feature-branch tip), message = the Upgrade Notice + a `Highlights:` list, pushed explicitly (`git push origin v…`). On feature branches, the changelog header is `= develop =` until release.
 
 ## Gotchas
 
-- **Empty blocks in parse_blocks()**: WordPress includes whitespace-only blocks in `parse_blocks()` output. The plugin filters these (checks `blockName` is non-empty) for write operations but preserves raw indices for path-based addressing. The `index` field skips empties; the `path` field does not. This means `path: [2]` might address what appears to be the first block if indices 0 and 1 are whitespace.
-
-- **innerContent vs innerHTML**: `innerHTML` is the block's own HTML content. `innerContent` is an array where `null` entries are placeholders for innerBlocks positions. A container block's innerContent looks like `['<div class="wp-block-group">', null, null, '</div>']` — two nulls for two child blocks. When updating innerHTML on a container, `rebuild_inner_content()` (`class-block-crud.php`, line 1630) splits the new HTML at the first `>` to find the opening tag, preserves null positions, and appends the closing portion. Destroying this structure causes `serialize_blocks()` to lose child blocks.
-
-- **No dotenv in MCP server**: The entry point (`src/index.ts`, line 37) explicitly avoids `dotenv.config()` because it breaks esbuild ESM bundles via CJS dynamic `require('fs')`. Environment variables must be passed by the parent process.
-
-- **Rate limiting is per-post**: 10 writes/min and 2 full rewrites (PUT)/min per post, tracked via transients with key `gk_block_api_rate_{post_id}`. The limit resets on its own after 60 seconds. The sliding window uses timestamp arrays.
-
-- **Legacy blocks are hard-rejected**: Inserting a `legacy`-tier block (`ugb/*`, `jetpack/*`) returns HTTP 400 with error code `legacy_block`. `avoid`-tier blocks (`stackable/*`) generate warnings but succeed. This is enforced in `insert_blocks()`, `replace_all_blocks()`, `replace-block` mutation, and `insert-child` mutation.
-
-- **Registered patterns cannot be synced**: Only synced patterns (wp_block CPT with a post ID) can be inserted as `core/block` references. Registered patterns are always inlined — `synced` is forced to `false` in `insert_pattern()` (`class-block-crud.php`, line 616).
-
-- **WP_HTML_Tag_Processor does not double-escape**: In `auto_transform_html()`, attribute values passed to `set_attribute()` must NOT be pre-escaped with `esc_attr()`. The processor handles escaping internally. Double-escaping produces garbled output like `&amp;amp;`.
-
-- **Move uses pre-move indexing**: The `before` parameter in the `move` operation uses paths as they exist before the move happens. The PHP code (`class-block-crud.php`, lines 1256-1301) adjusts destination indices after removing the source blocks, handling both same-parent and cross-level moves.
-
-- **Cannot move into self or descendants**: The `move` operation validates that the destination path does not start with the source path (lines 1231-1246). This prevents creating circular references.
-
-- **Unwrap updates grandparent innerContent**: When `unwrap-group` promotes N children from a container, the grandparent's `innerContent` must replace the single null (for the removed container) with N nulls (for the promoted children). This adjustment happens at lines 1047-1077.
-
-- **Duplicate deep-clones via PHP serialize**: The `duplicate` operation uses `unserialize(serialize($original))` for deep cloning (`class-block-crud.php`, line 1169). This handles nested structures but assumes all values are serializable (they always are for parsed blocks).
-
-- **Uninstall cleanup**: Deleting the plugin via WordPress admin removes `gk_block_api_preferences` option and `gk_block_inventory` transient (`uninstall.php`).
-
-- **Block inventory scan is expensive**: `Block_Inventory::build_stats()` queries ALL published posts with `posts_per_page: -1` and parses every one. The 1-hour transient cache is important. Use `refresh: true` sparingly.
-
-- **Pattern reference counting uses LIKE**: `Pattern_Manager::count_pattern_references()` searches post_content with `LIKE '%<!-- wp:block {"ref":ID} /-->%'`. This is accurate but not indexed — avoid calling it on sites with tens of thousands of posts without the transient cache.
+1. **Flat index vs path.** `index` (from `format_blocks`) skips empty/whitespace blocks; `path` uses raw `parse_blocks()` indices (preserving them). Use `path` for `/mutate`, `index`/`ref` for the per-block write tools.
+2. **`innerContent` null invariant.** Container blocks store `innerContent` like `['<div>', null, null, '</div>']` — one `null` per child. Any mutation that changes child count must maintain it or `serialize_blocks()` corrupts.
+3. **The exchange route is `__return_true` by design.** Security is the single-use, short-TTL, sealed code — not auth. Don't "fix" it by adding a permission callback.
+4. **Loopback callback validation is exact.** `is_loopback_callback()` requires a real loopback host + numeric port + no userinfo. The minted password is redirected only as a single-use *code*, never inline.
+5. **The agent can't delete — but can trash.** `wp_trash_post()` performs no cap check, and `update_post` only needs `edit_post`. The `gk_block_api_allow_trash` toggle is the application-level gate; it's OFF by default.
+6. **Connection meta is a network option.** Consistent with the network-wide connection list on multisite; `delete_network_option()` (falls back to `wp_options` on single-site) is the correct cleanup. Own-account credentials live on real users — uninstall revokes them via `Connections::purge_all_recorded()` (a dangling Application Password keeps authenticating to core REST after the plugin is gone).
+7. **.mcpb manifest v0.3 requires `description`** on every `user_config` option (alongside `type`+`title`), despite the prose docs calling it optional. Omitting it → Claude Desktop rejects the bundle with "user_config: Required, Required, Required".
+8. **Rate limiting is per-post, not per-user.** Multiple agents editing the same post share the budget (10 writes/min, 2 full rewrites/min).
+9. **Legacy-tier blocks are hard-rejected** on insert/replace (HTTP 400); avoid-tier warns but succeeds. Enforcement is insert-only — `update-attrs`/`update-html` don't re-check tiers.
+10. **No `dotenv` in the server.** It breaks the esbuild ESM→CJS bundle. Env vars come from the parent process only.
+11. **The agent role survives deactivation.** It lives in `wp_user_roles`; only `uninstall.php` (or `Agent_Provisioner::purge()`, gated by the `gk/block-mcp/agent/remove-on-uninstall` filter) tears it down.
 
 ## Related Resources
 
-- `docs/specs/` — versioned design specs (v1.2: `2026-04-27-docs-lifecycle-tools.md`)
-- WordPress Block API: https://developer.wordpress.org/block-editor/reference-guides/block-api/
-- MCP Specification: https://modelcontextprotocol.io
-- WP_HTML_Tag_Processor: https://developer.wordpress.org/reference/classes/wp_html_tag_processor/
+- `wordpress-plugin/AGENTS.md` — full REST route table + per-class plugin reference.
+- `wordpress-plugin/gk-block-mcp/tests/AGENTS.md` — PHPUnit conventions (naming, docblocks, regression-test discipline).
+- `README.md` — human-facing getting-started.
+- `docs/specs/` — versioned design specs.
+- WordPress Block API: https://developer.wordpress.org/block-editor/reference-guides/block-api/ · MCP: https://modelcontextprotocol.io · MCPB manifest schema: https://github.com/anthropics/mcpb
