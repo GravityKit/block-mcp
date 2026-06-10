@@ -177,6 +177,10 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 * **Decide what the AI is allowed to do.** Choose which content types it can create (or allow them all), turn media uploads on or off, and allow or block moving posts to the trash (off by default — and even when allowed, the assistant can only trash content, never permanently delete it). You can also set custom instructions it should always follow, and advanced users can tune which blocks the assistant prefers.
 * **Keyboard and screen-reader friendly.** The Connect and settings screens are fully operable with a keyboard and work with screen readers.
 
+#### ✨ Improved
+
+* Improves the built-in guidance the AI assistant receives, so its edits land right the first time: it can now build nested layouts (groups, columns, callout boxes) in a single step, and knows exactly how to position new blocks on the page.
+
 #### 🔒 Security & privacy
 
 * When you connect, your site credential is never placed in a web address or left in your browser history, and any client config files are written so that only you can read them.
@@ -184,6 +188,7 @@ Block MCP 2.0 lets you connect an AI assistant like Claude to your site in a few
 #### 🐛 Fixed
 
 * Fixes adding an image from a file on your computer through the assistant — local-file uploads previously didn't get uploaded (adding by web address or pasted data worked).
+* Fixes the assistant silently adding content to the end of the page when it described the position the wrong way — it now gets corrected immediately with the valid options, so new blocks land where you asked.
 
 #### 🛠 Developer note
 
