@@ -92,6 +92,9 @@
     "extra": {
         "wordpress-install-dir": "vendor/wordpress/wordpress",
         "installer-paths": {
+            "vendor/woocommerce/action-scheduler/": [
+                "woocommerce/action-scheduler"
+            ],
             "vendor/wordpress/wordpress/wp-content/plugins/{$name}/": [
                 "type:wordpress-plugin"
             ]

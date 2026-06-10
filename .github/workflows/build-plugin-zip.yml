@@ -70,6 +70,12 @@ jobs:
           rsync -a \
             --exclude-from='wordpress-plugin/gk-block-mcp/.distignore' \
             wordpress-plugin/gk-block-mcp/ "$stage/gk-block-mcp/"
+          rm -f "$stage/gk-block-mcp/vendor_prefixed/gravitykit/foundation/src/translations.js.php"
+          # Ship Action Scheduler: a non-prefixed runtime dep Foundation requires
+          # at vendor/woocommerce/action-scheduler/ — .distignore excludes vendor/,
+          # so copy it in explicitly.
+          mkdir -p "$stage/gk-block-mcp/vendor/woocommerce"
+          cp -R wordpress-plugin/gk-block-mcp/vendor/woocommerce/action-scheduler "$stage/gk-block-mcp/vendor/woocommerce/"
           (cd "$stage" && zip -rq "$GITHUB_WORKSPACE/gk-block-mcp.zip" gk-block-mcp)
           unzip -l gk-block-mcp.zip | tail -5
 

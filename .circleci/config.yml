@@ -90,6 +90,11 @@ jobs:
             stage="$(mktemp -d)"; mkdir -p "$stage/gk-block-mcp"
             rsync -a --exclude-from="$plugin_dir/.distignore" "$plugin_dir/" "$stage/gk-block-mcp/"
             rm -f "$stage/gk-block-mcp/vendor_prefixed/gravitykit/foundation/src/translations.js.php"
+            # Ship Action Scheduler: a non-prefixed runtime dep Foundation requires
+            # at vendor/woocommerce/action-scheduler/ — .distignore excludes vendor/,
+            # so copy it in explicitly.
+            mkdir -p "$stage/gk-block-mcp/vendor/woocommerce"
+            cp -R "$plugin_dir/vendor/woocommerce/action-scheduler" "$stage/gk-block-mcp/vendor/woocommerce/"
             (cd "$stage" && zip -rq "/home/circleci/project/$build_file" gk-block-mcp)
             unzip -l "$build_file" | tail -3
 
