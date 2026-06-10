@@ -54,6 +54,13 @@ if [ -f "vendor/gravitykit/foundation/scripts/post-install.php" ]; then
 fi
 
 # Keep only the essential dependencies/folders in the vendor directory
-if [[ -d "vendor" && "${COMPOSER_DEV_MODE}" -eq 0 ]]; then
-  find ./vendor -mindepth 1 -maxdepth 1 -type d $(printf -- "-not -name %s " "${VENDOR_FOLDERS_TO_KEEP[@]}") -exec rm -rf '{}' \;
+if [[ -d "vendor" && "${COMPOSER_DEV_MODE:-0}" -eq 0 ]]; then
+  # Build the find predicates as an array so each folder name is passed as a
+  # discrete argument — no unquoted word-splitting (clears shellcheck SC2046)
+  # and space-safe.
+  prune_predicates=()
+  for keep in "${VENDOR_FOLDERS_TO_KEEP[@]}"; do
+    prune_predicates+=( -not -name "$keep" )
+  done
+  find ./vendor -mindepth 1 -maxdepth 1 -type d "${prune_predicates[@]}" -exec rm -rf '{}' \;
 fi
