@@ -130,6 +130,9 @@
                     "paragonie/sodium_compat",
                     "symfony/polyfill-php70",
                     "woocommerce/action-scheduler"
+                ],
+                "file_patterns": [
+                    "#gravitykit/foundation/phpstan/#"
                 ]
             }
         }
