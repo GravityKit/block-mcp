@@ -27,10 +27,10 @@ jobs:
       run:
         working-directory: wordpress-plugin/gk-block-mcp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: ${{ matrix.php-version }}
           tools: composer:v2
@@ -44,7 +44,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock') }}
@@ -60,7 +60,7 @@ jobs:
       # built by an older script would silently miss those patches.
       - name: Cache vendor/
         id: vendor-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: wordpress-plugin/gk-block-mcp/vendor
           key: vendor-${{ matrix.php-version }}-${{ hashFiles('wordpress-plugin/gk-block-mcp/composer.lock', 'wordpress-plugin/gk-block-mcp/tests/install-sqlite-dropin.php', 'wordpress-plugin/gk-block-mcp/composer_post_update_install.sh') }}
@@ -111,9 +111,9 @@ jobs:
     name: TypeScript MCP server (Vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -157,9 +157,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') ||
       contains(github.event.head_commit.message, '[integration]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
