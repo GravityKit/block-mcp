@@ -94,21 +94,7 @@ class Agent_Provisioner {
 		 */
 		$caps = apply_filters(
 			'gk/block-mcp/agent/caps',
-			array(
-				'read'                 => true,
-				'edit_posts'           => true,
-				'edit_others_posts'    => true,
-				'edit_published_posts' => true,
-				'publish_posts'        => true,
-				'edit_pages'           => true,
-				'edit_others_pages'    => true,
-				'edit_published_pages' => true,
-				'publish_pages'        => true,
-				'upload_files'         => true,
-				// Deliberately NO delete_*, NO unfiltered_html, NO manage_options,
-				// NO manage_categories (a delete-class cap; term assignment flows
-				// through assign_terms, derived from edit_posts).
-			)
+			self::derive_capabilities()
 		);
 
 		/**
@@ -133,13 +119,71 @@ class Agent_Provisioner {
 		 */
 		$role = apply_filters( 'gk/block-mcp/agent/role', self::ROLE );
 
-		// Only register when the filter returns the canonical slug — a custom
-		// slug means the operator manages that role themselves.
-		if ( self::ROLE === $role && ! get_role( self::ROLE ) ) {
-			add_role( self::ROLE, 'Block MCP Agent', $caps );
+		// Only manage the role when the filter returns the canonical slug — a
+		// custom slug means the operator manages that role themselves.
+		if ( self::ROLE === $role ) {
+			$existing = get_role( self::ROLE );
+			if ( ! $existing ) {
+				add_role( self::ROLE, 'Block MCP Agent', $caps );
+			} else {
+				// Re-assert: grant any capability the role is missing — e.g. a CPT
+				// (weDocs `docs`) registered or allow-listed after the role was first
+				// created. Additive only: never strips caps an operator has added.
+				foreach ( $caps as $cap => $granted ) {
+					if ( $granted && ! $existing->has_cap( $cap ) ) {
+						$existing->add_cap( $cap );
+					}
+				}
+			}
 		}
 
 		return $role;
+	}
+
+	/**
+	 * Build the agent's capability set from the post types the REST API operates
+	 * on: `post`, `page`, plus every `show_in_rest` type (mirroring
+	 * Post_Manager's allow-list). Each type contributes its mapped edit/publish
+	 * primitives via the post-type capability object, so a CPT with a custom
+	 * `capability_type` — e.g. weDocs `docs` → `edit_docs` / `edit_others_docs` /
+	 * `edit_published_docs` / `publish_docs` — is editable, not just readable.
+	 *
+	 * Deliberately NO delete_*, NO edit_private_*, NO unfiltered_html, NO
+	 * manage_options — the agent writes and publishes, but never hard-deletes,
+	 * edits private content, or changes settings.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array<string,bool> Capability name => granted.
+	 */
+	private static function derive_capabilities(): array {
+		$caps = array(
+			'read'         => true,
+			'upload_files' => true,
+		);
+
+		$types = array( 'post', 'page' );
+		if ( function_exists( 'get_post_types' ) ) {
+			$types = array_unique(
+				array_merge( $types, array_values( get_post_types( array( 'show_in_rest' => true ), 'names' ) ) )
+			);
+		}
+
+		$primitives = array( 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts' );
+
+		foreach ( $types as $type ) {
+			$object = get_post_type_object( $type );
+			if ( ! $object ) {
+				continue;
+			}
+			foreach ( $primitives as $primitive ) {
+				if ( isset( $object->cap->$primitive ) ) {
+					$caps[ $object->cap->$primitive ] = true;
+				}
+			}
+		}
+
+		return $caps;
 	}
 
 	/**

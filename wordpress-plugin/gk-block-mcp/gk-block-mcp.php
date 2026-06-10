@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Block MCP by GravityKit
  * Plugin URI: https://www.gravitykit.com/wordpress-block-mcp/
- * Description: Lets an AI assistant (Claude, Cursor, ChatGPT) safely create and edit your WordPress content over the Model Context Protocol (MCP).
+ * Description: Lets an AI assistant (Claude, Cursor) safely create and edit your WordPress content over the Model Context Protocol (MCP).
  * Version: 2.0.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
@@ -223,7 +223,10 @@ add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_settings_page' );
  * @since 2.0.0
  */
 function init_agent() {
-	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
+	// Priority 99 so it runs after themes/plugins register their custom post
+	// types on `init` — the agent's caps are derived from every show_in_rest
+	// type, so the role must be (re)asserted once those types exist.
+	add_action( 'init', array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ), 99 );
 	// Priority 30 ensures the block fires after wp_authenticate_username_password
 	// (priority 20) so it intercepts both wrong-password WP_Error results and
 	// correctly-authenticated WP_User objects for the service account.

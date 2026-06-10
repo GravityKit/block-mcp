@@ -97,4 +97,74 @@ class AgentRoleTest extends WP_UnitTestCase {
 		$this->assertTrue( $role->has_cap( 'edit_posts' ) );
 		$this->assertFalse( $role->has_cap( 'upload_files' ) );
 	}
+
+	/**
+	 * A custom post type with its own capability_type (weDocs-style `docs`) must
+	 * be editable by the agent. register_role() derives the role's caps from each
+	 * show_in_rest post type's capability object, so the mapped edit/publish
+	 * primitives (edit_docs, edit_others_docs, edit_published_docs, publish_docs)
+	 * are granted — not just `read`. Pins the BMCP-5 fix where a static post+page
+	 * cap set left show_in_rest CPTs read-only despite "all public types allowed".
+	 *
+	 * delete_docs is NOT granted — the agent never hard-deletes.
+	 */
+	public function test_register_role_grants_edit_caps_for_custom_capability_cpt() {
+		register_post_type(
+			'doc',
+			array(
+				'public'          => true,
+				'show_in_rest'    => true,
+				'capability_type' => 'doc',
+				'map_meta_cap'    => true,
+			)
+		);
+
+		Agent_Provisioner::register_role();
+		$role = get_role( Agent_Provisioner::ROLE );
+
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( 'edit_docs' ), 'agent must be able to edit docs' );
+		$this->assertTrue( $role->has_cap( 'edit_others_docs' ), "agent must be able to edit others' docs" );
+		$this->assertTrue( $role->has_cap( 'edit_published_docs' ), 'agent must be able to edit published docs' );
+		$this->assertTrue( $role->has_cap( 'publish_docs' ), 'agent must be able to publish docs' );
+		$this->assertFalse( $role->has_cap( 'delete_docs' ), 'agent must NOT be able to delete docs' );
+
+		unregister_post_type( 'doc' );
+	}
+
+	/**
+	 * The WeDocs scenario: the role is created first (e.g. at activation, before
+	 * the CPT exists), then a show_in_rest CPT appears later. A subsequent
+	 * register_role() (it runs on init priority 99) must ADD the CPT's edit caps
+	 * to the already-existing role — otherwise the type stays 403 ("enabled in
+	 * settings but still can't edit"). Pins the additive re-assert path.
+	 */
+	public function test_register_role_reasserts_caps_for_cpt_registered_after_role() {
+		// Role created before the CPT exists (mirrors activation).
+		Agent_Provisioner::register_role();
+		$this->assertFalse(
+			get_role( Agent_Provisioner::ROLE )->has_cap( 'edit_others_docs' ),
+			'precondition: no docs caps before the CPT is registered'
+		);
+
+		// CPT appears later (e.g. weDocs loads on a subsequent request).
+		register_post_type(
+			'doc',
+			array(
+				'public'          => true,
+				'show_in_rest'    => true,
+				'capability_type' => 'doc',
+				'map_meta_cap'    => true,
+			)
+		);
+
+		// Next register_role() re-asserts onto the existing role.
+		Agent_Provisioner::register_role();
+		$this->assertTrue(
+			get_role( Agent_Provisioner::ROLE )->has_cap( 'edit_others_docs' ),
+			'caps must be re-asserted for a CPT registered after the role already existed'
+		);
+
+		unregister_post_type( 'doc' );
+	}
 }
