@@ -1154,7 +1154,7 @@ class REST_Controller {
 		// production site that accidentally has WP_DEBUG=true should not leak
 		// filesystem paths or SQL/PHP internals to remote callers.
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-			error_log( 'GK Block API error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			error_log( 'Block MCP error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 		}
 
 		return new \WP_Error(

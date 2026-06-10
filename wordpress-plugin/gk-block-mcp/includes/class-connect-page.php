@@ -29,7 +29,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Admin "Connect an AI Assistant" wizard for the GK Block API plugin.
+ * Admin "Connect an AI Assistant" wizard for the Block MCP plugin.
  *
  * @since 2.0.0
  */

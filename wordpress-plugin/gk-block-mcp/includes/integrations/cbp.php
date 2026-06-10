@@ -1,6 +1,6 @@
 <?php
 /**
- * Code Block Pro integration for the GK Block API.
+ * Code Block Pro integration for the Block MCP.
  *
  * Hooks into gk/block-mcp/block/format to strip fields that are either
  * derived (codeHTML, highestLineNumber) or too large to be useful to an AI

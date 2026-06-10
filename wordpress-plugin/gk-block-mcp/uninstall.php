@@ -1,6 +1,6 @@
 <?php
 /**
- * GK Block API uninstall handler.
+ * Block MCP uninstall handler.
  *
  * Cleans up plugin data when the plugin is deleted through the WordPress admin.
  *

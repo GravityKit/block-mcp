@@ -479,7 +479,7 @@ class Block_Inventory {
 			$stats = $this->build_stats();
 		} catch ( \Throwable $e ) {
 			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-				error_log( 'GK Block API stats build error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( 'Block MCP stats build error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 			$stats = array(
 				'block_usage'        => array(),

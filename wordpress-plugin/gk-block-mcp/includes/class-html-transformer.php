@@ -354,7 +354,7 @@ class HTML_Transformer {
 		} catch ( \Throwable $e ) {
 			// Transform failed — return null (no transform applied, safety warning will fire instead).
 			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-				error_log( 'GK Block API auto_transform error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( 'Block MCP auto_transform error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 			return null;
 		}
@@ -466,7 +466,7 @@ class HTML_Transformer {
 
 		} catch ( \Throwable $e ) {
 			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-				error_log( 'GK Block API rebuild_inner_content error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( 'Block MCP rebuild_inner_content error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 			// Fallback: simple array with the new HTML.
 			return array( $new_inner_html );

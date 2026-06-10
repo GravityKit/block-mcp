@@ -284,7 +284,7 @@ class Block_Reader {
 			// to error_log; WP_DEBUG also attaches the trace and the original
 			// message to the WP_Error data for local debugging.
 			if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) {
-				error_log( 'GK Block API parse error for post ' . (int) $post_id . ': ' . $e->__toString() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( 'Block MCP parse error for post ' . (int) $post_id . ': ' . $e->__toString() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
 
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -486,7 +486,7 @@ class Block_Reader {
 				} catch ( \Throwable $e ) {
 					// Render failed — skip silently, leaving a breadcrumb when debugging.
 					if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
-						error_log( 'GK Block API render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+						error_log( 'Block MCP render_block error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 					}
 				}
 			}
