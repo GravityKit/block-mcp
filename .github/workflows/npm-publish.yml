@@ -44,21 +44,37 @@ jobs:
           node-version: 22
 
       - name: Update npm (trusted publishing requires npm >= 11.5)
-        run: npm install -g npm@latest
+        # Pinned to the 11.x major so a future npm major can't change publish
+        # behavior mid-release.
+        run: npm install -g npm@11
 
       - name: Install dependencies (the prepare script builds dist/)
         run: npm ci
 
       - name: Skip when this version is already published
         id: guard
+        # Only a definitive "version not found" may proceed to publish; any
+        # other npm view failure (network, registry outage) fails the job so a
+        # transient error can't slip past the idempotency check. Some npm
+        # versions report a missing version as exit 0 with empty output, so
+        # success requires non-empty output too.
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if npm view "@gravitykit/block-mcp@$VERSION" version >/dev/null 2>&1; then
+          if OUTPUT="$(npm view "@gravitykit/block-mcp@$VERSION" version 2>&1)"; then
+            STATUS=0
+          else
+            STATUS=$?
+          fi
+          if [ "$STATUS" -eq 0 ] && [ -n "$OUTPUT" ]; then
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "@gravitykit/block-mcp@$VERSION is already on npm — nothing to publish."
-          else
+          elif [ "$STATUS" -eq 0 ] || printf '%s' "$OUTPUT" | grep -qiE 'E404|not found|no match found'; then
             echo "published=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not determine whether @gravitykit/block-mcp@$VERSION is published (npm view exit $STATUS):" >&2
+            printf '%s\n' "$OUTPUT" >&2
+            exit 1
           fi
 
       - name: Publish to npm
