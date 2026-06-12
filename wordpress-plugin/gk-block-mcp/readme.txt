@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.0.0
+Stable tag: 2.0.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,6 +120,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Upgrade Notice ==
 
+= 2.0.1 =
+Connecting to a local development site is now smoother: when a connection fails you see what went wrong and how to fix it, and the AI assistant keeps its access to the site after setup instead of failing with a certificate error.
+
 = 2.0.0 =
 Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create and whether it's allowed to move posts to the trash.
 
@@ -163,6 +166,22 @@ Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
 Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
 
 == Changelog ==
+
+= 2.0.1 on June 12, 2026 =
+
+This release makes connecting to a local development site smoother: clearer error messages when a connection fails, and a connection that keeps working after setup.
+
+#### ✨ Improved
+
+* Improves the error message when connecting to your site fails. Instead of a cryptic "fetch failed", you now see what actually went wrong — for example, a security certificate your computer doesn't trust yet — along with how to fix it.
+
+#### 🐛 Fixed
+
+* Fixes the AI assistant losing access to a local development site right after connecting successfully. The secure-connection setting used during setup now carries over to the assistant automatically, so it keeps working with sites built using tools like Laravel Herd, Valet, Local, or OrbStack.
+
+#### 💻 Developer Updates
+
+* The connector now surfaces the underlying TLS/network error code when the credential exchange fails, and propagates `NODE_EXTRA_CA_CERTS` into every generated MCP client config (`claude mcp add`, Claude Desktop, Cursor, and printed configs).
 
 = 2.0.0 on June 10, 2026 =
 
