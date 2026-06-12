@@ -1,0 +1,68 @@
+name: Publish to npm
+
+# Publishes @gravitykit/block-mcp whenever the version in package.json is not
+# yet on the registry. Runs on every push to main and on release tags, so a
+# version bump merged to main publishes immediately and the release tag acts
+# as a backstop; already-published versions are skipped, which makes both
+# triggers idempotent (the plugin and the MCP server version independently —
+# a v* tag whose package.json version is already live is a no-op).
+#
+# Auth is npm Trusted Publishing (OIDC) — no NPM_TOKEN secret to rotate or
+# leak. One-time setup on npmjs.com: package Settings → Trusted Publisher →
+# GitHub Actions, repository GravityKit/block-mcp, workflow npm-publish.yml.
+# Publishing through OIDC also generates provenance attestations.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing + provenance
+
+# A release pushes main and a tag back-to-back; run the publishes one at a
+# time so the second sees the first's result and skips via the version guard.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @gravitykit/block-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # No step does authenticated git ops; npm auth comes from OIDC.
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Update npm (trusted publishing requires npm >= 11.5)
+        run: npm install -g npm@latest
+
+      - name: Install dependencies (the prepare script builds dist/)
+        run: npm ci
+
+      - name: Skip when this version is already published
+        id: guard
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "@gravitykit/block-mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "@gravitykit/block-mcp@$VERSION is already on npm — nothing to publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.guard.outputs.published == 'false'
+        # prepublishOnly runs the Vitest suite first; publishConfig in
+        # package.json sets public access.
+        run: npm publish
