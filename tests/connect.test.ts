@@ -16,7 +16,7 @@
  *   - Password-never-logged: the success log path does not include the password
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   parseConnectArgs,
   normalizeSite,
@@ -30,6 +30,7 @@ import {
   parseExchangeResponse,
   defaultServerName,
   isLoopbackOrDevHost,
+  exchangeCode,
 } from '../src/connect.js';
 import type { Credentials, McpConfig } from '../src/connect.js';
 
@@ -656,5 +657,128 @@ describe('multi-site config (named servers coexist)', () => {
 
   it('claudeCodeAddArgs still defaults to block-mcp', () => {
     expect(claudeCodeAddArgs(CREDS)[2]).toBe('block-mcp');
+  });
+});
+
+// ── exchangeCode network-failure diagnostics ──────────────────────────────────
+//
+// undici reports every network-level failure as a bare "fetch failed" TypeError
+// with the real reason (TLS, DNS, refused connection) hidden in `cause`. The
+// exchange error must surface that cause, and certificate-trust failures must
+// carry an actionable NODE_EXTRA_CA_CERTS hint: Node ignores the OS keychain,
+// so a local dev site's CA that the browser trusts still fails here.
+
+describe('exchangeCode network-failure diagnostics', () => {
+  /** Build the rejection shape undici's fetch produces for a network failure. */
+  function fetchFailure(code: string): Error {
+    const cause = Object.assign(new Error(`network failure ${code}`), { code });
+    return Object.assign(new TypeError('fetch failed'), { cause });
+  }
+
+  function failingFetch(code: string): typeof fetch {
+    return (async () => {
+      throw fetchFailure(code);
+    }) as unknown as typeof fetch;
+  }
+
+  it('surfaces the TLS cause code hidden behind the generic "fetch failed"', async () => {
+    const error = await exchangeCode('https://dev.test', 'code123', failingFetch('UNABLE_TO_VERIFY_LEAF_SIGNATURE')).catch(
+      (e: Error) => e
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('UNABLE_TO_VERIFY_LEAF_SIGNATURE');
+    expect((error as Error).message).toContain('dev.test');
+  });
+
+  it('adds a NODE_EXTRA_CA_CERTS hint for every certificate-trust failure code', async () => {
+    const trustCodes = [
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    ];
+    for (const code of trustCodes) {
+      const error = await exchangeCode('https://dev.test', 'code123', failingFetch(code)).catch((e: Error) => e);
+      expect((error as Error).message).toContain('NODE_EXTRA_CA_CERTS');
+    }
+  });
+
+  it('does NOT suggest NODE_EXTRA_CA_CERTS for non-trust network failures', async () => {
+    const error = await exchangeCode('https://dev.test', 'code123', failingFetch('ECONNREFUSED')).catch((e: Error) => e);
+    expect((error as Error).message).toContain('ECONNREFUSED');
+    expect((error as Error).message).not.toContain('NODE_EXTRA_CA_CERTS');
+  });
+
+  it('keeps the plain error message when the failure has no cause', async () => {
+    const bareFetch = (async () => {
+      throw new Error('This operation was aborted');
+    }) as unknown as typeof fetch;
+    const error = await exchangeCode('https://dev.test', 'code123', bareFetch).catch((e: Error) => e);
+    expect((error as Error).message).toContain('This operation was aborted');
+    expect((error as Error).message).not.toContain('NODE_EXTRA_CA_CERTS');
+  });
+});
+
+// ── NODE_EXTRA_CA_CERTS propagation into generated configs ───────────────────
+//
+// The MCP server talks to the same site over the same Node TLS stack as the
+// connector, so a CA bundle that was required to complete the exchange must be
+// written into every generated client config — otherwise the server fails with
+// the exact TLS error the connector just got past.
+
+describe('NODE_EXTRA_CA_CERTS propagation', () => {
+  it('buildMcpEntry copies an explicit CA bundle path into the server env', () => {
+    const { env } = buildMcpEntry(CREDS, '/certs/local-ca.pem');
+    expect(env.NODE_EXTRA_CA_CERTS).toBe('/certs/local-ca.pem');
+  });
+
+  it('buildMcpEntry omits the variable when the environment does not set it', () => {
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', '');
+    try {
+      expect('NODE_EXTRA_CA_CERTS' in buildMcpEntry(CREDS).env).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('buildMcpEntry omits the variable when it is blank', () => {
+    expect('NODE_EXTRA_CA_CERTS' in buildMcpEntry(CREDS, '   ').env).toBe(false);
+  });
+
+  it('buildMcpEntry defaults from process.env.NODE_EXTRA_CA_CERTS', () => {
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', '/certs/from-env.pem');
+    try {
+      expect(buildMcpEntry(CREDS).env.NODE_EXTRA_CA_CERTS).toBe('/certs/from-env.pem');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('flows through cursorConfig / mergeMcpServers (the config-file path)', () => {
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', '/certs/from-env.pem');
+    try {
+      const config = cursorConfig(CREDS, 'block-mcp-dev-test');
+      expect(config.mcpServers['block-mcp-dev-test'].env.NODE_EXTRA_CA_CERTS).toBe('/certs/from-env.pem');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('claudeCodeAddArgs adds an --env pair before the -- separator when set', () => {
+    const args = claudeCodeAddArgs(CREDS, 'block-mcp', '/certs/local-ca.pem');
+    const idx = args.indexOf('NODE_EXTRA_CA_CERTS=/certs/local-ca.pem');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('--env');
+    expect(idx).toBeLessThan(args.indexOf('--'));
+  });
+
+  it('claudeCodeAddArgs omits the pair when the environment does not set it', () => {
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', '');
+    try {
+      const args = claudeCodeAddArgs(CREDS, 'block-mcp');
+      expect(args.some((arg) => arg.includes('NODE_EXTRA_CA_CERTS'))).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
