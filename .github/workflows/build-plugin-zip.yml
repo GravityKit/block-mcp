@@ -106,6 +106,56 @@ jobs:
           prerelease: true
           files: gk-block-mcp.zip
 
+      # Merging a plugin version bump to main IS the release: when the plugin
+      # Version header has no v{version} tag yet, create the tag + GitHub
+      # release here, with the readme.txt Upgrade Notice as the body and the
+      # ZIP attached. This must happen in this job rather than via a separate
+      # tag push — tags pushed with GITHUB_TOKEN don't trigger other
+      # workflows, so a tag-push hop would never fire the release build.
+      # The npm publish workflow keys off package.json independently (the
+      # plugin and the MCP server version separately); both fire from the
+      # same merge, keeping GitHub and npm releases in sync.
+      - name: Detect an unreleased plugin version (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: plugin_version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^ \* Version: //p' wordpress-plugin/gk-block-mcp/gk-block-mcp.php | head -1 | tr -d '[:space:]')"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read the plugin Version header."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "unreleased=false" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is already tagged — nothing to release."
+            exit 0
+          fi
+          echo "unreleased=true" >> "$GITHUB_OUTPUT"
+          # Release body = the version's Upgrade Notice from readme.txt
+          # (its header is exactly "= X.Y.Z =" — changelog headers carry a date).
+          awk -v ver="= $VERSION =" '
+            $0 == ver { grab = 1; next }
+            grab && /^= / { exit }
+            grab { print }
+          ' wordpress-plugin/gk-block-mcp/readme.txt > "$RUNNER_TEMP/release-notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
+            echo "::warning::No Upgrade Notice found for $VERSION in readme.txt — using a generic body."
+            printf 'Release v%s. See readme.txt for the changelog.\n' "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          fi
+
+      - name: Create tag + release for the new version (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.plugin_version.outputs.unreleased == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: v${{ steps.plugin_version.outputs.version }}
+          name: v${{ steps.plugin_version.outputs.version }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: gk-block-mcp.zip
+
+      # Backstop: a manually pushed v* tag still publishes a release.
       - name: Tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
