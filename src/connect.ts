@@ -336,6 +336,50 @@ export function parseExchangeResponse(json: unknown): Credentials {
 export const EXCHANGE_FETCH_TIMEOUT_MS = 15_000;
 
 /**
+ * TLS failure codes meaning the site's certificate chain is not trusted by
+ * Node's bundled CA store. Node ignores the operating system's trust store
+ * (macOS Keychain / Windows certificate store), so a local dev site whose CA
+ * the browser trusts — Laravel Herd/Valet, Local, OrbStack, mkcert — still
+ * fails here unless NODE_EXTRA_CA_CERTS points at that CA's .pem.
+ */
+const TLS_TRUST_ERROR_CODES = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_UNTRUSTED',
+]);
+
+/** Actionable guidance appended when the exchange fails on an untrusted certificate. */
+const CA_TRUST_HINT =
+  "The site's TLS certificate is not trusted by Node.js, which uses its own CA bundle rather than " +
+  "the operating system's trust store. If this is a local development site, re-run with " +
+  'NODE_EXTRA_CA_CERTS=<path to the root CA certificate (.pem) of the tool serving the site> — ' +
+  'Laravel Herd/Valet, Local, OrbStack, and mkcert each keep one in their config directory. ' +
+  'The variable is also copied into the generated MCP config so the server can reach the site too.';
+
+/**
+ * Render a network-level fetch failure as an actionable error message.
+ *
+ * `fetch` reports every network failure as a bare "fetch failed" TypeError and
+ * hides the real reason (TLS, DNS, refused connection) in `cause`. Surface the
+ * cause's code so the failure is diagnosable, and append the CA-trust hint when
+ * the code means Node rejected the site's certificate.
+ */
+function describeExchangeFetchError(url: string, err: unknown): string {
+  const error = err as Error & { cause?: { code?: unknown; message?: unknown } };
+  const causeCode = typeof error.cause?.code === 'string' ? error.cause.code : '';
+  const causeMessage = typeof error.cause?.message === 'string' ? error.cause.message : '';
+  const detail = causeCode || causeMessage;
+  const reason = detail ? `${error.message}: ${detail}` : error.message;
+
+  const isTrustFailure = TLS_TRUST_ERROR_CODES.has(causeCode);
+  const hint = isTrustFailure ? ` ${CA_TRUST_HINT}` : '';
+  return `Exchange failed: could not reach ${url} (${reason}).${hint}`;
+}
+
+/**
  * Exchange a single-use code for the credential set.
  *
  * POSTs the code to the site's REST exchange route and returns the credential
@@ -382,7 +426,7 @@ export async function exchangeCode(
           signal: controller.signal,
         });
       } catch (err) {
-        throw new Error(`Exchange failed: could not reach ${url} (${(err as Error).message}).`);
+        throw new Error(describeExchangeFetchError(url, err));
       }
 
       // 2xx (or any non-redirect) → done.
@@ -421,16 +465,31 @@ export async function exchangeCode(
 
 // ── MCP config builders ───────────────────────────────────────────────────────
 
-/** Build the mcpServers entry for @gravitykit/block-mcp. */
-export function buildMcpEntry(creds: Credentials): McpServerEntry {
+/**
+ * Build the mcpServers entry for @gravitykit/block-mcp.
+ *
+ * When NODE_EXTRA_CA_CERTS is set (required to reach a local dev site whose
+ * certificate Node's bundled CA store rejects), it is copied into the entry's
+ * env: the MCP server talks to the same site over the same Node TLS stack, so
+ * it needs the same trust anchor the connector did.
+ */
+export function buildMcpEntry(
+  creds: Credentials,
+  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS
+): McpServerEntry {
+  const env: Record<string, string> = {
+    WORDPRESS_URL: creds.site,
+    WORDPRESS_USER: creds.user,
+    WORDPRESS_APP_PASSWORD: creds.password,
+  };
+  const hasCaCerts = typeof extraCaCerts === 'string' && extraCaCerts.trim() !== '';
+  if (hasCaCerts) {
+    env.NODE_EXTRA_CA_CERTS = extraCaCerts;
+  }
   return {
     command: 'npx',
     args: ['-y', '@gravitykit/block-mcp'],
-    env: {
-      WORDPRESS_URL: creds.site,
-      WORDPRESS_USER: creds.user,
-      WORDPRESS_APP_PASSWORD: creds.password,
-    },
+    env,
   };
 }
 
@@ -505,24 +564,26 @@ export function cursorConfigPath(): string {
  * That residual exposure is inherent to the `claude mcp add` interface; the
  * config it then writes is owned and protected by Claude Code.
  */
-export function claudeCodeAddArgs(creds: Credentials, name: string = 'block-mcp'): string[] {
-  return [
-    'mcp',
-    'add',
-    name,
-    '--scope',
-    'user',
+export function claudeCodeAddArgs(
+  creds: Credentials,
+  name: string = 'block-mcp',
+  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS
+): string[] {
+  const envArgs = [
     '--env',
     `WORDPRESS_URL=${creds.site}`,
     '--env',
     `WORDPRESS_USER=${creds.user}`,
     '--env',
     `WORDPRESS_APP_PASSWORD=${creds.password}`,
-    '--',
-    'npx',
-    '-y',
-    '@gravitykit/block-mcp',
   ];
+  // Same propagation as buildMcpEntry: the server needs the CA bundle that the
+  // connector needed to reach the site.
+  const hasCaCerts = typeof extraCaCerts === 'string' && extraCaCerts.trim() !== '';
+  if (hasCaCerts) {
+    envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${extraCaCerts}`);
+  }
+  return ['mcp', 'add', name, '--scope', 'user', ...envArgs, '--', 'npx', '-y', '@gravitykit/block-mcp'];
 }
 
 // ── Config file writers ───────────────────────────────────────────────────────

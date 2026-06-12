@@ -35208,7 +35208,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.0.0",
+  version: "2.0.1",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
@@ -53589,6 +53589,25 @@ function parseExchangeResponse(json2) {
   return { site, user, password };
 }
 var EXCHANGE_FETCH_TIMEOUT_MS = 15e3;
+var TLS_TRUST_ERROR_CODES = /* @__PURE__ */ new Set([
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "CERT_UNTRUSTED"
+]);
+var CA_TRUST_HINT = "The site's TLS certificate is not trusted by Node.js, which uses its own CA bundle rather than the operating system's trust store. If this is a local development site, re-run with NODE_EXTRA_CA_CERTS=<path to the root CA certificate (.pem) of the tool serving the site> \u2014 Laravel Herd/Valet, Local, OrbStack, and mkcert each keep one in their config directory. The variable is also copied into the generated MCP config so the server can reach the site too.";
+function describeExchangeFetchError(url3, err) {
+  const error2 = err;
+  const causeCode = typeof error2.cause?.code === "string" ? error2.cause.code : "";
+  const causeMessage = typeof error2.cause?.message === "string" ? error2.cause.message : "";
+  const detail = causeCode || causeMessage;
+  const reason = detail ? `${error2.message}: ${detail}` : error2.message;
+  const isTrustFailure = TLS_TRUST_ERROR_CODES.has(causeCode);
+  const hint = isTrustFailure ? ` ${CA_TRUST_HINT}` : "";
+  return `Exchange failed: could not reach ${url3} (${reason}).${hint}`;
+}
 async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS) {
   const origin2 = new URL(site).origin;
   let url3 = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
@@ -53606,7 +53625,7 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
           signal: controller.signal
         });
       } catch (err) {
-        throw new Error(`Exchange failed: could not reach ${url3} (${err.message}).`);
+        throw new Error(describeExchangeFetchError(url3, err));
       }
       if (res.status < 300 || res.status >= 400) {
         break;
@@ -53636,15 +53655,20 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
   }
   return parseExchangeResponse(json2);
 }
-function buildMcpEntry(creds) {
+function buildMcpEntry(creds, extraCaCerts = process.env.NODE_EXTRA_CA_CERTS) {
+  const env = {
+    WORDPRESS_URL: creds.site,
+    WORDPRESS_USER: creds.user,
+    WORDPRESS_APP_PASSWORD: creds.password
+  };
+  const hasCaCerts = typeof extraCaCerts === "string" && extraCaCerts.trim() !== "";
+  if (hasCaCerts) {
+    env.NODE_EXTRA_CA_CERTS = extraCaCerts;
+  }
   return {
     command: "npx",
     args: ["-y", "@gravitykit/block-mcp"],
-    env: {
-      WORDPRESS_URL: creds.site,
-      WORDPRESS_USER: creds.user,
-      WORDPRESS_APP_PASSWORD: creds.password
-    }
+    env
   };
 }
 function mergeMcpServers(existing, creds, name = "block-mcp") {
@@ -53677,24 +53701,20 @@ function claudeDesktopConfigPath(platform) {
 function cursorConfigPath() {
   return path.join(os.homedir(), ".cursor", "mcp.json");
 }
-function claudeCodeAddArgs(creds, name = "block-mcp") {
-  return [
-    "mcp",
-    "add",
-    name,
-    "--scope",
-    "user",
+function claudeCodeAddArgs(creds, name = "block-mcp", extraCaCerts = process.env.NODE_EXTRA_CA_CERTS) {
+  const envArgs = [
     "--env",
     `WORDPRESS_URL=${creds.site}`,
     "--env",
     `WORDPRESS_USER=${creds.user}`,
     "--env",
-    `WORDPRESS_APP_PASSWORD=${creds.password}`,
-    "--",
-    "npx",
-    "-y",
-    "@gravitykit/block-mcp"
+    `WORDPRESS_APP_PASSWORD=${creds.password}`
   ];
+  const hasCaCerts = typeof extraCaCerts === "string" && extraCaCerts.trim() !== "";
+  if (hasCaCerts) {
+    envArgs.push("--env", `NODE_EXTRA_CA_CERTS=${extraCaCerts}`);
+  }
+  return ["mcp", "add", name, "--scope", "user", ...envArgs, "--", "npx", "-y", "@gravitykit/block-mcp"];
 }
 function readJsonFile(filePath, defaultValue) {
   let raw2;
