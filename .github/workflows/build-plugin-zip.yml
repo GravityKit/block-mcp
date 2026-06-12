@@ -133,6 +133,12 @@ jobs:
             echo "v$VERSION is already tagged — nothing to release."
             exit 0
           fi
+          # A '= develop =' changelog header means the readme was never
+          # finalized for this release — refuse to ship it.
+          if grep -q '^= develop =' wordpress-plugin/gk-block-mcp/readme.txt; then
+            echo "::error::readme.txt still contains a '= develop =' placeholder — finalize the changelog before releasing v$VERSION."
+            exit 1
+          fi
           echo "unreleased=true" >> "$GITHUB_OUTPUT"
           # Release body = the version's Upgrade Notice from readme.txt
           # (its header is exactly "= X.Y.Z =" — changelog headers carry a date).
@@ -148,12 +154,16 @@ jobs:
 
       - name: Create tag + release for the new version (push to main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.plugin_version.outputs.unreleased == 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          tag_name: v${{ steps.plugin_version.outputs.version }}
-          name: v${{ steps.plugin_version.outputs.version }}
-          body_path: ${{ runner.temp }}/release-notes.md
-          files: gk-block-mcp.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plugin_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # --target pins the tag to the exact commit this ZIP was built from.
+          gh release create "v$VERSION" gk-block-mcp.zip \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
 
       # Backstop: a manually pushed v* tag still publishes a release.
       - name: Tagged release
