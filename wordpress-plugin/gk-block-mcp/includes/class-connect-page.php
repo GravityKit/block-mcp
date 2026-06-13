@@ -891,16 +891,30 @@ class Connect_Page {
 		}
 
 		// Deliver the credential out-of-band: store it under a single-use,
-		// short-TTL code and redirect only the code (never the password) to the
+		// short-TTL code and hand only the code (never the password) to the
 		// loopback callback. The connector then POSTs the code to handle_exchange()
 		// to retrieve the credential once, keeping the site-wide password out of
 		// the redirect URL (browser history / Referer).
 		$code = $this->store_exchange_code( $creds );
 
-		// add_query_arg() does NOT encode the new values it adds — it expects the
-		// caller to pre-encode them (it only re-encodes params already present in
-		// the URL). rawurlencode() is therefore required so a code/state with a
-		// query-significant char (&, #, +) can't corrupt the redirect target.
+		// Default path: return the code as JSON; render_authorize_screen()'s
+		// fetch handler navigates to the loopback callback client-side. A
+		// server-issued redirect to a loopback/private IP looks like SSRF to
+		// origin RASP/WAF layers, which block the response and break the
+		// handshake. JSON keeps every loopback address out of the response.
+		if ( $this->is_xhr_authorize() ) {
+			wp_send_json_success(
+				array(
+					'code'  => $code,
+					'state' => $state,
+				)
+			);
+		}
+
+		// No-JS fallback: the classic server redirect. add_query_arg() does NOT
+		// encode the values it adds (it only re-encodes params already in the
+		// URL), so rawurlencode() is required — a code/state with a
+		// query-significant char (&, #, +) would otherwise corrupt the target.
 		$redirect = add_query_arg(
 			array(
 				'code'  => rawurlencode( $code ),
@@ -911,9 +925,38 @@ class Connect_Page {
 
 		// wp_redirect() is intentional: the validated loopback host is never in
 		// WordPress's allowed_redirect_hosts list, but is_loopback_callback()
-		// above already confirmed it is safe.
+		// above already confirmed it is safe. This path can trip a
+		// response-inspecting WAF, but only for the rare JS-disabled wp-admin
+		// session.
 		wp_redirect( $redirect ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
 		exit;
+	}
+
+	/**
+	 * Whether the authorize POST wants the exchange code back as JSON.
+	 *
+	 * True for the in-page fetch() handler (which redirects to the loopback
+	 * callback client-side); false for a classic full-page form submit (which
+	 * needs the no-JS server redirect). The fetch handler marks its request with
+	 * the gk_xhr field; the X-Requested-With header is a secondary signal.
+	 *
+	 * The caller verifies the nonce before reaching this.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @return bool
+	 */
+	private function is_xhr_authorize() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified by the caller via check_admin_referer().
+		if ( isset( $_POST['gk_xhr'] ) && '1' === $_POST['gk_xhr'] ) {
+			return true;
+		}
+
+		$requested_with = isset( $_SERVER['HTTP_X_REQUESTED_WITH'] )
+			? strtolower( sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_REQUESTED_WITH'] ) ) )
+			: '';
+
+		return 'xmlhttprequest' === $requested_with;
 	}
 
 	/**
@@ -2008,6 +2051,47 @@ class Connect_Page {
 				} )();
 				</script>
 				<?php endif; ?>
+				<script>
+				/* Approve via fetch() so the server returns the exchange code as
+					JSON and the browser navigates to the loopback callback from
+					here — a server-issued redirect to 127.0.0.1 reads as SSRF to
+					origin WAFs and gets blocked. Falls back to a native submit
+					(handled by the no-JS branch in handle_authorize()) if fetch is
+					unavailable or fails. */
+				( function () {
+					var script = document.currentScript;
+					var form   = script ? script.closest( 'form' ) : null;
+					if ( ! form || ! window.fetch || ! window.URL || ! window.FormData ) { return; }
+
+					form.addEventListener( 'submit', function ( e ) {
+						e.preventDefault();
+
+						var data = new FormData( form );
+						data.append( 'gk_xhr', '1' );
+
+						fetch( form.action, {
+							method:      'POST',
+							body:        data,
+							credentials: 'same-origin',
+							headers:     { 'X-Requested-With': 'XMLHttpRequest' }
+						} ).then( function ( res ) {
+							return res.ok ? res.json() : null;
+						} ).then( function ( json ) {
+							if ( ! json || ! json.success || ! json.data || ! json.data.code ) {
+								throw new Error( 'bad response' );
+							}
+							var cb = form.querySelector( 'input[name="callback"]' ).value;
+							var st = form.querySelector( 'input[name="state"]' );
+							var url = new URL( cb );
+							url.searchParams.set( 'code', json.data.code );
+							url.searchParams.set( 'state', json.data.state || ( st ? st.value : '' ) );
+							window.location.assign( url.toString() );
+						} ).catch( function () {
+							form.submit(); // native submit bypasses this handler.
+						} );
+					} );
+				} )();
+				</script>
 			</form>
 
 			<?php $this->render_help_link(); ?>

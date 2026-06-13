@@ -690,6 +690,105 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The browser-Approve fetch path returns the code as JSON and emits NO
+	 * loopback address anywhere in the response.
+	 *
+	 * A server-issued redirect to the loopback callback (Location:
+	 * http://127.0.0.1:...) reads as SSRF/open-redirect to origin WAF/RASP
+	 * layers, which block the response and silently break Connect. The fix
+	 * returns the code as JSON when the request is marked gk_xhr and lets the
+	 * browser navigate client-side. This pins all three halves: no server
+	 * redirect is issued, the single-use code + state are delivered, and the
+	 * loopback host appears nowhere in the response body. Revert the JSON branch
+	 * and the handler redirects instead — the wp_redirect guard trips and this
+	 * goes red.
+	 */
+	public function test_handle_authorize_xhr_returns_code_as_json_without_loopback_address() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51791/cb';
+		$_POST['state']       = 'xhr-state-token';
+		$_POST['client']      = 'block-mcp';
+		$_POST['gk_xhr']      = '1';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$redirected = false;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$redirected ) {
+				$redirected = true;
+				throw new \RuntimeException( 'must_not_redirect: ' . (string) $location );
+			}
+		);
+
+		try {
+			$raw = $this->capture_authorize_output( new Connect_Page() );
+		} finally {
+			remove_all_filters( 'wp_redirect' );
+			unset(
+				$_POST['action'],
+				$_POST['callback'],
+				$_POST['state'],
+				$_POST['client'],
+				$_POST['gk_xhr'],
+				$_POST['_wpnonce'],
+				$_REQUEST['_wpnonce']
+			);
+		}
+
+		$this->assertFalse( $redirected, 'the XHR path must NOT issue a server redirect' );
+		$this->assertStringNotContainsString( '127.0.0.1', $raw, 'no loopback address may appear in the response body' );
+
+		$json = (array) json_decode( $raw, true );
+		$this->assertTrue( $json['success'], 'the XHR path returns a success envelope' );
+		$this->assertNotEmpty( $json['data']['code'], 'the response carries the single-use exchange code' );
+		$this->assertSame( 'xhr-state-token', $json['data']['state'], 'the response echoes the state token' );
+		$this->assertArrayNotHasKey( 'password', $json['data'], 'the response must NOT carry the password' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+		$this->assertCount(
+			1,
+			WP_Application_Passwords::get_user_application_passwords( $agent->ID ),
+			'exactly one Application Password must be minted'
+		);
+	}
+
+	/**
+	 * Invoke handle_authorize() and return the raw body it emits.
+	 *
+	 * Mirrors capture_exchange_json(): wp_send_json_* calls die() in a non-AJAX
+	 * request, which would kill the test process; flip wp_doing_ajax true so it
+	 * routes through wp_die() instead, and install a throwing wp_die handler so
+	 * the echoed body can be captured.
+	 *
+	 * @param  Connect_Page $page Page whose handle_authorize() to invoke.
+	 * @return string Raw response body.
+	 */
+	private function capture_authorize_output( Connect_Page $page ): string {
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+
+		ob_start();
+		try {
+			$page->handle_authorize();
+		} catch ( \WPDieException $e ) {
+			unset( $e );
+		} finally {
+			$out = (string) ob_get_clean();
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+		}
+
+		return $out;
+	}
+
+	/**
 	 * handle_authorize() must rawurlencode() code/state before add_query_arg().
 	 *
 	 * add_query_arg() does NOT encode the new values it adds — it expects the

@@ -121,7 +121,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 == Upgrade Notice ==
 
 = 2.0.1 =
-Connecting to a local development site is now smoother: when a connection fails you see what went wrong and how to fix it, and the AI assistant keeps its access to the site after setup instead of failing with a certificate error.
+Connecting is now smoother and more reliable: setup finishes on sites whose security firewall previously blocked it, failed connections explain what went wrong and how to fix it, and the AI assistant keeps its access to local development sites after setup instead of failing with a certificate error.
 
 = 2.0.0 =
 Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create and whether it's allowed to move posts to the trash.
@@ -169,7 +169,7 @@ Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media`
 
 = 2.0.1 on June 12, 2026 =
 
-This release makes connecting to a local development site smoother: clearer error messages when a connection fails, and a connection that keeps working after setup.
+This release makes connecting more reliable: setup now finishes on sites protected by a security firewall, with clearer error messages when a connection fails and a connection that keeps working after setup.
 
 #### ✨ Improved
 
@@ -177,10 +177,12 @@ This release makes connecting to a local development site smoother: clearer erro
 
 #### 🐛 Fixed
 
+* Fixes the browser-Approve step being blocked on sites running a server security firewall (such as Monarx), where Approve returned an "Access Denied" page and the connection never completed. Approving now hands the connection back to your AI app without a server redirect that firewalls mistake for an attack.
 * Fixes the AI assistant losing access to a local development site right after connecting successfully. The secure-connection setting used during setup now carries over to the assistant automatically, so it keeps working with sites built using tools like Laravel Herd, Valet, Local, or OrbStack.
 
 #### 💻 Developer Updates
 
+* The browser-Approve handler (`admin-post.php?action=gk_block_api_authorize`) no longer issues a server-side redirect to the loopback callback — a `Location: http://127.0.0.1:…` response trips origin RASP/WAF open-redirect rules. The Approve form now posts via `fetch()`, the handler returns the single-use exchange code as JSON, and the browser navigates to the loopback callback client-side. A no-JS full-page submit still falls back to the classic redirect.
 * The connector now surfaces the underlying TLS/network error code when the credential exchange fails, and propagates `NODE_EXTRA_CA_CERTS` into every generated MCP client config (`claude mcp add`, Claude Desktop, Cursor, and printed configs).
 
 = 2.0.0 on June 10, 2026 =
