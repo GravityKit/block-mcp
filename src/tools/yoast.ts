@@ -40,8 +40,8 @@ const YOAST_FIELD_PROPERTIES = {
   canonical: { type: 'string', description: 'Canonical URL override.' },
   focus_keyword: { type: 'string', description: 'Focus keyphrase.' },
   noindex: {
-    type: ['boolean', 'null'],
-    description: 'Tri-state: true=noindex, false=explicit index, null=post-type default.',
+    type: 'boolean',
+    description: 'true=noindex, false=explicit index. Omit to leave the post-type default. (Schema uses a single type because the Anthropic tool-schema validator rejects a "null" member in a type array; the runtime handler still accepts an explicit null.)',
   },
   nofollow: { type: 'boolean', description: 'true=nofollow, false=follow.' },
   robots_advanced: {
