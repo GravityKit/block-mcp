@@ -1985,6 +1985,40 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The Approve screen's fetch handler must not touch the form's shadowed
+	 * action/submit DOM properties.
+	 *
+	 * The form contains controls named "action" (the hidden action field) and
+	 * "submit" (the Approve button), which shadow form.action (resolves to the
+	 * input, not the URL — fetch() then hit "[object HTMLInputElement]" and
+	 * 404'd) and form.submit (the input, not the method — the fallback threw
+	 * "form.submit is not a function"). The script must read the action via
+	 * getAttribute() and submit via HTMLFormElement.prototype. This pins the
+	 * rendered script away from both shadowed accessors so the connect handshake
+	 * survives WordPress naming the submit button "submit".
+	 */
+	public function test_authorize_screen_script_avoids_shadowed_form_properties() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( "form.getAttribute( 'action' )", $html, 'fetch target must come from getAttribute(), not the shadowed form.action property' );
+		$this->assertStringContainsString( 'HTMLFormElement.prototype.submit.call( form )', $html, 'fallback must submit via the prototype method, not the shadowed form.submit property' );
+		$this->assertStringNotContainsString( 'fetch( form.action', $html, 'must not fetch the shadowed form.action (an <input name="action">)' );
+		$this->assertStringNotContainsString( 'form.submit()', $html, 'must not call the shadowed form.submit() (an <input name="submit">)' );
+	}
+
+	/**
 	 * The Approve screen offers the higher-risk "Your own account" option with its
 	 * acknowledgment gate, and the removed agent_as_me option must be gone.
 	 */

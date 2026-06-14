@@ -2063,13 +2063,20 @@ class Connect_Page {
 					var form   = script ? script.closest( 'form' ) : null;
 					if ( ! form || ! window.fetch || ! window.URL || ! window.FormData ) { return; }
 
+					// The form has controls named "action" and "submit", which
+					// shadow form.action (→ the input, not the URL) and
+					// form.submit (→ the input, not the method). Read the action
+					// via getAttribute(); submit via the prototype method.
+					var actionUrl    = form.getAttribute( 'action' );
+					var nativeSubmit = function () { HTMLFormElement.prototype.submit.call( form ); };
+
 					form.addEventListener( 'submit', function ( e ) {
 						e.preventDefault();
 
 						var data = new FormData( form );
 						data.append( 'gk_xhr', '1' );
 
-						fetch( form.action, {
+						fetch( actionUrl, {
 							method:      'POST',
 							body:        data,
 							credentials: 'same-origin',
@@ -2087,7 +2094,7 @@ class Connect_Page {
 							url.searchParams.set( 'state', json.data.state || ( st ? st.value : '' ) );
 							window.location.assign( url.toString() );
 						} ).catch( function () {
-							form.submit(); // native submit bypasses this handler.
+							nativeSubmit(); // native submit bypasses this handler.
 						} );
 					} );
 				} )();
