@@ -98,6 +98,27 @@ class ConnectPageTest extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * Pre-create the dedicated agent account, mirroring what render_section()
+	 * does on the connect screen before any credential-minting request runs.
+	 *
+	 * The Monarx-safe contract splits agent creation (connect-screen render)
+	 * from credential minting (Approve POST / installer download):
+	 * provision_credentials() MINTS against an existing agent and never creates
+	 * one — a single request that both creates a user and mints its Application
+	 * Password matches a backdoor-provisioning signature that runtime firewalls
+	 * block. Tests that drive a mint path directly must therefore stand the
+	 * agent up first, exactly as the real render would.
+	 *
+	 * @return int The provisioned agent user id.
+	 */
+	private function prewarm_agent(): int {
+		$agent_id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $agent_id, 'agent prewarm must succeed and return a user id' );
+
+		return $agent_id;
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// provision_credentials() — new shared seam.
 	// ──────────────────────────────────────────────────────────────────────
@@ -110,6 +131,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * installs produce working REST credentials.
 	 */
 	public function test_provision_credentials_returns_url_user_password_uuid() {
+		$this->prewarm_agent();
 		$page  = new Connect_Page();
 		$creds = $page->provision_credentials( 'Claude Code' );
 
@@ -142,6 +164,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * into the connections list.
 	 */
 	public function test_provision_credentials_label_resolves_slug_to_friendly_name() {
+		$this->prewarm_agent();
 		$page = new Connect_Page();
 		$page->provision_credentials( 'claude-code', 'agent' );
 
@@ -163,6 +186,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin );
 
+		$this->prewarm_agent();
 		$page  = new Connect_Page();
 		$creds = $page->provision_credentials( 'Claude Code', 'agent' );
 
@@ -183,6 +207,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin );
 
+		$this->prewarm_agent();
 		$page  = new Connect_Page();
 		$creds = $page->provision_credentials( 'Cursor', 'agent_as_me' );
 
@@ -225,6 +250,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin );
 
+		$this->prewarm_agent();
 		add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
 		$page  = new Connect_Page();
 		$creds = $page->provision_credentials( 'Cursor', 'self' );
@@ -247,6 +273,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 			$this->markTestSkipped( 'Single-site label contract; the multisite suffix is covered separately.' );
 		}
 
+		$this->prewarm_agent();
 		$page = new Connect_Page();
 		$page->provision_credentials( 'Claude Desktop' );
 
@@ -277,6 +304,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 			$this->markTestSkipped( 'Multisite-only test. Run with WP_TESTS_MULTISITE=1.' );
 		}
 
+		$this->prewarm_agent();
 		$page = new Connect_Page();
 
 		// Main-blog connection.
@@ -338,6 +366,118 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
+	// Monarx-safe split: agent creation and credential minting are separate
+	// requests. A single request that BOTH creates a WordPress user AND mints
+	// its Application Password matches a backdoor-provisioning signature that
+	// runtime firewalls (e.g. Monarx on Convesio) block — silently breaking
+	// Connect. These pin that the mint path never creates the agent, and that
+	// the agent is pre-created on the (mint-free) connect-screen render instead.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Minting with no pre-existing agent must fail closed with
+	 * 'gk_block_api_agent_not_ready' and must NOT create the agent user.
+	 *
+	 * provision_credentials() resolves the EXISTING agent (get_existing()) and
+	 * never calls wp_insert_user(); a create-user + mint-password combination in
+	 * one request is the exact signature a runtime firewall blocks. Revert the
+	 * get_existing() guard back to ensure() and this goes red (a user is created).
+	 */
+	public function test_provision_credentials_agent_absent_returns_not_ready_without_creating_user() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		// Precondition: the dedicated agent does not exist yet (no prewarm).
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'precondition: agent must not exist' );
+
+		$page   = new Connect_Page();
+		$result = $page->provision_credentials( 'Claude Code', 'agent' );
+
+		$this->assertInstanceOf( WP_Error::class, $result, 'minting with no agent must fail closed' );
+		$this->assertSame( 'gk_block_api_agent_not_ready', $result->get_error_code() );
+
+		// The mint path must never create the agent — that is the whole point.
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'provision must not create the agent user' );
+		$this->assertCount(
+			0,
+			WP_Application_Passwords::get_user_application_passwords( $admin_id ),
+			'no Application Password may be minted anywhere'
+		);
+	}
+
+	/**
+	 * The browser-Approve POST must fail closed without creating the agent when
+	 * the agent has not been pre-provisioned.
+	 *
+	 * Pins the contract at the HTTP boundary (not just inside
+	 * provision_credentials()): handle_authorize() surfaces the agent-not-ready
+	 * message and the request creates no block-mcp user, so a real Approve click
+	 * can never be the create+mint request a runtime firewall blocks.
+	 */
+	public function test_handle_authorize_does_not_create_user_when_agent_absent() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'precondition: agent must not exist' );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51799/cb';
+		$_POST['state']       = 'no-agent-state';
+		$_POST['client']      = 'block-mcp';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		add_filter( 'wp_die_handler', array( $this, 'throwing_die_handler' ) );
+		$died = '';
+		try {
+			( new Connect_Page() )->handle_authorize();
+		} catch ( \WPDieException $e ) {
+			$died = $e->getMessage();
+		} finally {
+			remove_filter( 'wp_die_handler', array( $this, 'throwing_die_handler' ) );
+			unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+		}
+
+		$this->assertStringContainsString( 'still being set up', $died, 'must surface the agent-not-ready message' );
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'the Approve POST must NOT create the agent user' );
+	}
+
+	/**
+	 * The connect-screen render pre-provisions the dedicated agent but mints no
+	 * credential, and a subsequent mint then succeeds against it.
+	 *
+	 * This is the other half of the split: creation happens on render_section()
+	 * (a request that mints nothing), so the later Approve / installer request
+	 * only mints. Pins that the render creates the agent, mints zero Application
+	 * Passwords, and leaves a mintable agent behind.
+	 */
+	public function test_render_section_pre_provisions_agent_without_minting() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'precondition: agent must not exist' );
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		ob_get_clean();
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent, 'render_section() must pre-provision the agent' );
+		$this->assertCount(
+			0,
+			WP_Application_Passwords::get_user_application_passwords( $agent->ID ),
+			'the render must not mint a credential — creation and minting are separate requests'
+		);
+
+		// Minting now succeeds against the pre-created agent (no second creation).
+		$creds = ( new Connect_Page() )->provision_credentials( 'Claude Code', 'agent' );
+		$this->assertIsArray( $creds, 'minting after the render must succeed against the pre-created agent' );
+		$this->assertSame( Agent_Provisioner::LOGIN, $creds['user'] );
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
 	// prepare_installer() — happy path.
 	// ──────────────────────────────────────────────────────────────────────
 
@@ -349,6 +489,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * wordpress_user.default and home_url() as wordpress_url.default.
 	 */
 	public function test_prepare_installer_provisions_mints_and_builds_bundle() {
+		$this->prewarm_agent();
 		$page   = new Connect_Page();
 		$result = $page->prepare_installer( 'Claude Desktop', $this->fixture_server );
 
@@ -410,6 +551,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 			}
 		);
 
+		$this->prewarm_agent();
 		$page   = new Connect_Page();
 		$result = $page->prepare_installer( 'Claude Desktop', $this->fixture_server );
 
@@ -445,6 +587,11 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * App_Password_Issuer::issue() failures are propagated correctly.
 	 */
 	public function test_prepare_installer_returns_wp_error_when_passwords_unavailable() {
+		// Stand the agent up first so provisioning reaches the password-mint step;
+		// otherwise the Monarx-safe contract short-circuits on a missing agent and
+		// this would assert a WP_Error for the wrong reason.
+		$this->prewarm_agent();
+
 		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
 		add_filter( 'wp_is_application_passwords_available', '__return_false' );
 
@@ -493,6 +640,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 	 * caller instead of treating the error object as a filesystem path.
 	 */
 	public function test_prepare_installer_propagates_build_wp_error() {
+		$this->prewarm_agent();
 		$page   = new Connect_Page();
 		$result = $page->prepare_installer( 'Claude Desktop', '/nonexistent/index.cjs' );
 
@@ -639,6 +787,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
+		$this->prewarm_agent();
 		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
 
 		$_POST['action']       = Connect_Page::ACTION_AUTHORIZE;
@@ -648,28 +797,15 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$_POST['_wpnonce']     = $nonce;
 		$_REQUEST['_wpnonce']  = $nonce; // check_admin_referer() reads $_REQUEST in CLI.
 
-		$captured_redirect = null;
-
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
-
-		try {
-			( new Connect_Page() )->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-
-		remove_all_filters( 'wp_redirect' );
+		// The native (non-fetch) path renders a 200 HTML interstitial that
+		// redirects in the browser instead of a server-side wp_redirect(); the
+		// Halting double turns its exit into a catchable throw.
+		$captured_redirect = $this->capture_handoff_url( new Halting_Connect_Page() );
 
 		// Clean up superglobals.
 		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
 
-		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
+		$this->assertNotEmpty( $captured_redirect, 'handle_authorize() must hand a client-side redirect URL to the browser' );
 
 		$parts = wp_parse_url( $captured_redirect );
 		$this->assertSame( '127.0.0.1', $parts['host'], 'redirect must target the loopback host' );
@@ -690,6 +826,106 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The browser-Approve fetch path returns the code as JSON and emits NO
+	 * loopback address anywhere in the response.
+	 *
+	 * A server-issued redirect to the loopback callback (Location:
+	 * http://127.0.0.1:...) reads as SSRF/open-redirect to origin WAF/RASP
+	 * layers, which block the response and silently break Connect. The fix
+	 * returns the code as JSON when the request is marked gk_xhr and lets the
+	 * browser navigate client-side. This pins all three halves: no server
+	 * redirect is issued, the single-use code + state are delivered, and the
+	 * loopback host appears nowhere in the response body. Revert the JSON branch
+	 * and the handler redirects instead — the wp_redirect guard trips and this
+	 * goes red.
+	 */
+	public function test_handle_authorize_xhr_returns_code_as_json_without_loopback_address() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$this->prewarm_agent();
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'http://127.0.0.1:51791/cb';
+		$_POST['state']       = 'xhr-state-token';
+		$_POST['client']      = 'block-mcp';
+		$_POST['gk_xhr']      = '1';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$redirected = false;
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( &$redirected ) {
+				$redirected = true;
+				throw new \RuntimeException( 'must_not_redirect: ' . (string) $location );
+			}
+		);
+
+		try {
+			$raw = $this->capture_authorize_output( new Connect_Page() );
+		} finally {
+			remove_all_filters( 'wp_redirect' );
+			unset(
+				$_POST['action'],
+				$_POST['callback'],
+				$_POST['state'],
+				$_POST['client'],
+				$_POST['gk_xhr'],
+				$_POST['_wpnonce'],
+				$_REQUEST['_wpnonce']
+			);
+		}
+
+		$this->assertFalse( $redirected, 'the XHR path must NOT issue a server redirect' );
+		$this->assertStringNotContainsString( '127.0.0.1', $raw, 'no loopback address may appear in the response body' );
+
+		$json = (array) json_decode( $raw, true );
+		$this->assertTrue( $json['success'], 'the XHR path returns a success envelope' );
+		$this->assertNotEmpty( $json['data']['code'], 'the response carries the single-use exchange code' );
+		$this->assertSame( 'xhr-state-token', $json['data']['state'], 'the response echoes the state token' );
+		$this->assertArrayNotHasKey( 'password', $json['data'], 'the response must NOT carry the password' );
+
+		$agent = get_user_by( 'login', Agent_Provisioner::LOGIN );
+		$this->assertInstanceOf( WP_User::class, $agent );
+		$this->assertCount(
+			1,
+			WP_Application_Passwords::get_user_application_passwords( $agent->ID ),
+			'exactly one Application Password must be minted'
+		);
+	}
+
+	/**
+	 * Invoke handle_authorize() and return the raw body it emits.
+	 *
+	 * Mirrors capture_exchange_json(): wp_send_json_* calls die() in a non-AJAX
+	 * request, which would kill the test process; flip wp_doing_ajax true so it
+	 * routes through wp_die() instead, and install a throwing wp_die handler so
+	 * the echoed body can be captured.
+	 *
+	 * @param  Connect_Page $page Page whose handle_authorize() to invoke.
+	 * @return string Raw response body.
+	 */
+	private function capture_authorize_output( Connect_Page $page ): string {
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+
+		ob_start();
+		try {
+			$page->handle_authorize();
+		} catch ( \WPDieException $e ) {
+			unset( $e );
+		} finally {
+			$out = (string) ob_get_clean();
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'throwing_die_handler' ) );
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+		}
+
+		return $out;
+	}
+
+	/**
 	 * handle_authorize() must rawurlencode() code/state before add_query_arg().
 	 *
 	 * add_query_arg() does NOT encode the new values it adds — it expects the
@@ -704,6 +940,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
+		$this->prewarm_agent();
 		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
 
 		// '&' is query-significant: without rawurlencode() it would split the
@@ -717,22 +954,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$_POST['_wpnonce']    = $nonce;
 		$_REQUEST['_wpnonce'] = $nonce;
 
-		$captured_redirect = null;
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
-
-		try {
-			( new Connect_Page() )->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-
-		remove_all_filters( 'wp_redirect' );
+		// The native (non-fetch) path renders a 200 HTML interstitial that
+		// redirects in the browser instead of a server-side wp_redirect(); the
+		// Halting double turns its exit into a catchable throw.
+		$captured_redirect = $this->capture_handoff_url( new Halting_Connect_Page() );
 		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
 
 		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
@@ -755,6 +980,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
+		$this->prewarm_agent();
 		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
 
 		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
@@ -764,22 +990,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$_POST['_wpnonce']    = $nonce;
 		$_REQUEST['_wpnonce'] = $nonce;
 
-		$captured_redirect = null;
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
-
-		try {
-			( new Connect_Page() )->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-
-		remove_all_filters( 'wp_redirect' );
+		// The native (non-fetch) path renders a 200 HTML interstitial that
+		// redirects in the browser instead of a server-side wp_redirect(); the
+		// Halting double turns its exit into a catchable throw.
+		$captured_redirect = $this->capture_handoff_url( new Halting_Connect_Page() );
 		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
 
 		// Redeem the code from the redirect to learn the password that was stored,
@@ -828,22 +1042,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$_POST['_wpnonce']    = $nonce;
 		$_REQUEST['_wpnonce'] = $nonce;
 
-		$captured_redirect = null;
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
-
-		try {
-			( new Connect_Page() )->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-
-		remove_all_filters( 'wp_redirect' );
+		// The native (non-fetch) path renders a 200 HTML interstitial that
+		// redirects in the browser instead of a server-side wp_redirect(); the
+		// Halting double turns its exit into a catchable throw.
+		$captured_redirect = $this->capture_handoff_url( new Halting_Connect_Page() );
 		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['identity'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
 
 		$this->assertNotNull( $captured_redirect, 'handle_authorize() must call wp_redirect()' );
@@ -875,6 +1077,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
+		$this->prewarm_agent();
 		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
 
 		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
@@ -887,22 +1090,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 
 		add_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
 
-		$captured_redirect = null;
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
-
-		try {
-			( new Connect_Page() )->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-
-		remove_all_filters( 'wp_redirect' );
+		// The native (non-fetch) path renders a 200 HTML interstitial that
+		// redirects in the browser instead of a server-side wp_redirect(); the
+		// Halting double turns its exit into a catchable throw.
+		$captured_redirect = $this->capture_handoff_url( new Halting_Connect_Page() );
 		remove_filter( 'gk/block-mcp/identity/allow-self', '__return_false' );
 		unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['identity'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
 
@@ -1053,6 +1244,37 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Run handle_authorize() through the Halting double and return the loopback
+	 * URL its interstitial hands to the browser.
+	 *
+	 * The native (non-fetch) path renders a 200 HTML page whose inline script
+	 * does window.location.replace( "<loopback>?code=&state=" ) — never a
+	 * server-side Location: redirect (which origin WAF/RASP layers block). This
+	 * extracts that URL so the existing redirect-contract assertions still apply.
+	 *
+	 * @param  Connect_Page $page A Halting_Connect_Page (its halt() throws).
+	 * @return string Loopback URL, or '' when the interstitial was not rendered.
+	 */
+	private function capture_handoff_url( Connect_Page $page ): string {
+		ob_start();
+		try {
+			$page->handle_authorize();
+		} catch ( \RuntimeException $e ) {
+			// Expected: the Halting double's halt() throws after the interstitial
+			// is rendered (a real exit would end the test process).
+			unset( $e );
+		} finally {
+			$html = (string) ob_get_clean();
+		}
+
+		if ( ! preg_match( '/window\.location\.replace\(\s*("(?:[^"\\\\]|\\\\.)*")\s*\)/', $html, $m ) ) {
+			return '';
+		}
+
+		return (string) json_decode( $m[1] );
+	}
+
+	/**
 	 * Invoke handle_exchange() and decode the JSON it emits.
 	 *
 	 * wp_send_json_* echoes the body and then terminates the request. In a normal
@@ -1112,6 +1334,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
 		wp_set_current_user( $admin_id );
 
+		$this->prewarm_agent();
 		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
 
 		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
@@ -1121,26 +1344,12 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$_POST['_wpnonce']    = $nonce;
 		$_REQUEST['_wpnonce'] = $nonce;
 
-		$captured_redirect = null;
-		add_filter(
-			'wp_redirect',
-			static function ( $location ) use ( &$captured_redirect ) {
-				$captured_redirect = $location;
-				throw new \RuntimeException( 'redirect_captured' );
-			}
-		);
+		$page              = new Halting_Connect_Page();
+		$captured_redirect = $this->capture_handoff_url( $page );
 
-		$page = new Connect_Page();
-		try {
-			$page->handle_authorize();
-		} catch ( \RuntimeException $e ) {
-			$this->assertSame( 'redirect_captured', $e->getMessage() );
-		}
-		remove_all_filters( 'wp_redirect' );
+		$this->assertNotEmpty( $captured_redirect, 'handle_authorize() must hand off a client-side redirect URL' );
 
-		$this->assertNotNull( $captured_redirect, 'handle_authorize() must redirect' );
-
-		// Extract the single-use code the REAL authorize handler redirected with.
+		// Extract the single-use code the REAL authorize handler handed off with.
 		parse_str( (string) wp_parse_url( $captured_redirect, PHP_URL_QUERY ), $qs );
 		$this->assertNotEmpty( $qs['code'], 'authorize must redirect a single-use code' );
 
@@ -1411,6 +1620,9 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 'ready', $page->connection_state() );
 
 		// Branch 3: passwords available + agent + at least one connection → 'connected'.
+		// The agent is stood up first (as the connect-screen render does), then the
+		// installer mint adds the connection that flips the state to 'connected'.
+		$this->prewarm_agent();
 		$result = $page->prepare_installer( 'Claude Desktop', $this->fixture_server );
 		$this->assertIsArray( $result, 'prepare_installer must succeed for the connected branch' );
 		wp_delete_file( $result['path'] );
@@ -1439,6 +1651,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 			}
 		);
 
+		$this->prewarm_agent();
 		$page   = new Connect_Page();
 		$result = $page->prepare_installer( 'Claude Desktop', $this->fixture_server );
 
@@ -1479,6 +1692,7 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$fixture = wp_tempnam( 'mcp-server' );
 		file_put_contents( $fixture, "#!/usr/bin/env node\n// fixture\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 
+		$this->prewarm_agent();
 		$page   = new Connect_Page();
 		$result = $page->prepare_installer( 'Claude Desktop', $fixture );
 
@@ -1886,6 +2100,40 @@ class ConnectPageTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The Approve screen's fetch handler must not touch the form's shadowed
+	 * action/submit DOM properties.
+	 *
+	 * The form contains controls named "action" (the hidden action field) and
+	 * "submit" (the Approve button), which shadow form.action (resolves to the
+	 * input, not the URL — fetch() then hit "[object HTMLInputElement]" and
+	 * 404'd) and form.submit (the input, not the method — the fallback threw
+	 * "form.submit is not a function"). The script must read the action via
+	 * getAttribute() and submit via HTMLFormElement.prototype. This pins the
+	 * rendered script away from both shadowed accessors so the connect handshake
+	 * survives WordPress naming the submit button "submit".
+	 */
+	public function test_authorize_screen_script_avoids_shadowed_form_properties() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( "form.getAttribute( 'action' )", $html, 'fetch target must come from getAttribute(), not the shadowed form.action property' );
+		$this->assertStringContainsString( 'HTMLFormElement.prototype.submit.call( form )', $html, 'fallback must submit via the prototype method, not the shadowed form.submit property' );
+		$this->assertStringNotContainsString( 'fetch( form.action', $html, 'must not fetch the shadowed form.action (an <input name="action">)' );
+		$this->assertStringNotContainsString( 'form.submit()', $html, 'must not call the shadowed form.submit() (an <input name="submit">)' );
+	}
+
+	/**
 	 * The Approve screen offers the higher-risk "Your own account" option with its
 	 * acknowledgment gate, and the removed agent_as_me option must be gone.
 	 */
@@ -2209,8 +2457,10 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator', 'display_name' => 'Screenshot Admin' ) );
 		wp_set_current_user( $admin_id );
 
-		$agent_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
-		update_option( 'gk_block_api_agent_user_id', $agent_id );
+		// Use the real dedicated agent (as the connect-screen render does). A faked
+		// subscriber here would be clobbered when render_section() pre-provisions
+		// the genuine block-mcp account and rewrites gk_block_api_agent_user_id.
+		$agent_id = $this->prewarm_agent();
 
 		$created = \WP_Application_Passwords::create_new_application_password(
 			$agent_id,
@@ -2252,4 +2502,18 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://www.gravitykit.com/docs/block-mcp/connect-ai-assistant/', $url );
 	}
 
+}
+
+/**
+ * Connect_Page whose halt() throws instead of exit()ing, so the interstitial
+ * handoff path can be exercised under test without ending the process.
+ */
+class Halting_Connect_Page extends Connect_Page {
+
+	/**
+	 * @return void
+	 */
+	protected function halt() {
+		throw new \RuntimeException( 'gk_halt' );
+	}
 }

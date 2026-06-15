@@ -3,7 +3,7 @@
  * Plugin Name: Block MCP by GravityKit
  * Plugin URI: https://www.gravitykit.com/wordpress-block-mcp/
  * Description: Lets an AI assistant (Claude, Cursor) safely create and edit your WordPress content over the Model Context Protocol (MCP).
- * Version: 2.0.1
+ * Version: 2.0.2
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
@@ -35,7 +35,7 @@ if ( ! defined( 'GK_BLOCK_MCP_DISABLE_FOUNDATION' ) ) {
 	}
 }
 
-define( 'GK_BLOCK_MCP_VERSION', '2.0.1' );
+define( 'GK_BLOCK_MCP_VERSION', '2.0.2' );
 define( 'GK_BLOCK_MCP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_MCP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 

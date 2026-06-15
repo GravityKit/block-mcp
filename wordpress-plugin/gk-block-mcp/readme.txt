@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.0.1
+Stable tag: 2.0.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -118,54 +118,15 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 `uninstall.php` deletes all plugin options and transients (`gk_block_api_preferences`, `gk_block_api_post_types_allowlist`, `gk_block_api_storage_modes`, the manual dual-storage list, the inventory cache, and per-post rate-limit transients). Post content and revisions are not touched.
 
-== Upgrade Notice ==
-
-= 2.0.1 =
-Connecting to a local development site is now smoother: when a connection fails you see what went wrong and how to fix it, and the AI assistant keeps its access to the site after setup instead of failing with a certificate error.
-
-= 2.0.0 =
-Connect an AI assistant like Claude to your site in a few clicks — no terminal, no config files. Block MCP 2.0 adds a guided setup at Settings → Block MCP, gives the assistant its own limited account (separate from your login and easy to disconnect at any time), and lets you control exactly what it can create and whether it's allowed to move posts to the trash.
-
-= 1.8.1 =
-Fixes nested container blocks (columns, columns/column, group, buttons) rendering their children as top-level siblings on the front end while looking correct in the editor. Inside-out page builds through `insert_blocks` + `edit_block_tree.insert-child` now serialise with children correctly nested inside their wrappers.
-
-= 1.8.0 =
-Every WordPress core block and the full Gutenberg trunk block library now compose cleanly through the write API. Each insert is validated against the block's inline HTML attribute definitions, so malformed input is caught up front with a clear, actionable error before becoming an "invalid content" warning in the editor.
-
-= 1.7.1 =
-Fixes two Code Block Pro rendering bugs and hardens the wrapper against attribute injection. Code blocks inserted by an AI agent now render correctly (previously appeared as blank gaps), explicit `plaintext` language is respected instead of being auto-detected (English prose with the word "from" no longer renders as SQL), and caller-supplied font / colour / className values are HTML-encoded before they reach the wrapper markup.
-
-= 1.7.0 =
-New per-site MCP server instructions addendum. Paste site-specific conventions (callout className mapping, code-block theme, doc structure rules) under Settings → Block MCP and every connected MCP client receives them at handshake — no more rediscovery per session. Plain-text, 2,000-char cap, public-by-design endpoint with per-IP rate limiting.
-
-= 1.6.1 =
-Fixes a 30-second timeout on `/patterns` for sites with many synced patterns: the per-pattern LIKE scan that ran twice per pattern is now a single chunked aggregate scan cached for an hour. `?refresh=true` on `/patterns` now requires `manage_options`, and orphaned refs from copy-pasted content no longer pollute the cache.
-
-= 1.6.0 =
-Adds a master kill-switch for media uploads with an admin checkbox, restricts the `create_post` tool to a configurable post-type allowlist, and closes several visibility leaks where drafts and password-protected posts could appear in search and lookup results.
-
-= 1.5.1 =
-Write responses now echo a canonical `saved` snapshot (inner_html + attributes) so agents can verify edits without a follow-up read. New `get_block` endpoint mirrors the same shape for single-block re-reads. New `verbose` request param on batch-update (default false). All changes are additive — existing consumers continue to work unchanged.
-
-= 1.5.0 =
-Stable block refs (`gk_ref`) — every block gets a persistent ID that survives sibling inserts/removals, so chained mutations don't go stale. Atomic batch updates (`POST /posts/{id}/blocks/batch-update`) for N independent edits in ONE revision. ETag / If-Match optimistic concurrency for safe parallel writes. Cursor pagination on `get_page_blocks` for large pages. Yoast SEO bridge rolled into the plugin. WordPress admin settings page for editing tier scores, replacement map, dual-storage list, and post-type allow-list. Translations for 20 WordPress languages.
-
-= 1.4.2 =
-Critical save-path fix: block content now goes through `wp_slash()` before reaching `wp_update_post` / `wp_insert_post`, so backslashes inside block-comment JSON (Code Block Pro escape sequences, CSS variable references, etc.) survive the round-trip instead of being stripped by core's automatic `wp_unslash()`. New `gk_block_api_format_block` filter for enriching block responses (used by the Code Block Pro integration).
-
-= 1.4.1 =
-Security and hardening pass: SSRF guard extended to IPv6, multisite uninstall sweep, registry-first storage scan with OOM/DoS hardening and query safety. Lifecycle hooks reorganized, global filter wiring cleaned up, log gating refined, all user-facing strings wrapped in `__()` for translation.
-
-= 1.4.0 =
-Settings UI added. Auto-discovery of dual-storage blocks. Atomic range-replace endpoint. Dual-storage write protection (refuses innerHTML-only updates on dual-storage blocks to prevent the corruption class fixed by BLOCK-3). Tool/method renames may break custom code that instantiated Block_CRUD or REST_Controller directly — see changelog.
-
-= 1.3.0 =
-Yoast SEO tool integration. License (MIT for MCP / GPL-2.0+ for plugin) added.
-
-= 1.2.0 =
-Docs lifecycle tools (`create_post`, `update_post`, `list_terms`, `upload_media` with SSRF guard).
-
 == Changelog ==
+
+= 2.0.2 on June 15, 2026 =
+
+This release fixes connecting on sites protected by a server security firewall, which previously blocked setup partway through with an "Access Denied" page.
+
+#### 🐛 Fixed
+
+* Fixes connecting being blocked on sites running a server security firewall (such as Monarx), where setup returned an "Access Denied" page and never completed. The dedicated assistant account is now created when you open the connect screen, and its credential is issued on a separate step when you approve — so the firewall no longer mistakes setup for a single suspicious "create an account and hand out its password" action.
 
 = 2.0.1 on June 12, 2026 =
 

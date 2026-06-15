@@ -108,8 +108,8 @@ jobs:
 
       # Merging a plugin version bump to main IS the release: when the plugin
       # Version header has no v{version} tag yet, create the tag + GitHub
-      # release here, with the readme.txt Upgrade Notice as the body and the
-      # ZIP attached. This must happen in this job rather than via a separate
+      # release here, with the version's readme.txt Changelog entry as the body
+      # and the ZIP attached. This must happen in this job rather than via a separate
       # tag push — tags pushed with GITHUB_TOKEN don't trigger other
       # workflows, so a tag-push hop would never fire the release build.
       # The npm publish workflow keys off package.json independently (the
@@ -140,15 +140,15 @@ jobs:
             exit 1
           fi
           echo "unreleased=true" >> "$GITHUB_OUTPUT"
-          # Release body = the version's Upgrade Notice from readme.txt
-          # (its header is exactly "= X.Y.Z =" — changelog headers carry a date).
-          awk -v ver="= $VERSION =" '
-            $0 == ver { grab = 1; next }
+          # Release body = the version's Changelog entry from readme.txt
+          # (its header is "= X.Y.Z on {DATE} =" — match the version + " on ").
+          awk -v ver="= $VERSION on " '
+            index($0, ver) == 1 { grab = 1; next }
             grab && /^= / { exit }
             grab { print }
           ' wordpress-plugin/gk-block-mcp/readme.txt > "$RUNNER_TEMP/release-notes.md"
           if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
-            echo "::warning::No Upgrade Notice found for $VERSION in readme.txt — using a generic body."
+            echo "::warning::No changelog entry found for $VERSION in readme.txt — using a generic body."
             printf 'Release v%s. See readme.txt for the changelog.\n' "$VERSION" > "$RUNNER_TEMP/release-notes.md"
           fi
 

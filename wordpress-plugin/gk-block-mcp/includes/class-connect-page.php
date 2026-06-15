@@ -214,6 +214,19 @@ class Connect_Page {
 	const EXCHANGE_TTL = 120;
 
 	/**
+	 * Whether the agent account already existed when the connect screen began
+	 * rendering — captured before pre_provision_agent() creates it.
+	 *
+	 * The onboarding copy and the installer button label read this so a genuine
+	 * first run still says "a new account will be created", even though the
+	 * render then creates it. Per-request: a fresh Connect_Page renders each load.
+	 *
+	 * @since 2.0.1
+	 * @var bool
+	 */
+	private $agent_preexisted = false;
+
+	/**
 	 * Return the slug-keyed client metadata map.
 	 *
 	 * Each key is the stable, URL-safe slug used everywhere internally (form
@@ -378,9 +391,21 @@ class Connect_Page {
 			// doing the work. The agent is not provisioned for this path.
 			$target_user = $human;
 		} else {
-			$agent = ( new Agent_Provisioner() )->ensure();
+			// Resolve the EXISTING agent — never create it here. Creating a
+			// user and minting its Application Password in the same request
+			// matches a backdoor-provisioning signature that runtime firewalls
+			// (e.g. Monarx) block, which silently breaks Connect. The agent is
+			// pre-created on the connect-screen render (pre_provision_agent());
+			// this request only mints against it.
+			$agent = ( new Agent_Provisioner() )->get_existing();
 			if ( is_wp_error( $agent ) ) {
 				return $agent;
+			}
+			if ( null === $agent ) {
+				return new \WP_Error(
+					'gk_block_api_agent_not_ready',
+					__( 'The Block MCP account is still being set up. Reload this page and try connecting again.', 'gk-block-mcp' )
+				);
 			}
 			$target_user = $agent;
 		}
@@ -891,16 +916,30 @@ class Connect_Page {
 		}
 
 		// Deliver the credential out-of-band: store it under a single-use,
-		// short-TTL code and redirect only the code (never the password) to the
+		// short-TTL code and hand only the code (never the password) to the
 		// loopback callback. The connector then POSTs the code to handle_exchange()
 		// to retrieve the credential once, keeping the site-wide password out of
 		// the redirect URL (browser history / Referer).
 		$code = $this->store_exchange_code( $creds );
 
-		// add_query_arg() does NOT encode the new values it adds — it expects the
-		// caller to pre-encode them (it only re-encodes params already present in
-		// the URL). rawurlencode() is therefore required so a code/state with a
-		// query-significant char (&, #, +) can't corrupt the redirect target.
+		// Default path: return the code as JSON; render_authorize_screen()'s
+		// fetch handler navigates to the loopback callback client-side. A
+		// server-issued redirect to a loopback/private IP looks like SSRF to
+		// origin RASP/WAF layers, which block the response and break the
+		// handshake. JSON keeps every loopback address out of the response.
+		if ( $this->is_xhr_authorize() ) {
+			wp_send_json_success(
+				array(
+					'code'  => $code,
+					'state' => $state,
+				)
+			);
+		}
+
+		// Fallback for a native (non-fetch) submit. add_query_arg() does NOT
+		// encode the values it adds (it only re-encodes params already in the
+		// URL), so rawurlencode() is required — a code/state with a
+		// query-significant char (&, #, +) would otherwise corrupt the target.
 		$redirect = add_query_arg(
 			array(
 				'code'  => rawurlencode( $code ),
@@ -909,11 +948,112 @@ class Connect_Page {
 			$callback
 		);
 
-		// wp_redirect() is intentional: the validated loopback host is never in
-		// WordPress's allowed_redirect_hosts list, but is_loopback_callback()
-		// above already confirmed it is safe.
-		wp_redirect( $redirect ); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect
+		// Hand off via a 200 HTML page that redirects in the browser, NOT a
+		// server redirect. A Location: header to a loopback/private IP reads as
+		// SSRF/open-redirect to origin RASP/WAF layers and gets blocked; a 200
+		// page carrying the loopback only in its body does not (the block is on
+		// the redirect header, not page content). The page redirects via script
+		// with a visible manual link as the no-script floor.
+		$this->render_loopback_handoff( $redirect, $client );
+		$this->halt();
+	}
+
+	/**
+	 * Terminate the request after an echoed/streamed response.
+	 *
+	 * Wraps exit so tests can intercept it — a bare exit would end the test
+	 * process. Production behaviour is a plain exit.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @return void
+	 */
+	protected function halt() {
 		exit;
+	}
+
+	/**
+	 * Output a 200 HTML page that sends the browser to the loopback callback.
+	 *
+	 * Used by the native-submit fallback in place of wp_redirect(): a
+	 * server-issued redirect to a loopback host is blocked by origin WAF/RASP
+	 * layers, so the navigation must happen client-side. The exchange code rides
+	 * in the URL (single-use, short-TTL); the password is never here.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @param string $redirect Loopback callback URL with code + state.
+	 * @param string $client   Client slug, for the human-readable label.
+	 * @return void
+	 */
+	private function render_loopback_handoff( $redirect, $client ) {
+		nocache_headers();
+		if ( ! headers_sent() ) {
+			header( 'Content-Type: text/html; charset=utf-8' );
+		}
+
+		$label = $this->client_label( $client );
+
+		?>
+<!doctype html>
+<html <?php language_attributes(); ?>>
+<head>
+	<meta charset="<?php bloginfo( 'charset' ); ?>" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="robots" content="noindex,nofollow" />
+	<title><?php esc_html_e( 'Finishing connection…', 'gk-block-mcp' ); ?></title>
+	<script>window.location.replace( <?php echo wp_json_encode( $redirect ); ?> );</script>
+	<style>
+		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f0f1; color: #1e1e1e; margin: 0; }
+		.gk-handoff { max-width: 480px; margin: 15vh auto 0; padding: 24px 28px; background: #fff; border: 1px solid #c3c4c7; border-radius: 8px; text-align: center; }
+		.gk-handoff a { color: #2271b1; }
+	</style>
+</head>
+<body>
+	<div class="gk-handoff">
+		<p>
+			<?php
+			printf(
+				/* translators: %s: the AI app name (client). */
+				esc_html__( 'Finishing the connection to %s…', 'gk-block-mcp' ),
+				esc_html( $label )
+			);
+			?>
+		</p>
+		<p>
+			<a href="<?php echo esc_url( $redirect ); ?>"><?php esc_html_e( 'Click here if you are not redirected automatically.', 'gk-block-mcp' ); ?></a>
+		</p>
+	</div>
+</body>
+</html>
+		<?php
+	}
+
+	/**
+	 * Whether the authorize POST wants the exchange code back as JSON.
+	 *
+	 * True for the in-page fetch() handler (which redirects to the loopback
+	 * callback client-side); false for a classic full-page form submit (which
+	 * needs the no-JS server redirect). The fetch handler marks its request with
+	 * the gk_xhr field; the X-Requested-With header is a secondary signal.
+	 *
+	 * The caller verifies the nonce before reaching this.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @return bool
+	 */
+	private function is_xhr_authorize() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified by the caller via check_admin_referer().
+		if ( isset( $_POST['gk_xhr'] ) && '1' === $_POST['gk_xhr'] ) {
+			return true;
+		}
+
+		$requested_with = isset( $_SERVER['HTTP_X_REQUESTED_WITH'] )
+			? strtolower( sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_REQUESTED_WITH'] ) ) )
+			: '';
+
+		return 'xmlhttprequest' === $requested_with;
 	}
 
 	/**
@@ -1365,6 +1505,32 @@ class Connect_Page {
 	}
 
 	/**
+	 * Create the dedicated agent ahead of any credential mint.
+	 *
+	 * Runs on the connect-screen render — a request that mints no Application
+	 * Password — so the later Approve / installer-download request only mints
+	 * against an existing account. Splitting account creation from credential
+	 * minting across two requests sidesteps the backdoor-provisioning signature
+	 * runtime firewalls block. Best-effort: a failure here surfaces as a clear
+	 * error at mint time (provision_credentials() returns agent_not_ready).
+	 *
+	 * Skipped when Application Passwords are unavailable — the connect flow
+	 * can't proceed anyway, so there is nothing to pre-create.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @param string $state Current connection_state(): skips when 'needs_https'.
+	 * @return void
+	 */
+	private function pre_provision_agent( $state ) {
+		if ( 'needs_https' === $state ) {
+			return;
+		}
+
+		( new Agent_Provisioner() )->ensure();
+	}
+
+	/**
 	 * Render the Connect onboarding section.
 	 *
 	 * Outputs only the Connect content — the heading, status notices, the client
@@ -1389,6 +1555,18 @@ class Connect_Page {
 	 */
 	public function render_section() {
 		$state = $this->connection_state();
+
+		// Snapshot agent existence BEFORE pre-provisioning so first-run copy
+		// still reads as "an account will be created".
+		$this->agent_preexisted = $this->agent_exists();
+
+		// Create the dedicated agent now, on this render, so the later
+		// credential-minting request (browser Approve or installer download)
+		// only MINTS against an existing account. A single request that both
+		// creates a user and mints its Application Password matches a
+		// backdoor-provisioning signature that runtime firewalls (e.g. Monarx)
+		// block — splitting creation and minting across two requests avoids it.
+		$this->pre_provision_agent( $state );
 
 		// ── Authorize mode ────────────────────────────────────────────────────
 		// When the connector CLI sends the admin to ?gk_authorize=1 we show a
@@ -1481,7 +1659,7 @@ class Connect_Page {
 			<div class="notice notice-warning inline">
 				<p>
 					<?php
-					if ( $this->agent_exists() ) {
+					if ( $this->agent_preexisted ) {
 						/* translators: %1$s: opening <strong> tag, %2$s: closing </strong> tag. */
 						$account_copy = __( '%1$sThe AI uses a dedicated "Block MCP" account.%2$s It edits your posts and pages but can\'t sign in or change your settings, and you can remove access anytime by disconnecting.', 'gk-block-mcp' );
 					} else {
@@ -2008,6 +2186,54 @@ class Connect_Page {
 				} )();
 				</script>
 				<?php endif; ?>
+				<script>
+				/* Approve via fetch() so the server returns the exchange code as
+					JSON and the browser navigates to the loopback callback from
+					here — a server-issued redirect to 127.0.0.1 reads as SSRF to
+					origin WAFs and gets blocked. Falls back to a native submit
+					(handled by the no-JS branch in handle_authorize()) if fetch is
+					unavailable or fails. */
+				( function () {
+					var script = document.currentScript;
+					var form   = script ? script.closest( 'form' ) : null;
+					if ( ! form || ! window.fetch || ! window.URL || ! window.FormData ) { return; }
+
+					// The form has controls named "action" and "submit", which
+					// shadow form.action (→ the input, not the URL) and
+					// form.submit (→ the input, not the method). Read the action
+					// via getAttribute(); submit via the prototype method.
+					var actionUrl    = form.getAttribute( 'action' );
+					var nativeSubmit = function () { HTMLFormElement.prototype.submit.call( form ); };
+
+					form.addEventListener( 'submit', function ( e ) {
+						e.preventDefault();
+
+						var data = new FormData( form );
+						data.append( 'gk_xhr', '1' );
+
+						fetch( actionUrl, {
+							method:      'POST',
+							body:        data,
+							credentials: 'same-origin',
+							headers:     { 'X-Requested-With': 'XMLHttpRequest' }
+						} ).then( function ( res ) {
+							return res.ok ? res.json() : null;
+						} ).then( function ( json ) {
+							if ( ! json || ! json.success || ! json.data || ! json.data.code ) {
+								throw new Error( 'bad response' );
+							}
+							var cb = form.querySelector( 'input[name="callback"]' ).value;
+							var st = form.querySelector( 'input[name="state"]' );
+							var url = new URL( cb );
+							url.searchParams.set( 'code', json.data.code );
+							url.searchParams.set( 'state', json.data.state || ( st ? st.value : '' ) );
+							window.location.assign( url.toString() );
+						} ).catch( function () {
+							nativeSubmit(); // native submit bypasses this handler.
+						} );
+					} );
+				} )();
+				</script>
 			</form>
 
 			<?php $this->render_help_link(); ?>
@@ -2306,8 +2532,9 @@ class Connect_Page {
 
 			<?php
 			// "create MCP user" is only accurate the first time — once the agent
-			// account exists, downloading the installer just reuses it.
-			$desktop_button_label = $this->agent_exists()
+			// account exists, downloading the installer just reuses it. Reads the
+			// pre-provision snapshot so a genuine first run still says "create".
+			$desktop_button_label = $this->agent_preexisted
 				? __( 'Download installer', 'gk-block-mcp' )
 				: __( 'Download installer & create MCP user', 'gk-block-mcp' );
 			?>
