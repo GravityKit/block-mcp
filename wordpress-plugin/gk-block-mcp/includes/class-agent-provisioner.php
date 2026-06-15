@@ -206,6 +206,14 @@ class Agent_Provisioner {
 	 * @return int|\WP_Error Agent user ID, or WP_Error on failure.
 	 */
 	public function ensure() {
+		$existing = $this->get_existing();
+		if ( is_wp_error( $existing ) ) {
+			return $existing;
+		}
+		if ( null !== $existing ) {
+			return $existing;
+		}
+
 		/**
 		 * Name the AI agent's user account to match your house style.
 		 *
@@ -233,34 +241,6 @@ class Agent_Provisioner {
 		// been created on another blog, where this blog's role didn't yet exist.
 		$role = self::register_role();
 
-		$existing = get_user_by( 'login', $login );
-
-		if ( $existing instanceof \WP_User ) {
-			$meta_flag = get_user_meta( $existing->ID, self::META_FLAG, true );
-			if ( '1' !== $meta_flag ) {
-				return new \WP_Error(
-					'agent_login_taken',
-					sprintf(
-						/* translators: %s: filter name */
-						__(
-							'A user with that login already exists but is not the Block MCP service account. Use the %s filter to specify a different login.',
-							'gk-block-mcp'
-						),
-						'gk/block-mcp/agent/login'
-					)
-				);
-			}
-
-			// The agent user is network-global, but capabilities are per-blog.
-			// Without this the agent has the role only on the blog it was first
-			// created on, so REST writes 403 on every other blog of a network.
-			$this->ensure_role_on_current_blog( $existing->ID, $role );
-
-			update_option( 'gk_block_api_agent_user_id', $existing->ID, false );
-			return $existing->ID;
-		}
-
-		// No existing user — create the account.
 		$host  = wp_parse_url( home_url(), PHP_URL_HOST );
 		$email = 'block-mcp@' . ( $host ? $host : 'localhost' );
 
@@ -283,6 +263,59 @@ class Agent_Provisioner {
 		update_option( 'gk_block_api_agent_user_id', $user_id, false );
 
 		return $user_id;
+	}
+
+	/**
+	 * Resolve the already-provisioned agent without creating it.
+	 *
+	 * Mirrors ensure()'s existing-account branch — login lookup, service-account
+	 * flag check, and the per-blog role assertion — but never calls
+	 * wp_insert_user(). The credential-minting request uses this so it does NOT
+	 * also create a user: a request that both creates an account and mints an
+	 * Application Password for it matches a backdoor-provisioning signature that
+	 * runtime firewalls (e.g. Monarx) block. Creation happens earlier, on the
+	 * connect-screen render; minting runs here against the existing account.
+	 *
+	 * @since 2.0.1
+	 *
+	 * @return int|null|\WP_Error Agent user ID; null when not yet provisioned;
+	 *                            WP_Error when the login is held by a real user.
+	 */
+	public function get_existing() {
+		$login = apply_filters( 'gk/block-mcp/agent/login', self::LOGIN );
+
+		// Register the role (idempotent) so the agent's caps resolve on this
+		// blog. This writes no user, so it does not contribute to the
+		// create-user-and-mint signature the minting request must avoid.
+		$role = self::register_role();
+
+		$existing = get_user_by( 'login', $login );
+		if ( ! $existing instanceof \WP_User ) {
+			return null;
+		}
+
+		$meta_flag = get_user_meta( $existing->ID, self::META_FLAG, true );
+		if ( '1' !== $meta_flag ) {
+			return new \WP_Error(
+				'agent_login_taken',
+				sprintf(
+					/* translators: %s: filter name */
+					__(
+						'A user with that login already exists but is not the Block MCP service account. Use the %s filter to specify a different login.',
+						'gk-block-mcp'
+					),
+					'gk/block-mcp/agent/login'
+				)
+			);
+		}
+
+		// The agent user is network-global, but capabilities are per-blog.
+		// Without this the agent has the role only on the blog it was first
+		// created on, so REST writes 403 on every other blog of a network.
+		$this->ensure_role_on_current_blog( $existing->ID, $role );
+
+		update_option( 'gk_block_api_agent_user_id', $existing->ID, false );
+		return $existing->ID;
 	}
 
 	/**

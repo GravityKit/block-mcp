@@ -213,4 +213,57 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 			restore_current_blog();
 		}
 	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// get_existing() — the create-free resolver used by the minting request.
+	// ──────────────────────────────────────────────────────────────────────
+
+	/**
+	 * get_existing() returns null when the agent has not been provisioned, and
+	 * must NOT create the user.
+	 *
+	 * This is the half of the Monarx-safe split that keeps the credential-minting
+	 * request from also creating a user: get_existing() resolves an already-present
+	 * agent but never calls wp_insert_user(). Pins that an absent agent yields null
+	 * and zero users with the service-account login.
+	 */
+	public function test_get_existing_returns_null_when_agent_absent_and_creates_no_user() {
+		$result = ( new Agent_Provisioner() )->get_existing();
+
+		$this->assertNull( $result, 'get_existing() must return null when the agent is not provisioned' );
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'get_existing() must not create the agent user' );
+		$this->assertCount(
+			0,
+			get_users( array( 'login__in' => array( Agent_Provisioner::LOGIN ) ) ),
+			'no user may be created under the service-account login'
+		);
+	}
+
+	/**
+	 * Once ensure() has provisioned the agent, get_existing() returns that same
+	 * user ID — the minting request resolves the pre-created account.
+	 */
+	public function test_get_existing_returns_id_when_agent_present() {
+		$created = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $created );
+
+		$resolved = ( new Agent_Provisioner() )->get_existing();
+		$this->assertSame( $created, $resolved, 'get_existing() must resolve the pre-created agent id' );
+	}
+
+	/**
+	 * get_existing() must refuse to adopt a real user that happens to own the
+	 * service-account login, returning WP_Error('agent_login_taken') — the same
+	 * fail-closed contract as ensure(), so the minting path never mints on a
+	 * human account that shares the login.
+	 */
+	public function test_get_existing_returns_wp_error_when_login_taken_by_nonagent() {
+		$conflicting_user = self::factory()->user->create( array( 'user_login' => Agent_Provisioner::LOGIN, 'role' => 'subscriber' ) );
+		$this->assertGreaterThan( 0, $conflicting_user, 'precondition: the conflicting non-agent user must be created' );
+
+		$result = ( new Agent_Provisioner() )->get_existing();
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'agent_login_taken', $result->get_error_code() );
+	}
 }
