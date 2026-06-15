@@ -127,13 +127,6 @@ This release fixes connecting on sites protected by a server security firewall, 
 #### 🐛 Fixed
 
 * Fixes connecting being blocked on sites running a server security firewall (such as Monarx), where setup returned an "Access Denied" page and never completed. The dedicated assistant account is now created when you open the connect screen, and its credential is issued on a separate step when you approve — so the firewall no longer mistakes setup for a single suspicious "create an account and hand out its password" action.
-* Fixes an error that could prevent the Approve button on the connection screen from completing the connection.
-
-#### 💻 Developer Updates
-
-* Account creation and credential minting are now separate requests. The dedicated agent user is provisioned on the connect-screen render (`Connect_Page::pre_provision_agent()`), and the minting request (`provision_credentials()`) resolves the existing account through `Agent_Provisioner::get_existing()` rather than creating it. A single request that both creates a user and mints its Application Password matches a backdoor-provisioning signature that runtime firewalls (e.g. Monarx) block.
-* The browser-Approve handler (`admin-post.php?action=gk_block_api_authorize`) returns the single-use exchange code as JSON and the browser navigates to the loopback callback client-side, instead of a server-side `Location: http://127.0.0.1:…` redirect that trips origin RASP/WAF open-redirect rules. A no-JS full-page submit still falls back to the classic redirect.
-* The Approve form reads its target via `getAttribute('action')` and submits via `HTMLFormElement.prototype.submit.call(form)`, so form controls named `action` or `submit` can't shadow the form's own DOM properties and break submission.
 
 = 2.0.1 on June 12, 2026 =
 
