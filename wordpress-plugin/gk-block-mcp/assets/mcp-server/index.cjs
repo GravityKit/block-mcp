@@ -53118,8 +53118,8 @@ var YOAST_FIELD_PROPERTIES = {
   canonical: { type: "string", description: "Canonical URL override." },
   focus_keyword: { type: "string", description: "Focus keyphrase." },
   noindex: {
-    type: ["boolean", "null"],
-    description: "Tri-state: true=noindex, false=explicit index, null=post-type default."
+    type: "boolean",
+    description: 'true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients \u2014 e.g. Google Gemini \u2014 reject a "null" member in a type array; the handler still accepts an explicit null.)'
   },
   nofollow: { type: "boolean", description: "true=nofollow, false=follow." },
   robots_advanced: {

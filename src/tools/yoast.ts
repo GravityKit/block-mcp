@@ -41,7 +41,7 @@ const YOAST_FIELD_PROPERTIES = {
   focus_keyword: { type: 'string', description: 'Focus keyphrase.' },
   noindex: {
     type: 'boolean',
-    description: 'true=noindex, false=explicit index. Omit to leave the post-type default. (Schema uses a single type because the Anthropic tool-schema validator rejects a "null" member in a type array; the runtime handler still accepts an explicit null.)',
+    description: 'true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients — e.g. Google Gemini — reject a "null" member in a type array; the handler still accepts an explicit null.)',
   },
   nofollow: { type: 'boolean', description: 'true=nofollow, false=follow.' },
   robots_advanced: {
