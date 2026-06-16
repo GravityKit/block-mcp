@@ -2022,8 +2022,10 @@ class REST_Controller {
 	/**
 	 * DELETE /posts/{id}/blocks/by-ref/{ref}
 	 *
-	 * Ref-based delete. Resolves the ref to a flat index, then calls the
-	 * existing delete_blocks path.
+	 * Resolves the ref to its top-level counter — the index space
+	 * `delete_blocks()` operates in — so the block the ref names is the block
+	 * removed. A nested ref is refused with `ref_not_top_level`, since
+	 * `delete_blocks()` only splices the top-level array.
 	 *
 	 * @param \WP_REST_Request $request Request.
 	 *
@@ -2033,13 +2035,13 @@ class REST_Controller {
 		return $this->with_post_edit_context(
 			$request,
 			function ( $post_id, $req ) {
-				$ref   = (string) $req->get_param( 'ref' );
-				$index = $this->block_crud->resolve_ref_to_index( $post_id, $ref );
-				if ( is_wp_error( $index ) ) {
-					return $index;
+				$ref       = (string) $req->get_param( 'ref' );
+				$top_level = $this->block_crud->resolve_ref_to_top_level( $post_id, $ref );
+				if ( is_wp_error( $top_level ) ) {
+					return $top_level;
 				}
 				$count = (int) $req->get_param( 'count' );
-				return $this->block_crud->delete_blocks( $post_id, $index, $count );
+				return $this->block_crud->delete_blocks( $post_id, $top_level, $count );
 			}
 		);
 	}

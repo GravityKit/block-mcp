@@ -120,6 +120,12 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🐛 Fixed
+
+* Fixes deleting a block by its reference removing the wrong block on a page that contains nested blocks (such as Groups or Columns). The reference now resolves to the correct top-level block, and a reference that points to a nested block is safely refused rather than deleting an unrelated one.
+
 = 2.0.2 on June 15, 2026 =
 
 This release fixes connecting on sites protected by a server security firewall, which previously blocked setup partway through with an "Access Denied" page.
