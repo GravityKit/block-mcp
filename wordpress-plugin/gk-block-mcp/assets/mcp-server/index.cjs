@@ -35232,6 +35232,7 @@ var package_default = {
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:docs": "playwright test --config tests/docs/playwright.config.ts",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     eval: "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
     prepare: "npm run build",
