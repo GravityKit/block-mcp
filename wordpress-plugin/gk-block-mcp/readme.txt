@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.0.2
+Stable tag: 2.0.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,7 +120,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= develop =
+= 2.0.3 on June 17, 2026 =
+
+This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
 
 #### ✨ Improved
 
