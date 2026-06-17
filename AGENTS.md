@@ -49,7 +49,7 @@ MCPs/block-mcp/
 └── wordpress-plugin/gk-block-mcp/
     ├── gk-block-mcp.php          # Bootstrap: autoloader, rest_api_init wiring, admin wiring, CLI
     ├── uninstall.php             # Full data + agent teardown (multisite-aware)
-    ├── readme.txt                # Canonical changelog + Upgrade Notice (WordPress plugin readme)
+    ├── readme.txt                # Canonical changelog (WordPress plugin readme)
     ├── phpcs.xml.dist            # WordPress-Extra + WordPress-Docs + PHPCompatibilityWP (testVersion 7.4-)
     ├── phpstan.neon.dist         # PHPStan level 5, analyze-as-PHP-8.2, WP stubs
     ├── phpstan-bootstrap.php     # Placeholder constants for static analysis
@@ -168,7 +168,7 @@ Write them as standalone documentation of what the code does **today** — never
 Don't name specific third-party block namespaces as "legacy" in comments, error messages, REST responses, or changelog text — the legacy tier is site-configurable via `Preferences`. Use generic phrasing ("the namespace is configured as legacy"). Test *fixtures* may use a concrete namespace, but resolve it from `Preferences::get_defaults()` at runtime rather than hardcoding.
 
 ### Version annotations
-`@since {version}` for released members; update `@since` when adding members. New connect/identity code uses `@since 2.1.0` as a placeholder until the release version is settled.
+`@since {version}` annotates **shipped public members** — production classes, methods, hooks, and REST routes. Update `@since` when adding such a member; new code uses `@since 2.1.0` as a placeholder until the release version is settled. **Test files (`tests/**`) do not carry `@since`** — they pin contracts, not API surface, and the suite is uniformly free of it.
 
 ## Extension Patterns
 
@@ -221,17 +221,18 @@ The plugin and MCP server version independently. The plugin follows WP plugin co
 
 **Semver (plugin):** MAJOR = breaking REST/tool changes; MINOR = additive endpoints/tools/fields/settings; PATCH = fixes/hardening/refactors/i18n/tests.
 
-**Every plugin version bump updates all five:**
+**Every plugin version bump updates all four:**
 1. `gk-block-mcp.php` `* Version:` header
 2. `gk-block-mcp.php` `GK_BLOCK_MCP_VERSION` constant
 3. `readme.txt` `Stable tag:`
-4. `readme.txt` `== Upgrade Notice ==` (1–3 sentences, headline value, newest at top — this is what the WP update screen shows)
-5. `readme.txt` `== Changelog ==` (grouped `New`/`Improved`/`Fixed`/etc., newest at top)
+4. `readme.txt` `== Changelog ==` (a `= {version} on {date} =` entry with a one-sentence summary, grouped `Added`/`Improved`/`Fixed`/`Updated`, newest at top)
+
+**No `== Upgrade Notice ==` section.** GravityKit plugins update through Foundation, not the WP.org directory, so it is never surfaced to users; the GitHub release notes are sourced from the Changelog entry instead. `readme.txt` ends at `== Changelog ==`.
 
 **MCP server bump:** `package.json` `version` (+ optional readme mention if a TS change is user-observable).
 
 **Releasing = merging the version bump to `main`.** Two workflows fire from the merge and keep GitHub and npm in sync:
-- `build-plugin-zip.yml` reads the plugin `Version` header; when no `v{plugin-version}` tag exists yet it creates the tag + GitHub release (body = that version's `readme.txt` Upgrade Notice, `gk-block-mcp.zip` attached). A manually pushed `v*` tag still publishes a release as a backstop — note a workflow-created tag does NOT re-trigger workflows (`GITHUB_TOKEN` events don't cascade), which is why the release is created in the build job rather than via a tag push.
+- `build-plugin-zip.yml` reads the plugin `Version` header; when no `v{plugin-version}` tag exists yet it creates the tag + GitHub release (body = that version's `readme.txt` Changelog entry, `gk-block-mcp.zip` attached). A manually pushed `v*` tag still publishes a release as a backstop — note a workflow-created tag does NOT re-trigger workflows (`GITHUB_TOKEN` events don't cascade), which is why the release is created in the build job rather than via a tag push.
 - `npm-publish.yml` publishes `@gravitykit/block-mcp` (npm Trusted Publishing/OIDC, no token secret) whenever the `package.json` version isn't on the registry yet — independent of the plugin tag, since the two version separately.
 
 On feature branches, the changelog header is `= develop =` until release.

@@ -16,7 +16,7 @@
 gk-block-mcp/
 ├── gk-block-mcp.php              # Bootstrap: autoloader, rest_api_init + admin wiring, CLI
 ├── uninstall.php                 # Full data + agent teardown (multisite-aware)
-├── readme.txt                    # Canonical changelog + Upgrade Notice
+├── readme.txt                    # Canonical changelog
 ├── phpcs.xml.dist / phpstan.neon.dist / phpstan-bootstrap.php   # Static-analysis config
 └── includes/                     # (line counts approximate)
     ── Block engine (the CRUD facade + its parts) ─────────────────────────
@@ -214,4 +214,4 @@ All routes under `gk-block-api/v1`.
 
 - `../AGENTS.md` — repo-root architecture + connect overview (+ MCP server side).
 - `gk-block-mcp/tests/AGENTS.md` — PHPUnit conventions and regression-test discipline.
-- `gk-block-mcp/readme.txt` — canonical changelog + Upgrade Notice.
+- `gk-block-mcp/readme.txt` — canonical changelog.

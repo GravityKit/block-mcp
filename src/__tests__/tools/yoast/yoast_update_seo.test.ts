@@ -27,8 +27,8 @@ describe('yoast_update_seo — schema', () => {
     expect(tool.inputSchema.required).toContain('post_id');
   });
 
-  // Regression: the Anthropic tool-schema validator rejects a "null" member in a
-  // JSON Schema `type` array and 400s the entire tools/list request, taking down
+  // Regression: some AI clients (e.g. Google Gemini) reject a "null" member in a
+  // JSON Schema `type` array and 400 the entire tools/list request, taking down
   // every tool on the server. noindex must advertise a single scalar type; the
   // handler still accepts an explicit null (see "noindex tri-state" tests below).
   it('advertises noindex as a single boolean type, never a ["boolean","null"] array', () => {
