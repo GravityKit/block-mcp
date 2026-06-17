@@ -77,17 +77,38 @@ class DeleteBlockByRefTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A freeform whitespace block — the inter-block newlines the editor stores
+	 * between top-level blocks. `flatten_blocks()`, `resolve_ref_to_top_level()`
+	 * and `delete_blocks()` all skip these (empty blockName), so a fixture must
+	 * include them to mirror real editor content rather than the tighter output
+	 * of serialize_blocks() over a clean array.
+	 *
+	 * @return array
+	 */
+	private function whitespace(): array {
+		return array(
+			'blockName'    => null,
+			'attrs'        => array(),
+			'innerHTML'    => "\n\n",
+			'innerContent' => array( "\n\n" ),
+			'innerBlocks'  => array(),
+		);
+	}
+
+	/**
 	 * Dispatch DELETE /posts/{id}/blocks/by-ref/{ref} through the real handler.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $ref     Block ref.
+	 * @param int    $count   Consecutive top-level blocks to remove from the ref.
 	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
-	private function delete_by_ref( int $post_id, string $ref ) {
+	private function delete_by_ref( int $post_id, string $ref, int $count = 1 ) {
 		$request = new \WP_REST_Request( 'DELETE', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/' . $ref );
 		$request->set_param( 'id', $post_id );
 		$request->set_param( 'ref', $ref );
+		$request->set_param( 'count', $count );
 		return $this->controller->delete_block_by_ref( $request );
 	}
 
@@ -141,8 +162,12 @@ class DeleteBlockByRefTest extends RestControllerTestCase {
 	 * `ref_not_top_level` instead of silently removing a top-level block.
 	 * `delete_blocks()` only operates on the top-level array, so the only safe
 	 * answer for a nested ref is a clear error.
+	 *
+	 * The fixture carries a top-level BYSTANDER so the danger is concrete: the
+	 * nested ref's flat index (1) addresses BYSTANDER as a top-level counter, so
+	 * an unguarded delete would remove it. The guard must leave it intact.
 	 */
-	public function test_delete_by_ref_nested_block_is_rejected() {
+	public function test_delete_by_ref_nested_block_is_rejected_without_collateral() {
 		$post_id = $this->make_block_post(
 			array(
 				$this->block(
@@ -151,6 +176,7 @@ class DeleteBlockByRefTest extends RestControllerTestCase {
 					'<div>',
 					array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>CHILD</p>' ), 'blk_c1' ) )
 				),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>BYSTANDER</p>' ), 'blk_c2' ),
 			)
 		);
 
@@ -158,6 +184,76 @@ class DeleteBlockByRefTest extends RestControllerTestCase {
 
 		$this->assertWPError( $response );
 		$this->assertSame( 'ref_not_top_level', $response->get_error_code() );
-		$this->assertStringContainsString( 'CHILD', $this->content( $post_id ), 'Nested block must remain.' );
+		$content = $this->content( $post_id );
+		$this->assertStringContainsString( 'CHILD', $content, 'Nested block must remain.' );
+		$this->assertStringContainsString( 'BYSTANDER', $content, 'A top-level sibling must NOT be collateral.' );
+	}
+
+	/**
+	 * The fix holds for real editor content, where `\n\n` freeform blocks sit
+	 * between every top-level block. Those are skipped by both the resolver and
+	 * the deleter, so the ref must still map to the correct top-level block.
+	 *
+	 * Named flat indices:  group=0, child=1, TARGET=2, VICTIM=3 (freeform skipped).
+	 * Top-level counters:  group=0,          TARGET=1, VICTIM=2.
+	 * This mirrors the production post that surfaced the bug (nested blocks plus
+	 * editor whitespace), which the whitespace-free fixtures above do not.
+	 */
+	public function test_delete_by_ref_handles_interleaved_whitespace_blocks() {
+		$post_id = $this->make_block_post(
+			array(
+				$this->block(
+					'core/group',
+					array(),
+					'<div>',
+					array( $this->block( 'core/paragraph', array(), '<p>CHILD</p>' ) )
+				),
+				$this->whitespace(),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>TARGET</p>' ), 'blk_b1' ),
+				$this->whitespace(),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>VICTIM</p>' ), 'blk_b2' ),
+			)
+		);
+
+		$response = $this->delete_by_ref( $post_id, 'blk_b1' );
+
+		$this->assertNotWPError( $response );
+		$content = $this->content( $post_id );
+		$this->assertStringNotContainsString( 'TARGET', $content, 'The ref target must be deleted.' );
+		$this->assertStringContainsString( 'VICTIM', $content, 'A different top-level block must NOT be deleted.' );
+		$this->assertStringContainsString( 'CHILD', $content, 'Unrelated nested content must survive.' );
+	}
+
+	/**
+	 * A by-ref delete with count > 1 removes that many consecutive top-level
+	 * blocks starting AT the ref — so the start index must be the ref's
+	 * top-level counter, not its flat index, or the wrong run is removed.
+	 *
+	 * Top-level counters: group=0, TARGET=1, NEXT=2, KEEP=3.
+	 * Deleting count=2 from TARGET removes TARGET + NEXT and leaves KEEP.
+	 */
+	public function test_delete_by_ref_count_removes_consecutive_top_level_blocks() {
+		$post_id = $this->make_block_post(
+			array(
+				$this->block(
+					'core/group',
+					array(),
+					'<div>',
+					array( $this->block( 'core/paragraph', array(), '<p>CHILD</p>' ) )
+				),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>TARGET</p>' ), 'blk_d1' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>NEXT</p>' ), 'blk_d2' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_d3' ),
+			)
+		);
+
+		$response = $this->delete_by_ref( $post_id, 'blk_d1', 2 );
+
+		$this->assertNotWPError( $response );
+		$content = $this->content( $post_id );
+		$this->assertStringNotContainsString( 'TARGET', $content, 'TARGET (the ref) must be deleted.' );
+		$this->assertStringNotContainsString( 'NEXT', $content, 'NEXT (consecutive) must be deleted.' );
+		$this->assertStringContainsString( 'KEEP', $content, 'KEEP is past the count and must survive.' );
+		$this->assertStringContainsString( 'CHILD', $content, 'Unrelated nested content must survive.' );
 	}
 }
