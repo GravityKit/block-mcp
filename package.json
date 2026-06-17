@@ -1,6 +1,6 @@
 {
   "name": "@gravitykit/block-mcp",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "MCP server for WordPress block-level content management with preference-aware editing",
   "main": "dist/index.cjs",
   "bin": {
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.9",
+    "axios": "^1.16.0",
     "form-data": "^4.0.1"
   },
   "devDependencies": {
@@ -52,12 +52,12 @@
     "@shikijs/engine-javascript": "^4.0.2",
     "@shikijs/langs": "^4.0.2",
     "@types/node": "^22.0.0",
-    "esbuild": "^0.27.3",
+    "esbuild": "^0.28.1",
     "sharp": "^0.33.5",
     "shiki": "^4.0.2",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -71,5 +71,8 @@
   ],
   "publishConfig": {
     "access": "public"
+  },
+  "overrides": {
+    "esbuild": "$esbuild"
   }
 }

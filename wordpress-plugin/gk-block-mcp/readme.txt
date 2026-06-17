@@ -128,8 +128,13 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 🐛 Fixed
 
+* Fixes deleting a block by its reference removing the wrong block on a page that contains nested blocks (such as Groups or Columns). The reference now resolves to the correct top-level block, and a reference that points to a nested block is safely refused rather than deleting an unrelated one.
 * Fixes the Yoast SEO tools failing to load in AI assistants built on Google Gemini. The `noindex` field advertised a schema type that Gemini's tool format rejects, which took the assistant's entire tool list offline on those clients. The Yoast tools now connect across Claude, ChatGPT, and Gemini alike. Thank you to [Dallin Chase](https://github.com/dallinchase) for catching this and sending the fix — his first contribution to Block MCP! 🎉
 * Fixes the block-score and replacement tables on **Settings → Block MCP** losing your changes — and the built-in entries — the first time you saved them. Saved scores and replacements now persist, and the built-in entries always stay visible in the tables instead of disappearing once you add a custom one.
+
+#### 🔧 Updated
+
+* Updates the bundled MCP server's dependencies to resolve reported security advisories.
 
 = 2.0.2 on June 15, 2026 =
 
