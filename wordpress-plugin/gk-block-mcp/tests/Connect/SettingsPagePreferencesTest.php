@@ -2,23 +2,19 @@
 /**
  * Settings_Page namespace-score / replacement-map preference contracts.
  *
- * Pins the "stored preferences replace shipped defaults instead of layering
- * over them" contract. Three seams where the stored option and the hardcoded
- * GravityKit defaults must agree on the same "override layered on defaults"
- * model the runtime already uses:
+ * Pins the "stored preferences layer over shipped defaults" contract. Three
+ * seams where the stored option and the hardcoded GravityKit defaults must agree
+ * on the same "override layered on defaults" model the runtime uses:
  *
- *  1. render_page() must show the shipped namespace/replacement defaults even
- *     once a single custom entry is stored — the UI must mirror the merged
- *     view Preferences::get_preferences() enforces at runtime, not the raw
- *     stored subset. Before the fix, storing one entry hid all 11 namespace
- *     (or 19 replacement) defaults from the table.
- *  2. sanitize_preferences() must layer the posted rows OVER
- *     Preferences::get_defaults() so a partial submission can never erase the
- *     shipped defaults from storage. Before the fix it built the value purely
- *     from posted rows, so a subset submission wiped the rest.
- *  3. A posted row that carries a score/value but a blank name is a user edit
- *     that would otherwise vanish without a trace. sanitize_preferences() must
- *     surface a settings error rather than dropping it silently.
+ *  1. render_page() shows the shipped namespace/replacement defaults even when a
+ *     single custom entry is stored — the UI mirrors the merged view
+ *     Preferences::get_preferences() enforces at runtime, never the raw stored
+ *     subset.
+ *  2. sanitize_preferences() layers the posted rows OVER
+ *     Preferences::get_defaults(), so a partial submission cannot erase the
+ *     shipped defaults from storage.
+ *  3. A posted row that carries a score/value but a blank name surfaces a
+ *     settings error rather than being dropped silently.
  *
  * @package GravityKit\BlockMCP\Tests\Connect
  */
@@ -115,14 +111,13 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 	// ── Contract 2: sanitize path layers posted rows over shipped defaults ──
 
 	/**
-	 * A partial namespace submission must layer over the shipped defaults, never
-	 * replace them.
+	 * A partial namespace submission layers over the shipped defaults, never
+	 * replaces them.
 	 *
-	 * When only a subset of rows reaches the sanitizer (because the UI hid the
-	 * defaults, or a JS row-drop swallowed some), array_replace semantics would
-	 * persist that subset and erase every default not present. The sanitizer
-	 * must merge posted rows onto Preferences::get_defaults() so the stored
-	 * value can only ever be defaults + overrides.
+	 * Only a subset of rows can reach the sanitizer (the UI may render fewer, or a
+	 * row may not post). The sanitizer merges posted rows onto
+	 * Preferences::get_defaults() so the stored value is always defaults +
+	 * overrides, never a lossy subset.
 	 */
 	public function test_sanitize_preferences_layers_namespace_scores_over_shipped_defaults() {
 		$page = new Settings_Page( new Block_Inventory() );
@@ -251,15 +246,13 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 	// ── Contract 4: sanitizer is idempotent (survives core's double-sanitize) ──
 
 	/**
-	 * Sanitizing the sanitizer's own output must be a no-op, not a wipe.
+	 * Sanitizing the sanitizer's own output is a no-op, not a wipe.
 	 *
 	 * Core double-sanitizes an option on its first write: update_option()
 	 * sanitizes, then delegates to add_option() (the option doesn't exist yet),
 	 * which sanitizes again — so the second pass receives the canonical
-	 * {namespace_scores, replacement_map} shape, not the form's indexed rows. A
-	 * sanitizer that only understood the row shape discarded its own output,
-	 * collapsing the first-ever save to an empty array. The sanitizer must accept
-	 * its canonical shape so a re-run preserves the value.
+	 * {namespace_scores, replacement_map} shape, not the form's indexed rows. The
+	 * sanitizer accepts that canonical shape so a re-run preserves the value.
 	 */
 	public function test_sanitize_preferences_is_idempotent_on_its_own_output() {
 		$page = new Settings_Page( new Block_Inventory() );
@@ -279,12 +272,12 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The first-ever save of the preferences option must persist, not vanish.
+	 * The first-ever save of the preferences option persists, not vanishes.
 	 *
 	 * Exercises the real mechanism: with the setting registered, updating a
-	 * brand-new option routes update_option() through add_option(), double-running
-	 * the sanitize callback. Before the idempotency fix this stored an empty array
-	 * — the admin's first save silently lost everything.
+	 * brand-new option routes update_option() through add_option(), which runs the
+	 * sanitize callback a second time on its own output. The sanitizer's
+	 * idempotency keeps that first save intact.
 	 */
 	public function test_first_save_of_new_option_persists_through_core_double_sanitize() {
 		$page = new Settings_Page( new Block_Inventory() );

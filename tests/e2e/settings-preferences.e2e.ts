@@ -73,8 +73,12 @@ test('a namespace added via the Add row button persists across save', async ({
   await table.locator('input[name*="[name]"]').last().fill('spectra');
   await table.locator('input[name*="[score]"]').last().fill('75');
 
-  await page.locator('#gk-block-mcp-save').click();
-  await page.waitForLoadState('networkidle');
+  // The save posts to options.php and redirects back with settings-updated=true;
+  // wait for that redirect so the option is committed before reloading.
+  await Promise.all([
+    page.waitForURL(/settings-updated=true/),
+    page.locator('#gk-block-mcp-save').click(),
+  ]);
 
   // Reload the table from storage and confirm the addition survived alongside
   // the shipped defaults.
@@ -100,8 +104,9 @@ test('a score entered without a name warns on save instead of dropping silently'
   await table.locator('#gk-ns-score-new').fill('33');
 
   await page.locator('#gk-block-mcp-save').click();
-  await page.waitForLoadState('networkidle');
 
+  // The warning renders on the post-save settings screen; the assertion
+  // auto-waits across the form-submit navigation until it appears.
   await expect(
     page.getByText(/score was entered without a name/i)
   ).toBeVisible();
