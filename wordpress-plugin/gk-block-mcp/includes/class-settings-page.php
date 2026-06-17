@@ -238,7 +238,8 @@ class Settings_Page {
 			return array();
 		}
 
-		$out = array();
+		$out            = array();
+		$dropped_scored = 0;
 
 		// Namespace tier scores — indexed rows: [{name, score, delete?}, ...].
 		if ( isset( $input['namespace_rows'] ) && is_array( $input['namespace_rows'] ) ) {
@@ -247,12 +248,30 @@ class Settings_Page {
 				if ( ! is_array( $row ) || ! empty( $row['delete'] ) ) {
 					continue;
 				}
-				$ns = isset( $row['name'] ) ? sanitize_key( $row['name'] ) : '';
+				$ns    = isset( $row['name'] ) ? sanitize_key( $row['name'] ) : '';
+				$score = isset( $row['score'] ) ? (int) $row['score'] : 0;
 				if ( '' === $ns ) {
+					// A score with no usable name is a half-finished edit, not the
+					// blank trailing row. Drop it (it can't key the map) but count
+					// it so the save screen warns rather than losing it silently.
+					if ( $score > 0 ) {
+						++$dropped_scored;
+					}
 					continue;
 				}
-				$score                          = isset( $row['score'] ) ? (int) $row['score'] : 0;
 				$out['namespace_scores'][ $ns ] = max( 0, min( 100, $score ) );
+			}
+		} elseif ( isset( $input['namespace_scores'] ) && is_array( $input['namespace_scores'] ) ) {
+			// Already-canonical shape. Core double-sanitizes an option on its first
+			// write (update_option() → add_option()), so the second pass receives
+			// this method's own {ns => score} output rather than form rows. Re-clean
+			// it in place so the value survives instead of being discarded.
+			$out['namespace_scores'] = array();
+			foreach ( $input['namespace_scores'] as $ns => $score ) {
+				$ns = sanitize_key( $ns );
+				if ( '' !== $ns ) {
+					$out['namespace_scores'][ $ns ] = max( 0, min( 100, (int) $score ) );
+				}
 			}
 		}
 
@@ -269,6 +288,41 @@ class Settings_Page {
 					$out['replacement_map'][ $from ] = $to;
 				}
 			}
+		} elseif ( isset( $input['replacement_map'] ) && is_array( $input['replacement_map'] ) ) {
+			// Already-canonical shape (see the namespace branch above) — re-clean
+			// the {from => to} map so a second sanitize pass is idempotent.
+			$out['replacement_map'] = array();
+			foreach ( $input['replacement_map'] as $from => $to ) {
+				$from = $this->sanitize_block_name( $from );
+				$to   = $this->sanitize_block_name( $to );
+				if ( '' !== $from && '' !== $to ) {
+					$out['replacement_map'][ $from ] = $to;
+				}
+			}
+		}
+
+		// Layer the posted rows over the shipped defaults so a partial submission
+		// — hidden defaults, or a row a JS race swallowed — can never erase them
+		// from storage. Posted values win; missing defaults are restored. This
+		// keeps the option consistent with the runtime merge in
+		// Preferences::get_preferences() rather than persisting a lossy subset.
+		$defaults = Preferences::get_defaults();
+		if ( isset( $out['namespace_scores'] ) ) {
+			$out['namespace_scores'] = array_merge( $defaults['namespace_scores'], $out['namespace_scores'] );
+		}
+		if ( isset( $out['replacement_map'] ) ) {
+			$out['replacement_map'] = array_merge( $defaults['replacement_map'], $out['replacement_map'] );
+		}
+
+		// Warn rather than silently swallow a score the admin entered without a
+		// block-family name — otherwise the edit vanishes with no trace on save.
+		if ( $dropped_scored > 0 ) {
+			add_settings_error(
+				Preferences::OPTION_KEY,
+				'gk_block_api_namespace_row_dropped',
+				__( 'A block-family score was entered without a name and was skipped. Type a block family (for example, "core") next to the score and save again to keep it.', 'gk-block-mcp' ),
+				'warning'
+			);
 		}
 
 		// Preserve any other top-level keys the runtime may add (forwards-compat).
@@ -434,14 +488,15 @@ class Settings_Page {
 			return;
 		}
 
-		$defaults         = Preferences::get_defaults();
-		$prefs            = (array) get_option( 'gk_block_api_preferences', array() );
-		$namespace_scores = isset( $prefs['namespace_scores'] ) && is_array( $prefs['namespace_scores'] )
-			? $prefs['namespace_scores']
-			: $defaults['namespace_scores'];
-		$replacement_map  = isset( $prefs['replacement_map'] ) && is_array( $prefs['replacement_map'] )
-			? $prefs['replacement_map']
-			: $defaults['replacement_map'];
+		// Render the same merged view the runtime enforces: stored overrides
+		// layered over the shipped defaults. Preferences::get_preferences()
+		// deep-merges the option onto the defaults via wp_parse_args, so the
+		// table mirrors the policy actually in force. Reading the raw option
+		// here would hide every shipped default the moment one custom entry is
+		// stored, leaving the UI contradicting enforcement.
+		$merged_prefs     = ( new Preferences() )->get_preferences();
+		$namespace_scores = $merged_prefs['namespace_scores'];
+		$replacement_map  = $merged_prefs['replacement_map'];
 		$post_type_allow  = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
 		$manual_dual      = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
 		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
@@ -1021,7 +1076,7 @@ class Settings_Page {
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Block family', 'gk-block-mcp' ); ?></label>
-									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" list="gk-block-families" autocomplete="off" />
 								</td>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-mcp' ); ?></label>
@@ -1036,7 +1091,7 @@ class Settings_Page {
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New block family', 'gk-block-mcp' ); ?></label>
-								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-mcp' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
+								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-families" autocomplete="off" />
 							</td>
 							<td>
 								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-mcp' ); ?></label>
@@ -1046,6 +1101,11 @@ class Settings_Page {
 						</tr>
 					</tbody>
 				</table>
+				<p class="gk-block-mcp-add-row-wrap">
+					<button type="button" class="components-button is-secondary gk-block-mcp-add-row" data-target-table="namespace">
+						<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span><?php esc_html_e( 'Add row', 'gk-block-mcp' ); ?>
+					</button>
+				</p>
 
 
 				<h2><?php esc_html_e( 'Replacement map', 'gk-block-mcp' ); ?></h2>
@@ -1069,7 +1129,7 @@ class Settings_Page {
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-mcp' ); ?></label>
-									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 								</td>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-mcp' ); ?></label>
@@ -1084,7 +1144,7 @@ class Settings_Page {
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-mcp' ); ?></label>
-								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-mcp' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 							</td>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-mcp' ); ?></label>
@@ -1094,6 +1154,11 @@ class Settings_Page {
 						</tr>
 					</tbody>
 				</table>
+				<p class="gk-block-mcp-add-row-wrap">
+					<button type="button" class="components-button is-secondary gk-block-mcp-add-row" data-target-table="replacement">
+						<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span><?php esc_html_e( 'Add row', 'gk-block-mcp' ); ?>
+					</button>
+				</p>
 
 
 				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-mcp' ); ?></h2>
@@ -1152,11 +1217,13 @@ class Settings_Page {
 			</form>
 
 			<script>
-			/* Auto-grow tables marked .gk-block-mcp-growable. When the user types
-			 * into the last row's "trigger" input (data-row-trigger="1"), clone
-			 * that row, blank out its values, and increment the [N] index in
-			 * every input's name attribute so the form posts as a fresh entry.
-			 * Announces the new row via the polite live region for screen readers. */
+			/* Growable tables marked .gk-block-mcp-growable. Each table is paired
+			 * with an explicit "Add row" button (its next sibling); clicking it
+			 * clones the last row, blanks its values, and reindexes the [N] in
+			 * every input's name so the new entry posts on its own. An explicit
+			 * button is deterministic — the rows it adds are in the form DOM the
+			 * instant they appear, so none can be lost on save. New and removed
+			 * rows are announced via the polite live region for screen readers. */
 			(function () {
 				var live = document.getElementById('gk-block-mcp-live');
 				var announcement = <?php echo wp_json_encode( __( 'New row added. You can keep adding entries.', 'gk-block-mcp' ) ); ?>;
@@ -1177,16 +1244,10 @@ class Settings_Page {
 
 						var nextIdx = tbody.querySelectorAll('tr').length;
 
-						tbody.addEventListener('input', function (e) {
-							var trigger = e.target.closest('[data-row-trigger]');
-							if (!trigger) return;
-							var lastRow = tbody.lastElementChild;
-							if (!lastRow || !lastRow.contains(trigger)) return;
-							if (trigger.value === '') return;
-
-							trigger.removeAttribute('data-row-trigger');
-
-							var clone = lastRow.cloneNode(true);
+						function addRow() {
+							var template = tbody.lastElementChild;
+							if (!template) return;
+							var clone = template.cloneNode(true);
 							var idx = nextIdx++;
 							var inputs = clone.querySelectorAll('input');
 							for (var i = 0, ilen = inputs.length; i < ilen; i++) {
@@ -1205,19 +1266,20 @@ class Settings_Page {
 									input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
 								}
 							}
-
-							var triggerCell = trigger.closest('td');
-							if (triggerCell) {
-								var cellIndex = Array.prototype.indexOf.call(triggerCell.parentNode.children, triggerCell);
-								var newCell = clone.children[cellIndex];
-								if (newCell) {
-									var newTrigger = newCell.querySelector('input');
-									if (newTrigger) newTrigger.setAttribute('data-row-trigger', '1');
-								}
-							}
 							tbody.appendChild(clone);
 							announce(announcement);
-						});
+							var firstField = clone.querySelector('input:not([type="hidden"])');
+							if (firstField) { firstField.focus(); }
+						}
+
+						var addWrap = table.nextElementSibling;
+						var addBtn = addWrap ? addWrap.querySelector('.gk-block-mcp-add-row') : null;
+						if (addBtn) {
+							addBtn.addEventListener('click', function (e) {
+								e.preventDefault();
+								addRow();
+							});
+						}
 
 						tbody.addEventListener('click', function (e) {
 							var btn = e.target.closest('.gk-block-mcp-remove-row');
