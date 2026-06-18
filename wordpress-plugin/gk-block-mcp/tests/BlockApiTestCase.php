@@ -73,6 +73,25 @@ abstract class BlockApiTestCase extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 
+		// Legacy/avoid tiers are admin-configured now (the shipped defaults are
+		// opinion-free), so establish the namespaces the preference-tier tests
+		// exercise: ugb/jetpack as legacy, stackable as avoid. Seeded before the
+		// Preferences instance below reads them.
+		update_option(
+			Preferences::OPTION_KEY,
+			array(
+				'namespace_scores' => array(
+					'ugb'       => 0,
+					'jetpack'   => 0,
+					'stackable' => 10,
+				),
+				'replacement_map'  => array(
+					'ugb/text'          => 'core/paragraph',
+					'stackable/heading' => 'core/heading',
+				),
+			)
+		);
+
 		$registry = \WP_Block_Type_Registry::get_instance();
 		foreach ( $this->block_types_to_register() as $name ) {
 			if ( ! $registry->is_registered( $name ) ) {

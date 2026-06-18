@@ -155,6 +155,45 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertEquals( array(), $this->crud->format_blocks( array() ) );
 	}
 
+	/**
+	 * A block whose namespace has no registered block type is flagged orphaned.
+	 *
+	 * When a block's provider plugin or theme is not active, WordPress cannot
+	 * render the block properly. The reader sets preference.orphaned so an agent
+	 * editing the page knows the block's source is missing rather than treating
+	 * it as a normal acceptable-tier block. ghostpkg is not registered in this
+	 * suite, so its block must carry the flag.
+	 */
+	public function test_format_blocks_flags_orphaned_block_for_unregistered_namespace() {
+		$formatted = $this->crud->format_blocks(
+			array( $this->block( 'ghostpkg/widget', array(), '<div>orphan</div>' ) )
+		);
+
+		$this->assertArrayHasKey( 'preference', $formatted[0] );
+		$this->assertArrayHasKey( 'orphaned', $formatted[0]['preference'] );
+		$this->assertTrue( $formatted[0]['preference']['orphaned'] );
+	}
+
+	/**
+	 * A block whose namespace is registered is never flagged orphaned.
+	 *
+	 * core is registered and preferred, so it gets no preference block at all and
+	 * therefore no orphaned flag. stackable is registered but scored avoid, so it
+	 * gets a preference block whose orphaned key must stay absent.
+	 */
+	public function test_format_blocks_does_not_flag_registered_namespace_as_orphaned() {
+		$formatted = $this->crud->format_blocks(
+			array(
+				$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+				$this->block( 'stackable/heading', array(), '<h2>B</h2>' ),
+			)
+		);
+
+		$this->assertArrayNotHasKey( 'preference', $formatted[0], 'a registered preferred block carries no preference block' );
+		$this->assertArrayHasKey( 'preference', $formatted[1], 'a registered avoid-tier block carries a preference block' );
+		$this->assertArrayNotHasKey( 'orphaned', $formatted[1]['preference'], 'a registered namespace must not be flagged orphaned' );
+	}
+
 	// ── text_preview ───────────────────────────────────────────────
 
 	public function test_text_preview_stripped_tags() {
@@ -691,15 +730,18 @@ class BlockCrudTest extends BlockApiTestCase {
 		// Pick the first namespace whose default tier is "legacy" from the
 		// shipped preference defaults. Test stays valid as the policy
 		// configuration evolves.
-		$defaults         = \GravityKit\BlockMCP\Preferences::get_defaults();
+		// Legacy is admin-configured now (the shipped defaults are opinion-free), so
+		// resolve the legacy namespace from the effective preferences the test base
+		// seeds — not from get_defaults(), which no longer brands anything legacy.
+		$prefs            = ( new \GravityKit\BlockMCP\Preferences() )->get_preferences();
 		$legacy_namespace = null;
-		foreach ( ( $defaults['namespace_scores'] ?? array() ) as $ns => $score ) {
+		foreach ( ( $prefs['namespace_scores'] ?? array() ) as $ns => $score ) {
 			if ( \GravityKit\BlockMCP\Preferences::score_to_tier( $score ) === 'legacy' ) {
 				$legacy_namespace = $ns;
 				break;
 			}
 		}
-		$this->assertNotNull( $legacy_namespace, 'Default preferences must contain at least one legacy namespace.' );
+		$this->assertNotNull( $legacy_namespace, 'A legacy namespace must be configured for this test.' );
 
 		$block_name = $legacy_namespace . '/never-installed';
 		$registry   = \WP_Block_Type_Registry::get_instance();
