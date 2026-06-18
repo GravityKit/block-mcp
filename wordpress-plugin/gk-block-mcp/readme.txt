@@ -120,6 +120,22 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+This release makes block preferences site-aware and opinion-free: the score table now reflects the block families actually on your site, no third-party block is treated as legacy unless you choose to score it down, and your previously saved preferences are preserved.
+
+#### ✨ Improved
+
+* Block preferences are now site-aware. The score table lists the block families registered by your active plugins and themes, plus any found in your published content, instead of a fixed built-in list. You score the blocks your site actually uses.
+* No block is treated as legacy out of the box. Only WordPress core blocks are preferred by default, and every other block family is fine to use until you score it down. The built-in opinions about which third-party blocks to avoid have been removed.
+* The replacement map is now entirely your own list. No built-in replacement suggestions ship anymore, so the mappings shown are the ones you added, and a mapping you remove stays removed.
+* Blocks whose plugin or theme is no longer active are flagged as "not active on this site" in the score table and in AI assistant responses, so you and your assistant can spot content that references a missing block.
+* Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings &rarr; Block MCP explains the new model and offers a one-click reset to the new defaults.
+
+#### 💻 Developer Updates
+
+* Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
+
 = 2.0.3 on June 17, 2026 =
 
 This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
