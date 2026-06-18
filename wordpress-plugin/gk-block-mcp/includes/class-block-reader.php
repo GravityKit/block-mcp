@@ -66,6 +66,17 @@ class Block_Reader {
 	private $inventory;
 
 	/**
+	 * Namespaces with at least one registered block type, memoized per instance.
+	 *
+	 * Built lazily from WP_Block_Type_Registry the first time a block is checked,
+	 * then reused for the rest of the read. Used to flag orphaned blocks: a block
+	 * whose namespace has no registered provider on this site.
+	 *
+	 * @var array<string, true>|null
+	 */
+	private $registered_namespaces = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Block_CRUD      $crud        Owning CRUD instance for shared utilities.
@@ -76,6 +87,34 @@ class Block_Reader {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
 		$this->inventory   = $inventory;
+	}
+
+	/**
+	 * Whether a block's namespace has any registered block type on this site.
+	 *
+	 * Memoizes the set of registered namespaces on first use so a single read
+	 * walks the registry once. A namespace with no registered block type means
+	 * the providing plugin or theme is inactive, which marks its blocks orphaned.
+	 *
+	 * @param string $block_name Full block name (e.g. "core/paragraph").
+	 * @return bool
+	 */
+	private function namespace_has_registered_block( $block_name ) {
+		if ( null === $this->registered_namespaces ) {
+			$this->registered_namespaces = array();
+			$registry                    = \WP_Block_Type_Registry::get_instance();
+			if ( $registry ) {
+				foreach ( array_keys( $registry->get_all_registered() ) as $registered_name ) {
+					$namespace = $this->preferences->extract_namespace( $registered_name );
+					if ( '' !== $namespace ) {
+						$this->registered_namespaces[ $namespace ] = true;
+					}
+				}
+			}
+		}
+
+		$namespace = $this->preferences->extract_namespace( $block_name );
+		return '' !== $namespace && isset( $this->registered_namespaces[ $namespace ] );
 	}
 
 	/**
@@ -435,16 +474,26 @@ class Block_Reader {
 
 			// Preference tier from the (admin-editable, filter-extensible) Preferences
 			// config. Replaces hardcoded namespace lists in client-side enrichment.
-			// Only attach for non-preferred tiers — preferred is the default and adding
-			// the field on every block bloats the response.
-			$pref = $this->preferences->get_block_score( $block['blockName'] );
-			if ( isset( $pref['tier'] ) && 'preferred' !== $pref['tier'] ) {
+			// Attach for any non-preferred tier (preferred is the default and adding
+			// the field on every block bloats the response), or whenever the block is
+			// orphaned (its namespace has no registered provider on this site) so an
+			// agent always sees that signal even on an otherwise-preferred namespace.
+			// blockName is a non-empty string here (empty/whitespace blocks are
+			// skipped earlier in the loop); namespace_has_registered_block() guards
+			// the empty-namespace edge internally.
+			$pref     = $this->preferences->get_block_score( $block['blockName'] );
+			$tier     = isset( $pref['tier'] ) ? $pref['tier'] : 'acceptable';
+			$orphaned = ! $this->namespace_has_registered_block( $block['blockName'] );
+			if ( 'preferred' !== $tier || $orphaned ) {
 				$data['preference'] = array(
-					'tier' => $pref['tier'],
+					'tier' => $tier,
 				);
 				$replacement        = $this->preferences->get_replacement( $block['blockName'] );
 				if ( $replacement ) {
 					$data['preference']['suggested_replacement'] = $replacement;
+				}
+				if ( $orphaned ) {
+					$data['preference']['orphaned'] = true;
 				}
 			}
 
