@@ -2434,7 +2434,13 @@ class REST_Controller {
 	 */
 	private function with_post_edit_context( \WP_REST_Request $request, callable $operation, $status = 200 ) {
 		try {
-			$post_id    = (int) $request->get_param( 'id' );
+			$post_id = (int) $request->get_param( 'id' );
+
+			// Freshen before the permission check so authorization is evaluated
+			// against the same current post (author/status) the mutation will
+			// write to, not a stale cached copy.
+			$this->freshen_post_cache( $post_id );
+
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2455,6 +2461,26 @@ class REST_Controller {
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Evict this request's cached post object before a read-modify-write.
+	 *
+	 * Every write resolves refs and parses blocks from `get_post()`, which is
+	 * served from the object cache. If a prior request or another worker has
+	 * already changed `post_content` but this request still holds the old post
+	 * in cache, the read-modify-write would serialize the stale tree back and
+	 * silently undo that change (a lost update — e.g. a delete that reappears
+	 * after the next edit). Dropping the `posts` cache entry forces the
+	 * subsequent reads in this request to re-read current state from the
+	 * database; `get_post()` re-primes the cache on the miss.
+	 *
+	 * @param int $post_id Post being written.
+	 *
+	 * @return void
+	 */
+	private function freshen_post_cache( $post_id ) {
+		wp_cache_delete( $post_id, 'posts' );
 	}
 
 	/**
