@@ -124,7 +124,11 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 🚀 Added
 
-* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools. The abilities delegate to the same engine as the REST API, so behavior is identical whichever way they're called. On WordPress 6.8 and earlier the feature is simply skipped; nothing else changes.
+* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's on by default and can be turned off at **Settings → Block MCP**; on WordPress 6.8 and earlier it is simply skipped.
+
+#### 🔒 Security
+
+* Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
 
 = 2.0.3 on June 17, 2026 =
 

@@ -32,6 +32,13 @@ class Block_Abilities {
 	const CATEGORY = 'gk-block-mcp';
 
 	/**
+	 * Option key for the "expose operations as WordPress Abilities" toggle.
+	 *
+	 * Stored as the string '0'/'1'; defaults to enabled (opt-out) when unset.
+	 */
+	const ENABLED_OPTION = 'gk_block_api_abilities_enabled';
+
+	/**
 	 * Block CRUD service.
 	 *
 	 * @var Block_CRUD
@@ -75,15 +82,41 @@ class Block_Abilities {
 	}
 
 	/**
+	 * Whether registering Block MCP abilities is enabled for this site.
+	 *
+	 * Default on (opt-out): registration exposes the operations to the official
+	 * MCP Adapter and the Abilities REST API — a capability-gated but
+	 * network-reachable surface — so a site owner can turn it off. Stored as the
+	 * `gk_block_api_abilities_enabled` option (Settings → Block MCP) and
+	 * filterable via `gk/block-mcp/abilities/enabled` for programmatic control.
+	 *
+	 * @return bool
+	 */
+	public static function is_enabled() {
+		$enabled = '0' !== (string) get_option( self::ENABLED_OPTION, '1' );
+
+		/**
+		 * Filters whether Block MCP registers its operations as WordPress
+		 * Abilities (exposing them to the official MCP Adapter and the Abilities
+		 * REST API). Defaults to the Settings → Block MCP toggle.
+		 *
+		 * @since 2.1.0
+		 *
+		 * @param bool $enabled Whether registration is enabled.
+		 */
+		return (bool) apply_filters( 'gk/block-mcp/abilities/enabled', $enabled );
+	}
+
+	/**
 	 * Wire registration onto the Abilities init hooks.
 	 *
-	 * No-op when the Abilities API is absent, so callers can invoke this
-	 * unconditionally on older cores.
+	 * No-op when the Abilities API is absent (older cores) or when the site
+	 * owner has disabled the toggle, so callers can invoke this unconditionally.
 	 *
 	 * @return void
 	 */
 	public function register() {
-		if ( ! self::is_available() ) {
+		if ( ! self::is_available() || ! self::is_enabled() ) {
 			return;
 		}
 		add_action( 'wp_abilities_api_categories_init', array( $this, 'register_category' ) );

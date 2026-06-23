@@ -259,6 +259,51 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 		$this->assertTrue( wp_get_ability( 'gk-block-mcp/site-editor-context' )->get_meta()['annotations']['readonly'] );
 	}
 
+	// ── Enable/disable setting ────────────────────────────────────────
+
+	/**
+	 * Registration is enabled by default (opt-out).
+	 */
+	public function test_abilities_enabled_by_default() {
+		$this->assertTrue( Block_Abilities::is_enabled() );
+	}
+
+	/**
+	 * The stored setting disables registration when turned off.
+	 */
+	public function test_setting_disables_abilities() {
+		update_option( Block_Abilities::ENABLED_OPTION, '0' );
+		$this->assertFalse( Block_Abilities::is_enabled() );
+	}
+
+	/**
+	 * The gk/block-mcp/abilities/enabled filter overrides the option, for
+	 * programmatic control (matching the allow-trash pattern).
+	 */
+	public function test_filter_can_disable_abilities() {
+		add_filter( 'gk/block-mcp/abilities/enabled', '__return_false' );
+		$enabled = Block_Abilities::is_enabled();
+		remove_filter( 'gk/block-mcp/abilities/enabled', '__return_false' );
+		$this->assertFalse( $enabled );
+	}
+
+	/**
+	 * register() wires no Abilities hooks when the setting is off — turning it
+	 * off removes the entire surface, not just REST exposure.
+	 */
+	public function test_register_is_noop_when_disabled() {
+		update_option( Block_Abilities::ENABLED_OPTION, '0' );
+		$registrar = new Block_Abilities(
+			$this->crud,
+			new Post_Manager( $this->crud ),
+			new Block_Registry( new Preferences(), new Block_Inventory() )
+		);
+
+		$registrar->register();
+
+		$this->assertFalse( has_action( 'wp_abilities_api_init', array( $registrar, 'register_abilities' ) ) );
+	}
+
 	// ── Adversarial / hardening ───────────────────────────────────────
 
 	/**
