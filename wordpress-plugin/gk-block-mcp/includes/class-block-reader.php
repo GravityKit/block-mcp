@@ -268,7 +268,7 @@ class Block_Reader {
 							$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 						}
 						if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
-							$persisted = $this->crud->persist_ref_assignments( $post_id, $blocks );
+							$persisted = $this->crud->persist_ref_assignments( $post_id, $blocks, $fresh_content );
 							if ( $persisted ) {
 								// Persist succeeded — re-warm cache from authoritative DB content.
 								$this->invalidate( $post_id );

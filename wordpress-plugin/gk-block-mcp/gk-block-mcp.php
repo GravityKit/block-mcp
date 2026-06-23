@@ -194,6 +194,35 @@ function init_rest_api() {
 add_action( 'rest_api_init', __NAMESPACE__ . '\\init_rest_api' );
 
 /**
+ * Register Block MCP operations as WordPress 6.9 Abilities.
+ *
+ * Feature-detected: a no-op on cores without the Abilities API. When present,
+ * every block-tree operation becomes a native ability the official MCP Adapter
+ * (and any other Abilities consumer: REST, JS, WP-CLI) can discover and invoke,
+ * delegating to the same service graph the REST routes use. Wired on `init` so
+ * the hooks are attached before the registry lazily initializes.
+ */
+function init_abilities() {
+	if ( ! Block_Abilities::is_available() ) {
+		return;
+	}
+	try {
+		$preferences     = new Preferences();
+		$block_inventory = new Block_Inventory();
+		$block_registry  = new Block_Registry( $preferences, $block_inventory );
+		$block_crud      = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), $block_inventory );
+		$post_manager    = new Post_Manager( $block_crud );
+
+		( new Block_Abilities( $block_crud, $post_manager, $block_registry ) )->register();
+	} catch ( \Throwable $e ) {
+		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+			error_log( 'Block MCP abilities init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+		}
+	}
+}
+add_action( 'init', __NAMESPACE__ . '\\init_abilities' );
+
+/**
  * Settings page bootstrap. Admin-only via is_admin() guard.
  *
  * Hooks `plugins_loaded` (not `admin_init`) because Settings_Page::register()

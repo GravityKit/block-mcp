@@ -238,4 +238,75 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 		$this->assertNotNull( $found, 'the settings submenu entry must be registered' );
 		$this->assertSame( 'Block MCP', $found[0], 'menu title must be the "Block MCP" brand label' );
 	}
+
+	// ── Settings cross-cutting contracts (regression guards) ──────────
+
+	/**
+	 * Reset to defaults clears every UI-managed option, including the abilities
+	 * toggle and the one-time preferences upgrade notice. Pins that no
+	 * delete_option() can be silently dropped from handle_reset(), which would
+	 * leave a setting stuck after a reset.
+	 */
+	public function test_reset_clears_all_ui_managed_options() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$options = array(
+			\GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION,
+			'gk_block_api_preferences_notice',
+			'gk_block_api_preferences',
+			'gk_block_api_post_types_allowlist',
+			\GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION,
+		);
+		foreach ( $options as $opt ) {
+			update_option( $opt, 'sentinel' );
+		}
+
+		$nonce                = wp_create_nonce( 'gk_block_api_reset_defaults' );
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$page = new Settings_Page( new Block_Inventory() );
+		$this->capture_redirect(
+			static function () use ( $page ) {
+				$page->handle_reset();
+			}
+		);
+
+		foreach ( $options as $opt ) {
+			$this->assertNotSame( 'sentinel', get_option( $opt ), "handle_reset() must delete {$opt}" );
+		}
+	}
+
+	/**
+	 * register_settings() wires every checkbox toggle into the settings group so
+	 * the form persists it: media uploads, trash, and the abilities toggle. Pins
+	 * that the abilities setting registration is not lost.
+	 */
+	public function test_register_settings_registers_the_toggle_options() {
+		$page = new Settings_Page( new Block_Inventory() );
+		$page->register_settings();
+
+		global $wp_registered_settings;
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION, $wp_registered_settings, 'media uploads toggle must be registered' );
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION, $wp_registered_settings, 'trash toggle must be registered' );
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, $wp_registered_settings, 'abilities toggle must be registered' );
+	}
+
+	/**
+	 * The policy tab renders the abilities toggle (its option name + heading), so
+	 * a render_page() rework can't silently drop the Abilities section.
+	 */
+	public function test_policy_tab_renders_abilities_toggle() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		$_GET['tab'] = 'policy';
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, $html, 'the abilities toggle input must render' );
+		$this->assertStringContainsString( 'Abilities', $html, 'the Abilities section heading must render' );
+	}
 }
