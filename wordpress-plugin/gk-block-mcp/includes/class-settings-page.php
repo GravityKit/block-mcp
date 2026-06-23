@@ -1007,6 +1007,22 @@ class Settings_Page {
 								}
 							}
 						}
+						// If the admin unchecks every type, the allow-list is empty, which
+						// the engine treats as "all". Reflect that honestly by re-enabling
+						// "Allow all" rather than silently allowing everything from a
+						// "restricted to nothing" state.
+						list.addEventListener( 'change', function () {
+							if ( allowAll.checked ) {
+								return;
+							}
+							var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
+								return box.checked;
+							} );
+							if ( ! anyChecked ) {
+								allowAll.checked = true;
+								sync();
+							}
+						} );
 						allowAll.addEventListener( 'change', sync );
 						sync();
 					} )();
@@ -1569,6 +1585,9 @@ class Settings_Page {
 							if (score) {
 								var def = score.getAttribute('data-default-score');
 								score.value = (def === null ? '' : def);
+								// A programmatic value change fires no input event, so notify the
+								// live tier badge (and any other input listeners) explicitly.
+								score.dispatchEvent( new Event( 'input', { bubbles: true } ) );
 							}
 							// Row now matches its default; swap the control for the muted marker.
 							var cell = reset.parentNode;
