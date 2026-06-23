@@ -194,6 +194,21 @@ class Settings_Page {
 				'default'           => '0',
 			)
 		);
+
+		// 7. "Expose operations as WordPress Abilities" toggle. Same '0'/'1'
+		// string storage as above. Default '1' (on, opt-out): registering
+		// exposes the operations to the official MCP Adapter and the Abilities
+		// REST API — capability-gated, but a network-reachable surface a site
+		// owner may want to close.
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
+				'default'           => '1',
+			)
+		);
 	}
 
 	// ──────────────────────────────────────────────────────────────────
@@ -434,6 +449,7 @@ class Settings_Page {
 		delete_option( 'gk_block_api_post_types_allowlist' );
 		delete_option( self::DUAL_MANUAL_OPTION );
 		delete_option( Media_Manager::UPLOADS_OPTION );
+		delete_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
 		delete_option( Instructions::OPTION_KEY );
 		delete_option( Instructions::UPDATED_AT_OPTION );
@@ -494,18 +510,20 @@ class Settings_Page {
 		// table mirrors the policy actually in force. Reading the raw option
 		// here would hide every shipped default the moment one custom entry is
 		// stored, leaving the UI contradicting enforcement.
-		$merged_prefs     = ( new Preferences() )->get_preferences();
-		$namespace_scores = $merged_prefs['namespace_scores'];
-		$replacement_map  = $merged_prefs['replacement_map'];
-		$post_type_allow  = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
-		$manual_dual      = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
-		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
-		$uploads_enabled  = \GravityKit\BlockMCP\Media_Manager::uploads_enabled();
-		$uploads_option   = \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION;
-		$trash_enabled    = \GravityKit\BlockMCP\Post_Manager::trashing_enabled();
-		$trash_option     = \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION;
-		$instructions_val = Instructions::get_addendum();
-		$instructions_max = Instructions::MAX_LENGTH;
+		$merged_prefs      = ( new Preferences() )->get_preferences();
+		$namespace_scores  = $merged_prefs['namespace_scores'];
+		$replacement_map   = $merged_prefs['replacement_map'];
+		$post_type_allow   = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
+		$manual_dual       = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
+		$scan_results      = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
+		$uploads_enabled   = \GravityKit\BlockMCP\Media_Manager::uploads_enabled();
+		$uploads_option    = \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION;
+		$trash_enabled     = \GravityKit\BlockMCP\Post_Manager::trashing_enabled();
+		$trash_option      = \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION;
+		$abilities_enabled = \GravityKit\BlockMCP\Block_Abilities::is_enabled();
+		$abilities_option  = \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION;
+		$instructions_val  = Instructions::get_addendum();
+		$instructions_max  = Instructions::MAX_LENGTH;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -908,6 +926,50 @@ class Settings_Page {
 							/* translators: %s: filter name */
 							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
 							'<code>gk/block-mcp/post/allow-trash</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
+
+				<h2><?php esc_html_e( 'Abilities (WordPress 6.9+)', 'gk-block-mcp' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'On WordPress 6.9 and newer, expose Block MCP\'s operations as native WordPress Abilities so the official MCP Adapter — and other Abilities consumers — can discover and run them. On by default. Each operation still requires the same login and edit permission as the REST API; turn this off to remove that surface entirely.', 'gk-block-mcp' ); ?>
+				</p>
+				<?php
+				$abilities_available = \GravityKit\BlockMCP\Block_Abilities::is_available();
+				if ( ! $abilities_available ) :
+					?>
+					<p class="description"><em><?php esc_html_e( 'The Abilities API is not available on this site (it requires WordPress 6.9 or newer). Your choice here is saved and applied once it is.', 'gk-block-mcp' ); ?></em></p>
+					<?php
+				endif;
+				?>
+				<input type="hidden" name="<?php echo esc_attr( $abilities_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $abilities_option ); ?>"
+						value="1"
+						<?php checked( $abilities_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Expose operations as WordPress Abilities (for the official MCP Adapter)', 'gk-block-mcp' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so the box reflects the value the API actually honors.
+				$abilities_raw    = get_option( $abilities_option, '1' );
+				$abilities_stored = '0' !== (string) $abilities_raw;
+				// Applies the gk/block-mcp/abilities/enabled filter (documented in class-block-abilities.php).
+				$abilities_filtered = (bool) apply_filters( 'gk/block-mcp/abilities/enabled', $abilities_stored );
+				if ( $abilities_stored !== $abilities_filtered ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
+							'<code>gk/block-mcp/abilities/enabled</code>'
 						);
 						?>
 					</p>

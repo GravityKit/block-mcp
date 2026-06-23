@@ -303,7 +303,7 @@ class Block_Mutator {
 					return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
 				}
 
-				$parent[ $target_index ]['innerHTML'] = wp_kses_post( $inner_html );
+				$parent[ $target_index ]['innerHTML'] = Block_Writer::sanitize_inner_html( $inner_html );
 				// Preserve innerBlock placeholders (null) in innerContent for container blocks.
 				if ( ! empty( $parent[ $target_index ]['innerBlocks'] ) && ! empty( $parent[ $target_index ]['innerContent'] ) ) {
 					$parent[ $target_index ]['innerContent'] = $this->transformer->rebuild_inner_content(

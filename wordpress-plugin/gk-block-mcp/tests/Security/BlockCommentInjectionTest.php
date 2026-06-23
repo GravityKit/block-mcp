@@ -192,4 +192,52 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 		$visible = array_values( array_filter( $saved, static fn( $b ) => null !== $b['blockName'] ) );
 		$this->assertSame( $payload, $visible[0]['attrs']['title'] );
 	}
+
+	// ── block-delimiter breakout on update / mutate ───────────────
+
+	/**
+	 * Block-comment delimiters in innerHTML on the UPDATE path must be stripped.
+	 *
+	 * The insert path already neutralized injected delimiters, but updating a
+	 * block's innerHTML with `<!-- /wp:x --><!-- wp:x -->` let it break out of
+	 * the block and materialize a phantom sibling on the next parse (kses strips
+	 * scripts, not block delimiters). `Block_Writer::sanitize_inner_html` now
+	 * strips the delimiters on every write path; this pins the update path.
+	 */
+	public function test_update_block_innerhtml_strips_injected_delimiters() {
+		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
+
+		$this->crud->update_block( $post_id, 0, array(), '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' );
+
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ), 'update must not inject a phantom block delimiter' );
+	}
+
+	/**
+	 * The same guard covers edit_block_tree's `update-html` mutate op.
+	 */
+	public function test_mutate_update_html_strips_injected_delimiters() {
+		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
+
+		$this->mutator->mutate( $post_id, 'update-html', array( 0 ), array( 'innerHTML' => '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' ) );
+
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ) );
+	}
+
+	/**
+	 * Build a flat core/paragraph block in WP-internal shape.
+	 *
+	 * @param string $html Paragraph innerHTML.
+	 * @return array<string, mixed>
+	 */
+	private function paragraph_block( string $html ): array {
+		return array(
+			'blockName'    => 'core/paragraph',
+			'attrs'        => array(),
+			'innerHTML'    => $html,
+			'innerContent' => array( $html ),
+			'innerBlocks'  => array(),
+		);
+	}
 }

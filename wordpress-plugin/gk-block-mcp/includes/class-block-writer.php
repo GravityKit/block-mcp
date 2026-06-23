@@ -300,6 +300,26 @@ class Block_Writer {
 	}
 
 	/**
+	 * Sanitize a block's innerHTML.
+	 *
+	 * Runs wp_kses_post (stripping scripts and disallowed markup) and then
+	 * removes any block-comment delimiters. A block's structure lives in its
+	 * innerBlocks/innerContent, never in its raw innerHTML, so a stray
+	 * `<!-- wp:… -->` / `<!-- /wp:… -->` inside innerHTML can only be an attempt
+	 * to break out of the block and inject phantom sibling blocks on the next
+	 * parse. Stripping the delimiters neutralizes that without touching any
+	 * legitimate content — displayed block markup is entity-encoded, not a live
+	 * comment.
+	 *
+	 * @param string $html Raw innerHTML.
+	 * @return string Sanitized innerHTML.
+	 */
+	public static function sanitize_inner_html( $html ) {
+		$html = wp_kses_post( (string) $html );
+		return (string) preg_replace( '#<!--\s*/?\s*wp:.*?-->#is', '', $html );
+	}
+
+	/**
 	 * Save serialized block content to a post, tracking before/after revision IDs.
 	 *
 	 * @param int         $post_id     Post ID.
@@ -509,7 +529,7 @@ class Block_Writer {
 		}
 
 		if ( null !== $inner_html ) {
-			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( wp_kses_post( $inner_html ) );
+			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( self::sanitize_inner_html( $inner_html ) );
 			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
 				$block['innerContent'] = $this->transformer->rebuild_inner_content(
 					$block['innerContent'],
@@ -539,7 +559,7 @@ class Block_Writer {
 		$warnings = array_merge( $warnings, $validation['warnings'] );
 
 		$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-		$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
+		$inner_html = isset( $block_def['innerHTML'] ) ? self::sanitize_inner_html( $block_def['innerHTML'] ) : '';
 		$inner_html = $this->transformer->strip_empty_class_attributes( $inner_html );
 		$children   = array();
 
