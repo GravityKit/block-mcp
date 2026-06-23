@@ -498,4 +498,16 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		$this->assertSame( 'Blocked', $method->invoke( $page, 9 ) );
 		$this->assertSame( 'Blocked', $method->invoke( $page, 0 ) );
 	}
+
+	/**
+	 * The trailing "new" replacement row (the one Add row clones) renders a Remove
+	 * control, so a row you type into or add is removable without first saving.
+	 * It previously had an empty action cell, leaving typed/added rows with no
+	 * Remove button.
+	 */
+	public function test_replacement_table_new_row_has_remove_control() {
+		delete_option( Preferences::OPTION_KEY );
+		$html = $this->render_policy_html();
+		$this->assertStringContainsString( 'Remove this row', $html, 'the replacement new/template row must render a Remove control even with no stored mappings' );
+	}
 }

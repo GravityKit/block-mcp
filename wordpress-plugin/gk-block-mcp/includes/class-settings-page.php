@@ -1404,7 +1404,9 @@ class Settings_Page {
 								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-mcp' ); ?></label>
 								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 							</td>
-							<td></td>
+							<td>
+								<button type="button" class="components-button is-link is-destructive gk-block-mcp-remove-row" aria-label="<?php esc_attr_e( 'Remove this row', 'gk-block-mcp' ); ?>"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></button>
+							</td>
 						</tr>
 					</tbody>
 				</table>
@@ -1499,9 +1501,12 @@ class Settings_Page {
 						if (!tbody) return;
 
 						var nextIdx = tbody.querySelectorAll('tr').length;
+						// Capture a row template up front so Add row still works after every
+						// row (now individually removable) has been deleted.
+						var rowTemplate = tbody.lastElementChild ? tbody.lastElementChild.cloneNode( true ) : null;
 
 						function addRow() {
-							var template = tbody.lastElementChild;
+							var template = tbody.lastElementChild || rowTemplate;
 							if (!template) return;
 							var clone = template.cloneNode(true);
 							var idx = nextIdx++;
