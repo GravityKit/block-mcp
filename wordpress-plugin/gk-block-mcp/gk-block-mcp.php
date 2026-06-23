@@ -124,6 +124,14 @@ function register_global_filters() {
 	foreach ( (array) glob( GK_BLOCK_MCP_PLUGIN_DIR . 'includes/block-enrichers/*.php' ) as $enricher ) {
 		require_once $enricher;
 	}
+
+	// Block-type normalizers — write-path mirror of the enrichers above. One
+	// class per block, each calling add_filter on gk/block-mcp/block/normalize
+	// to repair provably-invalid markup before it is serialized. Each file ends
+	// with `Foo_Normalizer::init();` to self-register the filter.
+	foreach ( (array) glob( GK_BLOCK_MCP_PLUGIN_DIR . 'includes/block-normalizers/*.php' ) as $normalizer ) {
+		require_once $normalizer;
+	}
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\register_global_filters' );
 

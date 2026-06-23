@@ -162,8 +162,9 @@ class Post_Manager {
 			if ( is_wp_error( $validation ) ) {
 				return $validation;
 			}
-			$warnings = $validation['warnings'];
-			$content  = serialize_blocks( $validation['blocks'] );
+			$warnings          = $validation['warnings'];
+			$normalized_blocks = Block_Normalizer::normalize_tree( $validation['blocks'] );
+			$content           = serialize_blocks( $normalized_blocks );
 		} elseif ( isset( $args['content'] ) && is_string( $args['content'] ) ) {
 			$content = wp_kses_post( $args['content'] );
 		}

@@ -296,6 +296,7 @@ class Block_Writer {
 		if ( is_wp_error( $depth_check ) ) {
 			return $depth_check;
 		}
+		$blocks = Block_Normalizer::normalize_tree( $blocks );
 		return $this->save_post_content( $post_id, serialize_blocks( $blocks ), $expected );
 	}
 
