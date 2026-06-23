@@ -139,7 +139,7 @@ class Block_Abilities {
 	 */
 	private function definitions() {
 		return array(
-			self::NAMESPACE_PREFIX . 'get-page-blocks'  => array(
+			self::NAMESPACE_PREFIX . 'get-page-blocks'     => array(
 				'label'               => __( 'Get page blocks', 'gk-block-mcp' ),
 				'description'         => __( "Read a post's content as a structured block tree (paths, stable refs, attributes) instead of raw HTML.", 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -160,7 +160,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'update-block'     => array(
+			self::NAMESPACE_PREFIX . 'update-block'        => array(
 				'label'               => __( 'Update block', 'gk-block-mcp' ),
 				'description'         => __( 'Update one block by its flat index, changing attributes and/or innerHTML without rewriting the page.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -193,7 +193,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'insert-blocks'    => array(
+			self::NAMESPACE_PREFIX . 'insert-blocks'       => array(
 				'label'               => __( 'Insert blocks', 'gk-block-mcp' ),
 				'description'         => __( 'Insert one or more blocks at a position in the page (append when no position is given).', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -223,7 +223,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'create-post'      => array(
+			self::NAMESPACE_PREFIX . 'create-post'         => array(
 				'label'               => __( 'Create post', 'gk-block-mcp' ),
 				'description'         => __( 'Create a post or page from a block tree (or HTML). Drafts by default.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -260,7 +260,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'list-block-types' => array(
+			self::NAMESPACE_PREFIX . 'list-block-types'    => array(
 				'label'               => __( 'List block types', 'gk-block-mcp' ),
 				'description'         => __( 'List the block types registered on this site, with preference tiers — so an agent uses only blocks the site allows.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -276,6 +276,53 @@ class Block_Abilities {
 				),
 				'permission_callback' => array( $this, 'can_read' ),
 				'execute_callback'    => array( $this, 'execute_list_block_types' ),
+				'meta'                => array(
+					'annotations'  => array( 'readonly' => true ),
+					'show_in_rest' => true,
+				),
+			),
+			self::NAMESPACE_PREFIX . 'delete-block'        => array(
+				'label'               => __( 'Delete block', 'gk-block-mcp' ),
+				'description'         => __( 'Remove one or more top-level blocks starting at a flat index.', 'gk-block-mcp' ),
+				'category'            => self::CATEGORY,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'post_id' => array(
+							'type'        => 'integer',
+							'description' => __( 'The post ID.', 'gk-block-mcp' ),
+						),
+						'index'   => array(
+							'type'        => 'integer',
+							'description' => __( 'Flat index of the first block to remove.', 'gk-block-mcp' ),
+						),
+						'count'   => array(
+							'type'        => 'integer',
+							'description' => __( 'How many consecutive blocks to remove. Default 1.', 'gk-block-mcp' ),
+						),
+					),
+					'required'   => array( 'post_id', 'index' ),
+				),
+				'permission_callback' => array( $this, 'can_edit_post_input' ),
+				'execute_callback'    => array( $this, 'execute_delete_block' ),
+				'meta'                => array(
+					'annotations'  => array(
+						'readonly'    => false,
+						'destructive' => true,
+					),
+					'show_in_rest' => true,
+				),
+			),
+			self::NAMESPACE_PREFIX . 'site-editor-context' => array(
+				'label'               => __( 'Site editor context', 'gk-block-mcp' ),
+				'description'         => __( "Get the site's design tokens (theme name plus the color, gradient, font-size, and spacing presets) so block markup references theme-aligned preset slugs (e.g. has-primary-color) rather than hard-coded values.", 'gk-block-mcp' ),
+				'category'            => self::CATEGORY,
+				'input_schema'        => array(
+					'type'    => 'object',
+					'default' => array(),
+				),
+				'permission_callback' => array( $this, 'can_read' ),
+				'execute_callback'    => array( $this, 'execute_site_editor_context' ),
 				'meta'                => array(
 					'annotations'  => array( 'readonly' => true ),
 					'show_in_rest' => true,
@@ -378,5 +425,89 @@ class Block_Abilities {
 			$args['namespace'] = (string) $input['namespace'];
 		}
 		return $this->registry->get_block_types( $args );
+	}
+
+	/**
+	 * Remove one or more blocks via Block_CRUD.
+	 *
+	 * @param array<string, mixed> $input Ability input.
+	 * @return array|\WP_Error
+	 */
+	public function execute_delete_block( $input ) {
+		$count = isset( $input['count'] ) ? max( 1, (int) $input['count'] ) : 1;
+		return $this->crud->delete_blocks( (int) $input['post_id'], (int) $input['index'], $count );
+	}
+
+	/**
+	 * Build the site design context (theme + flattened theme.json presets) so an
+	 * agent composes theme-aligned, valid block markup.
+	 *
+	 * @param array<string, mixed> $input Ability input (unused).
+	 * @return array<string, mixed>
+	 */
+	public function execute_site_editor_context( $input ) {
+		unset( $input );
+
+		$theme = wp_get_theme();
+
+		return array(
+			'theme'   => array(
+				'name'       => $theme->get( 'Name' ),
+				'stylesheet' => get_stylesheet(),
+			),
+			'presets' => array(
+				'colors'        => $this->flatten_presets( $this->global_setting( array( 'color', 'palette' ) ) ),
+				'gradients'     => $this->flatten_presets( $this->global_setting( array( 'color', 'gradients' ) ) ),
+				'font_sizes'    => $this->flatten_presets( $this->global_setting( array( 'typography', 'fontSizes' ) ) ),
+				'spacing_sizes' => $this->flatten_presets( $this->global_setting( array( 'spacing', 'spacingSizes' ) ) ),
+			),
+		);
+	}
+
+	/**
+	 * Read a theme.json setting at the given path, or an empty array.
+	 *
+	 * @param string[] $path Settings path (e.g. ['color','palette']).
+	 * @return mixed
+	 */
+	private function global_setting( array $path ) {
+		if ( ! function_exists( 'wp_get_global_settings' ) ) {
+			return array();
+		}
+		return wp_get_global_settings( $path );
+	}
+
+	/**
+	 * Flatten a preset value that may be keyed by origin (default/theme/custom)
+	 * into a single list. Already-flat lists pass through unchanged.
+	 *
+	 * @param mixed $value Preset value from wp_get_global_settings().
+	 * @return array<int, mixed>
+	 */
+	private function flatten_presets( $value ) {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$origins   = array( 'default', 'theme', 'custom' );
+		$by_origin = false;
+		foreach ( $origins as $origin ) {
+			if ( isset( $value[ $origin ] ) ) {
+				$by_origin = true;
+				break;
+			}
+		}
+
+		if ( ! $by_origin ) {
+			return array_values( $value );
+		}
+
+		$merged = array();
+		foreach ( $origins as $origin ) {
+			if ( isset( $value[ $origin ] ) && is_array( $value[ $origin ] ) ) {
+				$merged = array_merge( $merged, $value[ $origin ] );
+			}
+		}
+		return $merged;
 	}
 }
