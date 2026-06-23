@@ -63,6 +63,7 @@ class Settings_Page {
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_post_gk_block_api_scan_storage_modes', array( $this, 'handle_scan' ) );
 		add_action( 'admin_post_gk_block_api_reset_defaults', array( $this, 'handle_reset' ) );
+		add_action( 'admin_post_gk_block_api_dismiss_prefs_notice', array( $this, 'handle_dismiss_prefs_notice' ) );
 		add_action( 'in_admin_header', array( $this, 'suppress_foreign_admin_notices' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
@@ -238,12 +239,74 @@ class Settings_Page {
 	}
 
 	/**
-	 * Sanitize the indexed-row form input back into the canonical
-	 * `namespace_scores` + `replacement_map` shape Preferences expects.
+	 * The score a namespace resolves to with no override, mirroring
+	 * Preferences::get_block_score(): the shipped default (`core` => 90) or the
+	 * neutral fallback (50) for everything else. Used to keep stored scores
+	 * overrides-only; a row that merely echoes this value is not persisted.
 	 *
-	 * Form input is row-indexed so we can rename namespaces/blocks safely
-	 * and so a new row's values are correlated. Rows flagged with `delete:1`
-	 * are dropped.
+	 * @param string $ns Block-family namespace (e.g. "core").
+	 * @return int
+	 */
+	private function resolved_default_score( $ns ) {
+		$defaults = Preferences::get_defaults();
+		return isset( $defaults['namespace_scores'][ $ns ] )
+			? (int) $defaults['namespace_scores'][ $ns ]
+			: 50;
+	}
+
+	/**
+	 * Block-family namespaces present in published content, read from the
+	 * inventory's cached scan only.
+	 *
+	 * Reads the inventory transient directly rather than calling
+	 * Block_Inventory::get_stats(), which would force a full-site walk on a cold
+	 * cache during a settings page render. When the cache is cold this returns an
+	 * empty list; the in-content leg of the score-table row universe is additive,
+	 * so the table degrades to registered ∪ overridden until the next scan warms
+	 * the cache.
+	 *
+	 * @return string[] Namespaces found in content (may be empty).
+	 */
+	private function content_namespaces() {
+		$cached = get_transient( Block_Inventory::CACHE_KEY );
+		if ( ! is_array( $cached ) || empty( $cached['namespace_totals'] ) || ! is_array( $cached['namespace_totals'] ) ) {
+			return array();
+		}
+		return array_keys( $cached['namespace_totals'] );
+	}
+
+	/**
+	 * Render the third-column control for a namespace score row.
+	 *
+	 * Overridden rows get a Reset control that restores the family's default
+	 * score (the overrides-only save then drops it from storage); rows already at
+	 * their default get a muted "default" marker, since there is nothing to reset.
+	 *
+	 * @param string $ns          Block-family namespace.
+	 * @param bool   $is_override Whether this row currently holds a stored override.
+	 * @return void
+	 */
+	private function render_namespace_action_cell( $ns, $is_override ) {
+		if ( $is_override ) {
+			?>
+			<button type="button" class="components-button is-link gk-block-mcp-reset-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: block family name */ __( 'Reset %s to its default score', 'gk-block-mcp' ), $ns ) ); ?>"><?php esc_html_e( 'Reset', 'gk-block-mcp' ); ?></button>
+			<?php
+			return;
+		}
+		?>
+		<span class="gk-block-mcp-row-default description"><?php esc_html_e( 'default', 'gk-block-mcp' ); ?></span>
+		<?php
+	}
+
+	/**
+	 * Sanitize the indexed-row form input into the stored `namespace_scores` +
+	 * `replacement_map` shape.
+	 *
+	 * Form input is row-indexed so namespaces/blocks can be renamed safely and a
+	 * new row's values stay correlated. Rows flagged with `delete:1` are dropped.
+	 * `namespace_scores` is stored overrides-only (scores equal to the resolved
+	 * default are skipped); `replacement_map` is the admin's authoritative list,
+	 * stored verbatim with no shipped defaults merged in.
 	 *
 	 * @param mixed $input Raw POST value.
 	 * @return array
@@ -256,7 +319,8 @@ class Settings_Page {
 		$out            = array();
 		$dropped_scored = 0;
 
-		// Namespace tier scores — indexed rows: [{name, score, delete?}, ...].
+		// Namespace tier scores arrive as indexed rows, each carrying a name, a
+		// score, and an optional delete flag.
 		if ( isset( $input['namespace_rows'] ) && is_array( $input['namespace_rows'] ) ) {
 			$out['namespace_scores'] = array();
 			foreach ( $input['namespace_rows'] as $row ) {
@@ -274,23 +338,31 @@ class Settings_Page {
 					}
 					continue;
 				}
-				$out['namespace_scores'][ $ns ] = max( 0, min( 100, $score ) );
+				$score = max( 0, min( 100, $score ) );
+				if ( $score !== $this->resolved_default_score( $ns ) ) {
+					// Overrides-only: a score that merely echoes the resolved
+					// default leaves no trace, so storage never accumulates the
+					// neutral defaults and Remove genuinely reverts to default.
+					$out['namespace_scores'][ $ns ] = $score;
+				}
 			}
 		} elseif ( isset( $input['namespace_scores'] ) && is_array( $input['namespace_scores'] ) ) {
 			// Already-canonical shape. Core double-sanitizes an option on its first
 			// write (update_option() → add_option()), so the second pass receives
 			// this method's own {ns => score} output rather than form rows. Re-clean
-			// it in place so the value survives instead of being discarded.
+			// it (and re-apply overrides-only) so a second pass is idempotent.
 			$out['namespace_scores'] = array();
 			foreach ( $input['namespace_scores'] as $ns => $score ) {
-				$ns = sanitize_key( $ns );
-				if ( '' !== $ns ) {
-					$out['namespace_scores'][ $ns ] = max( 0, min( 100, (int) $score ) );
+				$ns    = sanitize_key( $ns );
+				$score = max( 0, min( 100, (int) $score ) );
+				if ( '' !== $ns && $score !== $this->resolved_default_score( $ns ) ) {
+					$out['namespace_scores'][ $ns ] = $score;
 				}
 			}
 		}
 
-		// Replacement map — indexed rows: [{from, to, delete?}, ...].
+		// Replacement map arrives as indexed rows, each carrying a from, a to, and
+		// an optional delete flag.
 		if ( isset( $input['replacement_rows'] ) && is_array( $input['replacement_rows'] ) ) {
 			$out['replacement_map'] = array();
 			foreach ( $input['replacement_rows'] as $row ) {
@@ -304,7 +376,7 @@ class Settings_Page {
 				}
 			}
 		} elseif ( isset( $input['replacement_map'] ) && is_array( $input['replacement_map'] ) ) {
-			// Already-canonical shape (see the namespace branch above) — re-clean
+			// Already-canonical shape (see the namespace branch above); re-clean
 			// the {from => to} map so a second sanitize pass is idempotent.
 			$out['replacement_map'] = array();
 			foreach ( $input['replacement_map'] as $from => $to ) {
@@ -316,21 +388,14 @@ class Settings_Page {
 			}
 		}
 
-		// Layer the posted rows over the shipped defaults so a partial submission
-		// — hidden defaults, or a row a JS race swallowed — can never erase them
-		// from storage. Posted values win; missing defaults are restored. This
-		// keeps the option consistent with the runtime merge in
-		// Preferences::get_preferences() rather than persisting a lossy subset.
-		$defaults = Preferences::get_defaults();
-		if ( isset( $out['namespace_scores'] ) ) {
-			$out['namespace_scores'] = array_merge( $defaults['namespace_scores'], $out['namespace_scores'] );
-		}
-		if ( isset( $out['replacement_map'] ) ) {
-			$out['replacement_map'] = array_merge( $defaults['replacement_map'], $out['replacement_map'] );
-		}
+		// No defaults are layered in: `namespace_scores` holds only the admin's
+		// overrides (defaults resolve at read time) and `replacement_map` is the
+		// admin's authoritative list (taken verbatim, so a removed mapping stays
+		// removed). pattern_scoring and any forwards-compat keys ride along via the
+		// array_merge below.
 
 		// Warn rather than silently swallow a score the admin entered without a
-		// block-family name — otherwise the edit vanishes with no trace on save.
+		// block-family name; otherwise the edit vanishes with no trace on save.
 		if ( $dropped_scored > 0 ) {
 			add_settings_error(
 				Preferences::OPTION_KEY,
@@ -446,6 +511,7 @@ class Settings_Page {
 		check_admin_referer( 'gk_block_api_reset_defaults' );
 
 		delete_option( 'gk_block_api_preferences' );
+		delete_option( 'gk_block_api_preferences_notice' );
 		delete_option( 'gk_block_api_post_types_allowlist' );
 		delete_option( self::DUAL_MANUAL_OPTION );
 		delete_option( Media_Manager::UPLOADS_OPTION );
@@ -478,9 +544,71 @@ class Settings_Page {
 		exit;
 	}
 
+	/**
+	 * "Dismiss" handler for the post-upgrade preferences notice. Clears the
+	 * one-time flag the 1.5.0 migration sets, then returns to the settings page.
+	 */
+	public function handle_dismiss_prefs_notice() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-mcp' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( 'gk_block_api_dismiss_prefs_notice' );
+
+		delete_option( 'gk_block_api_preferences_notice' );
+
+		nocache_headers();
+		$args = array(
+			'page' => self::PAGE_SLUG,
+			'tab'  => 'policy',
+		);
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
 	// ──────────────────────────────────────────────────────────────────
 	// Render.
 	// ──────────────────────────────────────────────────────────────────
+
+	/**
+	 * Render the one-time post-upgrade preferences notice.
+	 *
+	 * Shown while the 1.5.0 migration flag is set (a site that had saved
+	 * preferences before the site-aware model). The notice explains that saved
+	 * settings were preserved and links to review them; Dismiss clears the flag,
+	 * as does "Reset to defaults". Rendered inline (not via admin_notices), which
+	 * the plugin's own screens suppress.
+	 *
+	 * @return void
+	 */
+	private function render_preferences_upgrade_notice() {
+		$show = '1' === (string) get_option( 'gk_block_api_preferences_notice', '' );
+		if ( ! $show ) {
+			return;
+		}
+
+		$review_url  = add_query_arg(
+			array(
+				'page' => self::PAGE_SLUG,
+				'tab'  => 'policy',
+			),
+			admin_url( 'options-general.php' )
+		);
+		$dismiss_url = wp_nonce_url(
+			admin_url( 'admin-post.php?action=gk_block_api_dismiss_prefs_notice' ),
+			'gk_block_api_dismiss_prefs_notice'
+		);
+		?>
+		<div class="notice notice-info gk-block-mcp-prefs-upgrade-notice">
+			<p>
+				<?php esc_html_e( 'Block preferences are now site-aware. The table shows the block families registered on your site or used in your content, and nothing is treated as legacy unless you score it down. Your previously saved preferences were kept exactly as they were.', 'gk-block-mcp' ); ?>
+			</p>
+			<p>
+				<a href="<?php echo esc_url( $review_url ); ?>" class="button button-secondary"><?php esc_html_e( 'Review block preferences', 'gk-block-mcp' ); ?></a>
+				<a href="<?php echo esc_url( $dismiss_url ); ?>" class="button-link" style="margin-left: 8px;"><?php esc_html_e( 'Dismiss', 'gk-block-mcp' ); ?></a>
+			</p>
+		</div>
+		<?php
+	}
 
 	/**
 	 * Render the settings page.
@@ -504,15 +632,13 @@ class Settings_Page {
 			return;
 		}
 
-		// Render the same merged view the runtime enforces: stored overrides
-		// layered over the shipped defaults. Preferences::get_preferences()
-		// deep-merges the option onto the defaults via wp_parse_args, so the
-		// table mirrors the policy actually in force. Reading the raw option
-		// here would hide every shipped default the moment one custom entry is
-		// stored, leaving the UI contradicting enforcement.
-		$merged_prefs      = ( new Preferences() )->get_preferences();
-		$namespace_scores  = $merged_prefs['namespace_scores'];
-		$replacement_map   = $merged_prefs['replacement_map'];
+		// Site-aware, overrides-only view: `namespace_scores` holds only the admin's
+		// overrides (everything else resolves to its default at read time), and
+		// `replacement_map` is the admin's authoritative list. The score table's
+		// rows are built below from registered ∪ overridden ∪ in-content families.
+		$stored_prefs      = (array) get_option( Preferences::OPTION_KEY, array() );
+		$overrides_ns      = isset( $stored_prefs['namespace_scores'] ) && is_array( $stored_prefs['namespace_scores'] ) ? $stored_prefs['namespace_scores'] : array();
+		$replacement_map   = isset( $stored_prefs['replacement_map'] ) && is_array( $stored_prefs['replacement_map'] ) ? $stored_prefs['replacement_map'] : array();
 		$post_type_allow   = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
 		$manual_dual       = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
 		$scan_results      = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
@@ -553,6 +679,16 @@ class Settings_Page {
 		}
 		$block_families = array_keys( $block_families );
 		sort( $block_families, SORT_NATURAL | SORT_FLAG_CASE );
+
+		// The score table is site-aware: one row per block family that is
+		// registered here, OR the admin has scored, OR appears in published
+		// content. Each row resolves to its override or its default score; a
+		// family in content whose plugin isn't registered is flagged orphaned.
+		$content_namespaces = $this->content_namespaces();
+		$registered_lookup  = array_flip( $block_families );
+		$content_lookup     = array_flip( $content_namespaces );
+		$row_namespaces     = array_values( array_unique( array_merge( $block_families, array_keys( $overrides_ns ), $content_namespaces ) ) );
+		sort( $row_namespaces, SORT_NATURAL | SORT_FLAG_CASE );
 
 		// Notices from action handlers. All inputs unslashed and clamped via
 		// absint before composition; the message itself never contains user data.
@@ -646,8 +782,10 @@ class Settings_Page {
 			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-mcp' ); ?></h1>
 			<p class="description gk-block-mcp-subtitle" style="margin:4px 0 12px; max-width:800px;">
-				<?php esc_html_e( 'Connect AI assistants like Claude to edit your site — no code required. (MCP stands for Model Context Protocol, the technology that lets AI apps connect to your site.)', 'gk-block-mcp' ); ?>
+				<?php esc_html_e( 'Connect AI assistants like Claude to edit your site, no code required. (MCP stands for Model Context Protocol, the technology that lets AI apps connect to your site.)', 'gk-block-mcp' ); ?>
 			</p>
+
+			<?php $this->render_preferences_upgrade_notice(); ?>
 
 			<h2 class="nav-tab-wrapper">
 				<a href="
@@ -846,7 +984,7 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Media uploads', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Turn this off to stop AI assistants from adding files to your Media Library. They can still edit blocks — they just won\'t be able to upload images or other files.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this off to stop AI assistants from adding files to your Media Library. They can still edit blocks; they just won\'t be able to upload images or other files.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -892,7 +1030,7 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Trash', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Turn this on to let AI assistants move posts and pages to the trash. It\'s off by default. Even when on, they can\'t permanently delete anything — trashed items stay in your Trash until you empty it, and you can restore them.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this on to let AI assistants move posts and pages to the trash. It\'s off by default. Even when on, they can\'t permanently delete anything. Trashed items stay in your Trash until you empty it, and you can restore them.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -1034,7 +1172,7 @@ class Settings_Page {
 				<summary>
 					<span class="gk-block-mcp-advanced__text">
 						<span class="gk-block-mcp-advanced__label"><?php esc_html_e( 'Advanced', 'gk-block-mcp' ); ?></span>
-						<span class="gk-block-mcp-advanced__desc"><?php esc_html_e( 'Custom instructions, block preferences, replacements, and blocks that store data in two places — most sites won\'t need these.', 'gk-block-mcp' ); ?></span>
+						<span class="gk-block-mcp-advanced__desc"><?php esc_html_e( 'Custom instructions, block preferences, replacements, and blocks that store data in two places. Most sites won\'t need these.', 'gk-block-mcp' ); ?></span>
 					</span>
 				</summary>
 				<h2><?php esc_html_e( 'Custom instructions for AI assistants', 'gk-block-mcp' ); ?></h2>
@@ -1043,7 +1181,7 @@ class Settings_Page {
 					echo wp_kses(
 						sprintf(
 							/* translators: 1: link to MCP spec, 2: max length */
-							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site — which callout styles to use, your preferred code-block look, how documents should be structured — so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-mcp' ),
+							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site (which callout styles to use, your preferred code-block look, how documents should be structured) so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-mcp' ),
 							'https://modelcontextprotocol.io/specification',
 							(int) $instructions_max
 						),
@@ -1087,7 +1225,7 @@ class Settings_Page {
 					echo esc_html(
 						sprintf(
 							/* translators: %d: max length */
-							__( '/ %d characters used. Keep it short — a few clear bullet points work better than long paragraphs.', 'gk-block-mcp' ),
+							__( '/ %d characters used. Keep it short. A few clear bullet points work better than long paragraphs.', 'gk-block-mcp' ),
 							(int) $instructions_max
 						)
 					);
@@ -1124,49 +1262,48 @@ class Settings_Page {
 						<tr>
 							<th scope="col"><?php esc_html_e( 'Block family', 'gk-block-mcp' ); ?></th>
 							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-mcp' ); ?></th>
-							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></th>
+							<th scope="col" style="width: 100px;"><span class="screen-reader-text"><?php esc_html_e( 'Reset to default', 'gk-block-mcp' ); ?></span></th>
 						</tr>
 					</thead>
 					<tbody>
 						<?php
-						$ns_keys  = array_keys( $namespace_scores );
-						$ns_count = count( $ns_keys );
+						$ns_count = count( $row_namespaces );
 						for ( $ns_index = 0; $ns_index < $ns_count; $ns_index++ ) :
-							$ns    = $ns_keys[ $ns_index ];
-							$score = $namespace_scores[ $ns ];
+							$ns          = $row_namespaces[ $ns_index ];
+							$is_override = isset( $overrides_ns[ $ns ] );
+							$score       = $is_override ? (int) $overrides_ns[ $ns ] : $this->resolved_default_score( $ns );
+							$is_orphaned = isset( $content_lookup[ $ns ] ) && ! isset( $registered_lookup[ $ns ] );
 							?>
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Block family', 'gk-block-mcp' ); ?></label>
-									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" list="gk-block-families" autocomplete="off" />
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" readonly="readonly"
+									<?php
+									if ( $is_orphaned ) :
+										?>
+										aria-describedby="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>"<?php endif; ?> />
+									<?php if ( $is_orphaned ) : ?>
+										<span class="gk-block-mcp-row-orphaned description" title="<?php esc_attr_e( 'This block family appears in your content but its plugin is not active on this site.', 'gk-block-mcp' ); ?>"><?php esc_html_e( 'not active on this site', 'gk-block-mcp' ); ?></span>
+										<span id="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>" class="screen-reader-text"><?php esc_html_e( 'This block family appears in your content but its plugin is not active on this site.', 'gk-block-mcp' ); ?></span>
+									<?php endif; ?>
 								</td>
 								<td>
-									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-mcp' ); ?></label>
-									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
+									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php echo esc_html( sprintf( /* translators: %s: block family name */ __( 'Score for %s', 'gk-block-mcp' ), $ns ) ); ?></label>
+									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) $score ); ?>" class="small-text" data-default-score="<?php echo esc_attr( (string) $this->resolved_default_score( $ns ) ); ?>"
+									<?php
+									if ( $is_orphaned ) :
+										?>
+										aria-describedby="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>"<?php endif; ?> />
 								</td>
 								<td>
-									<button type="button" class="components-button is-link is-destructive gk-block-mcp-remove-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: block family name */ __( 'Remove %s', 'gk-block-mcp' ), (string) $ns ) ); ?>"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></button>
+									<?php $this->render_namespace_action_cell( (string) $ns, $is_override ); ?>
 								</td>
 							</tr>
 						<?php endfor; ?>
-						<?php $ns_index = $ns_count; ?>
-						<tr>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New block family', 'gk-block-mcp' ); ?></label>
-								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-families" autocomplete="off" />
-							</td>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-mcp' ); ?></label>
-								<input type="number" id="gk-ns-score-new" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" placeholder="0" class="small-text" />
-							</td>
-							<td></td>
-						</tr>
 					</tbody>
 				</table>
-				<p class="gk-block-mcp-add-row-wrap">
-					<button type="button" class="components-button is-secondary gk-block-mcp-add-row" data-target-table="namespace">
-						<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span><?php esc_html_e( 'Add row', 'gk-block-mcp' ); ?>
-					</button>
+				<p class="description gk-block-mcp-namespace-help">
+					<?php esc_html_e( 'These are the block families WordPress sees on this site: every one registered by an active plugin or theme, plus any found in your content. Adjust a score to override its default; use Reset to restore it.', 'gk-block-mcp' ); ?>
 				</p>
 
 
@@ -1225,7 +1362,7 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Most blocks keep their content in one place. A few keep the same content in two places at once — and if an AI assistant updates only one of them, the block quietly breaks.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Most blocks keep their content in one place. A few keep the same content in two places at once, and if an AI assistant updates only one of them, the block quietly breaks.', 'gk-block-mcp' ); ?>
 				</p>
 				<p class="description">
 					<?php
@@ -1236,10 +1373,10 @@ class Settings_Page {
 					?>
 				</p>
 				<p class="description">
-					<?php esc_html_e( 'Block MCP finds most of these automatically when it scans your site. Add any others here, one per line — assistants will then be required to update both copies together, so nothing breaks.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Block MCP finds most of these automatically when it scans your site. Add any others here, one per line. Assistants will then be required to update both copies together, so nothing breaks.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block-name"; ?>
-				<label class="screen-reader-text" for="gk-block-mcp-dual-manual"><?php esc_html_e( 'Blocks that keep the same content in two places — one block name per line', 'gk-block-mcp' ); ?></label>
+				<label class="screen-reader-text" for="gk-block-mcp-dual-manual"><?php esc_html_e( 'Blocks that keep the same content in two places, one block name per line', 'gk-block-mcp' ); ?></label>
 				<textarea id="gk-block-mcp-dual-manual" name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
 				</details>
 
@@ -1290,6 +1427,8 @@ class Settings_Page {
 				var live = document.getElementById('gk-block-mcp-live');
 				var announcement = <?php echo wp_json_encode( __( 'New row added. You can keep adding entries.', 'gk-block-mcp' ) ); ?>;
 				var removedMsg   = <?php echo wp_json_encode( __( 'Row removed. Save changes to apply.', 'gk-block-mcp' ) ); ?>;
+				var resetMsg     = <?php echo wp_json_encode( __( 'Score reset to its default. Save changes to apply.', 'gk-block-mcp' ) ); ?>;
+				var defaultLabel = <?php echo wp_json_encode( __( 'default', 'gk-block-mcp' ) ); ?>;
 
 				function announce(msg) {
 					if (!live) return;
@@ -1358,6 +1497,32 @@ class Settings_Page {
 							row.parentNode.removeChild(row);
 							if (focusTarget) { focusTarget.focus(); }
 							announce(removedMsg);
+						});
+
+						tbody.addEventListener('click', function (e) {
+							var reset = e.target.closest('.gk-block-mcp-reset-row');
+							if (!reset || !tbody.contains(reset)) return;
+							e.preventDefault();
+							var row = reset.closest('tr');
+							if (!row) return;
+							var score = row.querySelector('input[type="number"]');
+							if (score) {
+								var def = score.getAttribute('data-default-score');
+								score.value = (def === null ? '' : def);
+							}
+							// Row now matches its default; swap the control for the muted marker.
+							var cell = reset.parentNode;
+							reset.parentNode.removeChild(reset);
+							if (cell) {
+								var marker = document.createElement('span');
+								marker.className = 'gk-block-mcp-row-default description';
+								marker.textContent = defaultLabel;
+								cell.appendChild(marker);
+							}
+							// Removing the focused Reset button drops focus to <body>; move it
+							// to the score field this control acted on so keyboard users stay put.
+							if (score) { score.focus(); }
+							announce(resetMsg);
 						});
 					})(tables[t]);
 				}

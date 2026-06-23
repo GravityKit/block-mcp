@@ -32,6 +32,7 @@ require_once __DIR__ . '/includes/class-connections.php';
  */
 function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
+	delete_option( 'gk_block_api_preferences_notice' );
 	delete_option( 'gk_block_api_post_types_allowlist' );
 	delete_option( 'gk_block_api_uploads_enabled' );
 	delete_option( 'gk_block_api_allow_trash' );

@@ -126,6 +126,14 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 * Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's on by default and can be turned off at **Settings → Block MCP**; on WordPress 6.8 and earlier it is simply skipped.
 
+#### ✨ Improved
+
+* Block preferences are now site-aware. The score table lists the block families registered by your active plugins and themes, plus any found in your published content, instead of a fixed built-in list. You score the blocks your site actually uses.
+* No block is treated as legacy out of the box. Only WordPress core blocks are preferred by default, and every other block family is fine to use until you score it down. The built-in opinions about which third-party blocks to avoid have been removed.
+* The replacement map is now entirely your own list. No built-in replacement suggestions ship anymore, so the mappings shown are the ones you added, and a mapping you remove stays removed.
+* Blocks whose plugin or theme is no longer active are flagged as "not active on this site" in the score table and in AI assistant responses, so you and your assistant can spot content that references a missing block.
+* Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings &rarr; Block MCP explains the new model and offers a one-click reset to the new defaults.
+
 #### 🔒 Security
 
 * Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
@@ -134,6 +142,10 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 * Fixes a block edit sometimes undoing a change made moments earlier — for example, a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
 * Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change — your revision history and editor integrations are left intact.
+
+#### 💻 Developer Updates
+
+* Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
 
 = 2.0.3 on June 17, 2026 =
 

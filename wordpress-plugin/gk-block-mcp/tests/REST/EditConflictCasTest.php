@@ -316,4 +316,77 @@ class EditConflictCasTest extends RestControllerTestCase {
 		$this->assertStringContainsString( 'WINNER', $content, 'The mid-flight winner must survive.' );
 		$this->assertStringNotContainsString( 'MINE', $content, 'The stale-based write must not clobber the winner.' );
 	}
+
+	/**
+	 * A no-op save — new content byte-identical to the snapshot — must succeed,
+	 * not 409. The compare-and-swap UPDATE reports 0 affected rows when the
+	 * stored value is unchanged (the engine counts changed rows, not matched
+	 * rows), which must not be mistaken for a concurrent edit.
+	 */
+	public function test_idempotent_save_of_unchanged_content_is_not_a_conflict() {
+		$blocks  = array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>SAME</p>' ), 'blk_fad' ) );
+		$post_id = $this->make_block_post( $blocks );
+
+		// Pin the stored bytes to exactly serialize_blocks( $blocks ) so re-saving
+		// the same array produces byte-identical content. (The SQLite test engine
+		// counts matched rows, so this passes here regardless; the MySQL-specific
+		// 0-affected-rows handling is pinned by the unit test below.)
+		$this->commit_behind_cache( $post_id, $blocks );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$result = $this->crud->save_blocks( $post_id, $blocks, $snapshot );
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'SAME', $this->persisted_content( $post_id ), 'A no-op save must leave the content intact.' );
+	}
+
+	/**
+	 * The compare-and-swap result classifier: 0 affected rows is a conflict ONLY
+	 * when the written content differs from the snapshot. An idempotent save (new
+	 * === snapshot) changes nothing and reports 0 affected on engines that count
+	 * changed rows (MySQL) but 1 on engines that count matched rows (SQLite), so
+	 * relying on the count alone would 409 a no-op save on MySQL. This pins the
+	 * decision harness-independently; teeth: drop the content-equality guard and
+	 * the idempotent case flips to a conflict.
+	 */
+	public function test_swap_is_conflict_only_when_content_differs() {
+		$method = new \ReflectionMethod( \GravityKit\BlockMCP\Block_Writer::class, 'swap_is_conflict' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( null, 0, 'NEW', 'OLD' ), '0 rows + content changed is a genuine conflict' );
+		$this->assertFalse( $method->invoke( null, 0, 'SAME', 'SAME' ), '0 rows + unchanged content is an idempotent no-op, not a conflict' );
+		$this->assertFalse( $method->invoke( null, 1, 'NEW', 'OLD' ), 'changed rows means the write applied' );
+	}
+
+	/**
+	 * A read that assigns a missing ref but loses the ref-persist race (a
+	 * concurrent edit moved the row) must surface disk truth, not the in-memory
+	 * tree carrying a ref that never reached disk — otherwise a follow-up
+	 * write-by-ref targets a non-existent ref.
+	 */
+	public function test_read_surfaces_disk_truth_when_ref_persist_loses_race() {
+		// Ref-less block, so the read assigns a fresh ref and tries to persist it.
+		$post_id = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>ORIG</p>' ) ) );
+
+		$injected = false;
+		$inject   = function ( $query ) use ( $post_id, &$injected ) {
+			$upper = strtoupper( ltrim( $query ) );
+			// The CAS swap references post_content twice (SET … WHERE … AND
+			// post_content = …), distinguishing it from the no-op touch (0) and a
+			// plain content write such as commit_behind_cache (1). Matches whether
+			// the engine backtick-quotes the column or not.
+			$is_persist_swap = ( 0 === strpos( $upper, 'UPDATE' ) && substr_count( $upper, 'POST_CONTENT' ) >= 2 );
+			if ( $is_persist_swap && ! $injected ) {
+				$injected = true;
+				$this->commit_behind_cache( $post_id, array( $this->block( 'core/paragraph', array(), '<p>WINNER</p>' ) ) );
+			}
+			return $query;
+		};
+		add_filter( 'query', $inject );
+		$blocks = $this->crud->get_blocks( $post_id );
+		remove_filter( 'query', $inject );
+
+		$this->assertTrue( $injected, 'the ref-persist swap must have run' );
+		$this->assertStringContainsString( 'WINNER', (string) wp_json_encode( $blocks ), 'the read must reflect disk after losing the ref-persist race' );
+	}
 }

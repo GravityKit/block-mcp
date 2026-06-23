@@ -37,6 +37,23 @@ class PostManagerTest extends WP_UnitTestCase {
 			}
 		}
 
+		// Legacy/avoid tiers are admin-configured now (opinion-free defaults); seed
+		// the namespace this create_post legacy-rejection test exercises.
+		update_option(
+			Preferences::OPTION_KEY,
+			array(
+				'namespace_scores' => array(
+					'ugb'       => 0,
+					'jetpack'   => 0,
+					'stackable' => 10,
+				),
+				'replacement_map'  => array(
+					'ugb/text'          => 'core/paragraph',
+					'stackable/heading' => 'core/heading',
+				),
+			)
+		);
+
 		$preferences = new Preferences();
 		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
 		$this->pm    = new Post_Manager( $block_crud );

@@ -2,19 +2,24 @@
 /**
  * Settings_Page namespace-score / replacement-map preference contracts.
  *
- * Pins the "stored preferences layer over shipped defaults" contract. Three
- * seams where the stored option and the hardcoded GravityKit defaults must agree
- * on the same "override layered on defaults" model the runtime uses:
+ * Pins the site-aware, opinion-free preference model:
  *
- *  1. render_page() shows the shipped namespace/replacement defaults even when a
- *     single custom entry is stored — the UI mirrors the merged view
- *     Preferences::get_preferences() enforces at runtime, never the raw stored
- *     subset.
- *  2. sanitize_preferences() layers the posted rows OVER
- *     Preferences::get_defaults(), so a partial submission cannot erase the
- *     shipped defaults from storage.
- *  3. A posted row that carries a score/value but a blank name surfaces a
- *     settings error rather than being dropped silently.
+ *  1. sanitize_preferences() stores `namespace_scores` overrides-only. A posted
+ *     score equal to the family's resolved default (core => 90, everything else
+ *     => 50) is dropped, so storage never accumulates shipped defaults and a
+ *     reset genuinely reverts to default.
+ *  2. sanitize_preferences() stores `replacement_map` as the admin's
+ *     authoritative list, verbatim. No shipped defaults are merged in, so a
+ *     removed mapping stays removed.
+ *  3. render_page() builds the score table from a site-aware row universe:
+ *     every block family registered on this site, plus any the admin has scored,
+ *     plus any present in published content. Overridden rows expose a Reset
+ *     control; unoverridden rows show a "default" marker; an in-content family
+ *     whose plugin is not registered is flagged orphaned. There is no free-form
+ *     "Add row" for namespaces.
+ *  4. A posted row that carries a score but a blank name surfaces a settings
+ *     error rather than vanishing silently.
+ *  5. The sanitizer is idempotent, surviving core's first-write double-sanitize.
  *
  * @package GravityKit\BlockMCP\Tests\Connect
  */
@@ -31,11 +36,12 @@ use GravityKit\BlockMCP\Settings_Page;
 class SettingsPagePreferencesTest extends WP_UnitTestCase {
 
 	/**
-	 * Reset request + settings-error state around every test.
+	 * Reset request + settings-error + inventory-cache state around every test.
 	 *
 	 * sanitize_preferences() pushes onto the $wp_settings_errors global; the
-	 * render tests read $_GET['tab']. Clear both so tests don't leak into one
-	 * another.
+	 * render tests read $_GET['tab'] and the inventory transient. A core block is
+	 * registered so the `core` family is deterministically part of the row
+	 * universe regardless of what the bootstrap registered.
 	 *
 	 * @return void
 	 */
@@ -43,6 +49,12 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		parent::set_up();
 		global $wp_settings_errors;
 		$wp_settings_errors = array();
+		delete_transient( Block_Inventory::CACHE_KEY );
+
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( ! $registry->is_registered( 'core/paragraph' ) ) {
+			$registry->register( 'core/paragraph' );
+		}
 	}
 
 	/**
@@ -52,6 +64,7 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		global $wp_settings_errors;
 		$wp_settings_errors = array();
 		unset( $_GET['tab'] );
+		delete_transient( Block_Inventory::CACHE_KEY );
 		parent::tear_down();
 	}
 
@@ -70,147 +83,318 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		return (string) ob_get_clean();
 	}
 
-	// ── Contract 1: render path layers stored over shipped defaults ──
+	// -- Contract 1: sanitize stores namespace scores overrides-only --
 
 	/**
-	 * Storing a single custom namespace score must not hide the shipped
-	 * namespace defaults from the score table.
+	 * A score below a family's default is stored as an override.
 	 *
-	 * The runtime (Preferences::get_preferences()) always layers stored scores
-	 * over the 11 hardcoded defaults via wp_parse_args, so the settings table
-	 * must render that same merged set — otherwise the admin sees a table that
-	 * contradicts the policy actually in force.
+	 * Scoring a namespace down (jetpack => 0, well under the neutral 50) is the
+	 * explicit way a site marks it legacy, so it must persist verbatim.
 	 */
-	public function test_render_page_shows_shipped_namespace_defaults_alongside_stored_entry() {
-		update_option( Preferences::OPTION_KEY, array( 'namespace_scores' => array( 'mything' => 90 ) ) );
+	public function test_sanitize_preferences_stores_below_default_score_as_override() {
+		$page = new Settings_Page( new Block_Inventory() );
 
-		$html = $this->render_policy_html();
+		$out = $page->sanitize_preferences(
+			array( 'namespace_rows' => array( array( 'name' => 'jetpack', 'score' => 0 ) ) )
+		);
 
-		$this->assertStringContainsString( 'value="mything"', $html, 'the stored custom namespace row must render' );
-		$this->assertStringContainsString( 'value="jetpack"', $html, 'a shipped namespace default must still render' );
-		$this->assertStringContainsString( 'value="stackable"', $html, 'a second shipped namespace default must still render' );
+		$this->assertSame( 0, $out['namespace_scores']['jetpack'], 'a score below default must persist as an override' );
 	}
 
 	/**
-	 * Storing a single custom replacement must not hide the shipped
-	 * replacement-map defaults from the table.
+	 * A score above the neutral default is stored as an override.
 	 *
-	 * Same layering contract as the namespace table, for the parallel
-	 * replacement-map section.
+	 * Promoting a namespace (spectra => 85, above the neutral 50) is equally an
+	 * override and must persist.
 	 */
-	public function test_render_page_shows_shipped_replacement_defaults_alongside_stored_entry() {
+	public function test_sanitize_preferences_stores_above_neutral_score_as_override() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array( 'namespace_rows' => array( array( 'name' => 'spectra', 'score' => 85 ) ) )
+		);
+
+		$this->assertSame( 85, $out['namespace_scores']['spectra'], 'a score above the neutral default must persist as an override' );
+	}
+
+	/**
+	 * A posted score equal to `core`'s shipped default (90) is not stored.
+	 *
+	 * core resolves to 90 with no override; echoing that value back is not an
+	 * override, so storage must stay empty rather than pinning the default.
+	 */
+	public function test_sanitize_preferences_drops_core_score_equal_to_default() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array( 'namespace_rows' => array( array( 'name' => 'core', 'score' => 90 ) ) )
+		);
+
+		$this->assertArrayNotHasKey( 'core', $out['namespace_scores'], 'a score equal to core\'s default must not be stored' );
+	}
+
+	/**
+	 * A posted score equal to the neutral default (50) is not stored.
+	 *
+	 * Every non-core namespace resolves to 50; a row that merely echoes 50 leaves
+	 * no override, so it must be dropped.
+	 */
+	public function test_sanitize_preferences_drops_score_equal_to_neutral_default() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array( 'namespace_rows' => array( array( 'name' => 'acme', 'score' => 50 ) ) )
+		);
+
+		$this->assertArrayNotHasKey( 'acme', $out['namespace_scores'], 'a score equal to the neutral default must not be stored' );
+	}
+
+	/**
+	 * A partial submission stores only what was posted, layering no shipped
+	 * defaults underneath.
+	 *
+	 * The opinion-free model ships only `core` as a default and resolves it at
+	 * read time, so a submission scoring one namespace must produce exactly that
+	 * one override, never a `core` (or any other) row pinned into storage.
+	 */
+	public function test_sanitize_preferences_does_not_layer_shipped_defaults() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array( 'namespace_rows' => array( array( 'name' => 'jetpack', 'score' => 0 ) ) )
+		);
+
+		$this->assertSame( array( 'jetpack' => 0 ), $out['namespace_scores'], 'storage must hold only the posted override, with no shipped defaults layered in' );
+	}
+
+	/**
+	 * Out-of-range scores are clamped to 0-100 before the overrides-only check.
+	 *
+	 * A clamped value that differs from the default is still an override; pins the
+	 * clamp boundary alongside the overrides-only drop.
+	 */
+	public function test_sanitize_preferences_clamps_out_of_range_scores() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array(
+				'namespace_rows' => array(
+					array( 'name' => 'tooboig', 'score' => 250 ),
+					array( 'name' => 'toolow', 'score' => -5 ),
+				),
+			)
+		);
+
+		$this->assertSame( 100, $out['namespace_scores']['tooboig'], 'a score above 100 must clamp to 100' );
+		$this->assertSame( 0, $out['namespace_scores']['toolow'], 'a score below 0 must clamp to 0' );
+	}
+
+	// -- Contract 2: sanitize stores the replacement map authoritatively --
+
+	/**
+	 * Posted replacement rows are stored verbatim with no defaults merged.
+	 *
+	 * The replacement map is the admin's authoritative list, not a shipped
+	 * opinion, so the stored map must equal exactly what was posted.
+	 */
+	public function test_sanitize_preferences_stores_replacement_map_verbatim() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences(
+			array( 'replacement_rows' => array( array( 'from' => 'foo/bar', 'to' => 'core/paragraph' ) ) )
+		);
+
+		$this->assertSame( array( 'foo/bar' => 'core/paragraph' ), $out['replacement_map'], 'the replacement map must be stored verbatim, with no shipped defaults merged' );
+	}
+
+	/**
+	 * An empty replacement-rows submission yields an empty map, not shipped
+	 * defaults.
+	 *
+	 * Clearing every replacement row must clear the stored map; a "default" map
+	 * reappearing here would contradict the authoritative-list contract.
+	 */
+	public function test_sanitize_preferences_empty_replacement_rows_yield_empty_map() {
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$out = $page->sanitize_preferences( array( 'replacement_rows' => array() ) );
+
+		$this->assertSame( array(), $out['replacement_map'], 'clearing every replacement row must leave an empty map' );
+	}
+
+	// -- Contract 3: render builds a site-aware row universe --
+
+	/**
+	 * A block family registered on this site appears in the score table.
+	 *
+	 * The row universe always includes registered families; `core` is registered,
+	 * so its row must render.
+	 */
+	public function test_render_page_includes_registered_core_family() {
+		$html = $this->render_policy_html();
+
+		$this->assertStringContainsString( 'value="core"', $html, 'a registered block family must render a score row' );
+	}
+
+	/**
+	 * An overridden namespace renders with a Reset control.
+	 *
+	 * A stored override (jetpack => 0) joins the row universe even though jetpack
+	 * is not registered, and its row offers Reset so the admin can revert it.
+	 */
+	public function test_render_page_overridden_namespace_shows_reset_control() {
+		update_option( Preferences::OPTION_KEY, array( 'namespace_scores' => array( 'jetpack' => 0 ) ) );
+
+		$html = $this->render_policy_html();
+
+		$this->assertStringContainsString( 'value="jetpack"', $html, 'a stored override must render a row' );
+		$this->assertStringContainsString( 'gk-block-mcp-reset-row', $html, 'an overridden row must expose a Reset control' );
+	}
+
+	/**
+	 * An unoverridden, registered family renders a "default" marker, not Reset.
+	 *
+	 * With no override stored, `core` resolves to its default and the action cell
+	 * shows the muted default marker, since there is nothing to reset.
+	 */
+	public function test_render_page_unoverridden_family_shows_default_marker() {
+		delete_option( Preferences::OPTION_KEY );
+
+		$html = $this->render_policy_html();
+
+		$this->assertStringContainsString( 'gk-block-mcp-row-default', $html, 'an unoverridden family must show the default marker' );
+	}
+
+	/**
+	 * A family present in content but not registered is flagged orphaned.
+	 *
+	 * The in-content leg of the row universe reads the inventory cache; a
+	 * namespace found there whose plugin is not registered renders with the
+	 * orphaned marker so the admin knows it is inactive.
+	 */
+	public function test_render_page_flags_orphaned_in_content_namespace() {
+		set_transient(
+			Block_Inventory::CACHE_KEY,
+			array( 'namespace_totals' => array( 'ghostpkg' => 3 ) )
+		);
+
+		$html = $this->render_policy_html();
+
+		$this->assertStringContainsString( 'value="ghostpkg"', $html, 'an in-content namespace must join the row universe' );
+		$this->assertStringContainsString( 'gk-block-mcp-row-orphaned', $html, 'an in-content namespace with no registered plugin must be flagged orphaned' );
+	}
+
+	/**
+	 * The orphaned cue is programmatically associated with the row's controls.
+	 *
+	 * A screen-reader user editing an orphaned family typically tabs straight to
+	 * the score field, so the "not active on this site" context must reach them
+	 * there, not only as loose text or a title tooltip. The orphaned cue carries a
+	 * stable id, the score and name inputs reference it via aria-describedby, and
+	 * the full explanation is exposed as screen-reader text rather than a
+	 * title-only attribute.
+	 */
+	public function test_render_page_associates_orphaned_cue_with_the_row_controls() {
+		set_transient(
+			Block_Inventory::CACHE_KEY,
+			array( 'namespace_totals' => array( 'ghostpkg' => 3 ) )
+		);
+
+		$html = $this->render_policy_html();
+
+		$this->assertMatchesRegularExpression( '/id="(gk-ns-orphaned-\d+)"/', $html, 'the orphaned cue must carry a stable id' );
+		preg_match( '/id="(gk-ns-orphaned-\d+)"/', $html, $matches );
+		$orphan_id = $matches[1];
+
+		$this->assertStringContainsString( 'aria-describedby="' . $orphan_id . '"', $html, 'an editable control in the orphaned row must be described by the orphaned cue' );
+		$this->assertStringContainsString( 'This block family appears in your content', $html, 'the full orphaned explanation must be present as text, not only a title attribute' );
+	}
+
+	/**
+	 * A namespace that is neither registered, overridden, nor in content does not
+	 * appear.
+	 *
+	 * The row universe is exactly registered union overridden union in-content;
+	 * an arbitrary unknown namespace must never render a row.
+	 */
+	public function test_render_page_omits_namespace_outside_the_row_universe() {
+		delete_option( Preferences::OPTION_KEY );
+
+		$html = $this->render_policy_html();
+
+		$this->assertStringNotContainsString( 'value="zzfakepkg"', $html, 'a namespace outside the row universe must not render' );
+	}
+
+	/**
+	 * The namespace score table offers no free-form "Add row".
+	 *
+	 * You score the families on your site, not a hypothetical list, so the
+	 * namespace table must not render an Add-row control (the replacement table
+	 * keeps its own).
+	 */
+	public function test_render_page_namespace_table_has_no_add_row() {
+		$html = $this->render_policy_html();
+
+		$this->assertStringNotContainsString( 'data-target-table="namespace"', $html, 'the namespace score table must not offer a free-form Add row' );
+	}
+
+	/**
+	 * A stored replacement mapping renders in the replacement table.
+	 *
+	 * The authoritative map is shown verbatim.
+	 */
+	public function test_render_page_shows_stored_replacement_mapping() {
 		update_option( Preferences::OPTION_KEY, array( 'replacement_map' => array( 'foo/bar' => 'core/paragraph' ) ) );
 
 		$html = $this->render_policy_html();
 
-		$this->assertStringContainsString( 'value="foo/bar"', $html, 'the stored custom replacement row must render' );
-		$this->assertStringContainsString( 'value="stackable/heading"', $html, 'a shipped replacement default must still render' );
-		$this->assertStringContainsString( 'value="ugb/columns"', $html, 'a second shipped replacement default must still render' );
+		$this->assertStringContainsString( 'value="foo/bar"', $html, 'a stored replacement mapping must render' );
+		$this->assertStringContainsString( 'value="core/paragraph"', $html, 'the replacement target must render' );
 	}
 
-	// ── Contract 2: sanitize path layers posted rows over shipped defaults ──
+	// -- Post-upgrade notice (migration flag) --
 
 	/**
-	 * A partial namespace submission layers over the shipped defaults, never
-	 * replaces them.
+	 * The post-upgrade notice renders when the migration flag is set.
 	 *
-	 * Only a subset of rows can reach the sanitizer (the UI may render fewer, or a
-	 * row may not post). The sanitizer merges posted rows onto
-	 * Preferences::get_defaults() so the stored value is always defaults +
-	 * overrides, never a lossy subset.
+	 * A site that had saved preferences before the site-aware model gets a
+	 * one-time notice telling them their settings were preserved and offering a
+	 * review or reset.
 	 */
-	public function test_sanitize_preferences_layers_namespace_scores_over_shipped_defaults() {
-		$page = new Settings_Page( new Block_Inventory() );
+	public function test_render_page_shows_upgrade_notice_when_migration_flag_set() {
+		update_option( 'gk_block_api_preferences_notice', '1' );
 
-		$out = $page->sanitize_preferences(
-			array(
-				'namespace_rows' => array(
-					array(
-						'name'  => 'mything',
-						'score' => 90,
-					),
-				),
-			)
-		);
+		$html = $this->render_policy_html();
 
-		$this->assertSame( 90, $out['namespace_scores']['mything'], 'the posted override must be stored' );
-		$this->assertArrayHasKey( 'core', $out['namespace_scores'], 'a shipped default must survive a partial submission' );
-		$this->assertSame( 90, $out['namespace_scores']['core'], 'the shipped default value must be preserved' );
-		$this->assertArrayHasKey( 'jetpack', $out['namespace_scores'], 'every shipped default must survive' );
-		$this->assertSame( 0, $out['namespace_scores']['jetpack'], 'the shipped default value must be preserved' );
+		$this->assertStringContainsString( 'gk-block-mcp-prefs-upgrade-notice', $html, 'the post-upgrade notice must render while the migration flag is set' );
 	}
 
 	/**
-	 * A posted score for a shipped namespace must override the default value
-	 * rather than being lost under it.
+	 * The post-upgrade notice does not render once the flag is absent.
 	 *
-	 * Layering must keep posted values winning over the defaults — demoting
-	 * core from 90 to 40 has to persist as 40.
+	 * After dismissal or reset (the flag is gone), the notice must not reappear.
 	 */
-	public function test_sanitize_preferences_posted_namespace_score_overrides_default() {
-		$page = new Settings_Page( new Block_Inventory() );
+	public function test_render_page_omits_upgrade_notice_when_flag_absent() {
+		delete_option( 'gk_block_api_preferences_notice' );
 
-		$out = $page->sanitize_preferences(
-			array(
-				'namespace_rows' => array(
-					array(
-						'name'  => 'core',
-						'score' => 40,
-					),
-				),
-			)
-		);
+		$html = $this->render_policy_html();
 
-		$this->assertSame( 40, $out['namespace_scores']['core'], 'the posted score must override the shipped default' );
+		$this->assertStringNotContainsString( 'gk-block-mcp-prefs-upgrade-notice', $html, 'the post-upgrade notice must not render without the migration flag' );
 	}
 
-	/**
-	 * A partial replacement submission must layer over the shipped defaults.
-	 *
-	 * Parallel to the namespace contract, for the replacement map.
-	 */
-	public function test_sanitize_preferences_layers_replacement_map_over_shipped_defaults() {
-		$page = new Settings_Page( new Block_Inventory() );
-
-		$out = $page->sanitize_preferences(
-			array(
-				'replacement_rows' => array(
-					array(
-						'from' => 'foo/bar',
-						'to'   => 'core/paragraph',
-					),
-				),
-			)
-		);
-
-		$this->assertSame( 'core/paragraph', $out['replacement_map']['foo/bar'], 'the posted replacement must be stored' );
-		$this->assertArrayHasKey( 'stackable/heading', $out['replacement_map'], 'a shipped replacement default must survive' );
-		$this->assertSame( 'core/heading', $out['replacement_map']['stackable/heading'], 'the shipped replacement target must be preserved' );
-	}
-
-	// ── Contract 3: silent row-drop must surface feedback ──
+	// -- Contract 4: silent row-drop must surface feedback --
 
 	/**
-	 * A namespace row with a score but a blank name must raise a settings error,
-	 * not vanish silently.
+	 * A namespace row with a score but a blank name raises a settings error.
 	 *
-	 * The auto-grow table makes it easy to enter a score and never type a name
-	 * (or to have a JS race swallow the row). The sanitizer drops nameless rows;
-	 * doing so without feedback means the admin's edit disappears with no notice.
-	 * The fix registers a settings error so the save screen warns them.
+	 * A score typed with no family name cannot key the map; dropping it without
+	 * notice loses the admin's edit, so the sanitizer must register a warning.
 	 */
 	public function test_sanitize_preferences_flags_namespace_score_with_blank_name() {
 		$page = new Settings_Page( new Block_Inventory() );
 
 		$page->sanitize_preferences(
-			array(
-				'namespace_rows' => array(
-					array(
-						'name'  => '',
-						'score' => 90,
-					),
-				),
-			)
+			array( 'namespace_rows' => array( array( 'name' => '', 'score' => 90 ) ) )
 		);
 
 		$errors = get_settings_errors( Preferences::OPTION_KEY );
@@ -218,41 +402,31 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A fully-empty trailing row (no name, no score) is the normal "blank new
-	 * row" and must NOT raise a settings error.
+	 * A fully-empty row (no name, no score) does not raise a settings error.
 	 *
-	 * The auto-grow table always submits one empty trailing row; warning on it
-	 * would fire on every single save. Only a row the user actually started
-	 * filling (a score with no name) is worth a warning.
+	 * Only a row the admin actually started filling is worth a warning; a blank
+	 * row must save silently.
 	 */
 	public function test_sanitize_preferences_does_not_flag_fully_empty_row() {
 		$page = new Settings_Page( new Block_Inventory() );
 
 		$page->sanitize_preferences(
-			array(
-				'namespace_rows' => array(
-					array(
-						'name'  => '',
-						'score' => 0,
-					),
-				),
-			)
+			array( 'namespace_rows' => array( array( 'name' => '', 'score' => 0 ) ) )
 		);
 
 		$errors = get_settings_errors( Preferences::OPTION_KEY );
-		$this->assertEmpty( $errors, 'an untouched blank trailing row must not warn' );
+		$this->assertEmpty( $errors, 'an untouched blank row must not warn' );
 	}
 
-	// ── Contract 4: sanitizer is idempotent (survives core's double-sanitize) ──
+	// -- Contract 5: sanitizer is idempotent (survives core's double-sanitize) --
 
 	/**
 	 * Sanitizing the sanitizer's own output is a no-op, not a wipe.
 	 *
-	 * Core double-sanitizes an option on its first write: update_option()
-	 * sanitizes, then delegates to add_option() (the option doesn't exist yet),
-	 * which sanitizes again — so the second pass receives the canonical
-	 * {namespace_scores, replacement_map} shape, not the form's indexed rows. The
-	 * sanitizer accepts that canonical shape so a re-run preserves the value.
+	 * Core double-sanitizes an option on its first write (update_option() then
+	 * add_option()), so the second pass receives the canonical
+	 * {namespace_scores, replacement_map} shape. Re-running must preserve the
+	 * overrides exactly.
 	 */
 	public function test_sanitize_preferences_is_idempotent_on_its_own_output() {
 		$page = new Settings_Page( new Block_Inventory() );
@@ -268,18 +442,17 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		$this->assertSame( $once, $twice, 'a second sanitize pass must not change the value' );
 		$this->assertSame( 75, $twice['namespace_scores']['spectra'], 'the namespace override must survive re-sanitization' );
 		$this->assertSame( 'core/paragraph', $twice['replacement_map']['foo/bar'], 'the replacement override must survive re-sanitization' );
-		$this->assertArrayHasKey( 'core', $twice['namespace_scores'], 'shipped defaults must survive re-sanitization' );
 	}
 
 	/**
-	 * The first-ever save of the preferences option persists, not vanishes.
+	 * The first-ever save of the preferences option persists overrides-only.
 	 *
-	 * Exercises the real mechanism: with the setting registered, updating a
-	 * brand-new option routes update_option() through add_option(), which runs the
-	 * sanitize callback a second time on its own output. The sanitizer's
-	 * idempotency keeps that first save intact.
+	 * Exercises the real mechanism: with the setting registered, the first
+	 * update_option() routes through add_option() and runs the sanitize callback
+	 * twice on its own output. The override survives, and no shipped default is
+	 * layered into storage.
 	 */
-	public function test_first_save_of_new_option_persists_through_core_double_sanitize() {
+	public function test_first_save_of_new_option_persists_overrides_only() {
 		$page = new Settings_Page( new Block_Inventory() );
 		$page->register_settings();
 		delete_option( Preferences::OPTION_KEY );
@@ -292,6 +465,6 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		$stored = get_option( Preferences::OPTION_KEY );
 		$this->assertIsArray( $stored['namespace_scores'] ?? null, 'the first save must persist namespace scores' );
 		$this->assertSame( 75, $stored['namespace_scores']['spectra'], 'the saved override must persist' );
-		$this->assertArrayHasKey( 'core', $stored['namespace_scores'], 'shipped defaults must persist on first save' );
+		$this->assertArrayNotHasKey( 'core', $stored['namespace_scores'], 'no shipped default may be layered into storage on first save' );
 	}
 }

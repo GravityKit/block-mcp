@@ -44,18 +44,12 @@ class Preferences {
 	 */
 	public static function get_defaults() {
 		return array(
+			// Opinion-free: `core` is the only preferred default (WordPress-native and
+			// portable). Every other namespace resolves to a neutral score via
+			// get_block_score(). The plugin ships no legacy/avoid brandings and no
+			// ecosystem favoritism. A site marks a namespace legacy by scoring it down.
 			'namespace_scores' => array(
-				'filter'             => 100, // Theme blocks — always preferred.
-				'core'               => 90,  // WordPress native.
-				'gravityforms'       => 80,  // GravityKit ecosystem.
-				'gk-gravitycharts'   => 80,
-				'gk-gravitycalendar' => 80,
-				'gravityboard'       => 80,
-				'outermost'          => 60,  // Third-party, acceptable.
-				'kevinbatdorf'       => 50,  // Code block pro.
-				'stackable'          => 10,  // Migrate away.
-				'ugb'                => 0,   // Legacy — never use.
-				'jetpack'            => 0,   // Never use.
+				'core' => 90,
 			),
 			'pattern_scoring'  => array(
 				'recency_bonus'        => array(
@@ -67,28 +61,10 @@ class Preferences {
 				'no_legacy_bonus'      => 20,
 				'has_legacy_penalty'   => -100,
 			),
-			'replacement_map'  => array(
-				'stackable/heading'      => 'core/heading',
-				'stackable/text'         => 'core/paragraph',
-				'stackable/button'       => 'core/button',
-				'stackable/button-group' => 'core/buttons',
-				'stackable/columns'      => 'core/columns',
-				'stackable/column'       => 'core/column',
-				'stackable/image'        => 'core/image',
-				'stackable/spacer'       => 'core/spacer',
-				'stackable/divider'      => 'core/separator',
-				'stackable/testimonial'  => 'filter/testimonial-wall',
-				'stackable/accordion'    => 'filter/accordion',
-				'stackable/icon'         => 'outermost/icon-block',
-				'stackable/icon-label'   => 'outermost/icon-block',
-				'stackable/card'         => 'core/group',
-				'stackable/subtitle'     => 'core/paragraph',
-				'ugb/columns'            => 'core/columns',
-				'ugb/column'             => 'core/column',
-				'ugb/button'             => 'core/button',
-				'ugb/text'               => 'core/paragraph',
-				'ugb/pricing-box'        => 'core/group',
-			),
+			// Ships empty: the replacement map is an admin-curated, authoritative
+			// list, not a shipped opinion about which third-party blocks to migrate
+			// off. See get_preferences(), which takes the stored map verbatim.
+			'replacement_map'  => array(),
 		);
 	}
 
@@ -105,8 +81,11 @@ class Preferences {
 			$defaults          = self::get_defaults();
 			$this->preferences = wp_parse_args( $stored, $defaults );
 
-			// Deep-merge sub-arrays.
-			foreach ( array( 'namespace_scores', 'pattern_scoring', 'replacement_map' ) as $key ) {
+			// Deep-merge the keyed sub-arrays so stored overrides layer over the
+			// shipped defaults. `replacement_map` is deliberately excluded; it is
+			// the admin's authoritative list, taken verbatim, so a removed mapping
+			// stays removed.
+			foreach ( array( 'namespace_scores', 'pattern_scoring' ) as $key ) {
 				if ( isset( $stored[ $key ] ) && is_array( $stored[ $key ] ) ) {
 					$this->preferences[ $key ] = wp_parse_args( $stored[ $key ], $defaults[ $key ] );
 				}
@@ -127,8 +106,9 @@ class Preferences {
 		$current = $this->get_preferences();
 		$merged  = wp_parse_args( $new_preferences, $current );
 
-		// Deep-merge sub-arrays.
-		foreach ( array( 'namespace_scores', 'pattern_scoring', 'replacement_map' ) as $key ) {
+		// Deep-merge namespace scores + pattern scoring over current values.
+		// `replacement_map` is replaced wholesale (authoritative list, no merge).
+		foreach ( array( 'namespace_scores', 'pattern_scoring' ) as $key ) {
 			if ( isset( $new_preferences[ $key ] ) && is_array( $new_preferences[ $key ] ) ) {
 				$merged[ $key ] = wp_parse_args( $new_preferences[ $key ], $current[ $key ] );
 			}
@@ -165,13 +145,13 @@ class Preferences {
 		$namespace = $this->extract_namespace( $block_name );
 		$scores    = $prefs['namespace_scores'];
 
-		// Check for exact namespace match, then gk-* wildcard.
+		// An explicit score (admin override, or the shipped `core` default) wins;
+		// every other namespace resolves to a neutral default, with no ecosystem
+		// favoritism, no legacy branding.
 		if ( isset( $scores[ $namespace ] ) ) {
 			$score = $scores[ $namespace ];
-		} elseif ( 0 === strpos( $namespace, 'gk-' ) ) {
-			$score = 80; // GravityKit ecosystem default.
 		} else {
-			$score = 30; // Unknown namespace default.
+			$score = 50; // Neutral default for any namespace without a score.
 		}
 
 		return array(
