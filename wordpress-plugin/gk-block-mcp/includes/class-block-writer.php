@@ -320,6 +320,24 @@ class Block_Writer {
 	}
 
 	/**
+	 * Whether a compare-and-swap UPDATE's affected-row count signals a lost race.
+	 *
+	 * The swap writes only while post_content still equals the snapshot, so 0
+	 * affected rows looks like a conflict — but an idempotent save (new content
+	 * equal to the snapshot) changes nothing and reports 0 affected on engines
+	 * that count changed rows (MySQL), even though the row matched. So 0 is a
+	 * conflict only when the content genuinely differs.
+	 *
+	 * @param int    $affected Affected-row count from the swap.
+	 * @param string $written  Content the swap wrote.
+	 * @param string $expected Snapshot the swap matched on.
+	 * @return bool
+	 */
+	private static function swap_is_conflict( $affected, $written, $expected ) {
+		return 0 === (int) $affected && (string) $written !== (string) $expected;
+	}
+
+	/**
 	 * Save serialized block content to a post, tracking before/after revision IDs.
 	 *
 	 * @param int         $post_id     Post ID.
@@ -370,7 +388,16 @@ class Block_Writer {
 					$expected
 				)
 			);
-			if ( 0 === (int) $swapped ) {
+			if ( false === $swapped ) {
+				// A DB error is not a conflict — surface it rather than telling the
+				// caller their snapshot is stale.
+				return new \WP_Error(
+					'db_write_failed',
+					__( 'The post could not be saved due to a database error. Try again.', 'gk-block-mcp' ),
+					array( 'status' => 500 )
+				);
+			}
+			if ( self::swap_is_conflict( (int) $swapped, (string) $new_content, (string) $expected ) ) {
 				return new \WP_Error(
 					'edit_conflict',
 					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),

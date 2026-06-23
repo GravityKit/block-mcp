@@ -275,12 +275,18 @@ class Block_Reader {
 								$new_content = (string) get_post_field( 'post_content', $post_id );
 								$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
 							} else {
-								// Persist failed (read-only DB, replica lag, broken column). Refs
-								// exist only in $blocks, not on disk. Caching them would surface
-								// stable-looking refs in the response that the next write-by-ref
-								// would reject as ref_stale. Drop the cache for this post so the
-								// next read re-parses disk truth and tries again.
+								// Persist failed: a concurrent edit moved the row, or the DB is
+								// read-only / replica-lagged. The refs we assigned exist only in
+								// $blocks, not on disk, so the response must surface disk truth
+								// instead — otherwise a follow-up write-by-ref targets a ref that
+								// was never persisted. Re-read the authoritative content.
 								$this->invalidate( $post_id );
+								$disk_content = (string) get_post_field( 'post_content', $post_id );
+								$disk_blocks  = parse_blocks( $disk_content );
+								if ( is_array( $disk_blocks ) && ! empty( $disk_blocks ) ) {
+									$blocks = $disk_blocks;
+									$this->parse_cache[ $post_id . ':' . md5( $disk_content ) ] = $blocks;
+								}
 							}
 						}
 					} finally {
