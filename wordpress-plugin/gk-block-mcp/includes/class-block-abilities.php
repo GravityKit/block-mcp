@@ -222,7 +222,10 @@ class Block_Abilities {
 				'permission_callback' => array( $this, 'can_edit_post_input' ),
 				'execute_callback'    => array( $this, 'execute_update_block' ),
 				'meta'                => array(
-					'annotations'  => array( 'readonly' => false ),
+					'annotations'  => array(
+						'readonly'    => false,
+						'destructive' => true,
+					),
 					'show_in_rest' => true,
 				),
 			),
@@ -252,7 +255,10 @@ class Block_Abilities {
 				'permission_callback' => array( $this, 'can_edit_post_input' ),
 				'execute_callback'    => array( $this, 'execute_insert_blocks' ),
 				'meta'                => array(
-					'annotations'  => array( 'readonly' => false ),
+					'annotations'  => array(
+						'readonly'    => false,
+						'destructive' => false,
+					),
 					'show_in_rest' => true,
 				),
 			),

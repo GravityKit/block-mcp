@@ -83,6 +83,26 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * Every write ability declares an explicit `destructive` annotation matching
+	 * its behavior, rather than leaving the core null default (which MCP treats
+	 * as destructive). Per the MCP destructiveHint spec, false means "additive
+	 * only": insert-blocks and create-post add content → non-destructive;
+	 * update-block overwrites a block's content and delete-block removes blocks →
+	 * destructive.
+	 */
+	public function test_write_abilities_declare_destructive_annotation() {
+		$update = wp_get_ability( 'gk-block-mcp/update-block' )->get_meta()['annotations'];
+		$insert = wp_get_ability( 'gk-block-mcp/insert-blocks' )->get_meta()['annotations'];
+		$create = wp_get_ability( 'gk-block-mcp/create-post' )->get_meta()['annotations'];
+		$delete = wp_get_ability( 'gk-block-mcp/delete-block' )->get_meta()['annotations'];
+
+		$this->assertTrue( $update['destructive'], 'update-block overwrites existing block content' );
+		$this->assertFalse( $insert['destructive'], 'insert-blocks only adds blocks' );
+		$this->assertFalse( $create['destructive'], 'create-post only adds a post' );
+		$this->assertTrue( $delete['destructive'], 'delete-block removes blocks' );
+	}
+
+	/**
 	 * The permission callback gates writes on `edit_post` for the target post:
 	 * a user without the capability gets `ability_invalid_permissions`, never the
 	 * effect.
