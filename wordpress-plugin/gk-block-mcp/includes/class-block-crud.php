@@ -294,13 +294,16 @@ class Block_CRUD {
 	 * Delegates to Block_Writer, then invalidates the reader parse-cache so the
 	 * next read in the same request sees the freshly-saved content.
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree in WP-internal shape.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree in WP-internal shape.
+	 * @param string|null $expected Stored post_content the tree was built from,
+	 *                              for the optimistic-concurrency guard. Null
+	 *                              disables it.
 	 *
 	 * @return array|\WP_Error
 	 */
-	public function save_blocks( $post_id, array $blocks ) {
-		$result = $this->writer->save_blocks( $post_id, $blocks );
+	public function save_blocks( $post_id, array $blocks, $expected = null ) {
+		$result = $this->writer->save_blocks( $post_id, $blocks, $expected );
 		if ( ! is_wp_error( $result ) ) {
 			$this->reader->invalidate( (int) $post_id );
 		}
@@ -977,22 +980,40 @@ class Block_CRUD {
 	 * wp_update_post to avoid creating revisions for what is effectively
 	 * metadata bookkeeping (gk_ref is editor-only — see Block_Safety).
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree with refs assigned.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree with refs assigned.
+	 * @param string|null $expected Stored post_content the ref walk parsed.
+	 *                              When set, the write compare-and-swaps on it
+	 *                              so a concurrent content edit is not clobbered
+	 *                              by this wp_update_post-bypassing write. Null
+	 *                              keeps the unconditional legacy behavior.
 	 *
-	 * @return bool True on success.
+	 * @return bool True on success; false on a CAS miss or DB error.
 	 */
-	public function persist_ref_assignments( $post_id, $blocks ) {
+	public function persist_ref_assignments( $post_id, $blocks, $expected = null ) {
 		global $wpdb;
-		$content = serialize_blocks( $blocks );
-		$result  = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$content      = serialize_blocks( $blocks );
+		$where        = array( 'ID' => (int) $post_id );
+		$where_format = array( '%d' );
+		if ( null !== $expected ) {
+			$where['post_content'] = $expected;
+			$where_format[]        = '%s';
+		}
+		$result = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->posts,
 			array( 'post_content' => $content ),
-			array( 'ID' => (int) $post_id ),
+			$where,
 			array( '%s' ),
-			array( '%d' )
+			$where_format
 		);
 		clean_post_cache( (int) $post_id );
+
+		// A 0-row result under a snapshot means a concurrent writer moved the
+		// row: skip the refs-persisted side effects and report no-op so the
+		// next read re-resolves against current content.
+		if ( null !== $expected && 0 === $result ) {
+			return false;
+		}
 
 		/**
 		 * React when block reference IDs are written straight to a post.

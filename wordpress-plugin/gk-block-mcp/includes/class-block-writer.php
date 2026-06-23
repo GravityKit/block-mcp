@@ -283,27 +283,56 @@ class Block_Writer {
 	 * the depth guard, so always prefer this entry point for any block-
 	 * shape input.
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree in WP-internal shape.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree in WP-internal shape.
+	 * @param string|null $expected Stored post_content the tree was built from,
+	 *                              for the optimistic-concurrency guard in
+	 *                              save_post_content(). Null disables it.
 	 *
 	 * @return array|\WP_Error
 	 */
-	public function save_blocks( $post_id, array $blocks ) {
+	public function save_blocks( $post_id, array $blocks, $expected = null ) {
 		$depth_check = Block_CRUD::validate_tree_depth( $blocks );
 		if ( is_wp_error( $depth_check ) ) {
 			return $depth_check;
 		}
-		return $this->save_post_content( $post_id, serialize_blocks( $blocks ) );
+		return $this->save_post_content( $post_id, serialize_blocks( $blocks ), $expected );
 	}
 
 	/**
 	 * Save serialized block content to a post, tracking before/after revision IDs.
 	 *
-	 * @param int    $post_id     Post ID.
-	 * @param string $new_content Serialized block markup to save.
+	 * @param int         $post_id     Post ID.
+	 * @param string      $new_content Serialized block markup to save.
+	 * @param string|null $expected    The exact stored post_content the caller's
+	 *                                 mutation was based on. When provided, the
+	 *                                 save fails closed (409) if the database no
+	 *                                 longer holds that snapshot. Null disables
+	 *                                 the check (back-compat for direct callers).
 	 * @return array|\WP_Error
 	 */
-	public function save_post_content( $post_id, $new_content ) {
+	public function save_post_content( $post_id, $new_content, $expected = null ) {
+		// Optimistic-concurrency guard: if the caller's snapshot no longer
+		// matches the stored content, a concurrent writer (or a replica-lagged
+		// read) moved the row, and the unconditional wp_update_post below would
+		// silently clobber it — so fail closed with 409 instead. The no-op touch
+		// is a write, which forces HyperDB/LudicrousDB to route the following
+		// read to the primary rather than a lagging replica.
+		if ( null !== $expected ) {
+			global $wpdb;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( (string) $current !== (string) $expected ) {
+				return new \WP_Error(
+					'edit_conflict',
+					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),
+					array( 'status' => 409 )
+				);
+			}
+		}
+
 		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
 		// correctly escapes newlines as \n in block comment JSON. Some
 		// content_save_pre filters (notably WPCom_Markdown::preserve_code_blocks)
@@ -834,7 +863,7 @@ class Block_Writer {
 		$this->apply_block_update_in_place( $block, (array) $attributes, $inner_html );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $blocks );
+		$result = $this->save_blocks( $post_id, $blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1115,7 +1144,7 @@ class Block_Writer {
 		}
 
 		// Phase 3: serialize and save. ONE wp_update_post call → ONE revision.
-		$save_result = $this->save_blocks( $post_id, $blocks );
+		$save_result = $this->save_blocks( $post_id, $blocks, $post->post_content );
 		if ( is_wp_error( $save_result ) ) {
 			return $save_result;
 		}
@@ -1221,7 +1250,7 @@ class Block_Writer {
 		array_splice( $all_existing_blocks, $raw_insert, 0, $new_blocks );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $all_existing_blocks );
+		$result = $this->save_blocks( $post_id, $all_existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1365,7 +1394,7 @@ class Block_Writer {
 		}
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $all_blocks );
+		$result = $this->save_blocks( $post_id, $all_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1516,7 +1545,7 @@ class Block_Writer {
 		// Atomic splice — one operation, one save, one revision.
 		array_splice( $all_existing_blocks, $raw_splice_start, $raw_splice_count, $new_blocks );
 
-		$result = $this->save_blocks( $post_id, $all_existing_blocks );
+		$result = $this->save_blocks( $post_id, $all_existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1612,7 +1641,7 @@ class Block_Writer {
 		$this->crud->assign_missing_refs_recursive( $new_blocks );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $new_blocks );
+		$result = $this->save_blocks( $post_id, $new_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1778,7 +1807,7 @@ class Block_Writer {
 
 			array_splice( $existing_blocks, $insert_at, 0, array( $ref_block ) );
 
-			$result = $this->save_blocks( $post_id, $existing_blocks );
+			$result = $this->save_blocks( $post_id, $existing_blocks, $post->post_content );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;
@@ -1846,7 +1875,7 @@ class Block_Writer {
 
 		array_splice( $existing_blocks, $insert_at, 0, $pattern_blocks );
 
-		$result = $this->save_blocks( $post_id, $existing_blocks );
+		$result = $this->save_blocks( $post_id, $existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1913,7 +1942,7 @@ class Block_Writer {
 			return new \WP_Error( 'revision_mismatch', __( 'Revision does not belong to this post.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
 
-		$result = $this->save_post_content( $post_id, $revision->post_content );
+		$result = $this->save_post_content( $post_id, $revision->post_content, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
