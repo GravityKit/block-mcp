@@ -120,6 +120,12 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🐛 Fixed
+
+* Fixes a block edit sometimes undoing a change made moments earlier — for example, a block you just deleted reappearing after your next edit. Each edit now starts from the page's current saved content, so rapid or concurrent edits no longer overwrite one another.
+
 = 2.0.3 on June 17, 2026 =
 
 This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
