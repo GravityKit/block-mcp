@@ -939,8 +939,9 @@ class Block_Mutator {
 			return $response;
 		}
 
-		// Serialize and save (depth-checked).
-		$result = $this->crud->save_blocks( $post_id, $blocks );
+		// Serialize and save (depth-checked) with the pre-mutation snapshot for
+		// the optimistic-concurrency guard.
+		$result = $this->crud->save_blocks( $post_id, $blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;

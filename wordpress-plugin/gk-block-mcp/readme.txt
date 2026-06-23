@@ -130,6 +130,11 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 * Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
 
+#### 🐛 Fixed
+
+* Fixes a block edit sometimes undoing a change made moments earlier — for example, a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
+* Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change — your revision history and editor integrations are left intact.
+
 = 2.0.3 on June 17, 2026 =
 
 This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
