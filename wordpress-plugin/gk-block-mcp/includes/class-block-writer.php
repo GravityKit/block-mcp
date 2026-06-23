@@ -312,19 +312,45 @@ class Block_Writer {
 	 * @return array|\WP_Error
 	 */
 	public function save_post_content( $post_id, $new_content, $expected = null ) {
-		// Optimistic-concurrency guard: if the caller's snapshot no longer
-		// matches the stored content, a concurrent writer (or a replica-lagged
-		// read) moved the row, and the unconditional wp_update_post below would
-		// silently clobber it — so fail closed with 409 instead. The no-op touch
-		// is a write, which forces HyperDB/LudicrousDB to route the following
-		// read to the primary rather than a lagging replica.
+		// Optimistic-concurrency guard: when the caller passes the snapshot its
+		// mutation was based on, persist via a portable compare-and-swap so a
+		// concurrent edit is never silently clobbered.
 		if ( null !== $expected ) {
 			global $wpdb;
+			// A write routes the verify + swap below to the primary, off any
+			// replica still lagging behind the snapshot.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+
+			// Byte-exact: the swap's collation WHERE would treat a case/accent-only
+			// concurrent change as identical and overwrite it.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
 			if ( (string) $current !== (string) $expected ) {
+				return new \WP_Error(
+					'edit_conflict',
+					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),
+					array( 'status' => 409 )
+				);
+			}
+
+			// Prime the cache with the pre-write post; the raw swap below does not
+			// invalidate it, so wp_update_post's hooks keep the correct $before.
+			get_post( $post_id );
+
+			// Write only while the row still holds the snapshot: a simultaneous
+			// writer that already moved it matches 0 rows. wp_update_post then
+			// re-saves the same content for the revision + save_post hooks.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$swapped = $wpdb->query(
+				$wpdb->prepare(
+					"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+					$new_content,
+					$post_id,
+					$expected
+				)
+			);
+			if ( 0 === (int) $swapped ) {
 				return new \WP_Error(
 					'edit_conflict',
 					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),

@@ -34,6 +34,9 @@ class EditConflictCasTest extends RestControllerTestCase {
 		parent::set_up();
 		$this->editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		wp_set_current_user( $this->editor_id );
+		// Register routes on the global REST server so the controller-level tests
+		// below exercise the full dispatch + permission chain.
+		do_action( 'rest_api_init' );
 	}
 
 	/**
@@ -179,7 +182,7 @@ class EditConflictCasTest extends RestControllerTestCase {
 	 */
 	public function test_non_conflicting_write_preserves_save_post_and_revisions() {
 		$post_id = $this->make_block_post(
-			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>ORIGINAL</p>' ), 'blk_p' ) )
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>ORIGINAL</p>' ), 'blk_abc' ) )
 		);
 		$revisions_before = count( wp_get_post_revisions( $post_id ) );
 		$fired            = 0;
@@ -190,14 +193,14 @@ class EditConflictCasTest extends RestControllerTestCase {
 		};
 		add_action( 'save_post', $counter );
 
-		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_p' );
+		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_abc' );
 		$request->set_param( 'id', $post_id );
-		$request->set_param( 'ref', 'blk_p' );
+		$request->set_param( 'ref', 'blk_abc' );
 		$request->set_param( 'innerHTML', '<p>UPDATED</p>' );
-		$response = $this->controller->update_block_by_ref( $request );
+		$response = rest_get_server()->dispatch( $request );
 		remove_action( 'save_post', $counter );
 
-		$this->assertNotWPError( $response );
+		$this->assertLessThan( 400, $response->get_status(), 'The non-conflicting write must succeed.' );
 		$this->assertGreaterThanOrEqual( 1, $fired, 'save_post must fire — wp_update_post is still the writer.' );
 		$this->assertGreaterThan( $revisions_before, count( wp_get_post_revisions( $post_id ) ), 'A revision must be created.' );
 		$this->assertStringContainsString( 'UPDATED', $this->persisted_content( $post_id ), 'The edit must apply.' );
@@ -212,7 +215,7 @@ class EditConflictCasTest extends RestControllerTestCase {
 	 */
 	public function test_write_path_emits_no_mysql_only_sql() {
 		$post_id = $this->make_block_post(
-			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>X</p>' ), 'blk_q' ) )
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>X</p>' ), 'blk_def' ) )
 		);
 
 		$queries = array();
@@ -222,11 +225,11 @@ class EditConflictCasTest extends RestControllerTestCase {
 		};
 		add_filter( 'query', $capture );
 
-		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_q' );
+		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_def' );
 		$request->set_param( 'id', $post_id );
-		$request->set_param( 'ref', 'blk_q' );
+		$request->set_param( 'ref', 'blk_def' );
 		$request->set_param( 'innerHTML', '<p>Y</p>' );
-		$this->controller->update_block_by_ref( $request );
+		rest_get_server()->dispatch( $request );
 		remove_filter( 'query', $capture );
 
 		$joined = strtoupper( implode( "\n", $queries ) );
@@ -262,5 +265,55 @@ class EditConflictCasTest extends RestControllerTestCase {
 
 		$this->assertFalse( $result, 'A case-only concurrent change must be detected as a conflict.' );
 		$this->assertStringContainsString( 'Café', $this->persisted_content( $post_id ), 'The concurrent case change must survive.' );
+	}
+
+	/**
+	 * A concurrent commit that lands AFTER the snapshot verify but BEFORE the
+	 * persisting write must be caught, not clobbered. A bare verify (SELECT +
+	 * PHP compare, then an unconditional wp_update_post) leaves this window open:
+	 * it saw matching content, then the row moved before the write. The portable
+	 * compare-and-swap (UPDATE ... WHERE ID = %d AND post_content = %s) re-checks
+	 * the snapshot atomically at write time, so the simultaneous writer matches 0
+	 * rows and gets edit_conflict (409). Teeth: revert save_post_content to an
+	 * unconditional wp_update_post and the mid-flight winner is clobbered.
+	 */
+	public function test_save_fails_closed_on_commit_between_verify_and_persist() {
+		$post_id  = $this->make_block_post(
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>ORIG</p>' ), 'blk_ace' ) )
+		);
+		$snapshot = $this->persisted_content( $post_id );
+
+		// Simulate a second writer that wins the row mid-flight: the instant the
+		// persisting content UPDATE is about to run — and only then, not the
+		// post_modified no-op touch — commit a different tree behind it.
+		$injected = false;
+		$inject   = function ( $query ) use ( $post_id, &$injected ) {
+			$upper            = strtoupper( ltrim( $query ) );
+			$is_content_write = (
+				0 === strpos( $upper, 'UPDATE' )
+				&& false !== strpos( $upper, 'POST_CONTENT' )
+				&& false === strpos( $upper, 'POST_MODIFIED = POST_MODIFIED' )
+			);
+			if ( $is_content_write && ! $injected ) {
+				$injected = true;
+				$this->commit_behind_cache(
+					$post_id,
+					array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>WINNER</p>' ), 'blk_ace' ) )
+				);
+			}
+			return $query;
+		};
+		add_filter( 'query', $inject );
+
+		$new_blocks = array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>MINE</p>' ), 'blk_ace' ) );
+		$result     = $this->crud->save_blocks( $post_id, $new_blocks, $snapshot );
+
+		remove_filter( 'query', $inject );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'edit_conflict', $result->get_error_code() );
+		$content = $this->persisted_content( $post_id );
+		$this->assertStringContainsString( 'WINNER', $content, 'The mid-flight winner must survive.' );
+		$this->assertStringNotContainsString( 'MINE', $content, 'The stale-based write must not clobber the winner.' );
 	}
 }
