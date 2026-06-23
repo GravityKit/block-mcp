@@ -183,20 +183,19 @@ class EditConflictCasTest extends RestControllerTestCase {
 		);
 		$revisions_before = count( wp_get_post_revisions( $post_id ) );
 		$fired            = 0;
-		add_action(
-			'save_post',
-			function ( $id ) use ( $post_id, &$fired ) {
-				if ( (int) $id === (int) $post_id ) {
-					++$fired;
-				}
+		$counter          = function ( $id ) use ( $post_id, &$fired ) {
+			if ( (int) $id === (int) $post_id ) {
+				++$fired;
 			}
-		);
+		};
+		add_action( 'save_post', $counter );
 
 		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_p' );
 		$request->set_param( 'id', $post_id );
 		$request->set_param( 'ref', 'blk_p' );
 		$request->set_param( 'innerHTML', '<p>UPDATED</p>' );
 		$response = $this->controller->update_block_by_ref( $request );
+		remove_action( 'save_post', $counter );
 
 		$this->assertNotWPError( $response );
 		$this->assertGreaterThanOrEqual( 1, $fired, 'save_post must fire — wp_update_post is still the writer.' );
@@ -217,24 +216,51 @@ class EditConflictCasTest extends RestControllerTestCase {
 		);
 
 		$queries = array();
-		add_filter(
-			'query',
-			function ( $query ) use ( &$queries ) {
-				$queries[] = $query;
-				return $query;
-			}
-		);
+		$capture = function ( $query ) use ( &$queries ) {
+			$queries[] = $query;
+			return $query;
+		};
+		add_filter( 'query', $capture );
 
 		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/blk_q' );
 		$request->set_param( 'id', $post_id );
 		$request->set_param( 'ref', 'blk_q' );
 		$request->set_param( 'innerHTML', '<p>Y</p>' );
 		$this->controller->update_block_by_ref( $request );
+		remove_filter( 'query', $capture );
 
 		$joined = strtoupper( implode( "\n", $queries ) );
 		$this->assertStringNotContainsString( 'FOR UPDATE', $joined, 'No SELECT ... FOR UPDATE.' );
 		$this->assertStringNotContainsString( 'GET_LOCK', $joined, 'No advisory GET_LOCK.' );
 		$this->assertDoesNotMatchRegularExpression( '/\bBINARY\s+[`\'"a-z_]/i', implode( "\n", $queries ), 'No bare BINARY comparison operator.' );
 		$this->assertNotEmpty( $queries, 'The write path issued queries (sanity).' );
+	}
+
+	/**
+	 * A concurrent edit that differs from the snapshot only by letter case must
+	 * be detected as a conflict, not treated as identical by the database's
+	 * case-insensitive collation. "café" and "Café" compare equal under the
+	 * default collation, so a collation-only WHERE would persist the stale refs
+	 * over the live change; the byte-exact compare rejects it.
+	 */
+	public function test_persist_ref_assignments_detects_case_only_concurrent_change() {
+		$post_id = $this->make_block_post(
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>café</p>' ), 'blk_p' ) )
+		);
+
+		$snapshot = $this->persisted_content( $post_id );
+
+		// A concurrent writer changed only the letter case (café -> Café).
+		$this->commit_behind_cache(
+			$post_id,
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>Café</p>' ), 'blk_p' ) )
+		);
+
+		$ref_tree = array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>café</p>' ), 'blk_p' ) );
+
+		$result = $this->crud->persist_ref_assignments( $post_id, $ref_tree, $snapshot );
+
+		$this->assertFalse( $result, 'A case-only concurrent change must be detected as a conflict.' );
+		$this->assertStringContainsString( 'Café', $this->persisted_content( $post_id ), 'The concurrent case change must survive.' );
 	}
 }

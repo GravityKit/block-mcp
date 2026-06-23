@@ -2434,13 +2434,17 @@ class REST_Controller {
 	 */
 	private function with_post_edit_context( \WP_REST_Request $request, callable $operation, $status = 200 ) {
 		try {
-			$post_id    = (int) $request->get_param( 'id' );
+			$post_id = (int) $request->get_param( 'id' );
+
+			// Freshen before the permission check so authorization is evaluated
+			// against the same current post (author/status) the mutation will
+			// write to, not a stale cached copy.
+			$this->freshen_post_cache( $post_id );
+
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
 			}
-
-			$this->freshen_post_cache( $post_id );
 
 			$if_match = $this->check_if_match_for_post( $post_id, $request );
 			if ( is_wp_error( $if_match ) ) {

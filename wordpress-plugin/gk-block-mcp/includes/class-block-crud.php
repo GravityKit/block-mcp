@@ -996,6 +996,19 @@ class Block_CRUD {
 		$where        = array( 'ID' => (int) $post_id );
 		$where_format = array( '%d' );
 		if ( null !== $expected ) {
+			// Byte-exact compare-and-swap. The case-insensitive WHERE below would
+			// treat a case/accent-only concurrent edit as unchanged and clobber
+			// it, so verify byte for byte first; the no-op touch pins the read to
+			// the primary. The WHERE snapshot stays as an atomic backstop for the
+			// verify-to-update window.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( (string) $current !== (string) $expected ) {
+				clean_post_cache( (int) $post_id );
+				return false;
+			}
 			$where['post_content'] = $expected;
 			$where_format[]        = '%s';
 		}
