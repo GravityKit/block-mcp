@@ -28,6 +28,9 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 		parent::set_up();
 		$this->editor_id = self::factory()->user->create( array( 'role' => 'editor' ) );
 		wp_set_current_user( $this->editor_id );
+		// Register routes on the global REST server so the suite exercises the
+		// full dispatch + permission chain, not a bare controller method call.
+		do_action( 'rest_api_init' );
 	}
 
 	/**
@@ -104,14 +107,14 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 	 * @param string $ref     Block ref.
 	 * @param string $html    Replacement innerHTML.
 	 *
-	 * @return \WP_REST_Response|\WP_Error
+	 * @return \WP_REST_Response
 	 */
 	private function update_by_ref( int $post_id, string $ref, string $html ) {
 		$request = new \WP_REST_Request( 'PATCH', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/' . $ref );
 		$request->set_param( 'id', $post_id );
 		$request->set_param( 'ref', $ref );
 		$request->set_param( 'innerHTML', $html );
-		return $this->controller->update_block_by_ref( $request );
+		return rest_get_server()->dispatch( $request );
 	}
 
 	/**
@@ -120,14 +123,14 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 	 * @param int    $post_id Post ID.
 	 * @param string $ref     Block ref.
 	 *
-	 * @return \WP_REST_Response|\WP_Error
+	 * @return \WP_REST_Response
 	 */
 	private function delete_by_ref( int $post_id, string $ref ) {
 		$request = new \WP_REST_Request( 'DELETE', '/gk-block-api/v1/posts/' . $post_id . '/blocks/by-ref/' . $ref );
 		$request->set_param( 'id', $post_id );
 		$request->set_param( 'ref', $ref );
 		$request->set_param( 'count', 1 );
-		return $this->controller->delete_block_by_ref( $request );
+		return rest_get_server()->dispatch( $request );
 	}
 
 	/**
@@ -138,7 +141,7 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 	public function test_update_by_ref_does_not_resurrect_block_deleted_behind_stale_cache() {
 		$post_id = $this->make_block_post(
 			array(
-				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_keep' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_face' ),
 				$this->block( 'core/paragraph', array(), '<p>GHOST</p>' ),
 			)
 		);
@@ -148,12 +151,12 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 		get_post( $post_id );
 		$this->commit_behind_cache(
 			$post_id,
-			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_keep' ) )
+			array( $this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_face' ) )
 		);
 
-		$response = $this->update_by_ref( $post_id, 'blk_keep', '<p>KEEPER</p>' );
+		$response = $this->update_by_ref( $post_id, 'blk_face', '<p>KEEPER</p>' );
 
-		$this->assertNotWPError( $response );
+		$this->assertLessThan( 400, $response->get_status(), 'The write must succeed (HTTP < 400).' );
 		$content = $this->persisted_content( $post_id );
 		$this->assertStringContainsString( 'KEEPER', $content, 'The targeted update must apply.' );
 		$this->assertStringNotContainsString( 'GHOST', $content, 'A stale cache must not resurrect a concurrently-deleted block.' );
@@ -170,9 +173,9 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 	public function test_delete_by_ref_does_not_resurrect_block_deleted_behind_stale_cache() {
 		$post_id = $this->make_block_post(
 			array(
-				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_keep' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_face' ),
 				$this->block( 'core/paragraph', array(), '<p>GHOST</p>' ),
-				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>DROP</p>' ), 'blk_drop' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>DROP</p>' ), 'blk_dad' ),
 			)
 		);
 
@@ -180,14 +183,14 @@ class StaleCacheLostUpdateTest extends RestControllerTestCase {
 		$this->commit_behind_cache(
 			$post_id,
 			array(
-				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_keep' ),
-				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>DROP</p>' ), 'blk_drop' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ), 'blk_face' ),
+				$this->with_ref( $this->block( 'core/paragraph', array(), '<p>DROP</p>' ), 'blk_dad' ),
 			)
 		);
 
-		$response = $this->delete_by_ref( $post_id, 'blk_drop' );
+		$response = $this->delete_by_ref( $post_id, 'blk_dad' );
 
-		$this->assertNotWPError( $response );
+		$this->assertLessThan( 400, $response->get_status(), 'The write must succeed (HTTP < 400).' );
 		$content = $this->persisted_content( $post_id );
 		$this->assertStringContainsString( 'KEEP', $content, 'An untouched block must survive.' );
 		$this->assertStringNotContainsString( 'DROP', $content, 'The targeted delete must apply.' );
