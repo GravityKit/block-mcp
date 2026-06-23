@@ -120,6 +120,12 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🚀 Added
+
+* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools. The abilities delegate to the same engine as the REST API, so behavior is identical whichever way they're called. On WordPress 6.8 and earlier the feature is simply skipped; nothing else changes.
+
 = 2.0.3 on June 17, 2026 =
 
 This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
