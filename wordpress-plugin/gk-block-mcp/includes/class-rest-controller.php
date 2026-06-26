@@ -1357,13 +1357,11 @@ class REST_Controller {
 		try {
 			$url = $request->get_param( 'url' );
 
-			// Extract path from full URL if needed.
-			if ( false !== strpos( $url, '://' ) ) {
-				$url = wp_parse_url( $url, PHP_URL_PATH );
-			}
-
-			// Use url_to_postid() which handles all post types, permalinks, etc.
-			$post_id = url_to_postid( home_url( $url ) );
+			// Keep the query string: url_to_postid() resolves ?p=/?page_id=
+			// forms from it, so stripping to the path alone collapses every
+			// query-permalink to the front page.
+			$path    = $this->url_to_resolvable_path( $url );
+			$post_id = url_to_postid( home_url( $path ) );
 
 			if ( ! $post_id ) {
 				return new \WP_Error(
@@ -1401,6 +1399,31 @@ class REST_Controller {
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Reduce a full URL or path to the site-relative string url_to_postid()
+	 * resolves, preserving the query string so the ?p= / ?page_id= /
+	 * ?post_type=&p= permalink forms resolve instead of collapsing to the
+	 * front page.
+	 *
+	 * @param string $url Full URL, or an already site-relative path/query.
+	 *
+	 * @return string Path, with the query string appended when present.
+	 */
+	private function url_to_resolvable_path( $url ) {
+		if ( false === strpos( $url, '://' ) ) {
+			return $url;
+		}
+
+		$parts = wp_parse_url( $url );
+		$path  = isset( $parts['path'] ) ? $parts['path'] : '/';
+
+		if ( ! empty( $parts['query'] ) ) {
+			$path .= '?' . $parts['query'];
+		}
+
+		return $path;
 	}
 
 	/**
@@ -1538,7 +1561,7 @@ class REST_Controller {
 			if ( $post_id > 0 ) {
 				$post = get_post( $post_id );
 			} elseif ( ! empty( $url ) ) {
-				$path     = false !== strpos( $url, '://' ) ? wp_parse_url( $url, PHP_URL_PATH ) : $url;
+				$path     = $this->url_to_resolvable_path( $url );
 				$resolved = url_to_postid( home_url( $path ) );
 				if ( $resolved ) {
 					$post = get_post( $resolved );
