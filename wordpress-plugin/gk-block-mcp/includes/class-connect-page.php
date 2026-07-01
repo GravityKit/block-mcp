@@ -704,10 +704,19 @@ class Connect_Page {
 	 *
 	 * @since  2.0.0
 	 *
-	 * @return string 'needs_https' | 'connected' | 'ready'
+	 * @return string 'needs_https' | 'app_passwords_disabled' | 'connected' | 'ready'
 	 */
 	public function connection_state() {
 		if ( ! wp_is_application_passwords_available() ) {
+			// Core reports Application Passwords unavailable for two unrelated
+			// reasons: the site is not on HTTPS, or HTTPS is fine but a plugin,
+			// constant, or the wp_is_application_passwords_available filter has
+			// switched the feature off. Only the first is solved by enabling
+			// HTTPS, so the two states carry different remediation copy.
+			if ( wp_is_application_passwords_supported() ) {
+				return 'app_passwords_disabled';
+			}
+
 			return 'needs_https';
 		}
 
@@ -1519,11 +1528,13 @@ class Connect_Page {
 	 *
 	 * @since 2.0.1
 	 *
-	 * @param string $state Current connection_state(): skips when 'needs_https'.
+	 * @param string $state Current connection_state(): skips when the connect
+	 *                      flow can't proceed ('needs_https' or
+	 *                      'app_passwords_disabled').
 	 * @return void
 	 */
 	private function pre_provision_agent( $state ) {
-		if ( 'needs_https' === $state ) {
+		if ( 'needs_https' === $state || 'app_passwords_disabled' === $state ) {
 			return;
 		}
 
@@ -1688,6 +1699,20 @@ class Connect_Page {
 					</p>
 					<p>
 						<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-mcp' ); ?>
+					</p>
+				</div>
+
+			<?php elseif ( 'app_passwords_disabled' === $state ) : ?>
+
+				<div class="notice notice-warning inline">
+					<p>
+						<strong><?php esc_html_e( 'Application Passwords are turned off', 'gk-block-mcp' ); ?></strong>
+					</p>
+					<p>
+						<?php esc_html_e( 'Your site is secure (HTTPS is on), but WordPress Application Passwords are disabled. The AI assistant connects using an Application Password, so the feature needs to be turned back on.', 'gk-block-mcp' ); ?>
+					</p>
+					<p>
+						<?php esc_html_e( 'This is usually done by a security plugin (for example, Solid Security or Wordfence) or a hardening setting. Look for an "Application Passwords" option there and re-enable it, or ask your host whether they disabled the feature. Then reload this page.', 'gk-block-mcp' ); ?>
 					</p>
 				</div>
 

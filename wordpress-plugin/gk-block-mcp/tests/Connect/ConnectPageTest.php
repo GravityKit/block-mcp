@@ -1630,6 +1630,89 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertSame( 'connected', $page->connection_state() );
 	}
 
+	/**
+	 * connection_state() must not report 'needs_https' when HTTPS is on.
+	 *
+	 * Regression: connection_state() collapsed every reason core reports
+	 * Application Passwords unavailable into 'needs_https', which renders an
+	 * "HTTPS required" notice. On a site that already serves HTTPS but has
+	 * Application Passwords switched off (a security plugin, a hardening
+	 * constant, or the wp_is_application_passwords_available filter), that
+	 * message is a misdiagnosis — it sent users to chase an HTTPS problem that
+	 * did not exist. The state must now distinguish the two: 'needs_https'
+	 * only when the site genuinely lacks HTTPS, 'app_passwords_disabled' when
+	 * HTTPS is fine but the feature is off.
+	 */
+	public function test_connection_state_app_passwords_disabled_when_https_on() {
+		$page                 = new Connect_Page();
+		$original_https       = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+		$original_server_port = isset( $_SERVER['SERVER_PORT'] ) ? $_SERVER['SERVER_PORT'] : null;
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		try {
+			// HTTPS on (Apache native SSL termination) but feature disabled.
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertTrue( is_ssl(), 'guard: is_ssl() must be true with HTTPS on' );
+			$this->assertSame( 'app_passwords_disabled', $page->connection_state() );
+
+			// HTTPS genuinely absent → the real HTTPS-required state.
+			unset( $_SERVER['HTTPS'] );
+			$_SERVER['SERVER_PORT'] = '80';
+			$this->assertFalse( is_ssl(), 'guard: is_ssl() must be false without HTTPS' );
+			$this->assertSame( 'needs_https', $page->connection_state() );
+		} finally {
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+
+			if ( null === $original_server_port ) {
+				unset( $_SERVER['SERVER_PORT'] );
+			} else {
+				$_SERVER['SERVER_PORT'] = $original_server_port;
+			}
+		}
+	}
+
+	/**
+	 * render_section() must show the disabled-feature notice, not "HTTPS
+	 * required", when HTTPS is on but Application Passwords are off.
+	 *
+	 * Pins the user-visible half of the misdiagnosis fix: the notice must say
+	 * the feature is turned off and tell the user the connection is already
+	 * secure, rather than telling them to enable HTTPS they already have.
+	 */
+	public function test_render_section_app_passwords_disabled_notice_when_https_on() {
+		$page           = new Connect_Page();
+		$original_https = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		try {
+			$_SERVER['HTTPS'] = 'on';
+
+			ob_start();
+			$page->render_section();
+			$html = ob_get_clean();
+
+			$this->assertStringContainsString( 'Application Passwords are turned off', $html );
+			$this->assertStringNotContainsString( 'HTTPS required', $html );
+		} finally {
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+		}
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// Secret-at-rest mode.
 	// ──────────────────────────────────────────────────────────────────────
