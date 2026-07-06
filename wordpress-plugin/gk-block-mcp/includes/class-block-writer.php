@@ -289,14 +289,23 @@ class Block_Writer {
 	 *                              for the optimistic-concurrency guard in
 	 *                              save_post_content(). Null disables it.
 	 *
-	 * @return array|\WP_Error
+	 * @return array|\WP_Error Save result. The `blocks` key carries the tree as
+	 *                         persisted (post-normalization) — response snapshots
+	 *                         built before this call must be rebuilt from it, or
+	 *                         they echo markup that differs from post_content.
 	 */
 	public function save_blocks( $post_id, array $blocks, $expected = null ) {
 		$depth_check = Block_CRUD::validate_tree_depth( $blocks );
 		if ( is_wp_error( $depth_check ) ) {
 			return $depth_check;
 		}
-		return $this->save_post_content( $post_id, serialize_blocks( $blocks ), $expected );
+		$blocks = Block_Normalizer::normalize_tree( $blocks );
+		$result = $this->save_post_content( $post_id, serialize_blocks( $blocks ), $expected );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$result['blocks'] = $blocks;
+		return $result;
 	}
 
 	/**
@@ -1223,6 +1232,18 @@ class Block_Writer {
 		}
 
 		$this->record_rate_limit( $post_id, 'write' );
+
+		// Rebuild the `saved` snapshots from the persisted (normalized) tree so
+		// they match post_content. $resolved and $results are index-aligned:
+		// phase 2 appends exactly one result per resolved item.
+		if ( $verbose && isset( $save_result['blocks'] ) ) {
+			foreach ( $resolved as $ri => $r ) {
+				$persisted_block = $this->crud->get_block_by_path( $save_result['blocks'], $r['path'] );
+				if ( is_array( $persisted_block ) ) {
+					$results[ $ri ]['saved'] = $this->format_saved_block( $persisted_block, $r['flat_index'] );
+				}
+			}
+		}
 
 		return array(
 			'success'            => true,
