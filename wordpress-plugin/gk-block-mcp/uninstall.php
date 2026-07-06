@@ -36,6 +36,7 @@ function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_post_types_allowlist' );
 	delete_option( 'gk_block_api_uploads_enabled' );
 	delete_option( 'gk_block_api_allow_trash' );
+	delete_option( 'gk_block_api_abilities_enabled' );
 
 	// Revoke any own-account credentials (Application Passwords minted on real
 	// users for "use my own account" connections) BEFORE dropping the meta that

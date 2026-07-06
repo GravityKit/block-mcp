@@ -137,6 +137,8 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🔒 Security
 
 * Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
+* Closed an over-grant in the dedicated AI assistant account: on block (full site editing) themes it could receive the "edit theme options" capability — which also governs menus, widgets, and the customizer — because the account's permissions were derived from every content type the site exposes, and WordPress maps the site-editor types (templates, template parts, navigation, global styles) onto that capability. The account is now built to skip those administrative capabilities, so it can still create and edit posts and pages but never change site-wide design or settings.
+* "Reset to defaults" now also turns the "allow the assistant to move posts to the trash" permission back off. Previously a reset restored every other setting but left that permission enabled, so the assistant kept the ability to trash content after an admin thought they had returned to the safe defaults.
 
 #### 🐛 Fixed
 
@@ -150,6 +152,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 💻 Developer Updates
 
 * Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
+* Uninstalling the plugin now also removes the "other AI tools" (Abilities) toggle option, so no orphaned setting row is left behind in the database.
 
 = 2.0.3 on June 17, 2026 =
 

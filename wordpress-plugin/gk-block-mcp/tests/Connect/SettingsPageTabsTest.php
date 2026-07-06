@@ -257,6 +257,9 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 			'gk_block_api_preferences',
 			'gk_block_api_post_types_allowlist',
 			\GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION,
+			// The trash grant is a security-relevant permission; a reset must
+			// return it to the OFF default, not leave it enabled.
+			\GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION,
 		);
 		foreach ( $options as $opt ) {
 			update_option( $opt, 'sentinel' );
