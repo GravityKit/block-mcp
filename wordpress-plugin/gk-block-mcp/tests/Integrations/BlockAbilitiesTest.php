@@ -560,6 +560,213 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 		$this->assertSame( 'ability_invalid_input', $result->get_error_code() );
 	}
 
+	// ── Adapter contract: stable name set + full-set structural invariants ─
+
+	/**
+	 * The full set of registered ability names is the adapter's public
+	 * contract: each name is a fully-qualified MCP tool id baked into every
+	 * client config. A silent rename or an accidental add/drop breaks existing
+	 * MCP clients, so pin the exact set of 7 rather than spot-checking a few.
+	 * A failure here means the change is breaking (or the expected set below
+	 * must be updated deliberately, in lockstep with a client-facing note).
+	 */
+	public function test_ability_names_match_the_published_set() {
+		$expected = array(
+			'gk-block-mcp/get-page-blocks',
+			'gk-block-mcp/update-block',
+			'gk-block-mcp/insert-blocks',
+			'gk-block-mcp/create-post',
+			'gk-block-mcp/list-block-types',
+			'gk-block-mcp/delete-block',
+			'gk-block-mcp/site-editor-context',
+		);
+
+		$this->assertEqualsCanonicalizing( $expected, $this->registrar->ability_names() );
+	}
+
+	/**
+	 * Every registered ability must satisfy the structural contract the MCP
+	 * Adapter reads to generate a tool: it resolves to a live WP_Ability; its
+	 * meta declares show_in_rest === true (so the Abilities REST/MCP surface
+	 * exposes it) alongside an `annotations` array (the readonly/destructive
+	 * hints); and it sits under the gk-block-mcp category the adapter scopes to.
+	 * Iterating the whole set — not a fixed few — catches a malformed NEW
+	 * ability before it ever reaches a client.
+	 */
+	public function test_every_ability_satisfies_the_adapter_structural_contract() {
+		foreach ( $this->registrar->ability_names() as $name ) {
+			$ability = wp_get_ability( $name );
+			$this->assertInstanceOf( \WP_Ability::class, $ability, $name . ' must resolve to a live WP_Ability' );
+
+			$meta = $ability->get_meta();
+			$this->assertArrayHasKey( 'show_in_rest', $meta, $name . ' must declare show_in_rest' );
+			$this->assertTrue( $meta['show_in_rest'], $name . ' must set show_in_rest === true' );
+			$this->assertArrayHasKey( 'annotations', $meta, $name . ' must declare annotations' );
+			$this->assertIsArray( $meta['annotations'], $name . ' annotations must be an array' );
+			$this->assertSame( Block_Abilities::CATEGORY, $ability->get_category(), $name . ' must be in the gk-block-mcp category' );
+		}
+	}
+
+	// ── Per-ability permission wiring ─────────────────────────────────
+
+	/**
+	 * insert-blocks wires the edit_post permission callback: a subscriber (no
+	 * edit_post on the target) is denied with ability_invalid_permissions and
+	 * the page gains no block. Proves the write gate is on this definition, not
+	 * just on update-block (the only write previously covered for denial).
+	 */
+	public function test_insert_blocks_ability_denies_without_capability() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Only</p>' ) ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/insert-blocks' )->execute(
+			array(
+				'post_id' => $post_id,
+				'blocks'  => array(
+					array(
+						'name'      => 'core/paragraph',
+						'innerHTML' => '<p>Nope</p>',
+					),
+				),
+			)
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+		$this->assertCount( 1, $this->block_tree_visible( $post_id ), 'no block may be inserted' );
+	}
+
+	/**
+	 * delete-block wires the edit_post permission callback: a subscriber is
+	 * denied with ability_invalid_permissions and every block survives — the
+	 * denial never reaches the destructive effect.
+	 */
+	public function test_delete_block_ability_denies_without_capability() {
+		$post_id = $this->make_block_post(
+			array(
+				$this->paragraph( '<p>One</p>' ),
+				$this->paragraph( '<p>Two</p>' ),
+			)
+		);
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/delete-block' )->execute(
+			array(
+				'post_id' => $post_id,
+				'index'   => 0,
+			)
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertStringContainsString( '<p>One</p>', $content, 'no block may be removed' );
+		$this->assertStringContainsString( '<p>Two</p>', $content );
+	}
+
+	/**
+	 * create-post wires can_create → edit_posts: a subscriber (who lacks
+	 * edit_posts) is denied with ability_invalid_permissions, so the
+	 * execute callback — and any post creation — never runs.
+	 */
+	public function test_create_post_ability_denies_subscriber() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/create-post' )->execute( array( 'title' => 'Should Not Exist' ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	/**
+	 * get-page-blocks — read-only, but still gated: it wires the edit_post
+	 * permission callback, so a subscriber is denied with
+	 * ability_invalid_permissions rather than reading a post they cannot edit.
+	 * Pins that even the read ability carries a permission_callback, not a
+	 * public one.
+	 */
+	public function test_get_page_blocks_ability_denies_subscriber() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Secret</p>' ) ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/get-page-blocks' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	// ── Idempotent re-registration ────────────────────────────────────
+
+	/**
+	 * Firing wp_abilities_api_init again must not fatal, must not re-register
+	 * (which the core registry answers with a _doing_it_wrong the harness turns
+	 * into a test failure), and must leave each ability registered exactly once
+	 * as the same live instance. The registrar claims idempotency via
+	 * wp_has_ability; this pins it — and it matters because the Abilities
+	 * registry lazily (re-)fires this hook on access in production.
+	 */
+	public function test_re_firing_abilities_init_is_idempotent() {
+		$before = array();
+		foreach ( $this->registrar->ability_names() as $name ) {
+			$before[ $name ] = wp_get_ability( $name );
+		}
+
+		do_action( 'wp_abilities_api_init' );
+
+		foreach ( $this->registrar->ability_names() as $name ) {
+			$this->assertTrue( wp_has_ability( $name ), $name . ' still registered after re-fire' );
+			$this->assertSame( $before[ $name ], wp_get_ability( $name ), $name . ' must not be re-registered as a new instance' );
+		}
+		$this->assertCount( 7, $this->registrar->ability_names() );
+	}
+
+	// ── Input-schema required fields (representative sample) ───────────
+
+	/**
+	 * insert-blocks requires 'blocks': omitting it is rejected by input-schema
+	 * validation with ability_invalid_input before execute_insert_blocks runs,
+	 * so the callback never reads an undefined key.
+	 */
+	public function test_insert_blocks_rejects_missing_required_blocks() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>x</p>' ) ) );
+		$result  = wp_get_ability( 'gk-block-mcp/insert-blocks' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_input', $result->get_error_code() );
+	}
+
+	/**
+	 * delete-block requires 'index': omitting it is rejected with
+	 * ability_invalid_input before any block is removed.
+	 */
+	public function test_delete_block_rejects_missing_required_index() {
+		$post_id = $this->make_block_post(
+			array(
+				$this->paragraph( '<p>One</p>' ),
+				$this->paragraph( '<p>Two</p>' ),
+			)
+		);
+		$result = wp_get_ability( 'gk-block-mcp/delete-block' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_input', $result->get_error_code() );
+		$this->assertStringContainsString( '<p>One</p>', (string) get_post_field( 'post_content', $post_id ), 'no block may be removed' );
+	}
+
+	/**
+	 * create-post requires 'title': omitting the field entirely is rejected by
+	 * input-schema validation with ability_invalid_input — distinct from an
+	 * empty-string title, which passes the schema and reaches the engine's
+	 * missing_title (see test_create_post_empty_title_is_graceful). Pins that
+	 * the schema's required marker is enforced before execution.
+	 */
+	public function test_create_post_rejects_missing_required_title() {
+		$result = wp_get_ability( 'gk-block-mcp/create-post' )->execute( array() );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_input', $result->get_error_code() );
+	}
+
 	/**
 	 * Build a flat core/paragraph block in WP-internal shape.
 	 *
