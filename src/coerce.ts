@@ -28,7 +28,12 @@ export function coercePostId(value: unknown, label: string): number | undefined 
     return value;
   }
   if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
-    return parseInt(value, 10);
+    const parsed = parseInt(value, 10);
+    // Re-apply the positive check so a zero-valued string ("0", "00") is
+    // rejected exactly like the number 0, not silently accepted as 0.
+    if (parsed > 0) {
+      return parsed;
+    }
   }
   throw new Error(`${label}: post_id must be a positive integer`);
 }

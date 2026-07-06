@@ -40942,7 +40942,10 @@ function coercePostId(value, label) {
     return value;
   }
   if (typeof value === "string" && /^[0-9]+$/.test(value)) {
-    return parseInt(value, 10);
+    const parsed = parseInt(value, 10);
+    if (parsed > 0) {
+      return parsed;
+    }
   }
   throw new Error(`${label}: post_id must be a positive integer`);
 }
