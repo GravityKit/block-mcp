@@ -144,6 +144,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 * Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change — your revision history and editor integrations are left intact.
 * Fixes URL lookups returning the site's front page when given a query-string permalink such as `?p=123` or `?post_type=docs&p=123`. The query string is now preserved, so the lookup resolves to the intended post. Pretty permalinks were unaffected.
 * Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
+* Moving a block into an empty container — or to the last position inside a container — no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 
 #### 💻 Developer Updates
 
