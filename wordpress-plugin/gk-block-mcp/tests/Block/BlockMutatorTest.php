@@ -1252,6 +1252,125 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertEquals( 2, $result['block']['moved_count'] );
 	}
 
+	/**
+	 * move must nest the moved block INSIDE a self-closing destination wrapper.
+	 *
+	 * Same failure shape insert-child pins above: a container created with a
+	 * self-closing wrapper and no children parses back with innerContent
+	 * as a single unsplit string ['<div class="wp-block-group"></div>']. The
+	 * move destination logic scanned for the Nth null and, finding none,
+	 * appended the placeholder at the very end — AFTER the closing-tag string —
+	 * so serialize_blocks() emitted the moved block OUTSIDE the wrapper markup
+	 * and the editor rejected the group as invalid content. The fix routes
+	 * move's destination placeholder through the same normalize-and-splice
+	 * helper insert-child uses.
+	 */
+	public function test_move_into_self_closing_wrapper_nests_inside() {
+		$this->make_post( array(
+			array(
+				'blockName'    => 'core/group',
+				'attrs'        => array(),
+				'innerHTML'    => '<div class="wp-block-group"></div>',
+				'innerContent' => array( '<div class="wp-block-group"></div>' ),
+				'innerBlocks'  => array(),
+			),
+			$this->block( 'core/paragraph', array(), '<p>Moved</p>' ),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'move',
+			array( 1 ),
+			array( 'destination' => array( 0, 0 ) )
+		);
+
+		$this->assertTrue( $result['success'] );
+
+		$saved = $this->current_blocks();
+		$this->assertCount( 1, $saved, 'Only the group remains at the top level.' );
+		$this->assertCount( 1, $saved[0]['innerBlocks'], 'Group must contain the moved paragraph.' );
+
+		$ic           = $saved[0]['innerContent'];
+		$null_indexes = array_keys(
+			array_filter(
+				$ic,
+				function ( $piece ) {
+					return null === $piece;
+				},
+				ARRAY_FILTER_USE_BOTH
+			)
+		);
+		$this->assertCount( 1, $null_indexes, 'Exactly one null placeholder for the moved child.' );
+		$this->assertGreaterThan( 0, $null_indexes[0], 'Null must come AFTER the opening wrapper string.' );
+		$this->assertLessThan( count( $ic ) - 1, $null_indexes[0], 'Null must come BEFORE the closing wrapper string.' );
+
+		$serialized = serialize_blocks( $saved );
+		$open_at    = strpos( $serialized, '<div class="wp-block-group">' );
+		$close_at   = strpos( $serialized, '</div>', (int) $open_at );
+		$child_at   = strpos( $serialized, '<p>Moved</p>' );
+		$this->assertNotFalse( $open_at, 'Opening group tag must be present.' );
+		$this->assertNotFalse( $close_at, 'Closing group tag must be present.' );
+		$this->assertNotFalse( $child_at, 'Moved paragraph must be present.' );
+		$this->assertGreaterThan( $open_at, $child_at, 'Moved block must appear AFTER the opening wrapper tag.' );
+		$this->assertLessThan( $close_at, $child_at, 'Moved block must appear BEFORE the closing wrapper tag.' );
+	}
+
+	/**
+	 * move to a container's end position must keep the block inside the wrapper.
+	 *
+	 * With destination index == child count, the Nth-null scan finds no match
+	 * and appended the placeholder after the closing-tag string instead of
+	 * before it — ['<div>', null, '</div>', null] — serializing the moved
+	 * block outside the wrapper. insert-child's 'end' branch scans backward
+	 * for the closing string; move's destination handling must do the same.
+	 */
+	public function test_move_to_container_end_position_nests_inside() {
+		$this->make_post( array(
+			$this->block(
+				'core/group',
+				array(),
+				'<div class="wp-block-group">',
+				array( $this->block( 'core/paragraph', array(), '<p>Existing</p>' ) )
+			),
+			$this->block( 'core/paragraph', array(), '<p>Moved</p>' ),
+		) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'move',
+			array( 1 ),
+			array( 'destination' => array( 0, 1 ) )
+		);
+
+		$this->assertTrue( $result['success'] );
+
+		$saved = $this->current_blocks();
+		$this->assertCount( 1, $saved, 'Only the group remains at the top level.' );
+		$this->assertCount( 2, $saved[0]['innerBlocks'], 'Group must contain both children.' );
+		$this->assertEquals( '<p>Existing</p>', $saved[0]['innerBlocks'][0]['innerHTML'] );
+		$this->assertEquals( '<p>Moved</p>', $saved[0]['innerBlocks'][1]['innerHTML'] );
+
+		$ic           = $saved[0]['innerContent'];
+		$null_indexes = array_keys(
+			array_filter(
+				$ic,
+				function ( $piece ) {
+					return null === $piece;
+				},
+				ARRAY_FILTER_USE_BOTH
+			)
+		);
+		$this->assertCount( 2, $null_indexes, 'One null placeholder per child.' );
+		$this->assertLessThan( count( $ic ) - 1, max( $null_indexes ), 'Both nulls must come BEFORE the closing wrapper string.' );
+
+		$serialized = serialize_blocks( $saved );
+		$close_at   = strpos( $serialized, '</div>' );
+		$child_at   = strpos( $serialized, '<p>Moved</p>' );
+		$this->assertNotFalse( $close_at, 'Closing group tag must be present.' );
+		$this->assertNotFalse( $child_at, 'Moved paragraph must be present.' );
+		$this->assertLessThan( $close_at, $child_at, 'Moved block must appear BEFORE the closing wrapper tag.' );
+	}
+
 	// ── dry_run ────────────────────────────────────────────────────
 
 	public function test_dry_run_does_not_save() {

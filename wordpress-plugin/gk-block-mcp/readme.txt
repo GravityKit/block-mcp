@@ -145,6 +145,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 * Fixes URL lookups returning the site's front page when given a query-string permalink such as `?p=123` or `?post_type=docs&p=123`. The query string is now preserved, so the lookup resolves to the intended post. Pretty permalinks were unaffected.
 * Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
 * Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
+* Moving a block into an empty container — or to the last position inside a container — no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 
 #### 💻 Developer Updates
 
