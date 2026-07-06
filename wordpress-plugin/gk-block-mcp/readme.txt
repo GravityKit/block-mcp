@@ -122,6 +122,8 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 = develop =
 
+This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and adds reliability and security hardening across editing, media uploads, and the assistant account.
+
 #### 🚀 Added
 
 * Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's on by default and can be turned off at **Settings → Block MCP**; on WordPress 6.8 and earlier it is simply skipped.
@@ -136,10 +138,10 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 🔒 Security
 
-* Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
-* Closed an over-grant in the dedicated AI assistant account: on block (full site editing) themes it could receive the "edit theme options" capability — which also governs menus, widgets, and the customizer — because the account's permissions were derived from every content type the site exposes, and WordPress maps the site-editor types (templates, template parts, navigation, global styles) onto that capability. The account is now built to skip those administrative capabilities, so it can still create and edit posts and pages but never change site-wide design or settings.
-* "Reset to defaults" now also turns the "allow the assistant to move posts to the trash" permission back off. Previously a reset restored every other setting but left that permission enabled, so the assistant kept the ability to trash content after an admin thought they had returned to the safe defaults.
-* Closed a server-side request forgery gap in URL media uploads: the safety check that blocks private, loopback, and cloud-metadata addresses validated only the address you supplied, while the download itself would follow redirects to a different address without re-checking it. URL uploads no longer follow redirects, so a link that bounces to an internal address can no longer be used to reach it. Supply the final image URL directly if a source relies on a redirect.
+* Tightened the permissions of the dedicated AI assistant account so it stays limited to creating and editing content — posts and pages — and is never granted access to site-wide design or administrative settings. This holds on every theme, including full site editing themes.
+* Strengthened how block content is saved so that text placed inside a block can't alter the structure of the surrounding page. This protection now applies on every editing path.
+* Hardened URL-based media uploads so a supplied link only downloads from the address you provide. If an image source relies on a redirect, provide the final image URL directly.
+* "Reset to defaults" now also returns the "allow the assistant to move posts to the trash" permission to off, so a reset fully restores the safe default settings.
 
 #### 🐛 Fixed
 
@@ -154,7 +156,6 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 💻 Developer Updates
 
 * Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
-* Uninstalling the plugin now also removes the "other AI tools" (Abilities) toggle option, so no orphaned setting row is left behind in the database.
 
 = 2.0.3 on June 17, 2026 =
 
