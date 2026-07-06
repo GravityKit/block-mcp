@@ -25,6 +25,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Runs registered normalizers over a block tree.
+ *
+ * @since 2.1.0
  */
 class Block_Normalizer {
 
@@ -34,6 +36,8 @@ class Block_Normalizer {
 	 * Applies the `gk/block-mcp/block/normalize` filter to every block, then
 	 * recurses into inner blocks. Block count is never changed, so the
 	 * `innerContent` null-placeholder invariant is preserved.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array $blocks Block tree in WP-internal shape.
 	 *
@@ -72,6 +76,8 @@ class Block_Normalizer {
 		 * `attrs`, `innerHTML`, `innerContent`, `innerBlocks`) plus its name,
 		 * acts only on the block(s) it understands, and returns the same shape.
 		 * It must not change the block's child count.
+		 *
+		 * @since 2.1.0
 		 *
 		 * @param array  $block      The block being normalized.
 		 * @param string $block_name The block's name.

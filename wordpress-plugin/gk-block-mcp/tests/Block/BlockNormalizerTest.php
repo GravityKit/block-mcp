@@ -17,6 +17,12 @@ use GravityKit\BlockMCP\Block_Normalizer;
 class BlockNormalizerTest extends BlockApiTestCase {
 
 	/**
+	 * The invalid `<img>` innerHTML used across the tests — width only in the
+	 * inline style, no width attribute, no is-resized.
+	 */
+	private const INVALID_IMAGE_HTML = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x" style="width: 560px"></figure>';
+
+	/**
 	 * Build a flat core/image block array in WP-internal shape.
 	 *
 	 * @param array  $attrs Block attributes (the JSON-comment delimiter payload).
@@ -47,13 +53,12 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	 * markup: no core/image deprecation stores width as an inline style.
 	 */
 	public function test_core_image_inline_width_without_attribute_is_lifted_and_resized() {
-		$html  = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x" style="width: 560px"></figure>';
 		$block = $this->image_block(
 			array(
 				'url' => 'https://example.com/x.png',
 				'alt' => 'x',
 			),
-			$html
+			self::INVALID_IMAGE_HTML
 		);
 
 		$out = Block_Normalizer::normalize_tree( array( $block ) );
@@ -63,12 +68,6 @@ class BlockNormalizerTest extends BlockApiTestCase {
 		$this->assertStringContainsString( 'width: 560px', $out[0]['innerHTML'], 'the existing inline style must be preserved verbatim' );
 		$this->assertSame( $out[0]['innerHTML'], $out[0]['innerContent'][0], 'innerContent must track the repaired innerHTML' );
 	}
-
-	/**
-	 * The invalid `<img>` innerHTML used across the write-surface integration
-	 * tests — width only in the inline style, no width attribute, no is-resized.
-	 */
-	private const INVALID_IMAGE_HTML = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x" style="width: 560px"></figure>';
 
 	/**
 	 * Locate the first core/image block in a parsed tree.
@@ -221,13 +220,12 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	 * pass would keep re-adding is-resized / re-deriving the attribute.
 	 */
 	public function test_normalize_is_idempotent() {
-		$html  = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x" style="width: 560px"></figure>';
 		$block = $this->image_block(
 			array(
 				'url' => 'https://example.com/x.png',
 				'alt' => 'x',
 			),
-			$html
+			self::INVALID_IMAGE_HTML
 		);
 
 		$once  = Block_Normalizer::normalize_tree( array( $block ) );
@@ -288,8 +286,8 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	 * one block.
 	 */
 	public function test_engine_has_no_builtin_block_rules() {
-		global $wp_filter;
-		$saved = isset( $wp_filter['gk/block-mcp/block/normalize'] ) ? $wp_filter['gk/block-mcp/block/normalize'] : null;
+		// The test framework restores all hooks in tear_down(), so stripping
+		// the filter here cannot leak into other tests.
 		remove_all_filters( 'gk/block-mcp/block/normalize' );
 
 		$block = $this->image_block(
@@ -300,10 +298,6 @@ class BlockNormalizerTest extends BlockApiTestCase {
 			self::INVALID_IMAGE_HTML
 		);
 		$out = Block_Normalizer::normalize_tree( array( $block ) );
-
-		if ( null !== $saved ) {
-			$wp_filter['gk/block-mcp/block/normalize'] = $saved;
-		}
 
 		$this->assertSame( array( $block ), $out, 'the engine itself must not know about any specific block' );
 	}
@@ -334,5 +328,82 @@ class BlockNormalizerTest extends BlockApiTestCase {
 		remove_filter( 'gk/block-mcp/block/normalize', $callback, 10 );
 
 		$this->assertSame( 'yes', $out[0]['attrs']['data-marked'] );
+	}
+
+	/**
+	 * update_block's `saved` snapshot must echo what actually landed on disk.
+	 *
+	 * The snapshot is the documented verification channel ("the response IS
+	 * the verification" — format_saved_block()), but it was built from the
+	 * handler's in-memory block, which save_blocks() normalizes only on a
+	 * local copy. For a repaired image the agent saw pre-repair markup that
+	 * differed from post_content: no width attribute, no is-resized class.
+	 * The snapshot must reflect the persisted, normalized block.
+	 */
+	public function test_update_block_saved_snapshot_reflects_persisted_normalization() {
+		$seed_html = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x"/></figure>';
+		$post_id   = $this->make_block_post(
+			array(
+				array(
+					'blockName'    => 'core/image',
+					'attrs'        => array(
+						'url' => 'https://example.com/x.png',
+						'alt' => 'x',
+					),
+					'innerHTML'    => $seed_html,
+					'innerContent' => array( $seed_html ),
+					'innerBlocks'  => array(),
+				),
+			)
+		);
+
+		$result = $this->crud->update_block( $post_id, 0, array(), self::INVALID_IMAGE_HTML );
+
+		$this->assertNotWPError( $result );
+		$this->assertArrayHasKey( 'saved', $result );
+		$this->assertSame( '560px', $result['saved']['attributes']['width'], 'saved snapshot must carry the lifted width attribute' );
+		$this->assertStringContainsString( 'is-resized', $result['saved']['inner_html'], 'saved snapshot must carry the repaired figure markup' );
+	}
+
+	/**
+	 * Batch update's verbose `saved` snapshots must echo the persisted blocks.
+	 *
+	 * Same contract as the single-update snapshot: with verbose:true each
+	 * result item's `saved` was built in the apply phase, before save_blocks()
+	 * normalized the tree, so a repaired image echoed pre-repair markup.
+	 */
+	public function test_batch_update_saved_snapshot_reflects_persisted_normalization() {
+		$seed_html = '<figure class="wp-block-image"><img src="https://example.com/x.png" alt="x"/></figure>';
+		$post_id   = $this->make_block_post(
+			array(
+				array(
+					'blockName'    => 'core/image',
+					'attrs'        => array(
+						'url' => 'https://example.com/x.png',
+						'alt' => 'x',
+					),
+					'innerHTML'    => $seed_html,
+					'innerContent' => array( $seed_html ),
+					'innerBlocks'  => array(),
+				),
+			)
+		);
+
+		$result = $this->crud->update_blocks_batch(
+			$post_id,
+			array(
+				array(
+					'flat_index' => 0,
+					'innerHTML'  => self::INVALID_IMAGE_HTML,
+				),
+			),
+			true
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertArrayHasKey( 'saved', $result['results'][0] );
+		$saved = $result['results'][0]['saved'];
+		$this->assertSame( '560px', $saved['attributes']['width'], 'verbose saved snapshot must carry the lifted width attribute' );
+		$this->assertStringContainsString( 'is-resized', $saved['inner_html'], 'verbose saved snapshot must carry the repaired figure markup' );
 	}
 }

@@ -23,6 +23,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Normalizer for core/image blocks.
+ *
+ * @since 2.1.0
  */
 class Core_Image_Normalizer {
 
@@ -35,6 +37,8 @@ class Core_Image_Normalizer {
 	 * Register the filter hook.
 	 *
 	 * Called once at plugin init by the normalizer loader.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return void
 	 */
@@ -50,6 +54,8 @@ class Core_Image_Normalizer {
 	 * inline dimension style. The repair lifts the inline dimension into the
 	 * block attribute (the value save() reads) and adds `is-resized` to the
 	 * figure, preserving the existing inline style.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array  $block      Block in WP-internal shape.
 	 * @param string $block_name Block name being normalized.
