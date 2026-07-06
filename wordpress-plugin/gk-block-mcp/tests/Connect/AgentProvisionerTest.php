@@ -78,6 +78,25 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The agent role must never gain `edit_theme_options`.
+	 *
+	 * derive_capabilities() copies each `show_in_rest` post type's mapped
+	 * edit/publish primitives into the role. Core's FSE post types
+	 * (wp_template, wp_template_part, wp_global_styles, wp_navigation) are
+	 * show_in_rest and map those very primitives to `edit_theme_options`, so an
+	 * unfiltered copy silently grants the agent site-wide theme/menu/widget/
+	 * customizer control — defeating the least-privilege contract. The agent
+	 * must be able to edit ordinary content, but never theme options.
+	 */
+	public function test_agent_role_never_grants_edit_theme_options() {
+		$id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $id );
+
+		$this->assertFalse( user_can( $id, 'edit_theme_options' ), 'agent must not gain edit_theme_options via FSE post types' );
+		$this->assertTrue( user_can( $id, 'edit_others_posts' ), 'ordinary content editing must remain intact' );
+	}
+
+	/**
 	 * Calling ensure() twice must return the same user ID and not create a
 	 * second user with the same login. The resolved ID must be persisted in
 	 * the gk_block_api_agent_user_id option.

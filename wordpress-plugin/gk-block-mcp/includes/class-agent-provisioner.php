@@ -171,15 +171,35 @@ class Agent_Provisioner {
 
 		$primitives = array( 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts' );
 
+		// Core's FSE post types (wp_template, wp_template_part, wp_global_styles,
+		// wp_navigation) are show_in_rest and map every content primitive to a
+		// site-administration meta cap — chiefly edit_theme_options, which also
+		// gates the customizer, menus, and widgets. Copying it would hand the
+		// least-privilege agent site-wide control, so any primitive resolving to
+		// a forbidden cap is skipped: the agent edits content, never settings.
+		$forbidden_caps = array(
+			'edit_theme_options' => true,
+			'manage_options'     => true,
+			'manage_categories'  => true,
+			'unfiltered_html'    => true,
+			'switch_themes'      => true,
+			'activate_plugins'   => true,
+		);
+
 		foreach ( $types as $type ) {
 			$object = get_post_type_object( $type );
 			if ( ! $object ) {
 				continue;
 			}
 			foreach ( $primitives as $primitive ) {
-				if ( isset( $object->cap->$primitive ) ) {
-					$caps[ $object->cap->$primitive ] = true;
+				if ( ! isset( $object->cap->$primitive ) ) {
+					continue;
 				}
+				$mapped = $object->cap->$primitive;
+				if ( isset( $forbidden_caps[ $mapped ] ) ) {
+					continue;
+				}
+				$caps[ $mapped ] = true;
 			}
 		}
 

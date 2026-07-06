@@ -538,6 +538,7 @@ class Settings_Page {
 		delete_option( 'gk_block_api_post_types_allowlist' );
 		delete_option( self::DUAL_MANUAL_OPTION );
 		delete_option( Media_Manager::UPLOADS_OPTION );
+		delete_option( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION );
 		delete_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
 		delete_option( Instructions::OPTION_KEY );
