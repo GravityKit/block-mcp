@@ -281,9 +281,25 @@ class Media_Manager {
 			return $ssrf_check;
 		}
 
+		// Disable HTTP redirects for the fetch. guard_ssrf() validates only the
+		// URL the caller gave; download_url() would otherwise follow up to 5
+		// redirects, and a 302 to 169.254.169.254 (cloud metadata) or a private
+		// host would be fetched WITHOUT re-validation — wp_http_validate_url,
+		// which core applies on redirects, does not block the metadata range.
+		// Refusing redirects closes that bypass; a redirecting source returns a
+		// fetch error, and the caller can pass the already-resolved URL.
+		$no_redirects = static function ( $args ) {
+			$args['redirection'] = 0;
+			return $args;
+		};
+		add_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
+
 		// Use a tighter timeout than core's 300s default. Slow-source amplification
 		// drops to ~10s of resource hold per request.
 		$tmp = download_url( $url, 10 );
+
+		remove_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
+
 		if ( is_wp_error( $tmp ) ) {
 			return new \WP_Error( 'url_fetch_failed', $tmp->get_error_message(), array( 'status' => 502 ) );
 		}

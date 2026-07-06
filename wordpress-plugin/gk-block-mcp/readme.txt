@@ -137,6 +137,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🔒 Security
 
 * Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
+* Closed a server-side request forgery gap in URL media uploads: the safety check that blocks private, loopback, and cloud-metadata addresses validated only the address you supplied, while the download itself would follow redirects to a different address without re-checking it. URL uploads no longer follow redirects, so a link that bounces to an internal address can no longer be used to reach it. Supply the final image URL directly if a source relies on a redirect.
 
 #### 🐛 Fixed
 
