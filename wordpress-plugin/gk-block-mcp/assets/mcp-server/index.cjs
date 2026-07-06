@@ -35215,7 +35215,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.0.3",
+  version: "2.0.4",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
@@ -40933,6 +40933,23 @@ function groupByNamespace(types) {
   return groups;
 }
 
+// src/coerce.ts
+function coercePostId(value, label) {
+  if (value === void 0 || value === null) {
+    return void 0;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    const parsed = parseInt(value, 10);
+    if (parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new Error(`${label}: post_id must be a positive integer`);
+}
+
 // src/tools/discovery.ts
 var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 var DISCOVERY_TOOLS = [
@@ -41129,14 +41146,7 @@ async function handleDiscoveryTool(toolName, args, client) {
       if ((postId === void 0 || postId === null) && (typeof url3 !== "string" || url3.length === 0) && (typeof slug !== "string" || slug.length === 0)) {
         throw new Error("get_post_info requires one of: post_id, url, or slug");
       }
-      let normalizedPostId;
-      if (typeof postId === "number" && Number.isInteger(postId) && postId > 0) {
-        normalizedPostId = postId;
-      } else if (typeof postId === "string" && /^[0-9]+$/.test(postId)) {
-        normalizedPostId = parseInt(postId, 10);
-      } else if (postId !== void 0 && postId !== null) {
-        throw new Error("get_post_info: post_id must be a positive integer");
-      }
+      const normalizedPostId = coercePostId(postId, "get_post_info");
       return await client.getPostInfo({
         post_id: normalizedPostId,
         url: typeof url3 === "string" ? url3 : void 0,
@@ -41311,7 +41321,7 @@ async function handleReadTool(toolName, args, client) {
     case "get_block": {
       const postId = args.post_id;
       const ref = typeof args.ref === "string" && args.ref.length > 0 ? args.ref : void 0;
-      const flatIndex = typeof args.flat_index === "number" && Number.isFinite(args.flat_index) ? args.flat_index : void 0;
+      const flatIndex = typeof args.flat_index === "number" && Number.isFinite(args.flat_index) && args.flat_index >= 0 ? args.flat_index : void 0;
       if (postId === void 0 || postId === null) {
         throw new Error("post_id is required");
       }
@@ -52930,10 +52940,12 @@ async function handlePostTool(toolName, args, client) {
       return client.createPost(create3);
     }
     case "update_post": {
-      if (typeof args.post_id !== "number") {
-        throw new Error('update_post: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "update_post");
+      if (postId === void 0) {
+        throw new Error('update_post: "post_id" is required');
       }
-      const { post_id: postId, ...rest } = args;
+      const { post_id: _omit, ...rest } = args;
+      void _omit;
       if (Object.keys(rest).length === 0) {
         throw new Error("update_post: provide at least one mutating field besides post_id");
       }
@@ -53212,16 +53224,16 @@ var YOAST_TOOLS = [
 async function handleYoastTool(toolName, args, client) {
   switch (toolName) {
     case "yoast_get_seo": {
-      const postId = args.post_id;
-      if (typeof postId !== "number") {
-        throw new Error('yoast_get_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "yoast_get_seo");
+      if (postId === void 0) {
+        throw new Error('yoast_get_seo: "post_id" is required');
       }
       return client.getYoastSEO(postId);
     }
     case "yoast_update_seo": {
-      const postId = args.post_id;
-      if (typeof postId !== "number") {
-        throw new Error('yoast_update_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "yoast_update_seo");
+      if (postId === void 0) {
+        throw new Error('yoast_update_seo: "post_id" is required');
       }
       const { post_id: _omit, ...rest } = args;
       void _omit;
@@ -53241,10 +53253,12 @@ async function handleYoastTool(toolName, args, client) {
           throw new Error("yoast_bulk_update_seo: each item in `posts` must be an object");
         }
         const obj = raw2;
-        if (typeof obj.post_id !== "number") {
-          throw new Error("yoast_bulk_update_seo: each item requires `post_id` (number)");
+        const id = coercePostId(obj.post_id, "yoast_bulk_update_seo");
+        if (id === void 0) {
+          throw new Error("yoast_bulk_update_seo: each item requires `post_id`");
         }
-        const { post_id: id, ...rest } = obj;
+        const { post_id: _omit, ...rest } = obj;
+        void _omit;
         items.push({ post_id: id, ...narrowYoastFields(rest) });
       }
       return client.bulkUpdateYoastSEO(items);

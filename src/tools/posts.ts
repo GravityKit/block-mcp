@@ -12,6 +12,7 @@
 import type { WordPressBlockClient } from '../client.js';
 import type { CreatePostRequest, UpdatePostRequest } from '../types.js';
 import { BLOCK_INPUT_SCHEMA } from './write.js';
+import { coercePostId } from '../coerce.js';
 
 const POST_STATUS_CREATE = ['draft', 'pending', 'private', 'publish', 'future'] as const;
 const POST_STATUS_UPDATE = ['draft', 'pending', 'private', 'publish', 'future', 'trash'] as const;
@@ -128,15 +129,17 @@ export async function handlePostTool(
     }
 
     case 'update_post': {
-      if (typeof args.post_id !== 'number') {
-        throw new Error('update_post: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'update_post');
+      if (postId === undefined) {
+        throw new Error('update_post: "post_id" is required');
       }
-      const { post_id: postId, ...rest } = args;
+      const { post_id: _omit, ...rest } = args;
+      void _omit;
       if (Object.keys(rest).length === 0) {
         throw new Error('update_post: provide at least one mutating field besides post_id');
       }
       const update = narrowUpdatePost(rest);
-      return client.updatePost(postId as number, update);
+      return client.updatePost(postId, update);
     }
 
     default:

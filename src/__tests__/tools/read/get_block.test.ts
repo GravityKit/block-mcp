@@ -54,6 +54,16 @@ describe('get_block — input validation', () => {
       handleReadTool('get_block', { post_id: 1, flat_index: NaN }, client as any)
     ).rejects.toThrow(/exactly one of ref or flat_index/);
   });
+
+  // update_block / delete_block reject a negative flat_index client-side;
+  // get_block must match so a negative index is treated as absent, not sent
+  // to the server as a valid target.
+  it('treats a negative flat_index as missing (still requires ref)', async () => {
+    await expect(
+      handleReadTool('get_block', { post_id: 1, flat_index: -1 }, client as any)
+    ).rejects.toThrow(/exactly one of ref or flat_index/);
+    expect(client.getBlock).not.toHaveBeenCalled();
+  });
 });
 
 describe('get_block — routing', () => {
