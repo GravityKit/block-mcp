@@ -112,9 +112,9 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 			Agent_Provisioner::ROLE,
 			'Block MCP Agent',
 			array(
-				'read'               => true,
-				'edit_others_posts'  => true,
-				'edit_theme_options' => true,
+				'read'                  => true,
+				'edit_others_posts'     => true,
+				'edit_theme_options'    => true,
 				'a_custom_operator_cap' => true,
 			)
 		);
