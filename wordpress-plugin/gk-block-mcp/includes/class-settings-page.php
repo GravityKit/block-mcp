@@ -299,6 +299,29 @@ class Settings_Page {
 	}
 
 	/**
+	 * Plain-language tier label for a 0–100 block-family score, mirroring the
+	 * thresholds the engine enforces (>=80 preferred, >=50 acceptable, >=10
+	 * discouraged, otherwise blocked). Shown beside the numeric score so a
+	 * non-technical admin reads "Preferred" rather than decoding "90".
+	 *
+	 * @param int $score Numeric score, 0–100.
+	 * @return string
+	 */
+	private function score_tier_label( $score ) {
+		$score = (int) $score;
+		if ( $score >= 80 ) {
+			return __( 'Preferred', 'gk-block-mcp' );
+		}
+		if ( $score >= 50 ) {
+			return __( 'Fine', 'gk-block-mcp' );
+		}
+		if ( $score >= 10 ) {
+			return __( 'Discouraged', 'gk-block-mcp' );
+		}
+		return __( 'Blocked', 'gk-block-mcp' );
+	}
+
+	/**
 	 * Sanitize the indexed-row form input into the stored `namespace_scores` +
 	 * `replacement_map` shape.
 	 *
@@ -813,7 +836,7 @@ class Settings_Page {
 					)
 				);
 				?>
-							" data-tab="policy" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Settings', 'gk-block-mcp' ); ?></a>
+							" data-tab="policy" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Permissions & Blocks', 'gk-block-mcp' ); ?></a>
 			</h2>
 
 			<div class="gk-tab-panel" data-tab-panel="connect"<?php echo 'connect' === $tab ? '' : ' hidden'; ?>>
@@ -898,17 +921,16 @@ class Settings_Page {
 
 
 				<h2><?php esc_html_e( 'What AI assistants can create', 'gk-block-mcp' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Choose which kinds of content AI assistants are allowed to create. Check the types you want to allow.', 'gk-block-mcp' ); ?></p>
-				<?php
-				$gk_allow_all_msg  = __( 'All public content types are currently allowed (the default).', 'gk-block-mcp' );
-				$gk_restricted_msg = __( 'Only the checked content types are allowed.', 'gk-block-mcp' );
-				?>
-				<p class="description gk-block-mcp-allow-all-note" aria-live="polite">
-					<span class="dashicons dashicons-info-outline" aria-hidden="true"></span>
-					<span class="gk-block-mcp-allow-all-text"><?php echo esc_html( empty( $post_type_allow ) ? $gk_allow_all_msg : $gk_restricted_msg ); ?></span>
+				<p class="description"><?php esc_html_e( 'Choose which kinds of content AI assistants are allowed to create.', 'gk-block-mcp' ); ?></p>
+				<?php $gk_allow_all_types = empty( $post_type_allow ); ?>
+				<p>
+					<label class="gk-block-mcp-allow-all-toggle">
+						<input type="checkbox" class="gk-block-mcp-allow-all" <?php checked( $gk_allow_all_types ); ?> aria-controls="gk-block-mcp-type-list" />
+						<strong><?php esc_html_e( 'Allow all content types', 'gk-block-mcp' ); ?></strong>
+					</label>
 				</p>
-				<fieldset class="gk-block-mcp-allowlist">
-					<legend class="screen-reader-text"><?php esc_html_e( 'Content types AI assistants are allowed to create', 'gk-block-mcp' ); ?></legend>
+				<fieldset class="gk-block-mcp-allowlist" id="gk-block-mcp-type-list"<?php echo $gk_allow_all_types ? ' hidden' : ''; ?>>
+					<legend><?php esc_html_e( 'Allow only these types — uncheck one to block it:', 'gk-block-mcp' ); ?></legend>
 					<?php
 					$pt_slugs = array_keys( $registered_post_types );
 					$pt_count = count( $pt_slugs );
@@ -917,7 +939,7 @@ class Settings_Page {
 						$type_obj = $registered_post_types[ $slug ];
 						?>
 						<label>
-							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> />
+							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> <?php disabled( $gk_allow_all_types ); ?> />
 							<?php echo esc_html( $type_obj->labels->singular_name ); ?> <code><?php echo esc_html( $slug ); ?></code>
 						</label>
 					<?php endfor; ?>
@@ -959,25 +981,50 @@ class Settings_Page {
 				</style>
 				<script>
 					( function () {
-						var fieldset = document.querySelector( '.gk-block-mcp-allowlist' );
-						var note     = document.querySelector( '.gk-block-mcp-allow-all-note' );
-						if ( ! fieldset || ! note ) {
+						var allowAll = document.querySelector( '.gk-block-mcp-allow-all' );
+						var list     = document.getElementById( 'gk-block-mcp-type-list' );
+						if ( ! allowAll || ! list ) {
 							return;
 						}
-						var textEl        = note.querySelector( '.gk-block-mcp-allow-all-text' );
-						var allowAllMsg   = <?php echo wp_json_encode( $gk_allow_all_msg ); ?>;
-						var restrictedMsg = <?php echo wp_json_encode( $gk_restricted_msg ); ?>;
-						var boxes = fieldset.querySelectorAll( 'input[type="checkbox"]' );
-						function update() {
+						var boxes = list.querySelectorAll( 'input[type="checkbox"]' );
+						function sync() {
+							var on = allowAll.checked;
+							list.hidden = on;
+							Array.prototype.forEach.call( boxes, function ( box ) {
+								box.disabled = on;
+							} );
+							// Revealing the list with nothing checked would submit an empty
+							// allow-list, which means "all" again. Start from all-checked so
+							// "checked = allowed" always holds; the admin unchecks to block.
+							if ( ! on ) {
+								var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
+									return box.checked;
+								} );
+								if ( ! anyChecked ) {
+									Array.prototype.forEach.call( boxes, function ( box ) {
+										box.checked = true;
+									} );
+								}
+							}
+						}
+						// If the admin unchecks every type, the allow-list is empty, which
+						// the engine treats as "all". Reflect that honestly by re-enabling
+						// "Allow all" rather than silently allowing everything from a
+						// "restricted to nothing" state.
+						list.addEventListener( 'change', function () {
+							if ( allowAll.checked ) {
+								return;
+							}
 							var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
 								return box.checked;
 							} );
-							if ( textEl ) {
-								textEl.textContent = anyChecked ? restrictedMsg : allowAllMsg;
+							if ( ! anyChecked ) {
+								allowAll.checked = true;
+								sync();
 							}
-						}
-						fieldset.addEventListener( 'change', update );
-						update();
+						} );
+						allowAll.addEventListener( 'change', sync );
+						sync();
 					} )();
 				</script>
 
@@ -1071,15 +1118,17 @@ class Settings_Page {
 				endif;
 				?>
 
-				<h2><?php esc_html_e( 'Abilities (WordPress 6.9+)', 'gk-block-mcp' ); ?></h2>
+				<h2><?php esc_html_e( 'Other AI tools (WordPress 6.9+)', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'On WordPress 6.9 and newer, expose Block MCP\'s operations as native WordPress Abilities so the official MCP Adapter — and other Abilities consumers — can discover and run them. On by default. Each operation still requires the same login and edit permission as the REST API; turn this off to remove that surface entirely.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Lets newer versions of WordPress — and other AI tools that support it — use Block MCP automatically, so you don\'t have to connect each one by hand.', 'gk-block-mcp' ); ?>
+					<strong><?php esc_html_e( 'Safe to leave on:', 'gk-block-mcp' ); ?></strong>
+					<?php esc_html_e( 'anything that uses it still has to sign in and have permission to edit, exactly like the connections on the Connect tab. Turn it off if you only want the assistants you connect here to have access.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				$abilities_available = \GravityKit\BlockMCP\Block_Abilities::is_available();
 				if ( ! $abilities_available ) :
 					?>
-					<p class="description"><em><?php esc_html_e( 'The Abilities API is not available on this site (it requires WordPress 6.9 or newer). Your choice here is saved and applied once it is.', 'gk-block-mcp' ); ?></em></p>
+					<p class="description"><em><?php esc_html_e( 'Your site is not on WordPress 6.9 yet, so this does nothing for now. Your choice is saved and takes effect once you update.', 'gk-block-mcp' ); ?></em></p>
 					<?php
 				endif;
 				?>
@@ -1091,8 +1140,29 @@ class Settings_Page {
 						value="1"
 						<?php checked( $abilities_enabled ); ?>
 					/>
-					<?php esc_html_e( 'Expose operations as WordPress Abilities (for the official MCP Adapter)', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Let other AI tools use Block MCP automatically', 'gk-block-mcp' ); ?>
 				</label>
+				<p class="description">
+					<details class="gk-block-mcp-tech-details">
+						<summary><?php esc_html_e( 'Technical details', 'gk-block-mcp' ); ?></summary>
+						<?php
+						echo wp_kses(
+							sprintf(
+								/* translators: %s: "Learn more" documentation link */
+								__( 'On WordPress 6.9+, Block MCP registers its operations as native WordPress Abilities, so the official MCP Adapter and any other Abilities consumer can discover and run them. Each ability is capability-gated identically to the REST API. %s', 'gk-block-mcp' ),
+								'<a href="https://www.gravitykit.com/wordpress-block-mcp/" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Learn more', 'gk-block-mcp' ) . '</a>'
+							),
+							array(
+								'a' => array(
+									'href'   => array(),
+									'target' => array(),
+									'rel'    => array(),
+								),
+							)
+						);
+						?>
+					</details>
+				</p>
 				<?php
 				// Surface filter-driven overrides so the box reflects the value the API actually honors.
 				$abilities_raw    = get_option( $abilities_option, '1' );
@@ -1182,7 +1252,7 @@ class Settings_Page {
 						sprintf(
 							/* translators: 1: link to MCP spec, 2: max length */
 							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site (which callout styles to use, your preferred code-block look, how documents should be structured) so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-mcp' ),
-							'https://modelcontextprotocol.io/specification',
+							'https://www.gravitykit.com/wordpress-block-mcp/',
 							(int) $instructions_max
 						),
 						array(
@@ -1217,7 +1287,7 @@ class Settings_Page {
 					rows="8"
 					data-max-codepoints="<?php echo esc_attr( (string) $instructions_max ); ?>"
 					class="large-text code"
-					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-mcp' ); ?>"
+					placeholder="<?php esc_attr_e( "Example:\nAlways start a document with an 'Overview' heading.\nUse the gray callout style for notes and the yellow one for warnings.", 'gk-block-mcp' ); ?>"
 				><?php echo esc_textarea( $instructions_val ); ?></textarea>
 				<p class="description">
 					<span id="gk-block-mcp-instructions-count"><?php echo esc_html( (string) mb_strlen( $instructions_val, 'UTF-8' ) ); ?></span>
@@ -1256,7 +1326,7 @@ class Settings_Page {
 
 
 				<h2><?php esc_html_e( 'Which blocks AI should prefer', 'gk-block-mcp' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Give each block family a score from 0 to 100 to tell AI assistants which blocks to favor. 80 or higher = preferred, 50 or higher = fine to use, 10 or higher = discouraged (the assistant is warned), below 10 = blocked.', 'gk-block-mcp' ); ?></p>
+				<p class="description"><?php esc_html_e( 'A "block family" is a group of blocks from one source — for example, WordPress core, or a page-builder plugin. The score sets how much AI assistants favor that family, shown as a plain label next to each one: Preferred, Fine, Discouraged, or Blocked. Most sites never need to change this — the defaults are sensible.', 'gk-block-mcp' ); ?></p>
 				<table class="widefat striped gk-block-mcp-growable" data-row-prefix="gk_block_api_preferences[namespace_rows]" style="max-width: 820px;">
 					<thead>
 						<tr>
@@ -1294,6 +1364,7 @@ class Settings_Page {
 									if ( $is_orphaned ) :
 										?>
 										aria-describedby="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>"<?php endif; ?> />
+										<span class="gk-block-mcp-tier" data-tier-for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php echo esc_html( $this->score_tier_label( $score ) ); ?></span>
 								</td>
 								<td>
 									<?php $this->render_namespace_action_cell( (string) $ns, $is_override ); ?>
@@ -1349,7 +1420,9 @@ class Settings_Page {
 								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-mcp' ); ?></label>
 								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 							</td>
-							<td></td>
+							<td>
+								<button type="button" class="components-button is-link is-destructive gk-block-mcp-remove-row" aria-label="<?php esc_attr_e( 'Remove this row', 'gk-block-mcp' ); ?>"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></button>
+							</td>
 						</tr>
 					</tbody>
 				</table>
@@ -1444,9 +1517,12 @@ class Settings_Page {
 						if (!tbody) return;
 
 						var nextIdx = tbody.querySelectorAll('tr').length;
+						// Capture a row template up front so Add row still works after every
+						// row (now individually removable) has been deleted.
+						var rowTemplate = tbody.lastElementChild ? tbody.lastElementChild.cloneNode( true ) : null;
 
 						function addRow() {
-							var template = tbody.lastElementChild;
+							var template = tbody.lastElementChild || rowTemplate;
 							if (!template) return;
 							var clone = template.cloneNode(true);
 							var idx = nextIdx++;
@@ -1509,6 +1585,9 @@ class Settings_Page {
 							if (score) {
 								var def = score.getAttribute('data-default-score');
 								score.value = (def === null ? '' : def);
+								// A programmatic value change fires no input event, so notify the
+								// live tier badge (and any other input listeners) explicitly.
+								score.dispatchEvent( new Event( 'input', { bubbles: true } ) );
 							}
 							// Row now matches its default; swap the control for the muted marker.
 							var cell = reset.parentNode;
@@ -1527,6 +1606,41 @@ class Settings_Page {
 					})(tables[t]);
 				}
 			})();
+			</script>
+
+			<script>
+			( function () {
+				// Live tier label: as the admin types a score, update the plain
+				// badge beside it so the number never reads as a bare value.
+				function tierLabel( v ) {
+					v = parseInt( v, 10 );
+					if ( isNaN( v ) ) { return ''; }
+					if ( v >= 80 ) { return <?php echo wp_json_encode( __( 'Preferred', 'gk-block-mcp' ) ); ?>; }
+					if ( v >= 50 ) { return <?php echo wp_json_encode( __( 'Fine', 'gk-block-mcp' ) ); ?>; }
+					if ( v >= 10 ) { return <?php echo wp_json_encode( __( 'Discouraged', 'gk-block-mcp' ) ); ?>; }
+					return <?php echo wp_json_encode( __( 'Blocked', 'gk-block-mcp' ) ); ?>;
+				}
+				document.addEventListener( 'input', function ( e ) {
+					var input = e.target;
+					if ( ! input || input.type !== 'number' || ! /^gk-ns-score-/.test( input.id || '' ) ) { return; }
+					var badge = document.querySelector( '.gk-block-mcp-tier[data-tier-for="' + input.id + '"]' );
+					var label = tierLabel( input.value );
+					if ( badge && label ) { badge.textContent = label; }
+				} );
+
+				// Keep the Advanced panel open across a save, so the setting you just
+				// changed is still visible after the page reloads.
+				var adv = document.querySelector( 'details.gk-block-mcp-advanced' );
+				if ( adv ) {
+					var KEY = 'gkBlockMcpAdvancedOpen';
+					try {
+						if ( window.sessionStorage.getItem( KEY ) === '1' ) { adv.open = true; }
+						adv.addEventListener( 'toggle', function () {
+							window.sessionStorage.setItem( KEY, adv.open ? '1' : '0' );
+						} );
+					} catch ( err ) {}
+				}
+			} )();
 			</script>
 
 

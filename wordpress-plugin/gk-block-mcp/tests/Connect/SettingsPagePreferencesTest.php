@@ -467,4 +467,47 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		$this->assertSame( 75, $stored['namespace_scores']['spectra'], 'the saved override must persist' );
 		$this->assertArrayNotHasKey( 'core', $stored['namespace_scores'], 'no shipped default may be layered into storage on first save' );
 	}
+
+	/**
+	 * The "What AI assistants can create" section renders an explicit "Allow all"
+	 * toggle, and the score table renders a plain-language tier badge, so a
+	 * non-technical admin never faces an empty-means-all checkbox set or a bare
+	 * numeric score.
+	 */
+	public function test_policy_tab_renders_allow_all_toggle_and_tier_badge() {
+		$html = $this->render_policy_html();
+		$this->assertStringContainsString( 'gk-block-mcp-allow-all', $html, 'the Allow-all-content-types toggle must render' );
+		$this->assertStringContainsString( 'Allow all content types', $html );
+		$this->assertStringContainsString( 'gk-block-mcp-tier', $html, 'the score tier badge must render' );
+		$this->assertStringContainsString( 'Preferred', $html, 'core (90) must show the Preferred tier label' );
+	}
+
+	/**
+	 * score_tier_label() maps a 0–100 score to the engine's tier wording so the
+	 * badge always matches the thresholds enforced at runtime.
+	 */
+	public function test_score_tier_label_matches_engine_thresholds() {
+		$method = new \ReflectionMethod( Settings_Page::class, 'score_tier_label' );
+		$method->setAccessible( true );
+		$page = new Settings_Page( new Block_Inventory() );
+
+		$this->assertSame( 'Preferred', $method->invoke( $page, 90 ) );
+		$this->assertSame( 'Preferred', $method->invoke( $page, 80 ) );
+		$this->assertSame( 'Fine', $method->invoke( $page, 50 ) );
+		$this->assertSame( 'Discouraged', $method->invoke( $page, 10 ) );
+		$this->assertSame( 'Blocked', $method->invoke( $page, 9 ) );
+		$this->assertSame( 'Blocked', $method->invoke( $page, 0 ) );
+	}
+
+	/**
+	 * The trailing "new" replacement row (the one Add row clones) renders a Remove
+	 * control, so a row you type into or add is removable without first saving.
+	 * It previously had an empty action cell, leaving typed/added rows with no
+	 * Remove button.
+	 */
+	public function test_replacement_table_new_row_has_remove_control() {
+		delete_option( Preferences::OPTION_KEY );
+		$html = $this->render_policy_html();
+		$this->assertStringContainsString( 'Remove this row', $html, 'the replacement new/template row must render a Remove control even with no stored mappings' );
+	}
 }

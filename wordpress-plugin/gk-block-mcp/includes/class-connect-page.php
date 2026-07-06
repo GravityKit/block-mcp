@@ -2623,6 +2623,21 @@ class Connect_Page {
 				} );
 
 				updateState();
+
+				// Confirm the download + account creation, which otherwise gives no
+				// on-page feedback (the installer streams as an attachment, so the page
+				// never navigates and nothing renders).
+				var form       = btn ? btn.closest( 'form' ) : null;
+				var postSubmit = document.querySelector( '.gk-block-mcp-connect__post-submit' );
+				if ( form && postSubmit ) {
+					form.addEventListener( 'submit', function () {
+						postSubmit.hidden = false;
+						postSubmit.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+						// Reload shortly so the new connection appears under Active
+						// connections; the in-flight attachment download is unaffected.
+						window.setTimeout( function () { window.location.reload(); }, 2500 );
+					} );
+				}
 				}
 				if ( 'loading' === document.readyState ) {
 					document.addEventListener( 'DOMContentLoaded', init );
@@ -2633,6 +2648,12 @@ class Connect_Page {
 			</script>
 
 			<?php submit_button( $desktop_button_label, 'primary', 'submit', true ); ?>
+			<div class="gk-block-mcp-connect__post-submit notice notice-success inline" hidden>
+				<p>
+					<strong><?php esc_html_e( 'Setting up your connection…', 'gk-block-mcp' ); ?></strong>
+					<?php esc_html_e( 'Your installer is downloading and your "Block MCP" account is being created. It will appear under Active connections in a moment.', 'gk-block-mcp' ); ?>
+				</p>
+			</div>
 		</form>
 		<?php
 	}
