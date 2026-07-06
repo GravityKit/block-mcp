@@ -11,6 +11,7 @@
  */
 
 import type { WordPressBlockClient } from '../client.js';
+import { coercePostId } from '../coerce.js';
 import type {
   YoastSchemaPageType,
   YoastSchemaArticleType,
@@ -132,17 +133,17 @@ export async function handleYoastTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'yoast_get_seo': {
-      const postId = args.post_id;
-      if (typeof postId !== 'number') {
-        throw new Error('yoast_get_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'yoast_get_seo');
+      if (postId === undefined) {
+        throw new Error('yoast_get_seo: "post_id" is required');
       }
       return client.getYoastSEO(postId);
     }
 
     case 'yoast_update_seo': {
-      const postId = args.post_id;
-      if (typeof postId !== 'number') {
-        throw new Error('yoast_update_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'yoast_update_seo');
+      if (postId === undefined) {
+        throw new Error('yoast_update_seo: "post_id" is required');
       }
       const { post_id: _omit, ...rest } = args;
       void _omit;
@@ -163,11 +164,13 @@ export async function handleYoastTool(
           throw new Error('yoast_bulk_update_seo: each item in `posts` must be an object');
         }
         const obj = raw as Record<string, unknown>;
-        if (typeof obj.post_id !== 'number') {
-          throw new Error('yoast_bulk_update_seo: each item requires `post_id` (number)');
+        const id = coercePostId(obj.post_id, 'yoast_bulk_update_seo');
+        if (id === undefined) {
+          throw new Error('yoast_bulk_update_seo: each item requires `post_id`');
         }
-        const { post_id: id, ...rest } = obj;
-        items.push({ post_id: id as number, ...narrowYoastFields(rest) });
+        const { post_id: _omit, ...rest } = obj;
+        void _omit;
+        items.push({ post_id: id, ...narrowYoastFields(rest) });
       }
       return client.bulkUpdateYoastSEO(items);
     }

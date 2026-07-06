@@ -195,7 +195,7 @@ export async function handleReadTool(
       const postId = args.post_id as number;
       const ref = typeof args.ref === 'string' && args.ref.length > 0 ? (args.ref as string) : undefined;
       const flatIndex =
-        typeof args.flat_index === 'number' && Number.isFinite(args.flat_index)
+        typeof args.flat_index === 'number' && Number.isFinite(args.flat_index) && args.flat_index >= 0
           ? (args.flat_index as number)
           : undefined;
 

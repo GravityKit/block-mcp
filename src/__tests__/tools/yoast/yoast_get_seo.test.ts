@@ -33,9 +33,17 @@ describe('yoast_get_seo — validation', () => {
     expect(client.getYoastSEO).not.toHaveBeenCalled();
   });
 
-  it('rejects string post_id (must be number)', async () => {
-    await expect(handleYoastTool('yoast_get_seo', { post_id: '42' }, client as any))
-      .rejects.toThrow('post_id');
+  // Coerces a numeric-string post_id (parity with get_post_info / update_post),
+  // rejecting only a genuinely non-numeric value.
+  it('coerces a numeric-string post_id', async () => {
+    client.getYoastSEO.mockResolvedValue(yoastSEOResponse);
+    await handleYoastTool('yoast_get_seo', { post_id: '42' }, client as any);
+    expect(client.getYoastSEO).toHaveBeenCalledWith(42);
+  });
+
+  it('rejects a non-numeric post_id string', async () => {
+    await expect(handleYoastTool('yoast_get_seo', { post_id: 'abc' }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
     expect(client.getYoastSEO).not.toHaveBeenCalled();
   });
 });
