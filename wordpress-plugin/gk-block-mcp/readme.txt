@@ -137,6 +137,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🔒 Security
 
 * Hardened innerHTML handling so block-comment delimiters (`<!-- wp:… -->`) embedded in a block's content can no longer break out of the block and inject phantom sibling blocks. The insert path was already protected; this extends the same protection to the update and mutate paths.
+* Closed a server-side request forgery gap in URL media uploads: the safety check that blocks private, loopback, and cloud-metadata addresses validated only the address you supplied, while the download itself would follow redirects to a different address without re-checking it. URL uploads no longer follow redirects, so a link that bounces to an internal address can no longer be used to reach it. Supply the final image URL directly if a source relies on a redirect.
 
 #### 🐛 Fixed
 
@@ -146,6 +147,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 * Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
 * Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
 * Moving a block into an empty container — or to the last position inside a container — no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
+* Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
 
 #### 💻 Developer Updates
 

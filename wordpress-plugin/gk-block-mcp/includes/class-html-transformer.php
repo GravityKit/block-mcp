@@ -258,14 +258,31 @@ class HTML_Transformer {
 			&& array_key_exists( 'content', $changed_attrs )
 			) {
 				$new_content = wp_kses_post( $changed_attrs['content'] );
-				// Replace inner text between the first opening tag and last closing tag.
-				$html = preg_replace_callback(
-					'/^(\s*<[^>]+>)(.*?)(<\/[^>]+>\s*)$/is',
-					function ( $matches ) use ( $new_content ) {
-						return $matches[1] . $new_content . $matches[3];
-					},
-					$html
-				);
+
+				// core/code is two-level: <pre class="wp-block-code"><code>…</code></pre>,
+				// and its `content` attribute is source:html against the INNER <code>.
+				// Targeting the outermost tags would strip the <code> wrapper and leave
+				// the editor unable to resolve the content, so replace the <code> inner
+				// text specifically and leave the <pre> shell intact.
+				if ( 'core/code' === $block_name && preg_match( '/<code[^>]*>.*?<\/code>/is', $html ) ) {
+					$html = preg_replace_callback(
+						'/(<code[^>]*>).*?(<\/code>)/is',
+						function ( $matches ) use ( $new_content ) {
+							return $matches[1] . $new_content . $matches[2];
+						},
+						$html
+					);
+				} else {
+					// Single-level blocks: replace inner text between the first opening
+					// tag and the last closing tag.
+					$html = preg_replace_callback(
+						'/^(\s*<[^>]+>)(.*?)(<\/[^>]+>\s*)$/is',
+						function ( $matches ) use ( $new_content ) {
+							return $matches[1] . $new_content . $matches[3];
+						},
+						$html
+					);
+				}
 			}
 
 			// core/button: `text` attr replaces the <a> inner text.

@@ -3,7 +3,8 @@
  *
  * Covers:
  *   - Filter forwarding (search → q, synced, min_score)
- *   - Server-side limit = offset + limit (so client slice still works)
+ *   - Full fetch (no server-side limit) + client-side pagination, so `total`
+ *     and `next_offset` reflect the true count (matches list_block_types)
  *   - Client-side slicing via offset
  *   - Defaults: limit 20, offset 0
  *   - Response shape: patterns, count, total, offset, next_offset, summary
@@ -46,15 +47,33 @@ describe('list_patterns — pagination', () => {
     client.getPatterns.mockResolvedValue(patternsResponse);
   });
 
-  it('defaults to limit 20, offset 0', async () => {
+  it('fetches the full set (no truncating server-side limit)', async () => {
     await handleDiscoveryTool('list_patterns', {}, client as any);
-    // server limit is offset + limit = 0 + 20 = 20
-    expect(client.getPatterns).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
+    // No `limit` is sent: the handler paginates locally so `total` and
+    // `next_offset` reflect the true count instead of the fetched window.
+    const args = client.getPatterns.mock.calls[0][0];
+    expect(args?.limit).toBeUndefined();
   });
 
-  it('server limit accounts for offset (offset+limit)', async () => {
+  it('does not cap the fetch by offset+limit', async () => {
     await handleDiscoveryTool('list_patterns', { limit: 10, offset: 30 }, client as any);
-    expect(client.getPatterns).toHaveBeenCalledWith(expect.objectContaining({ limit: 40 }));
+    const args = client.getPatterns.mock.calls[0][0];
+    expect(args?.limit).toBeUndefined();
+  });
+
+  it('reports true total and non-null next_offset when more remain', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      id: i + 1, name: `pattern-${i}`,
+      type: 'registered' as const,
+      created: '2026-01-01', modified: '2026-01-01',
+      reference_count: 0,
+      preference: { score: 80, tier: 'recommended' as const, reasons: [] },
+      contains_blocks: [], has_legacy_blocks: false,
+    }));
+    client.getPatterns.mockResolvedValueOnce({ patterns: many } as any);
+    const result = await handleDiscoveryTool('list_patterns', { limit: 20, offset: 0 }, client as any) as Record<string, unknown>;
+    expect(result.total).toBe(30);
+    expect(result.next_offset).toBe(20);
   });
 
   it('client-side slice honors offset', async () => {

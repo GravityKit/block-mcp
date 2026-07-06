@@ -41103,8 +41103,6 @@ async function handleDiscoveryTool(toolName, args, client) {
         q: args.search,
         synced: args.synced,
         min_score: args.min_score,
-        // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit,
         refresh: args.refresh
       });
       const enriched = enrichPatternList(response.patterns);
