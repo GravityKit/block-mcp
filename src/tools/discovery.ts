@@ -166,12 +166,14 @@ export async function handleDiscoveryTool(
     case 'list_patterns': {
       const limit  = (args.limit as number | undefined) ?? 20;
       const offset = (args.offset as number | undefined) ?? 0;
+      // Fetch the full set (no server-side limit) and paginate locally, matching
+      // list_block_types. Passing limit: offset+limit truncated `total` to the
+      // fetched window and made next_offset always null on a full page — the
+      // agent then never saw that more patterns existed.
       const response = await client.getPatterns({
         q: args.search as string | undefined,
         synced: args.synced as boolean | undefined,
         min_score: args.min_score as number | undefined,
-        // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit,
         refresh: args.refresh as boolean | undefined,
       });
       const enriched = enrichPatternList(response.patterns);
