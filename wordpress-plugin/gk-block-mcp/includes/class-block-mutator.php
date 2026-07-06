@@ -580,91 +580,19 @@ class Block_Mutator {
 				}
 
 				// Insert a null placeholder for the new child in innerContent.
-				$ic = &$parent[ $target_index ]['innerContent'];
-
-				// Normalise self-closing wrappers before splicing. A container
-				// created by insert_blocks with innerHTML="<div…></div>" and
-				// no innerBlocks parses back with innerContent stored as a
-				// single, unsplit string. Without a separable opening/closing
-				// pair, the splice logic below lands the new null adjacent to
-				// that string and serialize_blocks() emits children OUTSIDE
-				// the wrapper. Splitting the wrapper at the first `>` here
-				// turns ['<div></div>'] into ['<div>', '</div>'] so the new
-				// null falls between them, preserving the contract that
-				// children are interleaved INSIDE the wrapper.
-				$has_null = false;
-				foreach ( $ic as $piece ) {
-					if ( null === $piece ) {
-						$has_null = true;
-						break;
-					}
-				}
-				if ( ! $has_null ) {
-					foreach ( $ic as $piece_idx => $piece ) {
-						if ( ! is_string( $piece ) ) {
-							continue;
-						}
-						$open_end = strpos( $piece, '>' );
-						if ( false === $open_end || ( strlen( $piece ) - 1 ) === $open_end ) {
-							continue;
-						}
-						$opening = substr( $piece, 0, $open_end + 1 );
-						$closing = substr( $piece, $open_end + 1 );
-						if ( '' === $closing ) {
-							continue;
-						}
-						array_splice( $ic, $piece_idx, 1, array( $opening, $closing ) );
-						break;
-					}
-				}
-
 				if ( 'start' === $position ) {
-					// Insert after the first string entry (opening tag).
-					$insert_at = 0;
-					foreach ( $ic as $ic_idx => $ic_val ) {
-						if ( is_string( $ic_val ) ) {
-							$insert_at = $ic_idx + 1;
-							break;
-						}
-					}
-					array_splice( $ic, $insert_at, 0, array( null ) );
+					$child_position = 0;
 				} elseif ( 'end' === $position ) {
-					// Insert before the last string entry (closing tag).
-					$insert_at = count( $ic );
-					for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
-						if ( is_string( $ic[ $ri ] ) ) {
-							$insert_at = $ri;
-							break;
-						}
-					}
-					array_splice( $ic, $insert_at, 0, array( null ) );
+					$child_position = count( $parent[ $target_index ]['innerBlocks'] ) - 1;
 				} else {
-					// Numeric position: find the Nth null and insert before it.
-					// If no such null exists (pos >= null count, i.e. numeric append),
-					// fall back to the same backward-scan used by 'end' so the new
-					// null lands before the closing-tag string, not after it.
-					$null_count    = 0;
-					$insert_pos_ic = null;
-					foreach ( $ic as $ic_idx => $ic_val ) {
-						if ( null === $ic_val ) {
-							if ( $null_count === $pos ) {
-								$insert_pos_ic = $ic_idx;
-								break;
-							}
-							++$null_count;
-						}
-					}
-					if ( null === $insert_pos_ic ) {
-						$insert_pos_ic = count( $ic );
-						for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
-							if ( is_string( $ic[ $ri ] ) ) {
-								$insert_pos_ic = $ri;
-								break;
-							}
-						}
-					}
-					array_splice( $ic, $insert_pos_ic, 0, array( null ) );
+					$child_position = $pos;
 				}
+
+				$existing_ic = isset( $parent[ $target_index ]['innerContent'] ) && is_array( $parent[ $target_index ]['innerContent'] )
+					? $parent[ $target_index ]['innerContent']
+					: array();
+
+				$parent[ $target_index ]['innerContent'] = $this->insert_child_placeholders( $existing_ic, $child_position );
 
 				$result_block = array(
 					'name'       => $name,
@@ -887,20 +815,12 @@ class Block_Mutator {
 					for ( $di = 0; $di < $dest_parent_len - 1; $di++ ) {
 						$dest_gp = &$dest_gp[ $dest_parent_path[ $di ] ]['innerBlocks'];
 					}
-					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
-						$null_seen = 0;
-						$ic_insert = count( $dest_gp[ $dest_container_idx ]['innerContent'] );
-						foreach ( $dest_gp[ $dest_container_idx ]['innerContent'] as $ic_idx => $ic_val ) {
-							if ( null === $ic_val ) {
-								if ( $null_seen === $dest_index ) {
-									$ic_insert = $ic_idx;
-									break;
-								}
-								++$null_seen;
-							}
-						}
-						$nulls = array_fill( 0, $count, null );
-						array_splice( $dest_gp[ $dest_container_idx ]['innerContent'], $ic_insert, 0, $nulls );
+					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) && is_array( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
+						$dest_gp[ $dest_container_idx ]['innerContent'] = $this->insert_child_placeholders(
+							$dest_gp[ $dest_container_idx ]['innerContent'],
+							$dest_index,
+							$count
+						);
 					}
 				}
 
@@ -961,5 +881,73 @@ class Block_Mutator {
 		$response['block'] = $result_block;
 
 		return $response;
+	}
+
+	/**
+	 * Insert null placeholder(s) into a container's innerContent at a child position.
+	 *
+	 * Serialization interleaves innerContent — strings are emitted verbatim
+	 * and each null is replaced by the next innerBlock — so a placeholder must
+	 * land between the wrapper's opening and closing strings or the child is
+	 * serialized OUTSIDE the wrapper markup. Two shapes defeat a naive
+	 * Nth-null scan: a childless container parses back with a single unsplit
+	 * wrapper string (['<div></div>']), and an insertion at the end position
+	 * (child position == existing child count) has no Nth null to find. This
+	 * helper first splits an unsplit wrapper at the first '>' into
+	 * [opening, closing], then scans for the Nth null, and falls back to
+	 * inserting before the last string piece (the closing tag).
+	 *
+	 * @param array $inner_content  The container's innerContent array.
+	 * @param int   $child_position Index in innerBlocks the placeholder(s) represent.
+	 * @param int   $count          Number of placeholders to insert.
+	 *
+	 * @return array The updated innerContent.
+	 */
+	private function insert_child_placeholders( array $inner_content, $child_position, $count = 1 ) {
+		$has_null = in_array( null, $inner_content, true );
+		if ( ! $has_null ) {
+			foreach ( $inner_content as $piece_idx => $piece ) {
+				if ( ! is_string( $piece ) ) {
+					continue;
+				}
+				$open_end = strpos( $piece, '>' );
+				if ( false === $open_end || ( strlen( $piece ) - 1 ) === $open_end ) {
+					continue;
+				}
+				$opening = substr( $piece, 0, $open_end + 1 );
+				$closing = substr( $piece, $open_end + 1 );
+				if ( '' === $closing ) {
+					continue;
+				}
+				array_splice( $inner_content, $piece_idx, 1, array( $opening, $closing ) );
+				break;
+			}
+		}
+
+		$null_seen = 0;
+		$insert_at = null;
+		foreach ( $inner_content as $ic_idx => $ic_val ) {
+			if ( null === $ic_val ) {
+				if ( $null_seen === $child_position ) {
+					$insert_at = $ic_idx;
+					break;
+				}
+				++$null_seen;
+			}
+		}
+
+		if ( null === $insert_at ) {
+			$insert_at = count( $inner_content );
+			for ( $ri = count( $inner_content ) - 1; $ri >= 0; $ri-- ) {
+				if ( is_string( $inner_content[ $ri ] ) ) {
+					$insert_at = $ri;
+					break;
+				}
+			}
+		}
+
+		array_splice( $inner_content, $insert_at, 0, array_fill( 0, $count, null ) );
+
+		return $inner_content;
 	}
 }
