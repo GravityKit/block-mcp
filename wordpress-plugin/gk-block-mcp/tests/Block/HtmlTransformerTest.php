@@ -284,6 +284,25 @@ class HtmlTransformerTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'Old text', $result );
 	}
 
+	/**
+	 * core/code stores `content` as source:html, selector:code — its markup is
+	 * two-level (`<pre class="wp-block-code"><code>…</code></pre>`). The generic
+	 * content transform replaces everything between the first opening tag and the
+	 * last closing tag, which for core/code spans the whole `<code>…</code>`
+	 * element and discards the `<code>` wrapper — the editor then can't find the
+	 * content via the `code` selector and flags the block invalid. The new
+	 * content must land inside `<code>`, leaving the `<pre>`/`<code>` structure
+	 * intact.
+	 */
+	public function test_code_content_change_preserves_code_wrapper() {
+		$t      = $this->get_transformer();
+		$html   = '<pre class="wp-block-code"><code>old()</code></pre>';
+		$result = $t->auto_transform_html( 'core/code', array( 'content' => 'new()' ), $html );
+		$this->assertStringContainsString( '<code>new()</code>', $result, 'content must stay inside the <code> wrapper' );
+		$this->assertStringContainsString( 'wp-block-code', $result, 'the <pre> wrapper and its class must be preserved' );
+		$this->assertStringNotContainsString( 'old()', $result );
+	}
+
 	public function test_button_text_change() {
 		$t = $this->get_transformer();
 		$html = '<div class="wp-block-button"><a class="wp-block-button__link" href="/buy">Old Label</a></div>';
