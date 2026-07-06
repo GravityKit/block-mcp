@@ -134,10 +134,44 @@ class Agent_Provisioner {
 						$existing->add_cap( $cap );
 					}
 				}
+				// Remediate a role provisioned by an earlier version: strip any
+				// forbidden site-administration cap it may carry (e.g.
+				// edit_theme_options copied from an FSE post type). register_role()
+				// runs on `init`, so an upgraded site self-heals on the next request
+				// without needing to re-provision. Only the fixed denylist is
+				// removed — operator-added caps are left intact.
+				foreach ( array_keys( self::forbidden_capabilities() ) as $forbidden ) {
+					if ( $existing->has_cap( $forbidden ) ) {
+						$existing->remove_cap( $forbidden );
+					}
+				}
 			}
 		}
 
 		return $role;
+	}
+
+	/**
+	 * Capabilities the agent role must never hold, keyed by name.
+	 *
+	 * Core's FSE post types (wp_template, wp_template_part, wp_global_styles,
+	 * wp_navigation) are show_in_rest and map every content primitive to a
+	 * site-administration meta cap — chiefly edit_theme_options, which also
+	 * gates the customizer, menus, and widgets. These are skipped when deriving
+	 * the role's caps AND stripped from any existing role on re-assert, so a
+	 * role provisioned by an earlier version can't retain a site-wide grant.
+	 *
+	 * @return array<string,bool> Capability name => true.
+	 */
+	private static function forbidden_capabilities(): array {
+		return array(
+			'edit_theme_options' => true,
+			'manage_options'     => true,
+			'manage_categories'  => true,
+			'unfiltered_html'    => true,
+			'switch_themes'      => true,
+			'activate_plugins'   => true,
+		);
 	}
 
 	/**
@@ -171,20 +205,7 @@ class Agent_Provisioner {
 
 		$primitives = array( 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts' );
 
-		// Core's FSE post types (wp_template, wp_template_part, wp_global_styles,
-		// wp_navigation) are show_in_rest and map every content primitive to a
-		// site-administration meta cap — chiefly edit_theme_options, which also
-		// gates the customizer, menus, and widgets. Copying it would hand the
-		// least-privilege agent site-wide control, so any primitive resolving to
-		// a forbidden cap is skipped: the agent edits content, never settings.
-		$forbidden_caps = array(
-			'edit_theme_options' => true,
-			'manage_options'     => true,
-			'manage_categories'  => true,
-			'unfiltered_html'    => true,
-			'switch_themes'      => true,
-			'activate_plugins'   => true,
-		);
+		$forbidden_caps = self::forbidden_capabilities();
 
 		foreach ( $types as $type ) {
 			$object = get_post_type_object( $type );
