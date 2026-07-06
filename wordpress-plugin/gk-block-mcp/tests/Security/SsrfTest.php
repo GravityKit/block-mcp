@@ -209,6 +209,41 @@ class SsrfTest extends WP_UnitTestCase {
 		);
 	}
 
+	/**
+	 * The URL sideload fetch must run with HTTP redirects DISABLED.
+	 *
+	 * guard_ssrf() validates only the caller's URL. download_url() otherwise
+	 * follows up to 5 redirects, and a 302 to 169.254.169.254 or a private host
+	 * is fetched without re-validation (core's wp_http_validate_url does not
+	 * block the cloud-metadata range on redirects). This asserts the transport
+	 * receives redirection=0 for the fetch — teeth: without the redirect-
+	 * disabling filter the value is core's default 5 and this fails.
+	 */
+	public function test_url_fetch_disables_http_redirects() {
+		$seen_redirection = null;
+		add_filter(
+			'pre_http_request',
+			static function ( $preempt, $args ) use ( &$seen_redirection ) {
+				unset( $preempt );
+				$seen_redirection = $args['redirection'];
+				// Short-circuit with a benign non-image so the fetch ends here.
+				return array(
+					'headers'  => array(),
+					'body'     => 'x',
+					'response' => array( 'code' => 200, 'message' => 'OK' ),
+					'cookies'  => array(),
+					'filename' => $args['filename'] ?? null,
+				);
+			},
+			10,
+			3
+		);
+
+		$this->mm->upload( array( 'url' => 'https://203.0.113.5/logo.png' ) );
+
+		$this->assertSame( 0, $seen_redirection, 'the sideload fetch must disable HTTP redirects (redirection=0)' );
+	}
+
 	// ── Filter-extensibility ──────────────────────────────────────
 
 	public function test_filter_can_block_additional_ipv4_range() {
