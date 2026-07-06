@@ -35215,7 +35215,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.0.2",
+  version: "2.0.3",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
@@ -41086,8 +41086,6 @@ async function handleDiscoveryTool(toolName, args, client) {
         q: args.search,
         synced: args.synced,
         min_score: args.min_score,
-        // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit,
         refresh: args.refresh
       });
       const enriched = enrichPatternList(response.patterns);
