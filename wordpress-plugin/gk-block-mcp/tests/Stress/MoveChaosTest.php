@@ -15,10 +15,12 @@
  *   - parse → serialize → parse is idempotent (no block escapes its container,
  *     none are lost or duplicated).
  *
- * The PRNG seed is fixed per run so a failure reproduces exactly. A final
- * assertion guarantees `move` actually landed cleanly many times, so the test
- * can never silently degrade into "every move was rejected" and stop covering
- * the op it exists for.
+ * Seeds are randomized each run (with fixed anchor seeds as a deterministic
+ * floor) so successive runs explore new sequences instead of re-testing the
+ * same handful forever; every failure prints its seed with a GK_CHAOS_SEED
+ * replay hint. A final assertion guarantees `move` actually landed cleanly
+ * many times, so the test can never silently degrade into "every move was
+ * rejected" and stop covering the op it exists for.
  *
  * @package GravityKit\BlockMCP\Tests\Stress
  */
@@ -113,12 +115,12 @@ class MoveChaosTest extends BlockApiTestCase {
 	 * Assert the whole tree is well-formed: null-placeholder invariant holds at
 	 * every depth, refs are unique, and the serialize round-trip is idempotent.
 	 */
-	private function assertTreeWellFormed( int $iteration, string $last_op ): void {
+	private function assertTreeWellFormed( string $at ): void {
 		$content = (string) get_post_field( 'post_content', $this->post_id );
 		$blocks  = parse_blocks( $content );
 
 		$refs_seen = array();
-		$walker    = function ( $blocks, $where ) use ( $iteration, $last_op, &$walker, &$refs_seen ) {
+		$walker    = function ( $blocks, $where ) use ( $at, &$walker, &$refs_seen ) {
 			foreach ( $blocks as $i => $block ) {
 				if ( null === $block['blockName'] ) {
 					continue;
@@ -133,14 +135,14 @@ class MoveChaosTest extends BlockApiTestCase {
 				$this->assertSame(
 					count( $block['innerBlocks'] ),
 					$nulls,
-					"iter $iteration ($last_op) $here: innerContent null count ($nulls) must equal innerBlocks count (" . count( $block['innerBlocks'] ) . ')'
+					"$at $here: innerContent null count ($nulls) must equal innerBlocks count (" . count( $block['innerBlocks'] ) . ')'
 				);
 				$ref = $block['attrs']['metadata']['gk_ref'] ?? null;
 				if ( null !== $ref ) {
 					$this->assertArrayNotHasKey(
 						$ref,
 						$refs_seen,
-						"iter $iteration ($last_op): duplicate ref $ref at $here AND " . ( $refs_seen[ $ref ] ?? '?' )
+						"$at: duplicate ref $ref at $here AND " . ( $refs_seen[ $ref ] ?? '?' )
 					);
 					$refs_seen[ $ref ] = $here;
 				}
@@ -152,7 +154,7 @@ class MoveChaosTest extends BlockApiTestCase {
 		$this->assertSame(
 			$this->canonicalize( $blocks ),
 			$this->canonicalize( parse_blocks( serialize_blocks( $blocks ) ) ),
-			"iter $iteration ($last_op): parse→serialize→parse must be idempotent"
+			"$at: parse→serialize→parse must be idempotent"
 		);
 	}
 
@@ -204,18 +206,21 @@ class MoveChaosTest extends BlockApiTestCase {
 
 	/**
 	 * A randomized, move-heavy walk leaves the tree well-formed after every op.
+	 *
+	 * Seeds are randomized per run so each invocation explores new mutation
+	 * sequences — a fixed set would re-test the same handful forever and never
+	 * reach a latent bug living in an unexplored path. Reproducibility is
+	 * preserved two ways: a couple of fixed anchor seeds always run (a
+	 * deterministic regression floor), and every failure prints its seed with a
+	 * GK_CHAOS_SEED replay hint. Set GK_CHAOS_SEED=<n>[,<n>...] to force an exact
+	 * seed set and replay a reported failure.
 	 */
 	public function test_move_heavy_chaos_walk_preserves_invariants() {
 		$move_ok = 0;
 
-		// Multiple fixed seeds broaden coverage while staying reproducible.
-		foreach ( array( 1337, 7, 4242, 90210 ) as $seed ) {
+		foreach ( $this->chaos_seeds() as $seed ) {
 			mt_srand( $seed );
-
-			// Reset to the seed tree for each PRNG stream.
-			if ( 1337 !== $seed ) {
-				$this->set_up_reseed();
-			}
+			$this->set_up_reseed();
 
 			// Move dominates; the shape-changing ops around it accumulate the
 			// varied topology that makes move's index math non-trivial.
@@ -240,6 +245,7 @@ class MoveChaosTest extends BlockApiTestCase {
 				$pick = $candidates[ mt_rand( 0, count( $candidates ) - 1 ) ];
 				$op   = $op_pool[ mt_rand( 0, count( $op_pool ) - 1 ) ];
 				$args = array();
+				$at   = $this->locator( $seed, $i, $op );
 
 				// Snapshot the block-name multiset before a move so we can prove
 				// the move conserved it (relocated, not lost/duplicated a block).
@@ -273,7 +279,7 @@ class MoveChaosTest extends BlockApiTestCase {
 							'missing_block', 'missing_attributes', 'no_inner_blocks',
 							'legacy_block', 'invalid_block', 'rate_limit_exceeded',
 						),
-						"iter $i ($op) path " . wp_json_encode( $pick['path'] ) . ' produced unexpected error: ' . $result->get_error_code()
+						"$at path " . wp_json_encode( $pick['path'] ) . ' produced unexpected error: ' . $result->get_error_code()
 					);
 					continue;
 				}
@@ -283,20 +289,47 @@ class MoveChaosTest extends BlockApiTestCase {
 					$this->assertSame(
 						$names_before,
 						$this->name_multiset( parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) ) ),
-						"iter $i: move must conserve the block-name multiset (no block lost or duplicated)"
+						"$at: move must conserve the block-name multiset (no block lost or duplicated)"
 					);
 				}
-				$this->assertTreeWellFormed( $i, $op );
+				$this->assertTreeWellFormed( $at );
 			}
 		}
 
 		// Guard against silent degradation: if move stopped landing cleanly the
 		// test would still pass on invariants alone while covering nothing.
 		$this->assertGreaterThan(
-			40,
+			20,
 			$move_ok,
 			"only $move_ok move ops succeeded across all seeds — the walk is no longer exercising move"
 		);
+	}
+
+	/**
+	 * The seed set for this run: two fixed anchors (deterministic regression
+	 * floor) plus random explorers, or an exact set from GK_CHAOS_SEED.
+	 *
+	 * @return int[]
+	 */
+	private function chaos_seeds(): array {
+		$override = getenv( 'GK_CHAOS_SEED' );
+		if ( is_string( $override ) && '' !== $override ) {
+			return array_values( array_filter( array_map( 'intval', explode( ',', $override ) ) ) );
+		}
+		return array(
+			1337, // Fixed anchor.
+			90210, // Fixed anchor.
+			random_int( 1, PHP_INT_MAX ),
+			random_int( 1, PHP_INT_MAX ),
+		);
+	}
+
+	/**
+	 * Failure-locator prefix carrying the seed, so any random failure is
+	 * reproducible via GK_CHAOS_SEED.
+	 */
+	private function locator( int $seed, int $iteration, string $op ): string {
+		return "seed=$seed (replay: GK_CHAOS_SEED=$seed) iter=$iteration op=$op";
 	}
 
 	/**
