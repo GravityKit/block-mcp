@@ -388,10 +388,13 @@ class HTML_Transformer {
 	 * invalid content" on next edit. Stripping is information-preserving —
 	 * `class=""` and no class attribute are semantically identical in HTML.
 	 *
-	 * The regex only matches the attribute when it's preceded by whitespace
-	 * inside a tag (so we never touch text that happens to contain the
-	 * literal string `class=""`). The closing whitespace is normalised so
-	 * the resulting tag stays well-formed.
+	 * Only a real start-tag attribute is matched. The `[^<>]` guards on both
+	 * sides of the `class` capture keep the match inside a single `<…>` tag,
+	 * so an empty `class=""` that appears in *text* — an escaped code sample
+	 * (`&lt;div class=""&gt;`) or prose that mentions the literal string — is
+	 * never reached (there is no real `<`/`>` around it to anchor the match).
+	 * The surrounding attributes are preserved verbatim, so the tag stays
+	 * byte-clean (no leftover whitespace).
 	 *
 	 * @param string $html innerHTML to normalise.
 	 *
@@ -401,9 +404,15 @@ class HTML_Transformer {
 		if ( ! is_string( $html ) || '' === $html ) {
 			return $html;
 		}
-		// Match: whitespace, class=, quote, optional whitespace-only value,
-		// matching quote. Captures both single- and double-quoted forms.
-		return preg_replace( '/\s+class=(["\'])\s*\1/', '', $html );
+		// $1 = `<tag` + any attributes before class (no `<`/`>` crossing);
+		// the class value is empty or whitespace-only; $3 = the remaining
+		// attributes through the closing `>`. Dropping the class splices
+		// $1 and $3 with no residual space.
+		return preg_replace(
+			'/(<[a-zA-Z][a-zA-Z0-9:-]*[^<>]*?)\s+class\s*=\s*(["\'])\s*\2([^<>]*>)/',
+			'$1$3',
+			$html
+		);
 	}
 
 	/**
