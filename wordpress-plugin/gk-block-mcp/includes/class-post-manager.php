@@ -699,10 +699,17 @@ class Post_Manager {
 				$inner_content = array_fill( 0, $n, null );
 			}
 		} elseif ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
-			// Caller supplied explicit innerContent — sanitize each string piece.
+			// This branch runs only for a childless block. A null in
+			// innerContent is a child placeholder, and serialize_block()
+			// dereferences innerBlocks[$index] for each null — with no children
+			// that reads past an empty array and emits corrupt content. Drop
+			// the nulls; a childless block has no placeholders to preserve.
 			$inner_content = array();
 			foreach ( $block['innerContent'] as $piece ) {
-				$inner_content[] = ( null === $piece ) ? null : wp_kses_post( (string) $piece );
+				if ( null === $piece ) {
+					continue;
+				}
+				$inner_content[] = wp_kses_post( (string) $piece );
 			}
 		} else {
 			// Leaf block: innerContent is simply array( $innerHTML ) or empty.

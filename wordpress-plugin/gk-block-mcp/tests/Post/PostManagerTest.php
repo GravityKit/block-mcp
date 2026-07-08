@@ -185,6 +185,48 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A childless block that supplies explicit innerContent nulls must not
+	 * corrupt the saved content.
+	 *
+	 * innerContent is part of the public block-input shape. A null there is a
+	 * child placeholder; serialize_block() dereferences innerBlocks[$index] for
+	 * each null. When the caller passes nulls but no innerBlocks,
+	 * normalize_block_def_for_insert() passed them straight through, so
+	 * serialize_blocks() read past the empty innerBlocks array and emitted
+	 * corrupt content (an "Undefined array key" as the block index ran off the
+	 * end). The fix drops orphaned nulls; this pins that the stored content
+	 * round-trips cleanly with the wrapper string intact.
+	 */
+	public function test_create_post_orphan_inner_content_nulls_do_not_corrupt() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'Orphan nulls',
+			'blocks' => array(
+				array(
+					'name'         => 'core/group',
+					'innerContent' => array( '<div class="wp-block-group">', null, null, '</div>' ),
+				),
+			),
+		) );
+		$this->assertIsArray( $result );
+
+		$content = (string) get_post_field( 'post_content', $result['id'] );
+		$this->assertStringContainsString( '<div class="wp-block-group">', $content );
+
+		// The stored tree must satisfy the null-placeholder invariant: no null
+		// in innerContent without a matching child, so serialize→parse is clean.
+		$blocks = $this->stored_blocks( $result['id'] );
+		$this->assertCount( 1, $blocks );
+		$nulls = count( array_filter( $blocks[0]['innerContent'], static function ( $p ) {
+			return null === $p;
+		} ) );
+		$this->assertSame( count( $blocks[0]['innerBlocks'] ), $nulls );
+		$this->assertSame( 0, $nulls );
+
+		// Idempotent round-trip (would warn/differ under the bug).
+		$this->assertSame( $content, serialize_blocks( $blocks ) );
+	}
+
+	/**
 	 * Read the stored block tree for the given post ID via real WP — the
 	 * post_content round-trips through serialize_blocks() at save time and
 	 * parse_blocks() here, exactly as a production caller would see.
