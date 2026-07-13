@@ -100,6 +100,40 @@ class MediaManagerTest extends WP_UnitTestCase {
 		$this->assertGreaterThan( 0, $result['post_parent'] );
 	}
 
+	/**
+	 * A full data: URI is accepted for base64 uploads.
+	 *
+	 * Agents and browsers commonly hand over the whole `data:image/png;base64,…`
+	 * form. Strict base64_decode() rejects the `data:<mediatype>;base64,` prefix
+	 * (its `:` `/` `;` are outside the base64 alphabet), so the upload failed as
+	 * invalid_base64. handle_base64() now strips the prefix up to the first
+	 * comma; a bare base64 string is unaffected.
+	 */
+	public function test_base64_accepts_data_uri_prefix() {
+		$png    = file_get_contents( __DIR__ . '/../fixtures/sample.png' );
+		$result = $this->mm->upload( array(
+			'data_base64' => 'data:image/png;base64,' . base64_encode( $png ),
+			'filename'    => 'from-data-uri.png',
+		) );
+		$this->assertIsArray( $result, is_object( $result ) ? $result->get_error_message() : '' );
+		$this->assertTrue( $result['success'] );
+		$this->assertSame( 'image/png', $result['mime_type'] );
+	}
+
+	/**
+	 * A bare base64 string (no data: prefix) still uploads — the prefix strip
+	 * must not disturb the common case.
+	 */
+	public function test_base64_bare_string_still_uploads() {
+		$png    = file_get_contents( __DIR__ . '/../fixtures/sample.png' );
+		$result = $this->mm->upload( array(
+			'data_base64' => base64_encode( $png ),
+			'filename'    => 'bare.png',
+		) );
+		$this->assertIsArray( $result, is_object( $result ) ? $result->get_error_message() : '' );
+		$this->assertTrue( $result['success'] );
+	}
+
 	public function test_base64_enforces_max_upload_size() {
 		// Cap upload size to 8 bytes via the documented filter.
 		add_filter( 'upload_size_limit', static fn() => 8 );

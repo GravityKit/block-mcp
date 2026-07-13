@@ -179,6 +179,11 @@ export async function handleMutateTool(
           requestBody.position = position;
         } else if (position === 'start' || position === 'end') {
           requestBody.position = position;
+        } else if (typeof position === 'string' && /^\d+$/.test(position)) {
+          // The schema advertises `position` as integer|string; accept a
+          // numeric string ("3") as the index it plainly denotes rather than
+          // rejecting a schema-conformant value.
+          requestBody.position = parseInt(position, 10);
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }

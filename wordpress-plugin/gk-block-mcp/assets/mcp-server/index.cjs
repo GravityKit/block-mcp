@@ -52786,6 +52786,8 @@ async function handleMutateTool(toolName, args, client) {
           requestBody.position = position;
         } else if (position === "start" || position === "end") {
           requestBody.position = position;
+        } else if (typeof position === "string" && /^\d+$/.test(position)) {
+          requestBody.position = parseInt(position, 10);
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }

@@ -247,6 +247,18 @@ describe('edit_block_tree — insert-child', () => {
     }));
   });
 
+  it('coerces a numeric-string position to an integer', async () => {
+    // The inputSchema advertises position as integer|string, so a numeric
+    // string ("3") is schema-conformant and must be accepted as the index.
+    await handleMutateTool('edit_block_tree', {
+      post_id: 1, op: 'insert-child', path: [0],
+      block: { name: 'core/paragraph' }, position: '3',
+    }, client as any);
+    expect(client.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
+      position: 3,
+    }));
+  });
+
   it('rejects invalid position string', async () => {
     await expect(
       handleMutateTool('edit_block_tree', {

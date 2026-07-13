@@ -345,11 +345,24 @@ class Media_Manager {
 			return new \WP_Error( 'invalid_filename', __( '"filename" is required for base64 uploads.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
 
+		// Accept a full data: URI (e.g. "data:image/png;base64,iVBORw0K…"). Strict
+		// base64_decode() rejects the `data:<mediatype>;base64,` prefix (its `:`
+		// `/` `;` are outside the base64 alphabet), so without this the upload
+		// fails as invalid_base64. Strip up to the first comma; a bare base64
+		// string has no `data:` prefix and is unaffected.
+		$payload = (string) $args['data_base64'];
+		if ( 0 === stripos( $payload, 'data:' ) ) {
+			$comma = strpos( $payload, ',' );
+			if ( false !== $comma ) {
+				$payload = substr( $payload, $comma + 1 );
+			}
+		}
+
 		// Bound the encoded payload BEFORE decoding to limit memory consumption.
 		// Base64 expands 3 bytes → 4 bytes, so the encoded length cap matches the
 		// decoded size cap (URL_DOWNLOAD_MAX_BYTES, 25 MB).
 		$encoded_max = (int) ceil( self::URL_DOWNLOAD_MAX_BYTES * 4 / 3 );
-		if ( strlen( (string) $args['data_base64'] ) > $encoded_max ) {
+		if ( strlen( $payload ) > $encoded_max ) {
 			return new \WP_Error(
 				'file_too_large',
 				__( 'data_base64 exceeds size cap before decoding.', 'gk-block-mcp' ),
@@ -357,7 +370,7 @@ class Media_Manager {
 			);
 		}
 
-		$decoded = base64_decode( $args['data_base64'], true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
+		$decoded = base64_decode( $payload, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
 		if ( false === $decoded || '' === $decoded ) {
 			return new \WP_Error( 'invalid_base64', __( 'data_base64 is not valid base64.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
