@@ -1313,6 +1313,95 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * A write ability cannot be redirected to a different post by smuggling an
+	 * `id` into the body.
+	 *
+	 * The permission callback authorizes `$input['post_id']`, but the executor
+	 * forwards the operation through call_rest_handler where the controller
+	 * reads `$request['id']`. WordPress resolves JSON body params ahead of URL
+	 * params, so a body `id` would otherwise win over the authorized post_id —
+	 * a caller could edit-check a post they own yet redirect the write to one
+	 * they cannot edit. call_rest_handler strips route-param keys from the body,
+	 * so the route `id` (derived from the authorized post_id) is the only one
+	 * the handler sees.
+	 *
+	 * Teeth: without the strip, the handler reads the injected victim id, its
+	 * own edit_post re-check denies, and the caller's OWN post is left unchanged
+	 * — so the "own post was edited" assertion goes red.
+	 */
+	public function test_write_ability_ignores_body_id_injection() {
+		$author = self::factory()->user->create( array( 'role' => 'author' ) );
+		$other  = self::factory()->user->create( array( 'role' => 'administrator' ) );
+
+		// A post the author cannot edit (owned by someone else).
+		$victim = self::factory()->post->create(
+			array(
+				'post_author'  => $other,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:paragraph --><p>victim</p><!-- /wp:paragraph -->',
+			)
+		);
+		wp_set_current_user( $author );
+		// A post the author owns and may edit.
+		$own = self::factory()->post->create(
+			array(
+				'post_author'  => $author,
+				'post_status'  => 'draft',
+				'post_content' => '<!-- wp:paragraph --><p>own</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$victim_before = (string) get_post_field( 'post_content', $victim );
+
+		$result = wp_get_ability( 'gk-block-mcp/edit-block-tree' )->execute(
+			array(
+				'post_id'    => $own,
+				'id'         => $victim, // Injected — must be ignored.
+				'op'         => 'update-attrs',
+				'path'       => array( 0 ),
+				'attributes' => array( 'className' => 'routed-here' ),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertSame(
+			$victim_before,
+			(string) get_post_field( 'post_content', $victim ),
+			'the victim post must be untouched'
+		);
+		$this->assertStringContainsString(
+			'routed-here',
+			(string) get_post_field( 'post_content', $own ),
+			'the write must land on the authorized post_id, not the injected id'
+		);
+	}
+
+	/**
+	 * The same body-id smuggling is inert on update-post: the title change lands
+	 * on the authorized post, and the non-editable victim keeps its title.
+	 */
+	public function test_update_post_ignores_body_id_injection() {
+		$author = self::factory()->user->create( array( 'role' => 'author' ) );
+		$other  = self::factory()->user->create( array( 'role' => 'administrator' ) );
+
+		$victim = self::factory()->post->create(
+			array( 'post_author' => $other, 'post_status' => 'publish', 'post_title' => 'Victim Title' )
+		);
+		wp_set_current_user( $author );
+		$own = self::factory()->post->create(
+			array( 'post_author' => $author, 'post_status' => 'draft', 'post_title' => 'Own Title' )
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/update-post' )->execute(
+			array( 'post_id' => $own, 'id' => $victim, 'title' => 'Renamed' )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertSame( 'Victim Title', get_post_field( 'post_title', $victim ), 'victim title unchanged' );
+		$this->assertSame( 'Renamed', get_post_field( 'post_title', $own ), 'authorized post renamed' );
+	}
+
+	/**
 	 * A 1x1 transparent PNG as base64, for exercising the media sideload path
 	 * without a network fetch.
 	 */

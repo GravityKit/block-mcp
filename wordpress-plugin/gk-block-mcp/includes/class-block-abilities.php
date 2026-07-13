@@ -2156,9 +2156,16 @@ class Block_Abilities {
 		}
 
 		if ( ! empty( $body ) ) {
-			$request->set_header( 'Content-Type', 'application/json' );
-			$request->set_body( wp_json_encode( $body ) );
-			$request->set_body_params( $body );
+			// Strip any route-param key (notably `id`) from the body. WordPress
+			// resolves JSON body params ahead of URL params, so a body `id` would
+			// override the URL `id` the permission callback authorized, letting a
+			// caller edit-check post X but redirect the write to post Y.
+			$body = array_diff_key( $body, $route_params );
+			if ( ! empty( $body ) ) {
+				$request->set_header( 'Content-Type', 'application/json' );
+				$request->set_body( wp_json_encode( $body ) );
+				$request->set_body_params( $body );
+			}
 		}
 
 		$response = call_user_func( $callback, $request );
