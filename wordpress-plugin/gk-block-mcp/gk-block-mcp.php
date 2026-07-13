@@ -215,13 +215,31 @@ function init_abilities() {
 		return;
 	}
 	try {
-		$preferences     = new Preferences();
-		$block_inventory = new Block_Inventory();
-		$block_registry  = new Block_Registry( $preferences, $block_inventory );
-		$block_crud      = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), $block_inventory );
-		$post_manager    = new Post_Manager( $block_crud );
+		$preferences      = new Preferences();
+		$block_inventory  = new Block_Inventory();
+		$block_registry   = new Block_Registry( $preferences, $block_inventory );
+		$pattern_manager  = new Pattern_Manager( $preferences );
+		$block_safety     = new Block_Safety();
+		$html_transformer = new HTML_Transformer();
+		$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer, $block_inventory );
+		$block_mutator    = new Block_Mutator( $block_crud, $preferences, $block_safety, $html_transformer );
+		$post_manager     = new Post_Manager( $block_crud );
+		$term_manager     = new Term_Manager();
+		$media_manager    = new Media_Manager();
+		$controller       = new REST_Controller(
+			$block_registry,
+			$pattern_manager,
+			$block_crud,
+			$block_inventory,
+			$block_mutator,
+			$post_manager,
+			$term_manager,
+			$media_manager,
+			$preferences
+		);
+		$yoast_bridge     = new Yoast_Bridge();
 
-		( new Block_Abilities( $block_crud, $post_manager, $block_registry ) )->register();
+		( new Block_Abilities( $block_crud, $post_manager, $block_registry, $controller, $yoast_bridge ) )->register();
 	} catch ( \Throwable $e ) {
 		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 			error_log( 'Block MCP abilities init error: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log

@@ -13,10 +13,15 @@
  */
 
 use GravityKit\BlockMCP\Block_Abilities;
-use GravityKit\BlockMCP\Post_Manager;
+use GravityKit\BlockMCP\Media_Manager;
+use GravityKit\BlockMCP\Pattern_Manager;
 use GravityKit\BlockMCP\Block_Registry;
-use GravityKit\BlockMCP\Preferences;
 use GravityKit\BlockMCP\Block_Inventory;
+use GravityKit\BlockMCP\Post_Manager;
+use GravityKit\BlockMCP\Preferences;
+use GravityKit\BlockMCP\REST_Controller;
+use GravityKit\BlockMCP\Term_Manager;
+use GravityKit\BlockMCP\Yoast_Bridge;
 
 class BlockAbilitiesTest extends BlockApiTestCase {
 
@@ -32,11 +37,7 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
 
-		$this->registrar = new Block_Abilities(
-			$this->crud,
-			new Post_Manager( $this->crud ),
-			new Block_Registry( new Preferences(), new Block_Inventory() )
-		);
+		$this->registrar = $this->make_registrar();
 
 		add_action( 'wp_abilities_api_categories_init', array( $this->registrar, 'register_category' ) );
 		add_action( 'wp_abilities_api_init', array( $this->registrar, 'register_abilities' ) );
@@ -53,6 +54,32 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 			}
 		}
 		parent::tear_down();
+	}
+
+	/**
+	 * Build the same service graph the plugin bootstrap gives Block_Abilities.
+	 *
+	 * @return Block_Abilities
+	 */
+	private function make_registrar() {
+		$preferences = new Preferences();
+		$inventory   = new Block_Inventory();
+		$registry    = new Block_Registry( $preferences, $inventory );
+		$patterns    = new Pattern_Manager( $preferences );
+		$posts       = new Post_Manager( $this->crud );
+		$controller  = new REST_Controller(
+			$registry,
+			$patterns,
+			$this->crud,
+			$inventory,
+			$this->mutator,
+			$posts,
+			new Term_Manager(),
+			new Media_Manager(),
+			$preferences
+		);
+
+		return new Block_Abilities( $this->crud, $posts, $registry, $controller, new Yoast_Bridge() );
 	}
 
 	/**
@@ -216,6 +243,87 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * Pattern discovery delegates to the shared pattern manager/controller graph
+	 * and returns the MCP pagination envelope around real synced patterns.
+	 */
+	public function test_list_patterns_ability_returns_synced_pattern() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Ability Pattern',
+				'post_content' => '<!-- wp:paragraph --><p>Pattern body</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/list-patterns' )->execute(
+			array(
+				'synced' => true,
+				'limit'  => 20,
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertArrayHasKey( 'patterns', $result );
+		$this->assertContains( $pattern_id, wp_list_pluck( $result['patterns'], 'id' ) );
+	}
+
+	/**
+	 * Term discovery delegates to Term_Manager and returns real taxonomy terms
+	 * with the same pagination envelope as the REST endpoint.
+	 */
+	public function test_list_terms_ability_returns_category() {
+		$term = self::factory()->term->create_and_get(
+			array(
+				'taxonomy' => 'category',
+				'name'     => 'Ability Category',
+			)
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/list-terms' )->execute( array( 'taxonomy' => 'category' ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertContains( $term->term_id, wp_list_pluck( $result['terms'], 'id' ) );
+	}
+
+	/**
+	 * Yoast abilities are absent when Yoast SEO is inactive, matching the bridge
+	 * route gate and preventing dead integration tools from being advertised.
+	 */
+	public function test_yoast_abilities_are_not_registered_without_yoast() {
+		$this->assertFalse( Yoast_Bridge::is_yoast_active() );
+		$this->assertFalse( wp_has_ability( 'gk-block-mcp/yoast-get-seo' ) );
+		$this->assertFalse( wp_has_ability( 'gk-block-mcp/yoast-update-seo' ) );
+		$this->assertFalse( wp_has_ability( 'gk-block-mcp/yoast-bulk-update-seo' ) );
+	}
+
+	/**
+	 * With Yoast SEO loaded, its read ability registers and delegates to the
+	 * active bridge for a real post.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_get_seo_ability_registers_and_reads_when_active() {
+		// Executing the ability boots Yoast's own surface, which re-registers
+		// Yoast's abilities without an is-registered guard — a Yoast quirk,
+		// not a Block MCP one. Scope the expected notices to this test.
+		$this->setExpectedIncorrectUsage( 'WP_Ability_Categories_Registry::register' );
+		$this->setExpectedIncorrectUsage( 'WP_Abilities_Registry::register' );
+
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$this->assertTrue( Yoast_Bridge::is_yoast_active() );
+		$this->assertTrue( wp_has_ability( 'gk-block-mcp/yoast-get-seo' ) );
+		$this->assertTrue( wp_has_ability( 'gk-block-mcp/yoast-update-seo' ) );
+		$this->assertTrue( wp_has_ability( 'gk-block-mcp/yoast-bulk-update-seo' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertSame( $post_id, $result['post_id'] );
+	}
+
+	/**
 	 * The delete-block and site-editor-context abilities are registered.
 	 */
 	public function test_delete_and_context_abilities_are_registered() {
@@ -313,11 +421,7 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	 */
 	public function test_register_is_noop_when_disabled() {
 		update_option( Block_Abilities::ENABLED_OPTION, '0' );
-		$registrar = new Block_Abilities(
-			$this->crud,
-			new Post_Manager( $this->crud ),
-			new Block_Registry( new Preferences(), new Block_Inventory() )
-		);
+		$registrar = $this->make_registrar();
 
 		$registrar->register();
 
@@ -566,7 +670,7 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	 * The full set of registered ability names is the adapter's public
 	 * contract: each name is a fully-qualified MCP tool id baked into every
 	 * client config. A silent rename or an accidental add/drop breaks existing
-	 * MCP clients, so pin the exact set of 7 rather than spot-checking a few.
+	 * MCP clients, so pin the complete non-Yoast set rather than spot-checking.
 	 * A failure here means the change is breaking (or the expected set below
 	 * must be updated deliberately, in lockstep with a client-facing note).
 	 */
@@ -577,7 +681,24 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 			'gk-block-mcp/insert-blocks',
 			'gk-block-mcp/create-post',
 			'gk-block-mcp/list-block-types',
+			'gk-block-mcp/list-patterns',
+			'gk-block-mcp/get-pattern',
+			'gk-block-mcp/get-site-usage',
+			'gk-block-mcp/scan-storage-modes',
+			'gk-block-mcp/resolve-url',
+			'gk-block-mcp/list-posts',
+			'gk-block-mcp/get-post-info',
+			'gk-block-mcp/get-block',
 			'gk-block-mcp/delete-block',
+			'gk-block-mcp/update-blocks',
+			'gk-block-mcp/replace-block-range',
+			'gk-block-mcp/rewrite-post-blocks',
+			'gk-block-mcp/revert-to-revision',
+			'gk-block-mcp/insert-pattern',
+			'gk-block-mcp/edit-block-tree',
+			'gk-block-mcp/update-post',
+			'gk-block-mcp/list-terms',
+			'gk-block-mcp/upload-media',
 			'gk-block-mcp/site-editor-context',
 		);
 
@@ -717,7 +838,9 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 			$this->assertTrue( wp_has_ability( $name ), $name . ' still registered after re-fire' );
 			$this->assertSame( $before[ $name ], wp_get_ability( $name ), $name . ' must not be re-registered as a new instance' );
 		}
-		$this->assertCount( 7, $this->registrar->ability_names() );
+		// 24 without Yoast (this suite), 27 when Yoast SEO is active — the
+		// yoast.xml suite pins the 27 case.
+		$this->assertCount( 24, $this->registrar->ability_names() );
 	}
 
 	// ── Input-schema required fields (representative sample) ───────────
