@@ -890,6 +890,436 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 		$this->assertSame( 'ability_invalid_input', $result->get_error_code() );
 	}
 
+	// ── Execution coverage for the write / destructive / admin abilities ──
+	// Each of these delegates through call_rest_handler to the same controller
+	// the REST route uses. Registration and structural contracts are covered
+	// above; these prove the delegate actually runs and produces the effect.
+
+	/**
+	 * update-blocks applies a batch edit atomically through the controller.
+	 */
+	public function test_update_blocks_ability_applies_batch() {
+		$post_id = $this->make_block_post(
+			array( $this->paragraph( '<p>Zero</p>' ), $this->paragraph( '<p>One</p>' ) )
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/update-blocks' )->execute(
+			array(
+				'post_id' => $post_id,
+				'updates' => array(
+					array( 'flat_index' => 0, 'innerHTML' => '<p>Edited</p>' ),
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertStringContainsString( '<p>Edited</p>', $content );
+		$this->assertStringNotContainsString( '<p>Zero</p>', $content );
+	}
+
+	/**
+	 * replace-block-range swaps a top-level range for new blocks in one revision.
+	 */
+	public function test_replace_block_range_ability_swaps_range() {
+		$post_id = $this->make_block_post(
+			array(
+				$this->paragraph( '<p>One</p>' ),
+				$this->paragraph( '<p>Two</p>' ),
+				$this->paragraph( '<p>Three</p>' ),
+			)
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/replace-block-range' )->execute(
+			array(
+				'post_id' => $post_id,
+				'start'   => 0,
+				'count'   => 1,
+				'blocks'  => array(
+					array( 'name' => 'core/paragraph', 'innerHTML' => '<p>Replaced</p>' ),
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertStringContainsString( '<p>Replaced</p>', $content );
+		$this->assertStringNotContainsString( '<p>One</p>', $content );
+		$this->assertStringContainsString( '<p>Two</p>', $content );
+	}
+
+	/**
+	 * rewrite-post-blocks replaces the entire block content of a post.
+	 */
+	public function test_rewrite_post_blocks_ability_replaces_all() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Old body</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/rewrite-post-blocks' )->execute(
+			array(
+				'post_id' => $post_id,
+				'blocks'  => array(
+					array(
+						'name'       => 'core/heading',
+						'attributes' => array( 'level' => 2 ),
+						'innerHTML'  => '<h2>Fresh</h2>',
+					),
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertStringContainsString( '<!-- wp:heading', $content );
+		$this->assertStringNotContainsString( 'Old body', $content );
+	}
+
+	/**
+	 * revert-to-revision restores a prior revision's content through the engine.
+	 */
+	public function test_revert_to_revision_ability_restores_content() {
+		$post_id = wp_insert_post(
+			array(
+				'post_title'   => 'Revisioned',
+				'post_status'  => 'draft',
+				'post_content' => '<!-- wp:paragraph --><p>Seed</p><!-- /wp:paragraph -->',
+			)
+		);
+		// Each wp_update_post() snapshots the content it sets as a revision, so
+		// transition through Version A (captured) then Version B (current).
+		wp_update_post(
+			array(
+				'ID'           => $post_id,
+				'post_content' => '<!-- wp:paragraph --><p>Version A</p><!-- /wp:paragraph -->',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'           => $post_id,
+				'post_content' => '<!-- wp:paragraph --><p>Version B</p><!-- /wp:paragraph -->',
+			)
+		);
+		// Pick the revision that actually holds Version A (revisions are newest
+		// first, and the most recent captures Version B).
+		$revision_id = 0;
+		foreach ( wp_get_post_revisions( $post_id ) as $revision ) {
+			if ( false !== strpos( (string) $revision->post_content, 'Version A' ) ) {
+				$revision_id = (int) $revision->ID;
+				break;
+			}
+		}
+		$this->assertGreaterThan( 0, $revision_id, 'a revision holding Version A must exist' );
+
+		$result = wp_get_ability( 'gk-block-mcp/revert-to-revision' )->execute(
+			array( 'post_id' => $post_id, 'revision_id' => $revision_id )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'Version A', (string) get_post_field( 'post_content', $post_id ) );
+	}
+
+	/**
+	 * insert-pattern places a synced core/block reference and returns the synced
+	 * note so the caller knows the copy tracks the source pattern.
+	 */
+	public function test_insert_pattern_ability_inserts_synced_reference() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Synced Pattern',
+				'post_content' => '<!-- wp:paragraph --><p>Shared</p><!-- /wp:paragraph -->',
+			)
+		);
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Host</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/insert-pattern' )->execute(
+			array( 'post_id' => $post_id, 'pattern_id' => $pattern_id, 'synced' => true )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'wp:block', (string) get_post_field( 'post_content', $post_id ) );
+		$this->assertStringContainsString( (string) $pattern_id, (string) get_post_field( 'post_content', $post_id ) );
+		$this->assertStringContainsString( 'synced reference', (string) $result['note'] );
+	}
+
+	/**
+	 * edit-block-tree runs a path-based mutation through the shared mutator.
+	 */
+	public function test_edit_block_tree_ability_mutates() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Target</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/edit-block-tree' )->execute(
+			array(
+				'post_id'    => $post_id,
+				'op'         => 'update-attrs',
+				'path'       => array( 0 ),
+				'attributes' => array( 'className' => 'edited-via-ability' ),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'edited-via-ability', (string) get_post_field( 'post_content', $post_id ) );
+	}
+
+	/**
+	 * update-post updates post metadata (here, the title) through Post_Manager.
+	 */
+	public function test_update_post_ability_updates_title() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>x</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/update-post' )->execute(
+			array( 'post_id' => $post_id, 'title' => 'Renamed via ability' )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertSame( 'Renamed via ability', get_post_field( 'post_title', $post_id ) );
+	}
+
+	/**
+	 * upload-media sideloads a base64 payload through Media_Manager and returns
+	 * a real attachment. Exercises the ability's only non-URL fetch path and the
+	 * uploads-enabled gate (Media_Manager rejects when the option is off).
+	 */
+	public function test_upload_media_ability_creates_attachment() {
+		update_option( Media_Manager::UPLOADS_OPTION, '1' );
+
+		$result = wp_get_ability( 'gk-block-mcp/upload-media' )->execute(
+			array(
+				'data_base64' => $this->tiny_png_base64(),
+				'filename'    => 'pixel.png',
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertArrayHasKey( 'id', $result );
+		$this->assertTrue( wp_attachment_is_image( (int) $result['id'] ), 'a real image attachment must be created' );
+	}
+
+	/**
+	 * scan-storage-modes runs the admin-only inventory scan and returns a result.
+	 * Requires manage_options, so it runs as an administrator.
+	 */
+	public function test_scan_storage_modes_ability_runs_as_admin() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'administrator' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/scan-storage-modes' )->execute( array() );
+
+		$this->assertNotWPError( $result );
+		$this->assertIsArray( $result );
+	}
+
+	// ── Execution coverage for the new read abilities ─────────────────────
+
+	/**
+	 * get-block returns the canonical saved snapshot for a single block.
+	 */
+	public function test_get_block_ability_returns_snapshot() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Only</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/get-block' )->execute(
+			array( 'post_id' => $post_id, 'flat_index' => 0 )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'paragraph', wp_json_encode( $result ) );
+	}
+
+	/**
+	 * get-post-info returns metadata for the addressed post.
+	 */
+	public function test_get_post_info_ability_returns_metadata() {
+		$post_id = self::factory()->post->create( array( 'post_title' => 'Info Target', 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/get-post-info' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'Info Target', wp_json_encode( $result ) );
+	}
+
+	/**
+	 * list-posts finds a post by search term.
+	 */
+	public function test_list_posts_ability_finds_post() {
+		$post_id = self::factory()->post->create( array( 'post_title' => 'Findable Marker', 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/list-posts' )->execute( array( 'search' => 'Findable Marker' ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( (string) $post_id, wp_json_encode( $result ) );
+	}
+
+	/**
+	 * resolve-url maps a permalink back to its post id.
+	 */
+	public function test_resolve_url_ability_resolves_permalink() {
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/resolve-url' )->execute(
+			array( 'url' => get_permalink( $post_id ) )
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertContains( (string) $post_id, array_map( 'strval', array_values( (array) $result ) ) );
+	}
+
+	/**
+	 * get-pattern returns a registered/synced pattern by id.
+	 */
+	public function test_get_pattern_ability_returns_pattern() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Fetchable Pattern',
+				'post_content' => '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/get-pattern' )->execute( array( 'pattern_id' => $pattern_id ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'Fetchable Pattern', wp_json_encode( $result ) );
+	}
+
+	/**
+	 * get-site-usage returns the site-wide block usage structure.
+	 */
+	public function test_get_site_usage_ability_returns_usage() {
+		$this->make_block_post( array( $this->paragraph( '<p>counted</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/get-site-usage' )->execute( array() );
+
+		$this->assertNotWPError( $result );
+		$this->assertIsArray( $result );
+		$this->assertNotEmpty( $result );
+	}
+
+	// ── Permission-denial coverage for the new gates ──────────────────────
+
+	/**
+	 * Every new post-targeted write ability wires the edit_post gate: a
+	 * subscriber (no edit_post) is denied with ability_invalid_permissions and
+	 * the write never runs. Covers the write surface that previously had zero
+	 * denial coverage. Input is schema-valid so the permission check — not
+	 * input validation — is what rejects.
+	 */
+	public function test_new_write_abilities_deny_subscriber() {
+		$post_id    = $this->make_block_post( array( $this->paragraph( '<p>Guarded</p>' ) ) );
+		$pattern_id = self::factory()->post->create(
+			array( 'post_type' => 'wp_block', 'post_status' => 'publish', 'post_content' => '<!-- wp:paragraph --><p>p</p><!-- /wp:paragraph -->' )
+		);
+		$before = (string) get_post_field( 'post_content', $post_id );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$cases = array(
+			'update-blocks'       => array( 'post_id' => $post_id, 'updates' => array( array( 'flat_index' => 0, 'innerHTML' => '<p>x</p>' ) ) ),
+			'replace-block-range' => array( 'post_id' => $post_id, 'start' => 0, 'count' => 1, 'blocks' => array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>x</p>' ) ) ),
+			'rewrite-post-blocks' => array( 'post_id' => $post_id, 'blocks' => array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>x</p>' ) ) ),
+			'revert-to-revision'  => array( 'post_id' => $post_id, 'revision_id' => 999999 ),
+			'edit-block-tree'     => array( 'post_id' => $post_id, 'op' => 'update-attrs', 'path' => array( 0 ), 'attributes' => array( 'className' => 'x' ) ),
+			'update-post'         => array( 'post_id' => $post_id, 'title' => 'Nope' ),
+			'insert-pattern'      => array( 'post_id' => $post_id, 'pattern_id' => $pattern_id ),
+		);
+
+		foreach ( $cases as $slug => $input ) {
+			$result = wp_get_ability( 'gk-block-mcp/' . $slug )->execute( $input );
+			$this->assertWPError( $result, "$slug must deny a subscriber" );
+			$this->assertSame( 'ability_invalid_permissions', $result->get_error_code(), "$slug denial code" );
+		}
+
+		$this->assertSame( $before, (string) get_post_field( 'post_content', $post_id ), 'no denied write may alter the post' );
+	}
+
+	/**
+	 * upload-media wires can_upload_files: a subscriber (no upload_files) is
+	 * denied and no attachment is created, even with uploads enabled. This is the
+	 * only ability introducing that gate, and it guards the remote-fetch path.
+	 */
+	public function test_upload_media_denies_without_upload_files() {
+		update_option( Media_Manager::UPLOADS_OPTION, '1' );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/upload-media' )->execute(
+			array( 'data_base64' => $this->tiny_png_base64(), 'filename' => 'pixel.png' )
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	/**
+	 * scan-storage-modes wires can_manage_options: an editor (who has edit_posts
+	 * but not manage_options) is denied. Pins that the only admin-gated ability
+	 * cannot be triggered by a mere content editor.
+	 */
+	public function test_scan_storage_modes_denies_non_admin() {
+		// set_up() already logged in an editor — an editor lacks manage_options.
+		$result = wp_get_ability( 'gk-block-mcp/scan-storage-modes' )->execute( array() );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	/**
+	 * yoast-bulk-update-seo enforces per-post edit_post inside the delegated
+	 * bridge, not just the coarse edit_posts entry gate. A user with edit_posts
+	 * but no edit_post on the target (an author editing someone else's post) is
+	 * skipped with a per-entry "Permission denied", and the field is not written.
+	 * This is why the coarse can_create gate is not a weakness (see the executor).
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_bulk_skips_posts_without_per_post_edit() {
+		$this->setExpectedIncorrectUsage( 'WP_Ability_Categories_Registry::register' );
+		$this->setExpectedIncorrectUsage( 'WP_Abilities_Registry::register' );
+
+		$owner   = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish', 'post_author' => $owner ) );
+
+		// An author has edit_posts (passes the coarse gate) but cannot edit
+		// another user's post (fails the per-post edit_post check).
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'author' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/yoast-bulk-update-seo' )->execute(
+			array( 'posts' => array( array( 'post_id' => $post_id, 'title' => 'Hijacked SEO title' ) ) )
+		);
+
+		$this->assertNotWPError( $result, 'bulk itself is authorized; the per-post entry is what is denied' );
+		$encoded = wp_json_encode( $result );
+		$this->assertStringContainsString( 'Permission denied', $encoded );
+		$this->assertStringNotContainsString( 'Hijacked SEO title', (string) get_post_meta( $post_id, '_yoast_wpseo_title', true ) );
+	}
+
+	/**
+	 * yoast-update-seo writes a single post's SEO field through the active bridge.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_update_seo_ability_writes_field() {
+		$this->setExpectedIncorrectUsage( 'WP_Ability_Categories_Registry::register' );
+		$this->setExpectedIncorrectUsage( 'WP_Abilities_Registry::register' );
+
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/yoast-update-seo' )->execute(
+			array( 'post_id' => $post_id, 'title' => 'SEO Title Set' )
+		);
+
+		$this->assertNotWPError( $result );
+		$read = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+		$this->assertNotWPError( $read );
+		$this->assertStringContainsString( 'SEO Title Set', wp_json_encode( $read ) );
+	}
+
+	/**
+	 * A 1x1 transparent PNG as base64, for exercising the media sideload path
+	 * without a network fetch.
+	 */
+	private function tiny_png_base64(): string {
+		return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+	}
+
 	/**
 	 * Build a flat core/paragraph block in WP-internal shape.
 	 *

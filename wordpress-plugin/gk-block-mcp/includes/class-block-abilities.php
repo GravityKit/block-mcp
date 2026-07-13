@@ -808,7 +808,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'revert-to-revision' => array(
+			self::NAMESPACE_PREFIX . 'revert-to-revision'  => array(
 				'label'               => __( 'Revert post to revision', 'gk-block-mcp' ),
 				'description'         => __( 'Restore a post to a revision. Use before_revision_id from a prior write to undo that write.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -1430,7 +1430,7 @@ class Block_Abilities {
 		);
 
 		return array(
-			self::NAMESPACE_PREFIX . 'yoast-get-seo'         => array(
+			self::NAMESPACE_PREFIX . 'yoast-get-seo'    => array(
 				'label'               => __( 'Get Yoast SEO metadata', 'gk-block-mcp' ),
 				'description'         => __( 'Read all Yoast SEO metadata for a post or page.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -1456,7 +1456,7 @@ class Block_Abilities {
 					'show_in_rest' => true,
 				),
 			),
-			self::NAMESPACE_PREFIX . 'yoast-update-seo'      => array(
+			self::NAMESPACE_PREFIX . 'yoast-update-seo' => array(
 				'label'               => __( 'Update Yoast SEO metadata', 'gk-block-mcp' ),
 				'description'         => __( 'Update one or more Yoast SEO fields on a single post or page. Only supplied fields are written.', 'gk-block-mcp' ),
 				'category'            => self::CATEGORY,
@@ -1639,7 +1639,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_list_patterns( $input ) {
 		$limit  = isset( $input['limit'] ) ? max( 1, (int) $input['limit'] ) : 20;
@@ -1676,7 +1676,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_get_pattern( $input ) {
 		$pattern_id = isset( $input['pattern_id'] ) ? $input['pattern_id'] : '';
@@ -1694,7 +1694,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_get_site_usage( $input ) {
 		return $this->call_rest_handler(
@@ -1711,7 +1711,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_scan_storage_modes( $input ) {
 		unset( $input );
@@ -1724,7 +1724,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_resolve_url( $input ) {
 		return $this->call_rest_handler(
@@ -1741,7 +1741,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_list_posts( $input ) {
 		return $this->call_rest_handler( array( $this->controller, 'find_posts' ), 'GET', '/find-posts', $input );
@@ -1753,7 +1753,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_get_post_info( $input ) {
 		return $this->call_rest_handler( array( $this->controller, 'post_info' ), 'GET', '/post-info', $input );
@@ -1765,7 +1765,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_get_block( $input ) {
 		$params = array( 'id' => (int) $input['post_id'] );
@@ -1796,7 +1796,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_update_blocks( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -1831,14 +1831,14 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_replace_block_range( $input ) {
 		$post_id = (int) $input['post_id'];
 		if ( $post_id <= 0 ) {
 			return new \WP_Error( 'missing_post_id', __( 'post_id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
-		$body    = array(
+		$body = array(
 			'start'  => (int) $input['start'],
 			'count'  => (int) $input['count'],
 			'blocks' => isset( $input['blocks'] ) && is_array( $input['blocks'] ) ? $input['blocks'] : array(),
@@ -1859,7 +1859,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_rewrite_post_blocks( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -1884,7 +1884,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_revert_to_revision( $input ) {
 		$post_id     = (int) $input['post_id'];
@@ -1911,7 +1911,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_insert_pattern( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -1937,7 +1937,7 @@ class Block_Abilities {
 			return $data;
 		}
 
-		$data['note'] = ! empty( $data['synced'] )
+		$data['note'] = ! empty( $data['inserted']['synced'] )
 			? __( 'Pattern inserted as synced reference. Changes to the source pattern will update this page.', 'gk-block-mcp' )
 			: __( 'Pattern blocks inserted inline. This copy is independent and can be edited per-page.', 'gk-block-mcp' );
 		return $data;
@@ -1949,7 +1949,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_edit_block_tree( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -1971,7 +1971,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_update_post( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -2001,7 +2001,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_list_terms( $input ) {
 		return $this->call_rest_handler( array( $this->controller, 'list_terms' ), 'GET', '/terms', $input );
@@ -2013,7 +2013,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_upload_media( $input ) {
 		if ( isset( $input['path'] ) && is_string( $input['path'] ) && '' !== $input['path'] ) {
@@ -2061,7 +2061,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_yoast_get_seo( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -2079,7 +2079,7 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_yoast_update_seo( $input ) {
 		$post_id = (int) $input['post_id'];
@@ -2101,9 +2101,14 @@ class Block_Abilities {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	public function execute_yoast_bulk_update_seo( $input ) {
+		// The permission_callback is only the coarse `edit_posts` gate; a
+		// multi-post write has no single target to check up front. Real
+		// enforcement is per-post `edit_post` inside the delegated
+		// Yoast_Bridge::bulk_update_seo(), which skips any post the caller
+		// cannot edit. So bulk is not weaker-gated than single yoast-update-seo.
 		if ( empty( $input['posts'] ) || ! is_array( $input['posts'] ) ) {
 			return new \WP_Error(
 				'missing_posts',
@@ -2130,14 +2135,24 @@ class Block_Abilities {
 	 * @param string               $path     Namespace-relative path.
 	 * @param array<string, mixed> $params   Route and query parameters.
 	 * @param array<string, mixed> $body     JSON body parameters.
-	 * @return array|WP_Error
+	 * @return array|\WP_Error
 	 */
 	private function call_rest_handler( callable $callback, $method, $path, array $params = array(), array $body = array() ) {
 		$request = new \WP_REST_Request( $method, '/' . REST_Controller::NAMESPACE . $path );
+
+		// Route params (notably the post `id`) go in the URL-params bucket, the
+		// one real routing fills for `{id}` segments and controllers read via
+		// `$request['id']`. set_param() would land them in the body bucket, which
+		// set_body_params() below overwrites — the handler would then read id 0
+		// and every write ability would falsely fail its edit_post check.
+		$route_params = array();
 		foreach ( $params as $key => $value ) {
 			if ( null !== $value ) {
-				$request->set_param( $key, $value );
+				$route_params[ $key ] = $value;
 			}
+		}
+		if ( ! empty( $route_params ) ) {
+			$request->set_url_params( $route_params );
 		}
 
 		if ( ! empty( $body ) ) {
