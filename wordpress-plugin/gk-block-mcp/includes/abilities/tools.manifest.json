@@ -1,0 +1,1996 @@
+{
+  "version": 1,
+  "namespace": "gk-block-mcp",
+  "tools": [
+    {
+      "name": "list_block_types",
+      "ability": "gk-block-mcp/list-block-types",
+      "label": "List block types",
+      "description": "Registered block types with per-block `preference` (tier + replacement), `storage_mode` (\"static\"|\"dynamic\"|\"dual\"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "description": "Filter by namespace (e.g. \"core\", \"filter\")."
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by category (e.g. \"text\", \"media\")."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "preferred",
+              "acceptable",
+              "avoid",
+              "legacy"
+            ],
+            "description": "Exact tier match. Use for migration audits."
+          },
+          "storage_mode": {
+            "type": "string",
+            "enum": [
+              "static",
+              "dynamic",
+              "dual"
+            ],
+            "description": "Filter by storage mode. \"dual\" surfaces blocks needing both attrs+innerHTML on update."
+          },
+          "search": {
+            "type": "string",
+            "description": "Case-insensitive substring match against name + title."
+          },
+          "preferred_only": {
+            "type": "boolean",
+            "description": "Shorthand for `tier in {preferred,acceptable}` (score ≥ 50)."
+          },
+          "usage_only": {
+            "type": "boolean",
+            "description": "Only blocks with usage.count > 0 on this site."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results. Default 50."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip this many. Default 0."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "block_types": {
+            "type": "array"
+          },
+          "count": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          },
+          "next_offset": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "guidance": {
+            "type": "string"
+          }
+        }
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "list_patterns",
+      "ability": "gk-block-mcp/list-patterns",
+      "label": "List patterns",
+      "description": "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Search by name or keyword."
+          },
+          "synced": {
+            "type": "boolean",
+            "description": "true = synced only, false = registered only, omit = all."
+          },
+          "min_score": {
+            "type": "number",
+            "description": "Min preference score; 0 excludes legacy."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results. Default 20."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip this many results. Default 0."
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Bust the 1-hour reference-count cache before listing."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_pattern",
+      "ability": "gk-block-mcp/get-pattern",
+      "label": "Get pattern",
+      "description": "Single pattern's full block content + metadata. Use after list_patterns.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern_id": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "Numeric post ID (synced) or registered pattern name."
+          }
+        },
+        "required": [
+          "pattern_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_site_usage",
+      "ability": "gk-block-mcp/get-site-usage",
+      "label": "Get site usage",
+      "description": "Site-wide block + pattern inventory: usage counts, namespace totals, pattern reference counts, legacy patterns.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "refresh": {
+            "type": "boolean",
+            "description": "Bust the 1-hour cache and rebuild."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "scan_storage_modes",
+      "ability": "gk-block-mcp/scan-storage-modes",
+      "label": "Scan storage modes",
+      "description": "Walk every published post and persist a `block_name → \"static\"|\"dynamic\"|\"dual\"` map (option `gk_block_api_storage_modes`). Slow on large sites; rate-limited to 1/hr. After this runs, get_page_blocks `storage_mode` annotations and dual-storage write enforcement use the live classification. Returns `{scanned_posts, unique_blocks, classification, dual_count, dynamic_count, static_count}`.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "manage_options",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "resolve_url",
+      "ability": "gk-block-mcp/resolve-url",
+      "label": "Resolve URL to post",
+      "description": "URL or path → post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Full URL or path (e.g. \"/some/page/\")."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "list_posts",
+      "ability": "gk-block-mcp/list-posts",
+      "label": "List/search posts",
+      "description": "Search posts by title/content with pagination. Returns `{posts: [{post_id, title, slug, post_type, post_status, post_url, modified}], total, page, per_page, total_pages}`. Use instead of wp post list / wp-json.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Free-text across title + content. Omit to list."
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Single or comma-separated. Default: public types."
+          },
+          "post_status": {
+            "type": "string",
+            "description": "publish | draft | private | any | csv. Default: publish. (`any` is exclusive.)"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Default 20, max 100."
+          },
+          "page": {
+            "type": "number",
+            "description": "Default 1."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_post_info",
+      "ability": "gk-block-mcp/get-post-info",
+      "label": "Get post info",
+      "description": "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count}`. Replaces wp eval / get_permalink() shell-outs.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "One of post_id, url, or slug."
+          },
+          "url": {
+            "type": "string",
+            "description": "Full URL or path. Resolved via url_to_postid."
+          },
+          "slug": {
+            "type": "string",
+            "description": "post_name. Combine with post_type for uniqueness."
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Scope a slug lookup. Default: any."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_page_blocks",
+      "ability": "gk-block-mcp/get-page-blocks",
+      "label": "Get post blocks",
+      "description": "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID. Provide either this or url."
+          },
+          "url": {
+            "type": "string",
+            "description": "Full URL (https://site.com/path/) or site-relative path (/path/). Resolved via url_to_postid. Provide either this or post_id."
+          },
+          "fields": {
+            "type": "string",
+            "description": "Comma-separated fields (e.g. \"path,name,text_preview\"). Omit for all."
+          },
+          "render": {
+            "type": "boolean",
+            "description": "Expand shortcodes, resolve synced patterns, mark dynamic/static."
+          },
+          "search": {
+            "type": "string",
+            "description": "Filter by text in innerHTML. Returns flat matches."
+          },
+          "block_name": {
+            "type": "string",
+            "description": "Filter by block name (e.g. \"core/button\"). Returns flat matches."
+          },
+          "outline": {
+            "type": "boolean",
+            "description": "Return only headings and named sections as a flat outline. Fast page structure view."
+          },
+          "summary_only": {
+            "type": "boolean",
+            "description": "Return only the summary object (no blocks). Fastest page inspection."
+          },
+          "include_legacy_paths": {
+            "type": "boolean",
+            "description": "Add summary.legacy_blocks.paths (per-block path list). Off by default; turn on for migration audits."
+          },
+          "persist_refs": {
+            "type": "boolean",
+            "description": "Default true. When true, missing block refs (attrs.metadata.gk_ref) are assigned and persisted silently (no revision created). Set false for read-only callers that don't want write side effects — refs in the response will not resolve in subsequent mutation calls."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Page size: top-level blocks per response. When more remain, the response carries `pagination.next_cursor` — pass it back via `cursor` to fetch the next page."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous response's `pagination.next_cursor`. Omit on the first request."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "blocks": {
+            "type": "array"
+          },
+          "block_count": {
+            "type": "number"
+          },
+          "warnings": {
+            "type": "array"
+          }
+        }
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_block",
+      "ability": "gk-block-mcp/get-block",
+      "label": "Get one block",
+      "description": "Fetch one block by stable ref OR flat_index — returns the canonical `saved` snapshot (inner_html + attributes) from the database. Same shape that update_block / update_blocks (with `verbose:true`) echo back, so verification reads use the identical contract as the writes that produced them. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`saved.is_dynamic`), `inner_html` is the stored template, not rendered output.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Stable gk_ref. Provide this OR flat_index."
+          },
+          "flat_index": {
+            "type": "number",
+            "description": "Flat block index. Provide this OR ref."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "saved": {
+            "type": "object",
+            "properties": {
+              "flat_index": {
+                "type": "number"
+              },
+              "block_name": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object"
+              },
+              "inner_html": {
+                "type": "string"
+              },
+              "is_dynamic": {
+                "type": "boolean"
+              },
+              "ref": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "update_block",
+      "ability": "gk-block-mcp/update-block",
+      "label": "Update one block",
+      "description": "Update one block by flat_index OR by ref (stable gk_ref from get_page_blocks). Provide exactly one targeting field. Refs are recommended for chained mutations because they survive sibling shifts. attributes are SHALLOW-merged at top level — pass full arrays, not deltas. innerHTML replaces atomically. For dual-storage blocks (e.g. yoast/faq-block) you MUST send both fields together; innerHTML-only is rejected. Response includes `saved.inner_html` and `saved.attributes` — the canonical post-save snapshot from the database. Do not fetch the public page to verify edits.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "flat_index": {
+            "type": "number",
+            "description": "Zero-based flat `index` from get_page_blocks (counts every block, including innerBlocks). Provide this OR `ref`."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Stable gk_ref (e.g. \"blk_a3f2c1q9\") from get_page_blocks. Survives sibling shifts so chained mutations don't go stale. Provide this OR `flat_index`."
+          },
+          "block_name": {
+            "type": "string",
+            "description": "Block type being updated (e.g. \"kevinbatdorf/code-block-pro\"). Required to activate enrichers — e.g. auto-generating codeHTML from code + language."
+          },
+          "attributes": {
+            "type": "object",
+            "description": "Partial attrs (top-level shallow merge). Enrichers derive computed fields (e.g. codeHTML) automatically when block_name is provided."
+          },
+          "innerHTML": {
+            "type": "string",
+            "description": "Replacement innerHTML."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "block": {
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object"
+              },
+              "ref": {
+                "type": "string"
+              }
+            }
+          },
+          "saved": {
+            "type": "object",
+            "description": "Canonical post-save snapshot of the updated block — exactly what is now in post_content. For dynamic blocks, inner_html is the stored template, not the rendered output.",
+            "properties": {
+              "flat_index": {
+                "type": "number"
+              },
+              "block_name": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object"
+              },
+              "inner_html": {
+                "type": "string"
+              },
+              "is_dynamic": {
+                "type": "boolean"
+              },
+              "ref": {
+                "type": "string"
+              }
+            }
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "update_blocks",
+      "ability": "gk-block-mcp/update-blocks",
+      "label": "Batch-update blocks",
+      "description": "Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors — no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post — keeps revision history clean. Pass `verbose: true` to include `saved.inner_html` + `saved.attributes` per result for per-item verification without a re-read.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "updates": {
+            "type": "array",
+            "description": "List of update items (1..50). Each item targets one block; same item shape as update_block.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "description": "Stable gk_ref. Provide this OR flat_index."
+                },
+                "flat_index": {
+                  "type": "number",
+                  "description": "Flat index from get_page_blocks. Provide this OR ref."
+                },
+                "block_name": {
+                  "type": "string",
+                  "description": "Block type (e.g. \"core/paragraph\"). Required for enrichers when attributes are provided."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Partial attrs (top-level shallow merge)."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Replacement innerHTML."
+                }
+              }
+            }
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "When true, each result includes `saved.inner_html` + `saved.attributes` (the canonical post-save snapshot). Default false to keep batch responses compact."
+          }
+        },
+        "required": [
+          "post_id",
+          "updates"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "number"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "batch_index": {
+                  "type": "number"
+                },
+                "block": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "attributes": {
+                      "type": "object"
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "saved": {
+                  "type": "object",
+                  "description": "Canonical post-save snapshot. Present only when called with `verbose: true`.",
+                  "properties": {
+                    "flat_index": {
+                      "type": "number"
+                    },
+                    "block_name": {
+                      "type": "string"
+                    },
+                    "attributes": {
+                      "type": "object"
+                    },
+                    "inner_html": {
+                      "type": "string"
+                    },
+                    "is_dynamic": {
+                      "type": "boolean"
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "insert_blocks",
+      "ability": "gk-block-mcp/insert-blocks",
+      "label": "Insert blocks",
+      "description": "Insert top-level blocks into a post.\n\nPOSITIONING — use exactly ONE anchor (any other key, e.g. `after`, `before`, `position`, is rejected):\n- `before_ref` / `after_ref` — gk_ref from get_page_blocks. Recommended: refs survive sibling shifts.\n- `before_top_level` / `after_top_level` — top_level_counter position.\n- Prepend at the very top: `before_top_level: 0`. Append at the end: omit all anchors.\n\nCONTENT — legacy-tier blocks are rejected per the site policy. Blocks with HTML-sourced attributes (e.g. core/paragraph `content`, core/image `url`) must include matching `innerHTML`; attribute-only inserts fail with `inner_html_required`.\n\nVERIFY — the response's inserted[] returns `ref`, `path`, and `top_level_counter`: confirm the block landed where you intended before moving on. The refs let you chain edit_block_tree without re-reading.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "after_top_level": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "top_level_counter to insert AFTER (omit or -1 = append). To prepend at the very top, prefer `before_top_level: 0`."
+          },
+          "before_top_level": {
+            "type": "number",
+            "description": "top_level_counter to insert BEFORE."
+          },
+          "after_ref": {
+            "type": "string",
+            "description": "gk_ref of the top-level block to insert AFTER. Recommended — survives sibling shifts. Takes precedence over after_top_level."
+          },
+          "before_ref": {
+            "type": "string",
+            "description": "gk_ref of the top-level block to insert BEFORE. Takes precedence over before_top_level."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Blocks to insert. Each def nests recursively via `innerBlocks` — build a whole container (group/columns/callout) with its children in this one call; give the container its empty wrapper `innerHTML` (e.g. '<div class=\"wp-block-group\"></div>').",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "post_id",
+          "blocks"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "inserted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "top_level_counter": {
+                  "type": "number"
+                },
+                "path": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "delete_block",
+      "ability": "gk-block-mcp/delete-block",
+      "label": "Delete blocks",
+      "description": "Remove block(s) by top_level_counter OR by ref. Provide exactly one. For core/block, removes the reference only — not the source pattern.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "top_level_counter": {
+            "type": "number",
+            "description": "Zero-based top_level_counter (sequential position among top-level blocks). Provide this OR `ref`."
+          },
+          "ref": {
+            "type": "string",
+            "description": "gk_ref of the block to remove (or the leading block if count > 1). Survives sibling shifts. Provide this OR `top_level_counter`."
+          },
+          "count": {
+            "type": "number",
+            "description": "Consecutive top-level blocks to remove. Default 1."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          },
+          "deleted_index": {
+            "type": "number"
+          },
+          "deleted_count": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "replace_block_range",
+      "ability": "gk-block-mcp/replace-block-range",
+      "label": "Replace a range of blocks",
+      "description": "Atomic single-revision swap of N top-level blocks for M new blocks (M can be 0, 1, or N). Safer than delete+insert (no half-written intermediate state). Distinct from rewrite_post_blocks (which replaces the entire post).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "start": {
+            "type": "number",
+            "description": "top_level_counter of first block to replace."
+          },
+          "count": {
+            "type": "number",
+            "description": "How many top-level blocks to remove. Pass 0 to insert without removing."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Replacement blocks. May be empty (pure delete) or any length. Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "post_id",
+          "start",
+          "count",
+          "blocks"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "inserted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "top_level_counter": {
+                  "type": "number"
+                },
+                "path": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          },
+          "removed": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "rewrite_post_blocks",
+      "ability": "gk-block-mcp/rewrite-post-blocks",
+      "label": "Rewrite the entire post",
+      "description": "Replace ALL blocks on a page in one revision. Use for major restructuring; prefer update_block / insert_blocks / replace_block_range for edits.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Complete blocks array (replaces all). Each def nests recursively via `innerBlocks` for containers (group/columns/callout) — give the container its empty wrapper `innerHTML`.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "post_id",
+          "blocks"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "attributes": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "revert_to_revision",
+      "ability": "gk-block-mcp/revert-to-revision",
+      "label": "Revert post to revision",
+      "description": "Restore a post to a revision. Pass `before_revision_id` from a prior write to UNDO that write; pass `revision_id` to REDO it.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "revision_id": {
+            "type": "number",
+            "description": "Revision ID to restore."
+          }
+        },
+        "required": [
+          "post_id",
+          "revision_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "insert_pattern",
+      "ability": "gk-block-mcp/insert-pattern",
+      "label": "Insert pattern",
+      "description": "Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits. NOTE: registered (non-numeric) patterns cannot be synced — server forces synced=false. Response includes `synced` (actual mode used) so you can detect the override.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "pattern_id": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "description": "Numeric post ID (synced) or registered pattern name."
+          },
+          "after_top_level": {
+            "type": "number",
+            "description": "top_level_counter to insert AFTER. -1/omit = append. Matches insert_blocks naming."
+          },
+          "before_top_level": {
+            "type": "number",
+            "description": "top_level_counter to insert BEFORE. Matches insert_blocks naming."
+          },
+          "synced": {
+            "type": "boolean",
+            "description": "true (default) = synced reference; false = inline copy."
+          }
+        },
+        "required": [
+          "post_id",
+          "pattern_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "edit_block_tree",
+      "ability": "gk-block-mcp/edit-block-tree",
+      "label": "Edit block tree",
+      "description": "Run one structural op on a nested block tree. Ops: update-attrs, update-html, replace-block, remove-block, wrap-in-group, unwrap-group, insert-child, duplicate, move. Target the block via `ref` (stable gk_ref — recommended, survives sibling shifts) OR `path` (integer array, e.g. [0,2,1]). For move, the destination can be a `destination_ref` instead of a path. Creates a revision.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "Post ID."
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "update-attrs",
+              "update-html",
+              "replace-block",
+              "remove-block",
+              "wrap-in-group",
+              "unwrap-group",
+              "insert-child",
+              "duplicate",
+              "move"
+            ],
+            "description": "Operation to perform."
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Target block path (e.g. [0,2,1]). Provide this OR `ref`."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Stable gk_ref of the target block. Survives sibling shifts. Provide this OR `path`."
+          },
+          "attributes": {
+            "type": "object",
+            "description": "update-attrs: attributes to merge."
+          },
+          "innerHTML": {
+            "type": "string",
+            "description": "update-html: replacement innerHTML."
+          },
+          "block": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Fully-qualified block name (e.g. \"core/heading\")."
+              },
+              "attributes": {
+                "type": "object",
+                "description": "Block attributes."
+              },
+              "innerHTML": {
+                "type": "string",
+                "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+              },
+              "innerBlocks": {
+                "type": "array",
+                "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "description": "replace-block / insert-child: a block def. Nests recursively via `innerBlocks`; containers need their empty wrapper `innerHTML`."
+          },
+          "wrapper": {
+            "type": "object",
+            "description": "wrap-in-group: optional wrapper block. Default core/group.",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Wrapper name. Default \"core/group\"."
+              },
+              "attributes": {
+                "type": "object"
+              }
+            }
+          },
+          "position": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "insert-child: index, \"start\", or \"end\" (default)."
+          },
+          "destination": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "move: destination path (pre-move indexing)."
+          },
+          "destination_ref": {
+            "type": "string",
+            "description": "move: destination block ref (alternative to destination)."
+          },
+          "count": {
+            "type": "integer",
+            "description": "move: consecutive blocks to move. Default 1."
+          }
+        },
+        "required": [
+          "post_id",
+          "op"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "op": {
+            "type": "string"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "block": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "attributes": {
+                "type": "object"
+              },
+              "ref": {
+                "type": "string",
+                "description": "New ref when the op produced a new block."
+              },
+              "new_path": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "description": "duplicate: path of the clone."
+              }
+            }
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "formatted_warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "before_revision_id": {
+            "type": "number"
+          },
+          "revision_id": {
+            "type": "number"
+          }
+        }
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "create_post",
+      "ability": "gk-block-mcp/create-post",
+      "label": "Create post",
+      "description": "Create a new post or page. Returns ID, slug, permalink, and edit link. Provide either `content` (raw HTML or block markup) OR `blocks` (structured), not both. Status defaults to draft. Use update_post for trash transitions.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Post title (required, non-empty)."
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Post type slug (default: post)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "pending",
+              "private",
+              "publish",
+              "future"
+            ],
+            "description": "Initial status. Use update_post for trash transitions."
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw post_content (HTML or block markup). Mutually exclusive with blocks."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Structured blocks. Validated against block registry and preference tier — legacy blocks are rejected.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "slug": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "number",
+            "description": "Parent post ID (hierarchical post types only)."
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "featured_media": {
+            "type": "number",
+            "description": "Attachment ID. Must be an image MIME. Send 0 to leave unset."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Term IDs in the `category` taxonomy."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Term IDs in the `post_tag` taxonomy."
+          },
+          "terms": {
+            "type": "object",
+            "description": "Map of taxonomy slug → term IDs. For non-built-in taxonomies on CPTs."
+          },
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 publish date."
+          },
+          "menu_order": {
+            "type": "number"
+          },
+          "comment_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "ping_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "author": {
+            "type": "number",
+            "description": "User ID. Other-user authorship requires edit_others_posts cap."
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "create_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "update_post",
+      "ability": "gk-block-mcp/update-post",
+      "label": "Update post",
+      "description": "Partial update of post metadata, status, or terms. Block content edits stay on the per-block tools. Use status: \"trash\" to trash; any non-trash status untrashes a trashed post. At least one mutating field besides post_id is required.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "WordPress post ID."
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "pending",
+              "private",
+              "publish",
+              "future",
+              "trash"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "number"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "featured_media": {
+            "type": "number",
+            "description": "Attachment ID. Send 0 to clear."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "terms": {
+            "type": "object"
+          },
+          "date": {
+            "type": "string"
+          },
+          "menu_order": {
+            "type": "number"
+          },
+          "comment_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "ping_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "author": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "list_terms",
+      "ability": "gk-block-mcp/list-terms",
+      "label": "List terms",
+      "description": "List terms in a taxonomy (default: category). Useful for discovering category and tag IDs to pass to create_post or update_post.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "taxonomy": {
+            "type": "string",
+            "description": "Taxonomy slug. Default: category."
+          },
+          "search": {
+            "type": "string",
+            "description": "LIKE match against term name."
+          },
+          "parent": {
+            "type": "number"
+          },
+          "hide_empty": {
+            "type": "boolean",
+            "description": "Default: false."
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Default 100, max 200."
+          },
+          "page": {
+            "type": "number",
+            "description": "1-indexed."
+          },
+          "orderby": {
+            "type": "string",
+            "enum": [
+              "name",
+              "count",
+              "term_id",
+              "slug"
+            ]
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "upload_media",
+      "ability": "gk-block-mcp/upload-media",
+      "label": "Upload media",
+      "description": "Upload an item to the WordPress media library. Provide exactly one of: `path` (local filesystem on the MCP host, sent as multipart), `url` (server-side sideload, 25 MB cap), or `data_base64` (with `filename`). Returns the attachment ID and URL ready for core/image blocks.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path on the MCP host. Will be read and POSTed as multipart."
+          },
+          "url": {
+            "type": "string",
+            "description": "Public URL the WordPress site can fetch."
+          },
+          "data_base64": {
+            "type": "string",
+            "description": "Base64-encoded file contents (requires filename)."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Override filename (required when using data_base64)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "alt_text": {
+            "type": "string",
+            "description": "Saved as _wp_attachment_image_alt meta. Critical for accessibility."
+          },
+          "caption": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "post_id": {
+            "type": "number",
+            "description": "Attach to a parent post (sets post_parent)."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "upload_files",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "yoast_get_seo",
+      "ability": "gk-block-mcp/yoast-get-seo",
+      "label": "Get Yoast SEO metadata",
+      "description": "Read all Yoast SEO metadata for a post or page (title, description, robots, Open Graph, Twitter card, schema types, cornerstone flag, breadcrumb, redirect, scores, primary terms).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "WordPress post or page ID."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "yoast_update_seo",
+      "ability": "gk-block-mcp/yoast-update-seo",
+      "label": "Update Yoast SEO metadata",
+      "description": "Update one or more Yoast SEO fields on a single post or page. Only supplied fields are written. `noindex` is tri-state (true / false / null).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "number",
+            "description": "WordPress post or page ID."
+          },
+          "title": {
+            "type": "string",
+            "description": "SEO title (supports Yoast variables like %%title%%)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Meta description."
+          },
+          "canonical": {
+            "type": "string",
+            "description": "Canonical URL override."
+          },
+          "focus_keyword": {
+            "type": "string",
+            "description": "Focus keyphrase."
+          },
+          "noindex": {
+            "type": "boolean",
+            "description": "true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients — e.g. Google Gemini — reject a \"null\" member in a type array; the handler still accepts an explicit null.)"
+          },
+          "nofollow": {
+            "type": "boolean",
+            "description": "true=nofollow, false=follow."
+          },
+          "robots_advanced": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "noimageindex",
+                "noarchive",
+                "nosnippet"
+              ]
+            },
+            "description": "Subset of: noimageindex, noarchive, nosnippet."
+          },
+          "og_title": {
+            "type": "string",
+            "description": "Open Graph title."
+          },
+          "og_description": {
+            "type": "string",
+            "description": "Open Graph description."
+          },
+          "og_image": {
+            "type": "string",
+            "description": "Open Graph image URL."
+          },
+          "og_image_id": {
+            "type": "number",
+            "description": "Attachment ID for the OG image."
+          },
+          "twitter_title": {
+            "type": "string",
+            "description": "Twitter card title."
+          },
+          "twitter_description": {
+            "type": "string",
+            "description": "Twitter card description."
+          },
+          "twitter_image": {
+            "type": "string",
+            "description": "Twitter card image URL."
+          },
+          "twitter_image_id": {
+            "type": "number",
+            "description": "Attachment ID for the Twitter image."
+          },
+          "schema_page_type": {
+            "type": "string",
+            "enum": [
+              "WebPage",
+              "ItemPage",
+              "AboutPage",
+              "FAQPage",
+              "QAPage",
+              "ProfilePage",
+              "ContactPage",
+              "MedicalWebPage",
+              "CollectionPage",
+              "CheckoutPage",
+              "RealEstateListing",
+              "SearchResultsPage"
+            ],
+            "description": "Schema.org page type."
+          },
+          "schema_article_type": {
+            "type": "string",
+            "enum": [
+              "Article",
+              "BlogPosting",
+              "SocialMediaPosting",
+              "NewsArticle",
+              "AdvertiserContentArticle",
+              "SatiricalArticle",
+              "ScholarlyArticle",
+              "TechArticle",
+              "Report",
+              "None"
+            ],
+            "description": "Schema.org article type."
+          },
+          "is_cornerstone": {
+            "type": "boolean",
+            "description": "Cornerstone content flag."
+          },
+          "breadcrumb_title": {
+            "type": "string",
+            "description": "Breadcrumb title override."
+          },
+          "redirect": {
+            "type": "string",
+            "description": "Redirect URL (Yoast Premium)."
+          },
+          "primary_terms": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "{ taxonomy_name: term_id } — set primary term per taxonomy."
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "yoast_bulk_update_seo",
+      "ability": "gk-block-mcp/yoast-bulk-update-seo",
+      "label": "Bulk-update Yoast SEO metadata",
+      "description": "Update Yoast SEO fields on multiple posts in one call. Each item must include `post_id` plus any fields to update. Response preserves order.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "posts": {
+            "type": "array",
+            "description": "Array of objects, each with post_id and fields to update.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "post_id": {
+                  "type": "number"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "SEO title (supports Yoast variables like %%title%%)."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Meta description."
+                },
+                "canonical": {
+                  "type": "string",
+                  "description": "Canonical URL override."
+                },
+                "focus_keyword": {
+                  "type": "string",
+                  "description": "Focus keyphrase."
+                },
+                "noindex": {
+                  "type": "boolean",
+                  "description": "true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients — e.g. Google Gemini — reject a \"null\" member in a type array; the handler still accepts an explicit null.)"
+                },
+                "nofollow": {
+                  "type": "boolean",
+                  "description": "true=nofollow, false=follow."
+                },
+                "robots_advanced": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "noimageindex",
+                      "noarchive",
+                      "nosnippet"
+                    ]
+                  },
+                  "description": "Subset of: noimageindex, noarchive, nosnippet."
+                },
+                "og_title": {
+                  "type": "string",
+                  "description": "Open Graph title."
+                },
+                "og_description": {
+                  "type": "string",
+                  "description": "Open Graph description."
+                },
+                "og_image": {
+                  "type": "string",
+                  "description": "Open Graph image URL."
+                },
+                "og_image_id": {
+                  "type": "number",
+                  "description": "Attachment ID for the OG image."
+                },
+                "twitter_title": {
+                  "type": "string",
+                  "description": "Twitter card title."
+                },
+                "twitter_description": {
+                  "type": "string",
+                  "description": "Twitter card description."
+                },
+                "twitter_image": {
+                  "type": "string",
+                  "description": "Twitter card image URL."
+                },
+                "twitter_image_id": {
+                  "type": "number",
+                  "description": "Attachment ID for the Twitter image."
+                },
+                "schema_page_type": {
+                  "type": "string",
+                  "enum": [
+                    "WebPage",
+                    "ItemPage",
+                    "AboutPage",
+                    "FAQPage",
+                    "QAPage",
+                    "ProfilePage",
+                    "ContactPage",
+                    "MedicalWebPage",
+                    "CollectionPage",
+                    "CheckoutPage",
+                    "RealEstateListing",
+                    "SearchResultsPage"
+                  ],
+                  "description": "Schema.org page type."
+                },
+                "schema_article_type": {
+                  "type": "string",
+                  "enum": [
+                    "Article",
+                    "BlogPosting",
+                    "SocialMediaPosting",
+                    "NewsArticle",
+                    "AdvertiserContentArticle",
+                    "SatiricalArticle",
+                    "ScholarlyArticle",
+                    "TechArticle",
+                    "Report",
+                    "None"
+                  ],
+                  "description": "Schema.org article type."
+                },
+                "is_cornerstone": {
+                  "type": "boolean",
+                  "description": "Cornerstone content flag."
+                },
+                "breadcrumb_title": {
+                  "type": "string",
+                  "description": "Breadcrumb title override."
+                },
+                "redirect": {
+                  "type": "string",
+                  "description": "Redirect URL (Yoast Premium)."
+                },
+                "primary_terms": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "{ taxonomy_name: term_id } — set primary term per taxonomy."
+                }
+              },
+              "required": [
+                "post_id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "posts"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    }
+  ]
+}
