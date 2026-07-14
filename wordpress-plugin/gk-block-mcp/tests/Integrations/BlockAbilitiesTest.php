@@ -22,6 +22,7 @@ use GravityKit\BlockMCP\Preferences;
 use GravityKit\BlockMCP\REST_Controller;
 use GravityKit\BlockMCP\Term_Manager;
 use GravityKit\BlockMCP\Yoast_Bridge;
+use GravityKit\BlockMCP\Rank_Math_Bridge;
 
 class BlockAbilitiesTest extends BlockApiTestCase {
 
@@ -79,7 +80,7 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 			$preferences
 		);
 
-		return new Block_Abilities( $this->crud, $posts, $registry, $controller, new Yoast_Bridge() );
+		return new Block_Abilities( $this->crud, $posts, $registry, $controller, new Yoast_Bridge(), new Rank_Math_Bridge() );
 	}
 
 	/**

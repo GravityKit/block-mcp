@@ -74,26 +74,36 @@ class Block_Abilities {
 	private $yoast_bridge;
 
 	/**
+	 * Optional Rank Math SEO bridge.
+	 *
+	 * @var Rank_Math_Bridge
+	 */
+	private $rank_math_bridge;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Block_CRUD      $crud         Block CRUD service.
-	 * @param Post_Manager    $post_manager Post manager service.
-	 * @param Block_Registry  $registry     Block registry service.
-	 * @param REST_Controller $controller   REST controller service graph.
-	 * @param Yoast_Bridge    $yoast_bridge Optional Yoast SEO bridge.
+	 * @param Block_CRUD       $crud             Block CRUD service.
+	 * @param Post_Manager     $post_manager     Post manager service.
+	 * @param Block_Registry   $registry         Block registry service.
+	 * @param REST_Controller  $controller       REST controller service graph.
+	 * @param Yoast_Bridge     $yoast_bridge     Optional Yoast SEO bridge.
+	 * @param Rank_Math_Bridge $rank_math_bridge Optional Rank Math SEO bridge.
 	 */
 	public function __construct(
 		Block_CRUD $crud,
 		Post_Manager $post_manager,
 		Block_Registry $registry,
 		REST_Controller $controller,
-		Yoast_Bridge $yoast_bridge
+		Yoast_Bridge $yoast_bridge,
+		Rank_Math_Bridge $rank_math_bridge
 	) {
-		$this->crud         = $crud;
-		$this->post_manager = $post_manager;
-		$this->registry     = $registry;
-		$this->controller   = $controller;
-		$this->yoast_bridge = $yoast_bridge;
+		$this->crud             = $crud;
+		$this->post_manager     = $post_manager;
+		$this->registry         = $registry;
+		$this->controller       = $controller;
+		$this->yoast_bridge     = $yoast_bridge;
+		$this->rank_math_bridge = $rank_math_bridge;
 	}
 
 	/**
@@ -969,6 +979,10 @@ class Block_Abilities {
 			$definitions = array_merge( $definitions, $this->yoast_definitions() );
 		}
 
+		if ( Rank_Math_Bridge::is_rank_math_active() ) {
+			$definitions = array_merge( $definitions, $this->rank_math_definitions() );
+		}
+
 		return $definitions;
 	}
 
@@ -1504,6 +1518,151 @@ class Block_Abilities {
 						'readonly'    => false,
 						'destructive' => true,
 						'idempotent'  => false,
+					),
+					'show_in_rest' => true,
+				),
+			),
+		);
+	}
+
+	/**
+	 * Rank Math SEO field schemas shared by single and bulk updates.
+	 *
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function rank_math_field_properties() {
+		return array(
+			'title'               => array(
+				'type'        => 'string',
+				'description' => __( 'SEO title. Supports Rank Math variables.', 'gk-block-mcp' ),
+			),
+			'description'         => array(
+				'type'        => 'string',
+				'description' => __( 'Meta description.', 'gk-block-mcp' ),
+			),
+			'focus_keyword'       => array(
+				'type'        => 'string',
+				'description' => __( 'Focus keyword(s), comma-separated.', 'gk-block-mcp' ),
+			),
+			'canonical'           => array(
+				'type'        => 'string',
+				'description' => __( 'Canonical URL override.', 'gk-block-mcp' ),
+			),
+			'robots'              => array(
+				'type'        => 'array',
+				'items'       => array( 'type' => 'string' ),
+				'description' => __( 'Robots directives, e.g. index, noindex, nofollow, noarchive.', 'gk-block-mcp' ),
+			),
+			'og_title'            => array(
+				'type'        => 'string',
+				'description' => __( 'Open Graph (Facebook) title.', 'gk-block-mcp' ),
+			),
+			'og_description'      => array(
+				'type'        => 'string',
+				'description' => __( 'Open Graph (Facebook) description.', 'gk-block-mcp' ),
+			),
+			'twitter_title'       => array(
+				'type'        => 'string',
+				'description' => __( 'Twitter card title.', 'gk-block-mcp' ),
+			),
+			'twitter_description' => array(
+				'type'        => 'string',
+				'description' => __( 'Twitter card description.', 'gk-block-mcp' ),
+			),
+		);
+	}
+
+	/**
+	 * Rank Math abilities, registered only while Rank Math SEO is active.
+	 *
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function rank_math_definitions() {
+		$update_properties = array_merge(
+			array(
+				'post_id' => array(
+					'type'        => 'number',
+					'description' => __( 'WordPress post or page ID.', 'gk-block-mcp' ),
+				),
+			),
+			$this->rank_math_field_properties()
+		);
+
+		return array(
+			self::NAMESPACE_PREFIX . 'rank-math-get-seo'         => array(
+				'label'               => __( 'Get Rank Math SEO metadata', 'gk-block-mcp' ),
+				'description'         => __( 'Read all Rank Math SEO metadata for a post or page.', 'gk-block-mcp' ),
+				'category'            => self::CATEGORY,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'post_id' => array(
+							'type'        => 'number',
+							'description' => __( 'WordPress post or page ID.', 'gk-block-mcp' ),
+						),
+					),
+					'required'   => array( 'post_id' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'permission_callback' => array( $this, 'can_edit_post_input' ),
+				'execute_callback'    => array( $this, 'execute_rank_math_get_seo' ),
+				'meta'                => array(
+					'annotations'  => array(
+						'readonly'    => true,
+						'destructive' => false,
+						'idempotent'  => true,
+					),
+					'show_in_rest' => true,
+				),
+			),
+			self::NAMESPACE_PREFIX . 'rank-math-update-seo'      => array(
+				'label'               => __( 'Update Rank Math SEO metadata', 'gk-block-mcp' ),
+				'description'         => __( 'Update one or more Rank Math SEO fields on a single post or page. Only supplied fields are written.', 'gk-block-mcp' ),
+				'category'            => self::CATEGORY,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => $update_properties,
+					'required'   => array( 'post_id' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'permission_callback' => array( $this, 'can_edit_post_input' ),
+				'execute_callback'    => array( $this, 'execute_rank_math_update_seo' ),
+				'meta'                => array(
+					'annotations'  => array(
+						'readonly'    => false,
+						'destructive' => false,
+						'idempotent'  => true,
+					),
+					'show_in_rest' => true,
+				),
+			),
+			self::NAMESPACE_PREFIX . 'rank-math-bulk-update-seo' => array(
+				'label'               => __( 'Bulk-update Rank Math SEO metadata', 'gk-block-mcp' ),
+				'description'         => __( 'Update Rank Math SEO fields on multiple posts in one call. Response order matches request order.', 'gk-block-mcp' ),
+				'category'            => self::CATEGORY,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'posts' => array(
+							'type'        => 'array',
+							'description' => __( 'Array of objects, each with post_id and the fields to update.', 'gk-block-mcp' ),
+							'items'       => array(
+								'type'       => 'object',
+								'properties' => $update_properties,
+								'required'   => array( 'post_id' ),
+							),
+						),
+					),
+					'required'   => array( 'posts' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'permission_callback' => array( $this, 'can_create' ),
+				'execute_callback'    => array( $this, 'execute_rank_math_bulk_update_seo' ),
+				'meta'                => array(
+					'annotations'  => array(
+						'readonly'    => false,
+						'destructive' => false,
+						'idempotent'  => true,
 					),
 					'show_in_rest' => true,
 				),
@@ -2116,6 +2275,66 @@ class Block_Abilities {
 			array( $this->yoast_bridge, 'bulk_update_seo' ),
 			'POST',
 			'/yoast/bulk',
+			array(),
+			array( 'posts' => $input['posts'] )
+		);
+	}
+
+	/**
+	 * Read Rank Math SEO metadata for one post.
+	 *
+	 * @param array<string, mixed> $input Ability input.
+	 * @return array|WP_Error
+	 */
+	public function execute_rank_math_get_seo( $input ) {
+		$post_id = (int) $input['post_id'];
+		return $this->call_rest_handler(
+			array( $this->rank_math_bridge, 'get_seo' ),
+			'GET',
+			'/rank-math/' . $post_id,
+			array( 'post_id' => $post_id )
+		);
+	}
+
+	/**
+	 * Update Rank Math SEO metadata for one post.
+	 *
+	 * @param array<string, mixed> $input Ability input.
+	 * @return array|WP_Error
+	 */
+	public function execute_rank_math_update_seo( $input ) {
+		$post_id = (int) $input['post_id'];
+		$body    = $input;
+		unset( $body['post_id'] );
+
+		return $this->call_rest_handler(
+			array( $this->rank_math_bridge, 'update_seo' ),
+			'POST',
+			'/rank-math/' . $post_id,
+			array( 'post_id' => $post_id ),
+			$body
+		);
+	}
+
+	/**
+	 * Bulk-update Rank Math SEO metadata.
+	 *
+	 * @param array<string, mixed> $input Ability input.
+	 * @return array|WP_Error
+	 */
+	public function execute_rank_math_bulk_update_seo( $input ) {
+		if ( empty( $input['posts'] ) || ! is_array( $input['posts'] ) ) {
+			return new \WP_Error(
+				'missing_posts',
+				__( 'rank_math_bulk_update_seo: non-empty posts array is required.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		return $this->call_rest_handler(
+			array( $this->rank_math_bridge, 'bulk_update_seo' ),
+			'POST',
+			'/rank-math/bulk',
 			array(),
 			array( 'posts' => $input['posts'] )
 		);
