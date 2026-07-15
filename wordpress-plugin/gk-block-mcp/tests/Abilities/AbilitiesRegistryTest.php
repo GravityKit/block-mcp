@@ -8,6 +8,7 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockMCP\Abilities_Registry;
+use GravityKit\BlockMCP\Block_Abilities;
 use GravityKit\BlockMCP\Tool_Executor;
 use GravityKit\BlockMCP\Yoast_Bridge;
 
@@ -15,6 +16,21 @@ use GravityKit\BlockMCP\Yoast_Bridge;
  * Covers the exported tool manifest and in-process tool execution.
  */
 class AbilitiesRegistryTest extends RestControllerTestCase {
+
+	/**
+	 * Registration defaults to opt-in (off); enable it so the WordPress
+	 * Abilities API registry — a lazily-initialized singleton that fires its
+	 * `wp_abilities_api_init`/`wp_abilities_api_categories_init` bootstrap
+	 * exactly once per process, on first touch — registers Block MCP's
+	 * abilities instead of finding the toggle off and no-oping. This file is
+	 * the only place in the suite that touches the live Abilities API, so
+	 * setting the option here (before any test method can trigger that
+	 * first touch) is sufficient regardless of method execution order.
+	 */
+	public function set_up(): void {
+		parent::set_up();
+		update_option( Block_Abilities::ENABLED_OPTION, '1' );
+	}
 
 	/**
 	 * The exported manifest must stay aligned with the npm MCP server's tool list.
