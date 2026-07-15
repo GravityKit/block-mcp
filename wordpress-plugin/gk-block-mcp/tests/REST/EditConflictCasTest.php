@@ -392,4 +392,40 @@ class EditConflictCasTest extends RestControllerTestCase {
 		$this->assertTrue( $injected, 'the ref-persist swap must have run' );
 		$this->assertStringContainsString( 'WINNER', (string) wp_json_encode( $blocks ), 'the read must reflect disk after losing the ref-persist race' );
 	}
+
+	/**
+	 * A read that assigns a missing ref but loses the ref-persist race to a
+	 * writer that EMPTIES the post (not merely replaces its content) must
+	 * surface the empty disk truth, not the stale in-memory tree carrying a
+	 * ref that was never persisted — otherwise get_blocks() reports blocks
+	 * that no longer exist on disk.
+	 */
+	public function test_read_surfaces_empty_disk_truth_when_competing_writer_empties_post() {
+		// Ref-less block, so the read assigns a fresh ref and tries to persist it.
+		$post_id = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>ORIG</p>' ) ) );
+
+		$injected = false;
+		$inject   = function ( $query ) use ( $post_id, &$injected ) {
+			$upper = strtoupper( ltrim( $query ) );
+			// The CAS swap references post_content twice (SET … WHERE … AND
+			// post_content = …), distinguishing it from the no-op touch (0) and a
+			// plain content write such as commit_behind_cache (1). Matches whether
+			// the engine backtick-quotes the column or not.
+			$is_persist_swap = ( 0 === strpos( $upper, 'UPDATE' ) && substr_count( $upper, 'POST_CONTENT' ) >= 2 );
+			if ( $is_persist_swap && ! $injected ) {
+				$injected = true;
+				$this->commit_behind_cache( $post_id, array() );
+			}
+			return $query;
+		};
+		add_filter( 'query', $inject );
+		try {
+			$blocks = $this->crud->get_blocks( $post_id );
+		} finally {
+			remove_filter( 'query', $inject );
+		}
+
+		$this->assertTrue( $injected, 'the ref-persist swap must have run' );
+		$this->assertSame( array(), $blocks, 'the read must reflect the emptied disk state, not the stale in-memory tree carrying an unpersisted ref' );
+	}
 }
