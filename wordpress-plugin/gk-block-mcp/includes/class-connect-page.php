@@ -708,12 +708,15 @@ class Connect_Page {
 	 */
 	public function connection_state() {
 		if ( ! wp_is_application_passwords_available() ) {
-			// Core reports Application Passwords unavailable for two unrelated
-			// reasons: the site is not on HTTPS, or HTTPS is fine but a plugin,
-			// constant, or the wp_is_application_passwords_available filter has
-			// switched the feature off. Only the first is solved by enabling
-			// HTTPS, so the two states carry different remediation copy.
-			if ( wp_is_application_passwords_supported() ) {
+			// Core reports Application Passwords unavailable either because the
+			// site lacks HTTPS or because HTTPS is fine but a plugin/filter
+			// switched the feature off; the two states carry different
+			// remediation copy. Gated on is_ssl() directly, not
+			// wp_is_application_passwords_supported() — that also returns true
+			// on a local-environment install without HTTPS.
+			$has_ssl = is_ssl();
+
+			if ( $has_ssl ) {
 				return 'app_passwords_disabled';
 			}
 
