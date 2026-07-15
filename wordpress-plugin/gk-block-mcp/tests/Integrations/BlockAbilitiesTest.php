@@ -544,6 +544,61 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * insert-blocks position -1 is the documented "append" sentinel (matches
+	 * the MCP server's `after_top_level: -1` contract) and must keep working
+	 * through the ability layer, not be swept up by rejecting other negative
+	 * positions.
+	 */
+	public function test_insert_blocks_ability_position_negative_one_still_appends() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>A</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/insert-blocks' )->execute(
+			array(
+				'post_id'  => $post_id,
+				'position' => -1,
+				'blocks'   => array(
+					array(
+						'name'      => 'core/paragraph',
+						'innerHTML' => '<p>NEW</p>',
+					),
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$blocks = $this->block_tree( $post_id );
+		$this->assertCount( 2, $blocks );
+		$this->assertStringContainsString( '<p>NEW</p>', $blocks[1]['innerHTML'] );
+	}
+
+	/**
+	 * A position more negative than the documented -1 append sentinel has no
+	 * defined meaning; the ability layer talks to Block_Writer directly, so
+	 * it inherits the engine's rejection rather than silently prepending.
+	 */
+	public function test_insert_blocks_ability_rejects_position_more_negative_than_append_sentinel() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>A</p>' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/insert-blocks' )->execute(
+			array(
+				'post_id'  => $post_id,
+				'position' => -2,
+				'blocks'   => array(
+					array(
+						'name'      => 'core/paragraph',
+						'innerHTML' => '<p>NEW</p>',
+					),
+				),
+			)
+		);
+
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertWPError( $result, 'a position more negative than -1 must error, not silently prepend' );
+		$this->assertStringNotContainsString( '<p>NEW</p>', $content, 'no block may be inserted' );
+		$this->assertStringContainsString( '<p>A</p>', $content );
+	}
+
+	/**
 	 * innerHTML carrying block-comment delimiters must not break out of the block
 	 * and inject sibling blocks on the next parse.
 	 */

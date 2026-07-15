@@ -564,6 +564,48 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertEquals( '<p>A</p>', $saved[1]['innerHTML'] );
 	}
 
+	/**
+	 * Position -1 is the documented "append" sentinel (matches the MCP
+	 * server's `after_top_level: -1` / `insert_pattern` position contract)
+	 * and must keep working as append, not be swept up by rejecting other
+	 * negative positions.
+	 */
+	public function test_insert_blocks_position_negative_one_still_appends() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			-1,
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( '<p>NEW</p>', $saved[1]['innerHTML'] );
+	}
+
+	/**
+	 * A position more negative than the documented -1 "append" sentinel has
+	 * no defined meaning and was previously silently clamped to a prepend
+	 * (array_splice at 0) instead of erroring — surprising an agent that
+	 * passed a bad value. It must now be rejected with a 400 error, the same
+	 * style update_block/delete_blocks use for an out-of-range index.
+	 */
+	public function test_insert_blocks_rejects_position_more_negative_than_append_sentinel() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			-2,
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_position', $result->get_error_code() );
+		$this->assertCount( 1, $this->current_blocks(), 'the rejected insert must not have modified the post' );
+	}
+
 	public function test_insert_blocks_legacy_rejected() {
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
 		$result = $this->crud->insert_blocks(
