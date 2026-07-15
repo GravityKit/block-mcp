@@ -2,12 +2,16 @@ version: 2.1
 
 # Release pipeline for the gk-block-mcp WordPress plugin.
 #
-# Builds the plugin ZIP, creates a GitHub release (main only), and — the reason
-# this exists — runs `gktools announce`, which signs the build (Ed25519) and
-# POSTs the signed sha256 + ZIP to the GravityKit Release Manager
+# Builds the plugin ZIP, runs `gktools release` (tag + GitHub release with the
+# readme.txt changelog as the body, then the #release-announcements Slack post),
+# and — the reason this exists — runs `gktools announce`, which signs the build
+# (Ed25519) and POSTs the signed sha256 + ZIP to the GravityKit Release Manager
 # (gravitykit.com). The Release Manager rejects unsigned builds, and Foundation
 # reads auto-updates from it, so without this step a published, registered
 # product still has no builds to serve.
+#
+# CircleCI is the sole creator of the v{version} tag and release (see 3c03c42);
+# build-plugin-zip.yml only builds the ZIP and the rolling 'latest' prerelease.
 #
 # This is a MONOREPO: the plugin lives in wordpress-plugin/gk-block-mcp/, not at
 # the repo root, so the build-tools docker wrappers (which mount $PWD) are run
@@ -42,6 +46,12 @@ jobs:
     <<: *default_job_config
     steps:
       - checkout
+
+      - run:
+          name: Authenticate npm for gktools
+          command: |
+            # gktools is a private GitHub Packages module.
+            printf '//npm.pkg.github.com/:_authToken=%s\n@gravitykit:registry=https://npm.pkg.github.com\n' "$GH_AUTH_TOKEN" >> "$HOME/.npmrc"
 
       - run:
           name: Getting GK build tools
@@ -101,11 +111,18 @@ jobs:
       - run:
           name: Creating a GitHub release
           command: |
-            if [ "$CIRCLE_BRANCH" = "main" ]; then
-              git config user.email "support@gravitykit.com"
-              git config user.name "GravityKit - CI"
-              /home/circleci/tooling/build-tools/build_tools.sh create_release -o "wordpress-plugin/gk-block-mcp/gk-block-mcp.php $BUILD_FILE"
-            fi
+            # Must run from the repo root: gktools mounts the cwd at /app for `gh`.
+            git config user.email "support@gravitykit.com"
+            git config user.name "GravityKit - CI"
+            # gktools reads ./readme.txt from the cwd; this monorepo keeps it with
+            # the plugin. Untracked, so `git add -u` can never commit it.
+            cp wordpress-plugin/gk-block-mcp/readme.txt readme.txt
+            # --merge-to none: develop requires PRs, and --atomic would take the tag
+            # down with the rejected push. .gktools.json cannot express this.
+            npx -y @gravitykit/gktools@latest release \
+              --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php \
+              --build-file "$BUILD_FILE" \
+              --merge-to none
 
       - run:
           name: Sign + announce to the GravityKit Release Manager
@@ -115,16 +132,14 @@ jobs:
             # (Ed25519) and sends the sha256 + signature the Release Manager now
             # requires. build_tools.sh announce_build is deprecated — it sends
             # only an md5 hash with no signature, which the RM rejects
-            # ("Signing is required for every release"). gktools is a private
-            # GitHub Packages module, so authenticate npm to npm.pkg.github.com
-            # first. Signing shells out to `php`, which gktools runs inside the
-            # gravitykit/tools Docker image — the machine executor has no local
-            # php, so do NOT set USE_LOCAL (that would run php locally and fail
-            # with "php: command not found"). Docker is available on the machine
-            # executor, and the image is already pulled by the composer step.
-            # Reads GK_SIGNING_PRIVATE_KEY, GK_RELEASE_MANAGER_URL/TOKEN, and the
-            # Dropbox keys from the `shared` context.
-            printf '//npm.pkg.github.com/:_authToken=%s\n@gravitykit:registry=https://npm.pkg.github.com\n' "$GH_AUTH_TOKEN" >> "$HOME/.npmrc"
+            # ("Signing is required for every release"). Signing shells out to
+            # `php`, which gktools runs inside the gravitykit/tools Docker image —
+            # the machine executor has no local php, so do NOT set USE_LOCAL (that
+            # would run php locally and fail with "php: command not found").
+            # Docker is available on the machine executor, and the image is already
+            # pulled by the composer step. Reads GK_SIGNING_PRIVATE_KEY,
+            # GK_RELEASE_MANAGER_URL/TOKEN, and the Dropbox keys from the `shared`
+            # context.
             npx -y @gravitykit/gktools@latest announce \
               --build-file "$BUILD_FILE" \
               --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php
