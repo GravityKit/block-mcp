@@ -18,16 +18,22 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Registers Block MCP abilities with the WordPress Abilities API.
+ *
+ * @since 2.1.0
  */
 class Block_Abilities {
 
 	/**
 	 * Ability namespace prefix (per-product, matching the text domain).
+	 *
+	 * @since 2.1.0
 	 */
 	const NAMESPACE_PREFIX = 'gk-block-mcp/';
 
 	/**
 	 * Ability category slug.
+	 *
+	 * @since 2.1.0
 	 */
 	const CATEGORY = 'gk-block-mcp';
 
@@ -35,6 +41,8 @@ class Block_Abilities {
 	 * Option key for the "expose operations as WordPress Abilities" toggle.
 	 *
 	 * Stored as the string '0'/'1'; defaults to enabled (opt-out) when unset.
+	 *
+	 * @since 2.1.0
 	 */
 	const ENABLED_OPTION = 'gk_block_api_abilities_enabled';
 
@@ -62,6 +70,8 @@ class Block_Abilities {
 	/**
 	 * Constructor.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param Block_CRUD     $crud         Block CRUD service.
 	 * @param Post_Manager   $post_manager Post manager service.
 	 * @param Block_Registry $registry     Block registry service.
@@ -74,6 +84,8 @@ class Block_Abilities {
 
 	/**
 	 * Whether the WordPress Abilities API is available on this site.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return bool
 	 */
@@ -90,6 +102,8 @@ class Block_Abilities {
 	 * deliberate act, so the site owner turns it on. Stored as the
 	 * `gk_block_api_abilities_enabled` option (Settings → Block MCP) and
 	 * filterable via `gk/block-mcp/abilities/enabled` for programmatic control.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return bool
 	 */
@@ -114,6 +128,8 @@ class Block_Abilities {
 	 * No-op when the Abilities API is absent (older cores) or when the site
 	 * owner has disabled the toggle, so callers can invoke this unconditionally.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @return void
 	 */
 	public function register() {
@@ -126,6 +142,8 @@ class Block_Abilities {
 
 	/**
 	 * Register the ability category. Idempotent.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return void
 	 */
@@ -146,6 +164,8 @@ class Block_Abilities {
 	 * Register all abilities. Idempotent — skips any already registered, so
 	 * re-entrant or repeated firing of `wp_abilities_api_init` is safe.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @return void
 	 */
 	public function register_abilities() {
@@ -159,6 +179,8 @@ class Block_Abilities {
 
 	/**
 	 * The fully-qualified names of every ability this bridge registers.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return string[]
 	 */
@@ -376,6 +398,8 @@ class Block_Abilities {
 	/**
 	 * Permit when the user can edit the post named in the input.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return bool
 	 */
@@ -388,6 +412,8 @@ class Block_Abilities {
 	 * Permit creation for users who can edit posts. The precise create/publish
 	 * capability is enforced inside Post_Manager::create_post().
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return bool
 	 */
@@ -398,6 +424,8 @@ class Block_Abilities {
 
 	/**
 	 * Permit read/discovery for users who can edit posts.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return bool
@@ -412,6 +440,8 @@ class Block_Abilities {
 	/**
 	 * Read a post's block tree via Block_CRUD.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
 	 */
@@ -421,6 +451,8 @@ class Block_Abilities {
 
 	/**
 	 * Update one block by flat index via Block_CRUD.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
@@ -434,6 +466,8 @@ class Block_Abilities {
 	/**
 	 * Insert blocks at a position via Block_CRUD.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
 	 */
@@ -446,6 +480,8 @@ class Block_Abilities {
 	/**
 	 * Create a post via Post_Manager.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
 	 */
@@ -455,6 +491,8 @@ class Block_Abilities {
 
 	/**
 	 * List registered block types via Block_Registry.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
@@ -470,6 +508,8 @@ class Block_Abilities {
 	/**
 	 * Remove one or more blocks via Block_CRUD.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param array<string, mixed> $input Ability input.
 	 * @return array|\WP_Error
 	 */
@@ -481,6 +521,8 @@ class Block_Abilities {
 	/**
 	 * Build the site design context (theme + flattened theme.json presets) so an
 	 * agent composes theme-aligned, valid block markup.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $input Ability input (unused).
 	 * @return array<string, mixed>
