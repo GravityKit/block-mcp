@@ -105,9 +105,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 
 		foreach ( $registry->get_ability_ids() as $id ) {
 			$a = wp_get_ability( $id );
-			if ( null === $a ) {
-				continue;
-			}
+			$this->assertNotNull( $a, $id . ' must be registered' );
 			$m = $a->get_meta();
 			$this->assertTrue(
 				isset( $m['mcp']['public'] ) && true === $m['mcp']['public'],
