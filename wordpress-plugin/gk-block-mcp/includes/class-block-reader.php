@@ -283,10 +283,8 @@ class Block_Reader {
 								$this->invalidate( $post_id );
 								$disk_content = (string) get_post_field( 'post_content', $post_id );
 								$disk_blocks  = parse_blocks( $disk_content );
-								if ( is_array( $disk_blocks ) && ! empty( $disk_blocks ) ) {
-									$blocks = $disk_blocks;
-									$this->parse_cache[ $post_id . ':' . md5( $disk_content ) ] = $blocks;
-								}
+								$blocks       = is_array( $disk_blocks ) ? $disk_blocks : array();
+								$this->parse_cache[ $post_id . ':' . md5( $disk_content ) ] = $blocks;
 							}
 						}
 					} finally {

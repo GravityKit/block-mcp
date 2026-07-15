@@ -18,16 +18,22 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Registers Block MCP abilities with the WordPress Abilities API.
+ *
+ * @since 2.1.0
  */
 class Block_Abilities {
 
 	/**
 	 * Ability namespace prefix (per-product, matching the text domain).
+	 *
+	 * @since 2.1.0
 	 */
 	const NAMESPACE_PREFIX = 'gk-block-mcp/';
 
 	/**
 	 * Ability category slug.
+	 *
+	 * @since 2.1.0
 	 */
 	const CATEGORY = 'gk-block-mcp';
 
@@ -35,11 +41,15 @@ class Block_Abilities {
 	 * Option key for the "expose operations as WordPress Abilities" toggle.
 	 *
 	 * Stored as the string '0'/'1'; defaults to enabled (opt-out) when unset.
+	 *
+	 * @since 2.1.0
 	 */
 	const ENABLED_OPTION = 'gk_block_api_abilities_enabled';
 
 	/**
 	 * Whether the WordPress Abilities API is available on this site.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return bool
 	 */
@@ -50,16 +60,19 @@ class Block_Abilities {
 	/**
 	 * Whether registering Block MCP abilities is enabled for this site.
 	 *
-	 * Default on (opt-out): registration exposes the operations to the official
-	 * MCP Adapter and the Abilities REST API — a capability-gated but
-	 * network-reachable surface — so a site owner can turn it off. Stored as the
+	 * Default off (opt-in): registration exposes the operations to the Abilities
+	 * REST API and to AI agents through an MCP consumer like the MCP Adapter,
+	 * a capability-gated but network-reachable surface. Expanding it is a
+	 * deliberate act, so the site owner turns it on. Stored as the
 	 * `gk_block_api_abilities_enabled` option (Settings → Block MCP) and
 	 * filterable via `gk/block-mcp/abilities/enabled` for programmatic control.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return bool
 	 */
 	public static function is_enabled() {
-		$enabled = '0' !== (string) get_option( self::ENABLED_OPTION, '1' );
+		$enabled = '0' !== (string) get_option( self::ENABLED_OPTION, '0' );
 
 		/**
 		 * Filters whether Block MCP registers its operations as WordPress

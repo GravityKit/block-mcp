@@ -49,6 +49,8 @@
 
 declare( strict_types=1 );
 
+require_once __DIR__ . '/ApplicationPasswordsSupportedStub.php';
+
 use GravityKit\BlockMCP\Agent_Provisioner;
 use GravityKit\BlockMCP\Connect_Page;
 use GravityKit\BlockMCP\Connections;
@@ -1663,6 +1665,53 @@ class ConnectPageTest extends WP_UnitTestCase {
 			$this->assertFalse( is_ssl(), 'guard: is_ssl() must be false without HTTPS' );
 			$this->assertSame( 'needs_https', $page->connection_state() );
 		} finally {
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+
+			if ( null === $original_server_port ) {
+				unset( $_SERVER['SERVER_PORT'] );
+			} else {
+				$_SERVER['SERVER_PORT'] = $original_server_port;
+			}
+		}
+	}
+
+	/**
+	 * connection_state() must not report 'app_passwords_disabled' on a
+	 * local-environment install without HTTPS.
+	 *
+	 * Regression: wp_is_application_passwords_supported() returns true when
+	 * wp_get_environment_type() is 'local', even without HTTPS, so gating
+	 * 'app_passwords_disabled' on that combined predicate told a local dev
+	 * site with Application Passwords filtered off that HTTPS was on when it
+	 * was not. The gate must key off is_ssl() alone. wp_get_environment_type()
+	 * cannot be made to report 'local' from a test in this process (see
+	 * ApplicationPasswordsSupportedStub.php), so the 'local' condition is
+	 * simulated by stubbing wp_is_application_passwords_supported() directly.
+	 */
+	public function test_connection_state_local_env_without_ssl_reports_needs_https() {
+		$page                  = new Connect_Page();
+		$original_https        = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+		$original_server_port  = isset( $_SERVER['SERVER_PORT'] ) ? $_SERVER['SERVER_PORT'] : null;
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		// Simulates wp_get_environment_type() === 'local' without touching it.
+		$GLOBALS['GK_TEST_APP_PASSWORDS_SUPPORTED_OVERRIDE'] = true;
+
+		try {
+			unset( $_SERVER['HTTPS'] );
+			$_SERVER['SERVER_PORT'] = '80';
+			$this->assertFalse( is_ssl(), 'guard: is_ssl() must be false without HTTPS' );
+
+			$this->assertSame( 'needs_https', $page->connection_state() );
+		} finally {
+			unset( $GLOBALS['GK_TEST_APP_PASSWORDS_SUPPORTED_OVERRIDE'] );
+
 			if ( null === $original_https ) {
 				unset( $_SERVER['HTTPS'] );
 			} else {

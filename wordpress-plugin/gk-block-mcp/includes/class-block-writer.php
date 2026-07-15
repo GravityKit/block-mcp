@@ -1324,6 +1324,13 @@ class Block_Writer {
 			$visible_insert = 0;
 		} elseif ( is_numeric( $position ) ) {
 			$pos = (int) $position;
+			if ( $pos < -1 ) {
+				return new \WP_Error(
+					'invalid_position',
+					__( 'Insert position cannot be negative (pass -1 or omit to append).', 'gk-block-mcp' ),
+					array( 'status' => 400 )
+				);
+			}
 			if ( -1 === $pos ) {
 				$visible_insert = $visible_count;
 			} else {
