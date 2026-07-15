@@ -156,36 +156,15 @@ function merge_manual_dual_storage_blocks( $defaults ) {
  */
 function init_rest_api() {
 	try {
-		$preferences      = new Preferences();
-		$block_inventory  = new Block_Inventory();
-		$block_registry   = new Block_Registry( $preferences, $block_inventory );
-		$pattern_manager  = new Pattern_Manager( $preferences );
-		$block_safety     = new Block_Safety();
-		$html_transformer = new HTML_Transformer();
-		$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer, $block_inventory );
-		$block_mutator    = new Block_Mutator( $block_crud, $preferences, $block_safety, $html_transformer );
-		$post_manager     = new Post_Manager( $block_crud );
-		$term_manager     = new Term_Manager();
-		$media_manager    = new Media_Manager();
-
-		$controller = new REST_Controller(
-			$block_registry,
-			$pattern_manager,
-			$block_crud,
-			$block_inventory,
-			$block_mutator,
-			$post_manager,
-			$term_manager,
-			$media_manager,
-			$preferences
-		);
+		$services   = build_block_services();
+		$controller = $services['controller'];
 
 		$controller->register_routes();
 
 		// Yoast SEO bridge: optional add-on. Routes only register when Yoast SEO
 		// is active; absent Yoast, this is a no-op. Lives in its own class so
 		// gk-block-mcp stays self-contained — no mu-plugin or theme dependency.
-		( new Yoast_Bridge() )->register_routes();
+		$services['yoast']->register_routes();
 
 		// Connector credential-exchange route. Registered here (rest_api_init, NOT
 		// the admin-only settings bootstrap) so it answers the connector's
