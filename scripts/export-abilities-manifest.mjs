@@ -20,7 +20,9 @@ import { MEDIA_TOOLS } from '../src/tools/media.js';
 import { YOAST_TOOLS } from '../src/tools/yoast.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(
+
+/** Path to the committed manifest this script writes (and the drift-guard test reads). */
+export const MANIFEST_PATH = path.join(
   __dirname,
   '../wordpress-plugin/gk-block-mcp/includes/abilities/tools.manifest.json',
 );
@@ -85,41 +87,59 @@ const EXTRA_TOOLS = [
   },
 ];
 
-const ALL = [
-  ...DISCOVERY_TOOLS,
-  ...READ_TOOLS,
-  ...WRITE_TOOLS,
-  ...PATTERN_TOOLS,
-  ...MUTATE_TOOLS,
-  ...POST_TOOLS,
-  ...TERM_TOOLS,
-  ...MEDIA_TOOLS,
-  ...YOAST_TOOLS,
-  ...EXTRA_TOOLS,
-];
+/**
+ * Build the abilities manifest object from the current npm tool definitions
+ * plus the plugin-only EXTRA_TOOLS. Shared by the CLI export below and the
+ * manifest drift-guard test (tests/abilities-manifest.test.ts) so both walk
+ * the identical generation logic — a test that duplicated this mapping by
+ * hand could drift from it independently of the committed JSON.
+ *
+ * @returns {{version: number, namespace: string, tools: Array<Record<string, unknown>>}}
+ */
+export function buildManifest() {
+  const all = [
+    ...DISCOVERY_TOOLS,
+    ...READ_TOOLS,
+    ...WRITE_TOOLS,
+    ...PATTERN_TOOLS,
+    ...MUTATE_TOOLS,
+    ...POST_TOOLS,
+    ...TERM_TOOLS,
+    ...MEDIA_TOOLS,
+    ...YOAST_TOOLS,
+    ...EXTRA_TOOLS,
+  ];
 
-const manifest = {
-  version: 1,
-  namespace: 'gk-block-mcp',
-  tools: ALL.map((tool) => {
-    const annotations = tool.annotations ?? {};
-    return {
-      name: tool.name,
-      ability: `gk-block-mcp/${toAbilitySlug(tool.name)}`,
-      label: annotations.title ?? humanLabel(tool.name),
-      description: tool.description,
-      input_schema: tool.inputSchema ?? { type: 'object', properties: {} },
-      output_schema: tool.outputSchema ?? { type: 'object' },
-      permission: permissionFor(tool.name, annotations),
-      annotations: {
-        readonly: annotations.readOnlyHint === true,
-        destructive: annotations.destructiveHint === true,
-        idempotent: annotations.idempotentHint === true,
-      },
-    };
-  }),
-};
+  return {
+    version: 1,
+    namespace: 'gk-block-mcp',
+    tools: all.map((tool) => {
+      const annotations = tool.annotations ?? {};
+      return {
+        name: tool.name,
+        ability: `gk-block-mcp/${toAbilitySlug(tool.name)}`,
+        label: annotations.title ?? humanLabel(tool.name),
+        description: tool.description,
+        input_schema: tool.inputSchema ?? { type: 'object', properties: {} },
+        output_schema: tool.outputSchema ?? { type: 'object' },
+        permission: permissionFor(tool.name, annotations),
+        annotations: {
+          readonly: annotations.readOnlyHint === true,
+          destructive: annotations.destructiveHint === true,
+          idempotent: annotations.idempotentHint === true,
+        },
+      };
+    }),
+  };
+}
 
-fs.mkdirSync(path.dirname(OUT), { recursive: true });
-fs.writeFileSync(OUT, `${JSON.stringify(manifest, null, 2)}\n`);
-console.error(`Wrote ${manifest.tools.length} tools to ${OUT}`);
+// CLI entry point only — guarded so importing this module (e.g. from the
+// drift-guard test) doesn't have the side effect of overwriting the
+// committed manifest.
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const manifest = buildManifest();
+  fs.mkdirSync(path.dirname(MANIFEST_PATH), { recursive: true });
+  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.error(`Wrote ${manifest.tools.length} tools to ${MANIFEST_PATH}`);
+}
