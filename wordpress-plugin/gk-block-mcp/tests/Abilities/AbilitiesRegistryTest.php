@@ -47,10 +47,11 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		$manifest = $method->invoke( $registry );
 
 		$this->assertIsArray( $manifest );
-		$this->assertCount( 26, $manifest['tools'] );
+		$this->assertCount( 27, $manifest['tools'] );
 		$names = wp_list_pluck( $manifest['tools'], 'name' );
 		$this->assertContains( 'get_page_blocks', $names );
 		$this->assertContains( 'edit_block_tree', $names );
+		$this->assertContains( 'site_editor_context', $names );
 	}
 
 	/**
@@ -87,9 +88,10 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		);
 
 		$ids = $registry->get_ability_ids();
-		$this->assertCount( 26, $ids );
+		$this->assertCount( 27, $ids );
 		$this->assertContains( 'gk-block-mcp/get-page-blocks', $ids );
 		$this->assertContains( 'gk-block-mcp/edit-block-tree', $ids );
+		$this->assertContains( 'gk-block-mcp/site-editor-context', $ids );
 	}
 
 	/**
@@ -128,5 +130,35 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 				$id . ' must be mcp.public'
 			);
 		}
+	}
+
+	/**
+	 * The site-editor-context ability returns the site's design tokens so an
+	 * agent composes theme-aligned, valid block markup (preset slugs instead
+	 * of raw hex/px) — the WordPress-recommended prevention move. Restored
+	 * from develop's hand-written Block_Abilities into the manifest-driven
+	 * registry; execution now lives in Tool_Executor::execute_site_editor_context().
+	 */
+	public function test_site_editor_context_ability_returns_presets() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/site-editor-context' )->execute();
+
+		$this->assertNotWPError( $result );
+		$this->assertIsArray( $result );
+		$this->assertArrayHasKey( 'theme', $result );
+		$this->assertArrayHasKey( 'presets', $result );
+		$this->assertArrayHasKey( 'colors', $result['presets'] );
+		$this->assertIsArray( $result['presets']['colors'] );
+	}
+
+	/**
+	 * site-editor-context is a read-only discovery ability, per the manifest
+	 * annotation restored alongside it (see tools.manifest.json EXTRA_TOOLS
+	 * entry in scripts/export-abilities-manifest.mjs).
+	 */
+	public function test_site_editor_context_is_readonly() {
+		$meta = wp_get_ability( 'gk-block-mcp/site-editor-context' )->get_meta();
+		$this->assertTrue( $meta['annotations']['readonly'] );
 	}
 }

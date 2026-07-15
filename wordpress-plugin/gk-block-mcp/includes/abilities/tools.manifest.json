@@ -1991,6 +1991,25 @@
         "destructive": true,
         "idempotent": false
       }
+    },
+    {
+      "name": "site_editor_context",
+      "ability": "gk-block-mcp/site-editor-context",
+      "label": "Site editor context",
+      "description": "Get the site's design tokens (theme name plus the color, gradient, font-size, and spacing presets) so block markup references theme-aligned preset slugs (e.g. has-primary-color) rather than hard-coded values.",
+      "input_schema": {
+        "type": "object",
+        "default": {}
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
     }
   ]
 }

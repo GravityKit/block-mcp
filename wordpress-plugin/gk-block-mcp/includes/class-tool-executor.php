@@ -74,6 +74,8 @@ class Tool_Executor {
 				return $this->execute_get_post_info( $input );
 			case 'get_page_blocks':
 				return $this->execute_get_page_blocks( $input );
+			case 'site_editor_context':
+				return $this->execute_site_editor_context( $input );
 			case 'get_block':
 				return $this->execute_get_block( $input );
 			case 'update_block':
@@ -331,6 +333,80 @@ class Tool_Executor {
 
 		$request = new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/posts/' . $post_id . '/blocks' );
 		return $this->call_controller( array( $this->controller, 'get_post_blocks' ), $request, $params );
+	}
+
+	/**
+	 * Build the site design context (theme + flattened theme.json presets) so an
+	 * agent composes theme-aligned, valid block markup. Has no REST route
+	 * equivalent — this ability reads global settings directly.
+	 *
+	 * @param array<string, mixed> $input Tool input (unused).
+	 * @return array<string, mixed>
+	 */
+	private function execute_site_editor_context( array $input ) {
+		unset( $input );
+
+		$theme = wp_get_theme();
+
+		return array(
+			'theme'   => array(
+				'name'       => $theme->get( 'Name' ),
+				'stylesheet' => get_stylesheet(),
+			),
+			'presets' => array(
+				'colors'        => $this->flatten_presets( $this->global_setting( array( 'color', 'palette' ) ) ),
+				'gradients'     => $this->flatten_presets( $this->global_setting( array( 'color', 'gradients' ) ) ),
+				'font_sizes'    => $this->flatten_presets( $this->global_setting( array( 'typography', 'fontSizes' ) ) ),
+				'spacing_sizes' => $this->flatten_presets( $this->global_setting( array( 'spacing', 'spacingSizes' ) ) ),
+			),
+		);
+	}
+
+	/**
+	 * Read a theme.json setting at the given path, or an empty array.
+	 *
+	 * @param string[] $path Settings path (e.g. ['color','palette']).
+	 * @return mixed
+	 */
+	private function global_setting( array $path ) {
+		if ( ! function_exists( 'wp_get_global_settings' ) ) {
+			return array();
+		}
+		return wp_get_global_settings( $path );
+	}
+
+	/**
+	 * Flatten a preset value that may be keyed by origin (default/theme/custom)
+	 * into a single list. Already-flat lists pass through unchanged.
+	 *
+	 * @param mixed $value Preset value from wp_get_global_settings().
+	 * @return array<int, mixed>
+	 */
+	private function flatten_presets( $value ) {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$origins   = array( 'default', 'theme', 'custom' );
+		$by_origin = false;
+		foreach ( $origins as $origin ) {
+			if ( isset( $value[ $origin ] ) ) {
+				$by_origin = true;
+				break;
+			}
+		}
+
+		if ( ! $by_origin ) {
+			return array_values( $value );
+		}
+
+		$merged = array();
+		foreach ( $origins as $origin ) {
+			if ( isset( $value[ $origin ] ) && is_array( $value[ $origin ] ) ) {
+				$merged = array_merge( $merged, $value[ $origin ] );
+			}
+		}
+		return $merged;
 	}
 
 	/**

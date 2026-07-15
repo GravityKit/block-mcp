@@ -68,6 +68,23 @@ function humanLabel(name) {
     .join(' ');
 }
 
+/**
+ * Plugin-only abilities with no npm MCP server equivalent. Defined here
+ * (rather than sourced from src/tools/*.ts) so a manifest regenerate does
+ * not drop them.
+ *
+ * @type {ReadonlyArray<{name: string, description: string, annotations: Record<string, unknown>, inputSchema: Record<string, unknown>}>}
+ */
+const EXTRA_TOOLS = [
+  {
+    name: 'site_editor_context',
+    description:
+      "Get the site's design tokens (theme name plus the color, gradient, font-size, and spacing presets) so block markup references theme-aligned preset slugs (e.g. has-primary-color) rather than hard-coded values.",
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, title: 'Site editor context' },
+    inputSchema: { type: 'object', default: {} },
+  },
+];
+
 const ALL = [
   ...DISCOVERY_TOOLS,
   ...READ_TOOLS,
@@ -78,6 +95,7 @@ const ALL = [
   ...TERM_TOOLS,
   ...MEDIA_TOOLS,
   ...YOAST_TOOLS,
+  ...EXTRA_TOOLS,
 ];
 
 const manifest = {
