@@ -673,6 +673,24 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 		}
 	}
 
+	/**
+	 * Every registered ability must declare meta.mcp.public === true. The
+	 * official MCP Adapter's default server exposes an ability only when
+	 * this flag is true (`WP\MCP\Abilities\McpAbilityHelperTrait::check_ability_mcp_exposure()`
+	 * reads `$meta['mcp']['public'] ?? false`); a missing or false flag
+	 * silently hides the ability from every adapter-connected agent even
+	 * though show_in_rest/annotations are otherwise correct. Iterating the
+	 * whole set catches a new ability that forgets the flag, not just the
+	 * seven known at write time.
+	 */
+	public function test_every_ability_exposes_mcp_public_meta() {
+		foreach ( $this->registrar->ability_names() as $name ) {
+			$meta      = wp_get_ability( $name )->get_meta();
+			$is_public = isset( $meta['mcp']['public'] ) && true === $meta['mcp']['public'];
+			$this->assertTrue( $is_public, $name . ' must declare meta.mcp.public === true for MCP Adapter exposure' );
+		}
+	}
+
 	// ── Per-ability permission wiring ─────────────────────────────────
 
 	/**

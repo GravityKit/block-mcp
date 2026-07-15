@@ -214,6 +214,7 @@ class Block_Abilities {
 				'meta'                => array(
 					'annotations'  => array( 'readonly' => true ),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'update-block'        => array(
@@ -250,6 +251,7 @@ class Block_Abilities {
 						'destructive' => true,
 					),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'insert-blocks'       => array(
@@ -283,6 +285,7 @@ class Block_Abilities {
 						'destructive' => false,
 					),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'create-post'         => array(
@@ -320,6 +323,7 @@ class Block_Abilities {
 						'destructive' => false,
 					),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'list-block-types'    => array(
@@ -341,6 +345,7 @@ class Block_Abilities {
 				'meta'                => array(
 					'annotations'  => array( 'readonly' => true ),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'delete-block'        => array(
@@ -373,6 +378,7 @@ class Block_Abilities {
 						'destructive' => true,
 					),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 			self::NAMESPACE_PREFIX . 'site-editor-context' => array(
@@ -388,6 +394,7 @@ class Block_Abilities {
 				'meta'                => array(
 					'annotations'  => array( 'readonly' => true ),
 					'show_in_rest' => true,
+					'mcp'          => array( 'public' => true ),
 				),
 			),
 		);
