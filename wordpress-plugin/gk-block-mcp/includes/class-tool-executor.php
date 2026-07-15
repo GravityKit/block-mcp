@@ -960,6 +960,16 @@ class Tool_Executor {
 	/**
 	 * Invoke a REST controller handler and normalize its response payload.
 	 *
+	 * Route params land in the request's URL parameter bucket via
+	 * set_url_params(), never set_param(). WP_REST_Request::set_param()
+	 * writes an unmatched key into whichever bucket is first in parameter
+	 * priority order at that moment — the POST bucket for a PATCH/POST/PUT/
+	 * DELETE request without a JSON content type yet — and set_body_params()
+	 * below fully replaces the POST bucket, silently dropping anything
+	 * written there beforehand. The URL bucket is never touched by
+	 * set_body_params(), so route params (post id, block index, etc.)
+	 * survive regardless of call order.
+	 *
 	 * @param callable             $callback Controller method.
 	 * @param \WP_REST_Request     $request  Prepared request.
 	 * @param array<string, mixed> $params   Route/query params to merge.
@@ -967,11 +977,14 @@ class Tool_Executor {
 	 * @return array<string, mixed>|\WP_Error
 	 */
 	private function call_controller( callable $callback, \WP_REST_Request $request, array $params = array(), array $json = array() ) {
-		foreach ( $params as $key => $value ) {
-			if ( null === $value ) {
-				continue;
+		$route_params = array_filter(
+			$params,
+			static function ( $value ) {
+				return null !== $value;
 			}
-			$request->set_param( $key, $value );
+		);
+		if ( ! empty( $route_params ) ) {
+			$request->set_url_params( array_merge( $request->get_url_params(), $route_params ) );
 		}
 
 		if ( ! empty( $json ) ) {
