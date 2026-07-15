@@ -126,7 +126,7 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 
 #### 🚀 Added
 
-* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's off by default; turn it on at **Settings → Block MCP** when you want AI agents that connect through WordPress to reach Block MCP. On WordPress 6.8 and earlier it is simply skipped.
+* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter (and any other Abilities consumer) can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's off by default; turn it on at **Settings → Block MCP** when you want AI agents that connect through WordPress to reach Block MCP. On WordPress 6.8 and earlier it is simply skipped.
 
 #### ✨ Improved
 
@@ -138,19 +138,19 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 
 #### 🔒 Security
 
-* Tightened the permissions of the dedicated AI assistant account so it stays limited to creating and editing content — posts and pages — and is never granted access to site-wide design or administrative settings. This holds on every theme, including full site editing themes.
+* Tightened the permissions of the dedicated AI assistant account so it stays limited to creating and editing content (posts and pages) and is never granted access to site-wide design or administrative settings. This holds on every theme, including full site editing themes.
 * Strengthened how block content is saved so that text placed inside a block can't alter the structure of the surrounding page. This protection now applies on every editing path.
 * Hardened URL-based media uploads so a supplied link only downloads from the address you provide. If an image source relies on a redirect, provide the final image URL directly.
 * "Reset to defaults" now also returns the "allow the assistant to move posts to the trash" permission to off, so a reset fully restores the safe default settings.
 
 #### 🐛 Fixed
 
-* Fixes a block edit sometimes undoing a change made moments earlier — for example, a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
-* Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change — your revision history and editor integrations are left intact.
+* Fixes a block edit sometimes undoing a change made moments earlier, such as a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
+* Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change. Your revision history and editor integrations are left intact.
 * Fixes URL lookups returning the site's front page when given a query-string permalink such as `?p=123` or `?post_type=docs&p=123`. The query string is now preserved, so the lookup resolves to the intended post. Pretty permalinks were unaffected.
 * Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
 * Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
-* Moving a block into an empty container — or to the last position inside a container — no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
+* Moving a block into an empty container (or to the last position inside a container) no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 * Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
 
 #### 💻 Developer Updates
