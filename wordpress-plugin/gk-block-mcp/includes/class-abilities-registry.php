@@ -139,9 +139,9 @@ class Abilities_Registry {
 			'Block MCP',
 			__( 'Block-level WordPress content CRUD with preference-aware guidance.', 'gk-block-mcp' ),
 			GK_BLOCK_MCP_VERSION,
-			array( '\WP\MCP\Transport\HttpTransport::class' ),
-			'\WP\MCP\Infrastructure\ErrorHandling\ErrorLogMcpErrorHandler::class',
-			'\WP\MCP\Infrastructure\Observability\NullMcpObservabilityHandler::class',
+			array( \WP\MCP\Transport\HttpTransport::class ),
+			\WP\MCP\Infrastructure\ErrorHandling\ErrorLogMcpErrorHandler::class,
+			\WP\MCP\Infrastructure\Observability\NullMcpObservabilityHandler::class,
 			$ability_ids,
 			array(),
 			array()
