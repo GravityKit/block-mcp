@@ -94,7 +94,7 @@ class Abilities_Registry {
 			return;
 		}
 
-		foreach ( $manifest['tools'] as $tool ) {
+		foreach ( $this->registrable_tools( $manifest ) as $tool ) {
 			$this->register_tool_ability( $tool );
 		}
 	}
@@ -119,7 +119,7 @@ class Abilities_Registry {
 		}
 
 		$ability_ids = array();
-		foreach ( $manifest['tools'] as $tool ) {
+		foreach ( $this->registrable_tools( $manifest ) as $tool ) {
 			if ( ! empty( $tool['ability'] ) && is_string( $tool['ability'] ) ) {
 				$ability_ids[] = $tool['ability'];
 			}
@@ -162,12 +162,41 @@ class Abilities_Registry {
 		}
 
 		$ids = array();
-		foreach ( $manifest['tools'] as $tool ) {
+		foreach ( $this->registrable_tools( $manifest ) as $tool ) {
 			if ( ! empty( $tool['ability'] ) && is_string( $tool['ability'] ) ) {
 				$ids[] = $tool['ability'];
 			}
 		}
 		return $ids;
+	}
+
+	/**
+	 * Manifest tools this site can actually run.
+	 *
+	 * Yoast tools (`yoast_*`) call into Tool_Executor's Yoast bridge, which
+	 * hard-fails with `yoast_unavailable` when Yoast SEO isn't active — the
+	 * same gate `Yoast_Bridge::register_routes()` applies to the REST routes.
+	 * Excluding them here keeps Abilities/MCP-Adapter discovery from
+	 * advertising abilities that always error on this site.
+	 *
+	 * @param array<string, mixed> $manifest Parsed manifest (from load_manifest()).
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function registrable_tools( array $manifest ) {
+		$tools = isset( $manifest['tools'] ) && is_array( $manifest['tools'] ) ? $manifest['tools'] : array();
+		if ( Yoast_Bridge::is_yoast_active() ) {
+			return $tools;
+		}
+
+		return array_values(
+			array_filter(
+				$tools,
+				static function ( $tool ) {
+					$name = isset( $tool['name'] ) ? (string) $tool['name'] : '';
+					return 0 !== strpos( $name, 'yoast_' );
+				}
+			)
+		);
 	}
 
 	/**

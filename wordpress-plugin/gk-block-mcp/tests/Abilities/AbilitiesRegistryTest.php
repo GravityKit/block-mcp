@@ -80,6 +80,12 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 
 	/**
 	 * Ability ids use the gk-block-mcp namespace and dashed slugs.
+	 *
+	 * Count excludes the three yoast_* tools: get_ability_ids() reflects what
+	 * actually registers, which is conditional on Yoast being active, unlike
+	 * the manifest itself (still 27 — test_manifest_lists_all_block_mcp_tools).
+	 * This test is untagged, so it only ever runs in the default (non-Yoast)
+	 * suite.
 	 */
 	public function test_ability_ids_use_expected_namespace() {
 		$registry = new Abilities_Registry(
@@ -88,10 +94,73 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		);
 
 		$ids = $registry->get_ability_ids();
-		$this->assertCount( 27, $ids );
+		$this->assertCount( 24, $ids );
 		$this->assertContains( 'gk-block-mcp/get-page-blocks', $ids );
 		$this->assertContains( 'gk-block-mcp/edit-block-tree', $ids );
 		$this->assertContains( 'gk-block-mcp/site-editor-context', $ids );
+		$this->assertNotContains( 'gk-block-mcp/yoast-get-seo', $ids );
+	}
+
+	/**
+	 * Yoast abilities must not be registered when Yoast SEO isn't active —
+	 * Tool_Executor's yoast_* handlers hard-fail with `yoast_unavailable`
+	 * otherwise, so registering them would advertise abilities that always
+	 * error. Runs under the default (non-Yoast) suite only; the positive
+	 * case is covered by test_yoast_abilities_registered_when_yoast_active()
+	 * under tests/phpunit/yoast.xml.
+	 */
+	public function test_yoast_abilities_not_registered_when_yoast_inactive() {
+		$this->assertFalse( Yoast_Bridge::is_yoast_active(), 'sanity: this test must run where Yoast is not loaded' );
+
+		$registry = new Abilities_Registry(
+			new Tool_Executor( $this->controller, new Yoast_Bridge() ),
+			$this->controller
+		);
+
+		$ids = $registry->get_ability_ids();
+		$this->assertNotContains( 'gk-block-mcp/yoast-get-seo', $ids );
+		$this->assertNotContains( 'gk-block-mcp/yoast-update-seo', $ids );
+		$this->assertNotContains( 'gk-block-mcp/yoast-bulk-update-seo', $ids );
+
+		// The plugin bootstrap already registered abilities on the init hooks
+		// (see test_registered_abilities_are_mcp_public for why this reads
+		// live registration instead of re-registering). wp_get_ability() on an
+		// unregistered id triggers WP core's own _doing_it_wrong() — expect it
+		// rather than let the test framework flag it as unexpected.
+		$this->setExpectedIncorrectUsage( 'WP_Abilities_Registry::get_registered' );
+		$this->assertNull( wp_get_ability( 'gk-block-mcp/yoast-get-seo' ) );
+		$this->assertNull( wp_get_ability( 'gk-block-mcp/yoast-update-seo' ) );
+		$this->assertNull( wp_get_ability( 'gk-block-mcp/yoast-bulk-update-seo' ) );
+	}
+
+	/**
+	 * Mirror of test_yoast_abilities_not_registered_when_yoast_inactive() for
+	 * the positive case: when Yoast SEO is active, the three yoast_* tools
+	 * ARE registered as abilities (and the manifest's full 27 count is
+	 * reachable). Tagged `@group yoast` so it only runs under
+	 * tests/phpunit/yoast.xml, the one config that loads Yoast SEO
+	 * (GK_LOAD_YOAST=1) — the default suite excludes the yoast group, so
+	 * this never runs where Yoast is absent.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_abilities_registered_when_yoast_active() {
+		$this->assertTrue( Yoast_Bridge::is_yoast_active(), 'sanity: this test must run where Yoast is loaded' );
+
+		$registry = new Abilities_Registry(
+			new Tool_Executor( $this->controller, new Yoast_Bridge() ),
+			$this->controller
+		);
+
+		$ids = $registry->get_ability_ids();
+		$this->assertCount( 27, $ids );
+		$this->assertContains( 'gk-block-mcp/yoast-get-seo', $ids );
+		$this->assertContains( 'gk-block-mcp/yoast-update-seo', $ids );
+		$this->assertContains( 'gk-block-mcp/yoast-bulk-update-seo', $ids );
+
+		$this->assertNotNull( wp_get_ability( 'gk-block-mcp/yoast-get-seo' ) );
+		$this->assertNotNull( wp_get_ability( 'gk-block-mcp/yoast-update-seo' ) );
+		$this->assertNotNull( wp_get_ability( 'gk-block-mcp/yoast-bulk-update-seo' ) );
 	}
 
 	/**
