@@ -207,7 +207,8 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 	public function test_update_block_innerhtml_strips_injected_delimiters() {
 		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
 
-		$this->crud->update_block( $post_id, 0, array(), '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' );
+		$result = $this->crud->update_block( $post_id, 0, array(), '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' );
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'update must succeed before the delimiter assertion is meaningful' );
 
 		$content = (string) get_post_field( 'post_content', $post_id );
 		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ), 'update must not inject a phantom block delimiter' );
@@ -219,7 +220,8 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 	public function test_mutate_update_html_strips_injected_delimiters() {
 		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
 
-		$this->mutator->mutate( $post_id, 'update-html', array( 0 ), array( 'innerHTML' => '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' ) );
+		$result = $this->mutator->mutate( $post_id, 'update-html', array( 0 ), array( 'innerHTML' => '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' ) );
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'mutate must succeed before the delimiter assertion is meaningful' );
 
 		$content = (string) get_post_field( 'post_content', $post_id );
 		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ) );

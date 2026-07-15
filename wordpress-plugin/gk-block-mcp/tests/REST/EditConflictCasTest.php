@@ -383,8 +383,11 @@ class EditConflictCasTest extends RestControllerTestCase {
 			return $query;
 		};
 		add_filter( 'query', $inject );
-		$blocks = $this->crud->get_blocks( $post_id );
-		remove_filter( 'query', $inject );
+		try {
+			$blocks = $this->crud->get_blocks( $post_id );
+		} finally {
+			remove_filter( 'query', $inject );
+		}
 
 		$this->assertTrue( $injected, 'the ref-persist swap must have run' );
 		$this->assertStringContainsString( 'WINNER', (string) wp_json_encode( $blocks ), 'the read must reflect disk after losing the ref-persist race' );
