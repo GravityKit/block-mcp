@@ -37,6 +37,8 @@ class Tool_Executor {
 	private $yoast_bridge;
 
 	/**
+	 * Constructor.
+	 *
 	 * @param REST_Controller   $controller   REST controller instance.
 	 * @param Yoast_Bridge|null $yoast_bridge Yoast bridge, when available.
 	 */
@@ -120,6 +122,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * List and paginate registered block types via the block-types REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -159,6 +163,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * List and paginate registered patterns via the patterns REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -196,6 +202,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Fetch a single pattern by id via the patterns REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -211,6 +219,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Fetch site-wide block and pattern usage stats via the site-usage REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -223,6 +233,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Trigger a site-wide block storage-mode scan via the storage-modes REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -235,6 +247,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Resolve a front-end URL to its post id via the resolve REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -252,6 +266,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Search and list posts via the find-posts REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -264,6 +280,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Fetch post metadata via the post-info REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -276,6 +294,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Resolve a post by id or URL and fetch its blocks via the post-blocks REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -314,6 +334,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Fetch a single block by ref or flat_index via the block REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -345,6 +367,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Update one block's attributes and/or innerHTML, addressed by ref or flat_index, via the block-update REST handlers.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -396,10 +420,20 @@ class Tool_Executor {
 		$index   = (int) $input['flat_index'];
 		$request = new \WP_REST_Request( 'PATCH', '/' . REST_Controller::NAMESPACE . '/posts/' . $post_id . '/blocks/' . $index );
 		$request->set_param( 'index', $index );
-		return $this->call_controller( array( $this->controller, 'update_block' ), $request, array( 'id' => $post_id, 'index' => $index ), $body );
+		return $this->call_controller(
+			array( $this->controller, 'update_block' ),
+			$request,
+			array(
+				'id'    => $post_id,
+				'index' => $index,
+			),
+			$body
+		);
 	}
 
 	/**
+	 * Batch-update multiple blocks in one revision via the blocks batch-update REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -427,6 +461,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Insert one or more blocks into a post via the insert-blocks REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -463,6 +499,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Delete one or more blocks, addressed by ref or top-level counter, via the block-delete REST handlers.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -509,6 +547,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Replace a contiguous range of top-level blocks via the blocks-replace REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -534,6 +574,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Replace all of a post's blocks in one write via the replace-all-blocks REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -556,6 +598,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Revert a post's blocks to a prior revision via the revert REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -580,6 +624,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Run a path-based block-tree mutation via the mutate REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -602,6 +648,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Insert a pattern (synced or inline) via the insert-pattern REST handler and annotate the result with a synced/inline note.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -637,7 +685,7 @@ class Tool_Executor {
 			return $data;
 		}
 
-		$synced = ! empty( $data['synced'] );
+		$synced       = ! empty( $data['synced'] );
 		$data['note'] = $synced
 			? __( 'Pattern inserted as synced reference. Changes to the source pattern will update this page.', 'gk-block-mcp' )
 			: __( 'Pattern blocks inserted inline. This copy is independent and can be edited per-page.', 'gk-block-mcp' );
@@ -646,6 +694,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Create a post via the posts REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -655,6 +705,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Update a post's fields (status, terms, author, etc.) via the post-update REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -684,6 +736,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * List terms via the terms REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -696,6 +750,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Validate a single media source (URL or base64) and upload it via the media REST handler.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -741,6 +797,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Fetch a post's Yoast SEO data via the Yoast bridge, when Yoast is active.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -764,6 +822,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Update a post's Yoast SEO data via the Yoast bridge, when Yoast is active.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -790,6 +850,8 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Bulk-update Yoast SEO data for multiple posts via the Yoast bridge, when Yoast is active.
+	 *
 	 * @param array<string, mixed> $input Tool input.
 	 * @return array<string, mixed>|\WP_Error
 	 */
@@ -823,8 +885,8 @@ class Tool_Executor {
 	 * Invoke a REST controller handler and normalize its response payload.
 	 *
 	 * @param callable             $callback Controller method.
-	 * @param \WP_REST_Request       $request  Prepared request.
-	 * @param array<string, mixed>   $params   Route/query params to merge.
+	 * @param \WP_REST_Request     $request  Prepared request.
+	 * @param array<string, mixed> $params   Route/query params to merge.
 	 * @param array<string, mixed> $json     Optional JSON body params.
 	 * @return array<string, mixed>|\WP_Error
 	 */

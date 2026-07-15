@@ -50,6 +50,8 @@ class Abilities_Registry {
 	private $manifest;
 
 	/**
+	 * Constructor.
+	 *
 	 * @param Tool_Executor   $executor   Tool runner.
 	 * @param REST_Controller $controller REST controller for permission callbacks.
 	 */
@@ -169,6 +171,8 @@ class Abilities_Registry {
 	}
 
 	/**
+	 * Register a single manifest tool as a WordPress ability.
+	 *
 	 * @param array<string, mixed> $tool Tool definition from the manifest.
 	 * @return void
 	 */
@@ -258,6 +262,8 @@ class Abilities_Registry {
 	}
 
 	/**
+	 * Normalize a REST_Controller permission-check result to true or a WP_Error.
+	 *
 	 * @param callable $callback REST_Controller permission method.
 	 * @return true|\WP_Error
 	 */

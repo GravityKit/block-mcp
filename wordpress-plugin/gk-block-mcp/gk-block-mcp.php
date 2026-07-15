@@ -274,6 +274,8 @@ add_action( 'wp_abilities_api_init', __NAMESPACE__ . '\\init_abilities_api' );
 /**
  * Expose Block MCP abilities through a dedicated MCP Adapter server with
  * one tool per ability (matches the npm block-mcp tool surface).
+ *
+ * @param object $adapter The `\WP\MCP\Core\McpAdapter` instance from the `mcp_adapter_init` action; unused — `Abilities_Registry::register_mcp_server()` re-fetches the singleton itself.
  */
 function init_block_mcp_adapter_server( $adapter ) {
 	unset( $adapter );
