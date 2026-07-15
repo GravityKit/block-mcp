@@ -15,6 +15,7 @@
             <directory>Security</directory>
             <directory>Stress</directory>
             <directory>Connect</directory>
+            <directory>Abilities</directory>
         </testsuite>
     </testsuites>
     <!--
