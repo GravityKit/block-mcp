@@ -126,7 +126,7 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 
 #### 🚀 Added
 
-* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's on by default and can be turned off at **Settings → Block MCP**; on WordPress 6.8 and earlier it is simply skipped.
+* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter — and any other Abilities consumer — can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's off by default; turn it on at **Settings → Block MCP** when you want AI agents that connect through WordPress to reach Block MCP. On WordPress 6.8 and earlier it is simply skipped.
 
 #### ✨ Improved
 

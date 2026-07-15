@@ -282,14 +282,24 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	// ── Enable/disable setting ────────────────────────────────────────
 
 	/**
-	 * Registration is enabled by default (opt-out).
+	 * Registration is disabled by default (opt-in). Exposing the operations to
+	 * the Abilities REST API and to AI agents via an MCP consumer is a
+	 * deliberate act, so a fresh install ships with the surface closed.
 	 */
-	public function test_abilities_enabled_by_default() {
+	public function test_abilities_disabled_by_default() {
+		$this->assertFalse( Block_Abilities::is_enabled() );
+	}
+
+	/**
+	 * The stored setting enables registration when turned on.
+	 */
+	public function test_setting_enables_abilities() {
+		update_option( Block_Abilities::ENABLED_OPTION, '1' );
 		$this->assertTrue( Block_Abilities::is_enabled() );
 	}
 
 	/**
-	 * The stored setting disables registration when turned off.
+	 * The stored setting keeps registration off when explicitly '0'.
 	 */
 	public function test_setting_disables_abilities() {
 		update_option( Block_Abilities::ENABLED_OPTION, '0' );
@@ -301,6 +311,7 @@ class BlockAbilitiesTest extends BlockApiTestCase {
 	 * programmatic control (matching the allow-trash pattern).
 	 */
 	public function test_filter_can_disable_abilities() {
+		update_option( Block_Abilities::ENABLED_OPTION, '1' );
 		add_filter( 'gk/block-mcp/abilities/enabled', '__return_false' );
 		$enabled = Block_Abilities::is_enabled();
 		remove_filter( 'gk/block-mcp/abilities/enabled', '__return_false' );

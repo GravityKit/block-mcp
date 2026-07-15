@@ -84,16 +84,17 @@ class Block_Abilities {
 	/**
 	 * Whether registering Block MCP abilities is enabled for this site.
 	 *
-	 * Default on (opt-out): registration exposes the operations to the official
-	 * MCP Adapter and the Abilities REST API — a capability-gated but
-	 * network-reachable surface — so a site owner can turn it off. Stored as the
+	 * Default off (opt-in): registration exposes the operations to the Abilities
+	 * REST API and to AI agents through an MCP consumer like the MCP Adapter,
+	 * a capability-gated but network-reachable surface. Expanding it is a
+	 * deliberate act, so the site owner turns it on. Stored as the
 	 * `gk_block_api_abilities_enabled` option (Settings → Block MCP) and
 	 * filterable via `gk/block-mcp/abilities/enabled` for programmatic control.
 	 *
 	 * @return bool
 	 */
 	public static function is_enabled() {
-		$enabled = '0' !== (string) get_option( self::ENABLED_OPTION, '1' );
+		$enabled = '0' !== (string) get_option( self::ENABLED_OPTION, '0' );
 
 		/**
 		 * Filters whether Block MCP registers its operations as WordPress

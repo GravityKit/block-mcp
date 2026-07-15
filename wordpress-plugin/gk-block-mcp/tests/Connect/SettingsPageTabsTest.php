@@ -310,6 +310,6 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 
 		$this->assertStringContainsString( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, $html, 'the abilities toggle input must render' );
-		$this->assertStringContainsString( 'Abilities', $html, 'the Abilities section heading must render' );
+		$this->assertStringContainsString( 'AI agents', $html, 'the AI agents section heading must render' );
 	}
 }

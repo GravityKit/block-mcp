@@ -197,17 +197,17 @@ class Settings_Page {
 		);
 
 		// 7. "Expose operations as WordPress Abilities" toggle. Same '0'/'1'
-		// string storage as above. Default '1' (on, opt-out): registering
-		// exposes the operations to the official MCP Adapter and the Abilities
-		// REST API — capability-gated, but a network-reachable surface a site
-		// owner may want to close.
+		// string storage as above. Default '0' (off, opt-in): registering
+		// exposes the operations to the Abilities REST API and to AI agents via
+		// an MCP consumer — capability-gated, but a network-reachable surface the
+		// owner opts into rather than one that turns on during a core update.
 		register_setting(
 			self::OPTION_GROUP,
 			\GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION,
 			array(
 				'type'              => 'string',
 				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
-				'default'           => '1',
+				'default'           => '0',
 			)
 		);
 	}
@@ -1119,11 +1119,9 @@ class Settings_Page {
 				endif;
 				?>
 
-				<h2><?php esc_html_e( 'Other AI tools (WordPress 6.9+)', 'gk-block-mcp' ); ?></h2>
+				<h2><?php esc_html_e( 'AI agents', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Lets newer versions of WordPress — and other AI tools that support it — use Block MCP automatically, so you don\'t have to connect each one by hand.', 'gk-block-mcp' ); ?>
-					<strong><?php esc_html_e( 'Safe to leave on:', 'gk-block-mcp' ); ?></strong>
-					<?php esc_html_e( 'anything that uses it still has to sign in and have permission to edit, exactly like the connections on the Connect tab. Turn it off if you only want the assistants you connect here to have access.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this on so AI agents that connect through WordPress can edit your pages and posts using Block MCP, instead of connecting Block MCP to each one separately. Each agent still has to sign in and have permission to edit, the same as the apps on the Connect tab.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				$abilities_available = \GravityKit\BlockMCP\Block_Abilities::is_available();
@@ -1141,7 +1139,7 @@ class Settings_Page {
 						value="1"
 						<?php checked( $abilities_enabled ); ?>
 					/>
-					<?php esc_html_e( 'Let other AI tools use Block MCP automatically', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Let AI agents that connect through WordPress edit my pages and posts', 'gk-block-mcp' ); ?>
 				</label>
 				<p class="description">
 					<details class="gk-block-mcp-tech-details">
@@ -1150,7 +1148,7 @@ class Settings_Page {
 						echo wp_kses(
 							sprintf(
 								/* translators: %s: "Learn more" documentation link */
-								__( 'On WordPress 6.9+, Block MCP registers its operations as native WordPress Abilities, so the official MCP Adapter and any other Abilities consumer can discover and run them. Each ability is capability-gated identically to the REST API. %s', 'gk-block-mcp' ),
+								__( 'Registers Block MCP\'s operations as WordPress Abilities. The official MCP Adapter exposes them to AI agents as MCP tools, and any Abilities consumer can discover and run them. Every operation stays capability-gated, identical to the REST API. %s', 'gk-block-mcp' ),
 								'<a href="https://www.gravitykit.com/wordpress-block-mcp/" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Learn more', 'gk-block-mcp' ) . '</a>'
 							),
 							array(
@@ -1166,7 +1164,7 @@ class Settings_Page {
 				</p>
 				<?php
 				// Surface filter-driven overrides so the box reflects the value the API actually honors.
-				$abilities_raw    = get_option( $abilities_option, '1' );
+				$abilities_raw    = get_option( $abilities_option, '0' );
 				$abilities_stored = '0' !== (string) $abilities_raw;
 				// Applies the gk/block-mcp/abilities/enabled filter (documented in class-block-abilities.php).
 				$abilities_filtered = (bool) apply_filters( 'gk/block-mcp/abilities/enabled', $abilities_stored );
