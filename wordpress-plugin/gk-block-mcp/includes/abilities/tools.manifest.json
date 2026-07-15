@@ -555,7 +555,7 @@
       "permission": "edit_post",
       "annotations": {
         "readonly": false,
-        "destructive": false,
+        "destructive": true,
         "idempotent": false
       }
     },
@@ -682,7 +682,7 @@
       "permission": "edit_post",
       "annotations": {
         "readonly": false,
-        "destructive": false,
+        "destructive": true,
         "idempotent": false
       }
     },
