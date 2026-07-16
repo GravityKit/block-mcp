@@ -470,6 +470,77 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * The edit_post permission branch has two halves: a global edit_posts
+	 * check, then (when the input carries post_id) a per-post
+	 * current_user_can('edit_post', post_id) check. The sibling test above
+	 * (test_update_block_ability_denies_without_capability) only exercises the
+	 * first half — a fully logged-out user fails before the per-post check
+	 * ever runs. This test pins the second half: an Author has edit_posts
+	 * globally (passes the first check) but lacks edit_others_posts, so
+	 * targeting another author's post must still be denied.
+	 *
+	 * Pins current, already-correct behavior in
+	 * Abilities_Registry::check_tool_permission()'s default/edit_post branch —
+	 * the same per-post half whose absence of coverage on the read branch let
+	 * Fix 3's yoast_get_seo over-permission ship green (see
+	 * test_yoast_get_seo_ability_denies_reading_another_authors_post).
+	 */
+	public function test_update_block_ability_denies_without_per_post_capability() {
+		$owner_id = self::factory()->user->create( array( 'role' => 'author' ) );
+		$post_id  = $this->make_block_post(
+			array( $this->paragraph( '<p>Old</p>' ) ),
+			array( 'post_author' => $owner_id )
+		);
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'author' ) ) );
+		$this->setExpectedIncorrectUsage( 'WP_Ability::execute' );
+		$result = wp_get_ability( 'gk-block-mcp/update-block' )->execute(
+			array(
+				'post_id'    => $post_id,
+				'flat_index' => 0,
+				'innerHTML'  => '<p>New</p>',
+			)
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+		$this->assertStringContainsString( '<p>Old</p>', $this->block_tree( $post_id )[0]['innerHTML'], 'content must be untouched' );
+	}
+
+	/**
+	 * The read permission branch (Abilities_Registry::check_tool_permission()'s
+	 * 'read' case) denies a subscriber, who lacks the global edit_posts
+	 * capability the branch checks. Pins the branch itself — distinct from
+	 * test_yoast_get_seo_ability_denies_reading_another_authors_post, which
+	 * pins the per-post edit_post branch a read-shaped ability was moved to.
+	 */
+	public function test_list_block_types_ability_denies_subscriber() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$this->setExpectedIncorrectUsage( 'WP_Ability::execute' );
+		$result = wp_get_ability( 'gk-block-mcp/list-block-types' )->execute( array() );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	/**
+	 * The manage_options permission branch
+	 * (Abilities_Registry::check_tool_permission()'s 'manage_options' case)
+	 * denies a non-admin (an Editor, who has edit_posts and edit_others_posts
+	 * but not manage_options) rather than falling through to a lesser check.
+	 */
+	public function test_scan_storage_modes_ability_denies_non_admin() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		$this->setExpectedIncorrectUsage( 'WP_Ability::execute' );
+		$result = wp_get_ability( 'gk-block-mcp/scan-storage-modes' )->execute( array() );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
+	}
+
+	/**
 	 * Read/discovery abilities are annotated readonly; the mutating
 	 * update-block ability is not. The annotation is the hint MCP clients
 	 * use to label a tool.
