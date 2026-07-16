@@ -173,11 +173,11 @@ class Block_Inventory {
 	 *
 	 * True only when the block is registered, declares at least one attribute
 	 * this plugin can re-derive from innerHTML (source attribute/html/rich-text/
-	 * text), and carries no non-presentational array/object attribute that lacks
-	 * such a source. That last clause is the guard against blocks like
-	 * yoast/faq-block, whose `questions[]` array lives only in the delimiter JSON
-	 * and cannot be reconstructed from the rendered innerHTML — for those an
-	 * innerHTML-only edit must still be rejected, not auto-synced.
+	 * text), and carries no non-presentational array/object attribute at all.
+	 * That last clause is the guard against blocks like yoast/faq-block, whose
+	 * `questions[]` array lives only in the delimiter JSON and cannot be
+	 * reconstructed from a string source — for those an innerHTML-only edit must
+	 * still be rejected, not auto-synced.
 	 *
 	 * @since 2.1.0
 	 *
@@ -230,11 +230,13 @@ class Block_Inventory {
 			if ( ! $is_structured || isset( $presentational[ $key ] ) ) {
 				continue;
 			}
-			$attr_def   = isset( $schema[ $key ] ) && is_array( $schema[ $key ] ) ? $schema[ $key ] : array();
-			$has_source = isset( $attr_def['source'] ) && isset( $derivable_sources[ $attr_def['source'] ] );
-			if ( ! $has_source ) {
-				return false;
-			}
+			// A non-presentational array/object value can never be auto-synced:
+			// all four derivable sources resolve to a string, so re-deriving it
+			// would overwrite the structured value with a scalar. This holds even
+			// when the attribute declares a source (a string source on an array
+			// attribute still yields a string) — the yoast/faq-block questions[]
+			// case is only the sourceless variant of the same hazard.
+			return false;
 		}
 
 		return true;

@@ -1129,6 +1129,60 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Reject an attribute write that would overwrite a Block Bindings value.
+	 *
+	 * WP 6.5+ resolves a bound attribute at render time from a binding source
+	 * (post-meta, etc.), so writing it directly silently clobbers a value the
+	 * author never controls here. Every write path that applies attributes runs
+	 * this, including the dual-storage auto-derive paths whose derived `content`
+	 * could collide with a `content` binding. A write to `metadata` itself is
+	 * structural and always allowed.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param array<string, mixed> $attributes         Attributes about to be written.
+	 * @param array<string, mixed> $block_attrs         The target block's current attributes.
+	 * @param bool                 $allow_bound_writes  Caller opt-in to overwrite bound attrs.
+	 *
+	 * @return \WP_Error|null WP_Error('bound_attribute') when blocked, else null.
+	 */
+	public function reject_bound_write( array $attributes, array $block_attrs, $allow_bound_writes ) {
+		if ( $allow_bound_writes || empty( $attributes ) ) {
+			return null;
+		}
+
+		$bindings = isset( $block_attrs['metadata']['bindings'] ) && is_array( $block_attrs['metadata']['bindings'] )
+			? $block_attrs['metadata']['bindings']
+			: array();
+		if ( empty( $bindings ) ) {
+			return null;
+		}
+
+		$blocked = array();
+		foreach ( array_keys( $attributes ) as $attr_key ) {
+			if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
+				$blocked[] = $attr_key;
+			}
+		}
+		if ( empty( $blocked ) ) {
+			return null;
+		}
+
+		return new \WP_Error(
+			'bound_attribute',
+			sprintf(
+				/* translators: 1: comma-separated list of bound attribute names */
+				__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
+				implode( ', ', $blocked )
+			),
+			array(
+				'status'           => 400,
+				'bound_attributes' => $blocked,
+			)
+		);
+	}
+
+	/**
 	 * Flatten a nested block structure into a flat array with path references.
 	 *
 	 * Each entry contains the block data and a 'path' array indicating how to

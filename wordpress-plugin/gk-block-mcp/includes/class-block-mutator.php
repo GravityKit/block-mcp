@@ -309,6 +309,15 @@ class Block_Mutator {
 					if ( null === $derived ) {
 						return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
 					}
+					// Same bound-write guard update_block applies to derived attrs.
+					$bound_error = $this->crud->reject_bound_write(
+						$derived,
+						$existing_attrs,
+						! empty( $params['allow_bound_writes'] )
+					);
+					if ( null !== $bound_error ) {
+						return $bound_error;
+					}
 					$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $derived );
 				}
 

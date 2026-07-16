@@ -66,6 +66,20 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 			);
 		}
 
+		// The trap the adversarial pass found: a STRUCTURED (array) attribute
+		// that declares an innerHTML source. The source resolves to a string, so
+		// re-deriving would clobber the array — this must NOT be auto-synced.
+		if ( ! $registry->is_registered( 'test/list-like' ) ) {
+			$registry->register(
+				'test/list-like',
+				array(
+					'attributes' => array(
+						'items' => array( 'type' => 'array', 'source' => 'html', 'selector' => 'ul' ),
+					),
+				)
+			);
+		}
+
 		// Mark the fixtures dual via the authoritative storage-modes option
 		// rather than the gk/block-mcp/block/dual-storage filter: the filter's
 		// defaults are cached in a process-static inside is_block_dual_storage(),
@@ -77,6 +91,7 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 				'test/heading-like'       => Block_Inventory::STORAGE_MODE_DUAL,
 				'test/faq-like'           => Block_Inventory::STORAGE_MODE_DUAL,
 				'test/opaque'             => Block_Inventory::STORAGE_MODE_DUAL,
+				'test/list-like'          => Block_Inventory::STORAGE_MODE_DUAL,
 				'test/unregistered-dual'  => Block_Inventory::STORAGE_MODE_DUAL,
 			)
 		);
@@ -312,5 +327,93 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 
 		$this->assertWPError( $result );
 		$this->assertSame( 'dual_storage_requires_both', $result->get_error_code() );
+	}
+
+	// ── Structured-attribute clobber (adversarial finding) ────────────────
+
+	/**
+	 * A structured (array/object) attribute is never re-derivable even when it
+	 * declares an innerHTML source, because every source resolves to a string.
+	 * The discriminator must reject it so array_merge can't overwrite the array.
+	 */
+	public function test_rederivable_false_for_structured_attr_with_source() {
+		$inv   = new Block_Inventory();
+		$attrs = array( 'items' => array( array( 'label' => 'Apple' ), array( 'label' => 'Pear' ) ) );
+		$this->assertFalse( $inv->is_innerhtml_rederivable( 'test/list-like', $attrs ) );
+	}
+
+	/**
+	 * An innerHTML-only edit to a block whose sourced attribute is an ARRAY must
+	 * be rejected, not auto-synced — otherwise the derived string clobbers the
+	 * canonical array and the structured data is lost. This is the exact
+	 * data-loss the adversarial verification caught.
+	 */
+	public function test_update_block_rejects_structured_sourced_attr_and_preserves_array() {
+		$items   = array( array( 'label' => 'Apple', 'url' => '/a' ), array( 'label' => 'Pear', 'url' => '/p' ) );
+		$post_id = $this->make_block_post( array(
+			$this->blk( 'test/list-like', array( 'items' => $items ), '<ul><li>Apple</li><li>Pear</li></ul>' ),
+		) );
+
+		$result = $this->crud->update_block( $post_id, 0, array(), '<ul><li>Cherry</li></ul>' );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'dual_storage_requires_both', $result->get_error_code() );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( $items, $tree[0]['attrs']['items'], 'structured array must survive intact' );
+	}
+
+	// ── Bound-attribute guard on the derive paths (adversarial finding) ───
+
+	/**
+	 * Build a simple dual block whose `content` is bound via Block Bindings.
+	 *
+	 * @param string $inner_html Rendered markup.
+	 * @return array
+	 */
+	private function bound_heading( string $inner_html ): array {
+		return $this->blk(
+			'test/heading-like',
+			array(
+				'level'    => 2,
+				'content'  => 'Bound',
+				'metadata' => array( 'bindings' => array( 'content' => array( 'source' => 'core/post-meta', 'args' => array( 'key' => 'k' ) ) ) ),
+			),
+			$inner_html
+		);
+	}
+
+	/**
+	 * The batch derive path must run the same bound-write guard as update_block,
+	 * so an auto-derived `content` can't overwrite a `content` binding.
+	 */
+	public function test_batch_guards_bound_derived_attribute() {
+		$post_id = $this->make_block_post( array( $this->bound_heading( '<h2>Bound</h2>' ) ) );
+
+		$result = $this->crud->update_blocks_batch(
+			$post_id,
+			array( array( 'flat_index' => 0, 'innerHTML' => '<h2>Overwrite</h2>' ) ),
+			true
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'batch_validation_failed', $result->get_error_code() );
+		$errors = $result->get_error_data()['errors'] ?? array();
+		$this->assertSame( 'bound_attribute', $errors[0]['code'] ?? null );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( 'Bound', $tree[0]['attrs']['content'], 'bound value not clobbered' );
+	}
+
+	/**
+	 * The mutator update-html derive path must run the same bound-write guard.
+	 */
+	public function test_mutator_guards_bound_derived_attribute() {
+		$post_id = $this->make_block_post( array( $this->bound_heading( '<h2>Bound</h2>' ) ) );
+
+		$result = $this->mutator->mutate( $post_id, 'update-html', array( 0 ), array( 'innerHTML' => '<h2>Overwrite</h2>' ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'bound_attribute', $result->get_error_code() );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( 'Bound', $tree[0]['attrs']['content'], 'bound value not clobbered' );
 	}
 }

@@ -913,41 +913,17 @@ class Block_Writer {
 			$attributes = $derived;
 		}
 
-		// WP 6.5+ Block Bindings guard: reject writes that attempt to overwrite
-		// a dynamically-bound attribute unless the caller explicitly opts in with
-		// allow_bound_writes:true. This prevents agents from silently clobbering
-		// a value that is resolved at render time from post-meta or another source.
+		// WP 6.5+ Block Bindings guard, applied here so the derived attributes
+		// above are checked too: an auto-derived `content` must not clobber a
+		// `content` binding any more than a caller-supplied one.
 		$allow_bound_writes = ! empty( $options['allow_bound_writes'] );
-		if ( ! $allow_bound_writes && ! empty( $attributes ) ) {
-			$bindings = isset( $block['attrs']['metadata']['bindings'] ) && is_array( $block['attrs']['metadata']['bindings'] )
-				? $block['attrs']['metadata']['bindings']
-				: array();
-
-			if ( ! empty( $bindings ) ) {
-				$blocked = array();
-				foreach ( array_keys( (array) $attributes ) as $attr_key ) {
-					// 'metadata' writes are structural; only individual attribute
-					// keys within bindings are protected. A write to 'metadata'
-					// itself (e.g. updating metadata.name) is always allowed.
-					if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
-						$blocked[] = $attr_key;
-					}
-				}
-				if ( ! empty( $blocked ) ) {
-					return new \WP_Error(
-						'bound_attribute',
-						sprintf(
-							/* translators: 1: comma-separated list of bound attribute names */
-							__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
-							implode( ', ', $blocked )
-						),
-						array(
-							'status'           => 400,
-							'bound_attributes' => $blocked,
-						)
-					);
-				}
-			}
+		$bound_error        = $this->crud->reject_bound_write(
+			(array) $attributes,
+			isset( $block['attrs'] ) ? $block['attrs'] : array(),
+			$allow_bound_writes
+		);
+		if ( null !== $bound_error ) {
+			return $bound_error;
 		}
 
 		// Apply attribute merge + auto-transform + innerHTML replacement.
@@ -1181,6 +1157,22 @@ class Block_Writer {
 							__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
 							$target_block['blockName']
 						),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				// Derived attrs go through the same bound-write guard as
+				// update_block, so an auto-derived value can't clobber a binding.
+				$bound_error = $this->crud->reject_bound_write(
+					$derived,
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					false
+				);
+				if ( null !== $bound_error ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $bound_error->get_error_code(),
+						'message' => $bound_error->get_error_message(),
 						'block'   => (string) $target_block['blockName'],
 					);
 					continue;
