@@ -38,6 +38,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { WordPressBlockClient } from './client.js';
+import { resolveWordPressConfig, buildNotConfiguredResult } from './config.js';
 import { getInstructions } from './instructions.js';
 import { DISCOVERY_TOOLS, handleDiscoveryTool } from './tools/discovery.js';
 import { READ_TOOLS, handleReadTool } from './tools/read.js';
@@ -58,21 +59,8 @@ import { runConnect } from './connect.js';
 // ============================================
 // Initialize WordPress client
 // ============================================
-
-// Primary names (recommended): WORDPRESS_URL / WORDPRESS_USER / WORDPRESS_APP_PASSWORD.
-// Fall back to the legacy GK_-prefixed names so existing configs keep working;
-// emit a deprecation notice to stderr when they're used. The legacy names will
-// be removed in a future minor release.
-function readEnv(primary: string, legacy: string): string | undefined {
-  const fromPrimary = process.env[primary];
-  if (fromPrimary) return fromPrimary;
-  const fromLegacy = process.env[legacy];
-  if (fromLegacy) {
-    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
-    return fromLegacy;
-  }
-  return undefined;
-}
+// Config resolution (WORDPRESS_* with legacy GK_* fallback) lives in
+// ./config.ts so it stays side-effect free and unit-testable.
 
 // ============================================
 // Aggregate all tool definitions
@@ -152,7 +140,11 @@ const LEGACY_PREFERENCES_RESOURCE_URI = 'block-mcp://block-preferences';
 // `_instructions` field — see the construction note above).
 // ============================================
 
-function registerHandlers(server: McpServer, client: WordPressBlockClient): void {
+function registerHandlers(
+  server: McpServer,
+  client: WordPressBlockClient | null,
+  notConfiguredMessage?: string
+): void {
 
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: ALL_TOOLS };
@@ -165,6 +157,13 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const toolArgs = (args ?? {}) as Record<string, unknown>;
+
+  // Degraded mode: the server started without a valid WordPress config, so it
+  // can list tools (the client connects and sees them) but cannot run any —
+  // return a clear reason instead of a crash the client shows as -32000.
+  if (!client) {
+    return buildNotConfiguredResult(notConfiguredMessage ?? 'Block MCP is not configured.');
+  }
 
   try {
     const handle = TOOL_DISPATCH.get(name);
@@ -358,22 +357,31 @@ async function main(): Promise<void> {
   }
 
   // ── env-var validation ──────────────────────────────────────────────────
-  const WORDPRESS_URL = readEnv('WORDPRESS_URL', 'GK_SITE_URL');
-  const WORDPRESS_USER = readEnv('WORDPRESS_USER', 'GK_BLOCK_API_USER');
-  const WORDPRESS_APP_PASSWORD = readEnv('WORDPRESS_APP_PASSWORD', 'GK_BLOCK_API_APP_PASSWORD');
+  const cfg = resolveWordPressConfig(process.env);
 
-  if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
-    console.error(
-      'Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD'
+  // Start degraded rather than exiting on a missing/invalid config: exiting
+  // kills the stdio session before the handshake, so the MCP client only shows
+  // an opaque -32000. A running server lists its tools and returns cfg.message
+  // (which names the missing vars) on any tool call — a diagnosable error.
+  if (!cfg.ok) {
+    console.error(`Block MCP: ${cfg.message}`);
+    const degraded = new McpServer(
+      { name: 'block-mcp', version: pkg.version },
+      { capabilities: { tools: {}, resources: {}, prompts: {} } }
     );
-    process.exit(1);
+    registerHandlers(degraded, null, cfg.message);
+    await degraded.connect(new StdioServerTransport());
+    console.error(
+      'Block MCP Server running on stdio (unconfigured — tool calls return a configuration error)'
+    );
+    return;
   }
 
   const client = new WordPressBlockClient({
-    wordpress_url: WORDPRESS_URL,
+    wordpress_url: cfg.config.url,
     auth: {
-      username: WORDPRESS_USER,
-      application_password: WORDPRESS_APP_PASSWORD,
+      username: cfg.config.user,
+      application_password: cfg.config.password,
     },
   });
 
@@ -382,7 +390,7 @@ async function main(): Promise<void> {
   // from the start — no post-construction mutation of SDK internals.
   // `getInstructions` never throws: on any failure it logs to stderr
   // and returns the baseline only.
-  const instructions = await getInstructions(WORDPRESS_URL);
+  const instructions = await getInstructions(cfg.config.url);
 
   const server = new McpServer(
     {

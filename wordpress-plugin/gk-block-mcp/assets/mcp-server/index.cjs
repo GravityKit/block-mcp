@@ -40690,6 +40690,51 @@ var WordPressBlockClient = class {
   }
 };
 
+// src/config.ts
+function readEnv(env, primary, legacy) {
+  const fromPrimary = env[primary];
+  if (fromPrimary && fromPrimary.trim() !== "") {
+    return fromPrimary;
+  }
+  const fromLegacy = env[legacy];
+  if (fromLegacy && fromLegacy.trim() !== "") {
+    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
+    return fromLegacy;
+  }
+  return void 0;
+}
+function resolveWordPressConfig(env) {
+  const url3 = readEnv(env, "WORDPRESS_URL", "GK_SITE_URL");
+  const user = readEnv(env, "WORDPRESS_USER", "GK_BLOCK_API_USER");
+  const password = readEnv(env, "WORDPRESS_APP_PASSWORD", "GK_BLOCK_API_APP_PASSWORD");
+  const missing = [];
+  if (!url3) {
+    missing.push("WORDPRESS_URL");
+  }
+  if (!user) {
+    missing.push("WORDPRESS_USER");
+  }
+  if (!password) {
+    missing.push("WORDPRESS_APP_PASSWORD");
+  }
+  if (missing.length > 0) {
+    const message = `Block MCP is not configured: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Set them in the "env" block of the block-mcp server entry in your MCP client config. Your site's Settings \u2192 Block MCP \u2192 Connect generates a ready-made config for you.`;
+    return { ok: false, missing, message };
+  }
+  return { ok: true, config: { url: url3, user, password } };
+}
+function buildNotConfiguredResult(message) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ error: true, code: "not_configured", message }, null, 2)
+      }
+    ],
+    isError: true
+  };
+}
+
 // src/instructions.ts
 var BASELINE = `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
@@ -53990,16 +54035,6 @@ Fall back \u2014 add this to your Claude Code MCP config manually:`);
 }
 
 // src/index.ts
-function readEnv(primary, legacy) {
-  const fromPrimary = process.env[primary];
-  if (fromPrimary) return fromPrimary;
-  const fromLegacy = process.env[legacy];
-  if (fromLegacy) {
-    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
-    return fromLegacy;
-  }
-  return void 0;
-}
 var ALL_TOOLS = [
   ...DISCOVERY_TOOLS,
   ...READ_TOOLS,
@@ -54030,13 +54065,16 @@ for (const { tools, handle: handle2 } of TOOL_GROUPS) {
 }
 var AGENT_GUIDE_RESOURCE_URI = "block-mcp://agent-guide";
 var LEGACY_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-function registerHandlers(server, client) {
+function registerHandlers(server, client, notConfiguredMessage) {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: ALL_TOOLS };
   });
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const toolArgs = args ?? {};
+    if (!client) {
+      return buildNotConfiguredResult(notConfiguredMessage ?? "Block MCP is not configured.");
+    }
     try {
       const handle2 = TOOL_DISPATCH.get(name);
       if (!handle2) {
@@ -54162,23 +54200,28 @@ async function main() {
     await runConnect(process.argv.slice(3));
     process.exit(0);
   }
-  const WORDPRESS_URL = readEnv("WORDPRESS_URL", "GK_SITE_URL");
-  const WORDPRESS_USER = readEnv("WORDPRESS_USER", "GK_BLOCK_API_USER");
-  const WORDPRESS_APP_PASSWORD = readEnv("WORDPRESS_APP_PASSWORD", "GK_BLOCK_API_APP_PASSWORD");
-  if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
-    console.error(
-      "Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD"
+  const cfg = resolveWordPressConfig(process.env);
+  if (!cfg.ok) {
+    console.error(`Block MCP: ${cfg.message}`);
+    const degraded = new McpServer(
+      { name: "block-mcp", version: package_default.version },
+      { capabilities: { tools: {}, resources: {}, prompts: {} } }
     );
-    process.exit(1);
+    registerHandlers(degraded, null, cfg.message);
+    await degraded.connect(new StdioServerTransport());
+    console.error(
+      "Block MCP Server running on stdio (unconfigured \u2014 tool calls return a configuration error)"
+    );
+    return;
   }
   const client = new WordPressBlockClient({
-    wordpress_url: WORDPRESS_URL,
+    wordpress_url: cfg.config.url,
     auth: {
-      username: WORDPRESS_USER,
-      application_password: WORDPRESS_APP_PASSWORD
+      username: cfg.config.user,
+      application_password: cfg.config.password
     }
   });
-  const instructions = await getInstructions(WORDPRESS_URL);
+  const instructions = await getInstructions(cfg.config.url);
   const server = new McpServer(
     {
       name: "block-mcp",
