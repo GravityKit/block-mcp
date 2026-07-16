@@ -53682,7 +53682,6 @@ function describeExchangeFetchError(url3, err) {
   return `Exchange failed: could not reach ${url3} (${reason}).${hint}`;
 }
 async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS) {
-  const origin2 = new URL(site).origin;
   let url3 = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -53709,8 +53708,10 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
           `Exchange failed: the site redirected the request (HTTP ${res.status}); ensure --site is the canonical site URL.`
         );
       }
+      const current = new URL(url3);
       const next = new URL(location, url3);
-      if (next.origin !== origin2) {
+      const sameHostHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname;
+      if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
         throw new Error(
           `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
         );

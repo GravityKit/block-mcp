@@ -408,7 +408,6 @@ export async function exchangeCode(
   fetchFn: typeof fetch = fetch,
   timeoutMs: number = EXCHANGE_FETCH_TIMEOUT_MS
 ): Promise<Credentials> {
-  const origin = new URL(site).origin;
   let url = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
 
   const controller = new AbortController();
@@ -434,15 +433,23 @@ export async function exchangeCode(
         break;
       }
 
-      // Follow only same-origin redirects, re-POSTing the body.
+      // Follow same-origin redirects, re-POSTing the body. Also follow a
+      // same-host http->https upgrade: a site that forces HTTPS is a security
+      // upgrade to the same site, not an off-site leak, and refusing it bombed
+      // the connector for anyone who passed --site http://. Any other
+      // cross-origin redirect (different host, or an https->http downgrade) is
+      // still refused so the credential is never sent off the target site.
       const location = res.headers.get('location');
       if (!location || hops >= 3) {
         throw new Error(
           `Exchange failed: the site redirected the request (HTTP ${res.status}); ensure --site is the canonical site URL.`
         );
       }
+      const current = new URL(url);
       const next = new URL(location, url);
-      if (next.origin !== origin) {
+      const sameHostHttpsUpgrade =
+        current.protocol === 'http:' && next.protocol === 'https:' && next.hostname === current.hostname;
+      if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
         throw new Error(
           `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
         );
