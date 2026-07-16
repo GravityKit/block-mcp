@@ -40,7 +40,7 @@ class Block_Abilities {
 	/**
 	 * Option key for the "expose operations as WordPress Abilities" toggle.
 	 *
-	 * Stored as the string '0'/'1'; defaults to enabled (opt-out) when unset.
+	 * Stored as the string '0'/'1'; defaults to disabled (opt-in) when unset.
 	 *
 	 * @since 2.1.0
 	 */

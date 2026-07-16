@@ -120,7 +120,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= 2.1.0 on July 6, 2026 =
+= 2.1.0 on July 16, 2026 =
 
 This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and adds reliability and security hardening across editing, media uploads, and the assistant account.
 

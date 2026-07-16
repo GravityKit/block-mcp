@@ -670,7 +670,7 @@ class Post_Manager {
 	 * @return array WP internal block shape.
 	 */
 	private function normalize_block_def_for_insert( array $block ) {
-		$inner_html = isset( $block['innerHTML'] ) ? wp_kses_post( $block['innerHTML'] ) : '';
+		$inner_html = isset( $block['innerHTML'] ) ? Block_Writer::sanitize_inner_html( $block['innerHTML'] ) : '';
 		$attrs      = isset( $block['attributes'] ) && is_array( $block['attributes'] ) ? $block['attributes'] : array();
 
 		// Recurse into children first so container blocks have a fully-formed
@@ -712,7 +712,7 @@ class Post_Manager {
 				if ( null === $piece ) {
 					continue;
 				}
-				$inner_content[] = wp_kses_post( (string) $piece );
+				$inner_content[] = Block_Writer::sanitize_inner_html( (string) $piece );
 			}
 		} else {
 			// Leaf block: innerContent is array( $innerHTML ) or empty. Explicit
