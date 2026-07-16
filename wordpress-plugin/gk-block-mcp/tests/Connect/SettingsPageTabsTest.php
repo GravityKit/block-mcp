@@ -216,6 +216,32 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The settings form must pin its post-save return URL to the Block MCP page.
+	 *
+	 * The form posts to options.php, which redirects after saving to
+	 * wp_get_referer(). When that referer is absent or host-mismatched (a reverse
+	 * proxy, a www/non-www split), core falls back to bare options-general.php,
+	 * dumping the admin on WP General Settings with no notice. Emitting an explicit
+	 * canonical _wp_http_referer for the plugin page keeps the save on the Block
+	 * MCP screen regardless of the browser's referer. Relying on the REQUEST_URI
+	 * referer alone carries no page slug here, so this goes red without the pin.
+	 */
+	public function test_settings_form_pins_return_url_to_plugin_page() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertMatchesRegularExpression(
+			'/name="_wp_http_referer"\s+value="[^"]*page=gk-block-mcp-settings/',
+			$html,
+			'the settings form must carry a canonical _wp_http_referer targeting the Block MCP page so a save never lands on General Settings'
+		);
+	}
+
+	/**
 	 * The admin submenu uses the "Block MCP" brand label.
 	 */
 	public function test_register_menu_uses_block_mcp_label() {

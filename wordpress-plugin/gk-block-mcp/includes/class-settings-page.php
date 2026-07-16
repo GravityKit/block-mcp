@@ -493,6 +493,29 @@ class Settings_Page {
 		return $name;
 	}
 
+	/**
+	 * Canonical post-save return URL for the settings form.
+	 *
+	 * WordPress's options.php redirects here after saving. Pinned to this plugin
+	 * page (active tab preserved) so a missing or host-mismatched browser referer
+	 * cannot bounce the save to bare WP General Settings.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string Admin URL for the Block MCP settings page.
+	 */
+	private function settings_return_url() {
+		$args = array( 'page' => self::PAGE_SLUG );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only nav param, no state change.
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( '' !== $tab ) {
+			$args['tab'] = $tab;
+		}
+
+		return add_query_arg( $args, admin_url( 'options-general.php' ) );
+	}
+
 	// ──────────────────────────────────────────────────────────────────
 	// Action handlers (admin-post.php).
 	// ──────────────────────────────────────────────────────────────────
@@ -918,7 +941,17 @@ class Settings_Page {
 			</datalist>
 
 			<form method="post" action="options.php">
-				<?php settings_fields( self::OPTION_GROUP ); ?>
+				<?php
+				// Settings API fields with an explicit canonical _wp_http_referer,
+				// not settings_fields()' REQUEST_URI one. When the browser referer
+				// is absent or host-mismatched (proxy, www/non-www), options.php
+				// falls back to bare options-general.php (WP General Settings); the
+				// pin keeps the post-save redirect on this page.
+				printf( '<input type="hidden" name="option_page" value="%s" />', esc_attr( self::OPTION_GROUP ) );
+				echo '<input type="hidden" name="action" value="update" />';
+				wp_nonce_field( self::OPTION_GROUP . '-options', '_wpnonce', false );
+				printf( '<input type="hidden" name="_wp_http_referer" value="%s" />', esc_attr( $this->settings_return_url() ) );
+				?>
 
 
 				<h2><?php esc_html_e( 'What AI assistants can create', 'gk-block-mcp' ); ?></h2>
