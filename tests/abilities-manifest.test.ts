@@ -24,4 +24,13 @@ describe('tools.manifest.json matches the current npm tool definitions', () => {
       'wordpress-plugin/gk-block-mcp/includes/abilities/tools.manifest.json is out of sync with src/tools/* — run `npx tsx scripts/export-abilities-manifest.mjs` and commit the result',
     ).toEqual(generated);
   });
+
+  it('scopes yoast_get_seo to a per-post permission, not the blanket read permission', () => {
+    const generated = buildManifest();
+    const tool = generated.tools.find((t) => t.name === 'yoast_get_seo');
+    expect(
+      tool?.permission,
+      'yoast_get_seo returns single-post SEO data; its REST twin (Yoast_Bridge::check_permissions) requires edit_post on the target post, not only the global read permission',
+    ).toBe('edit_post');
+  });
 });

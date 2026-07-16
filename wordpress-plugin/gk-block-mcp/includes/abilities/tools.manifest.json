@@ -1678,7 +1678,7 @@
       "output_schema": {
         "type": "object"
       },
-      "permission": "read",
+      "permission": "edit_post",
       "annotations": {
         "readonly": true,
         "destructive": false,

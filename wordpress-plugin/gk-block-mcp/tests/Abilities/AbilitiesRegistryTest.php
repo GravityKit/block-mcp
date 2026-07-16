@@ -186,6 +186,103 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * Executing yoast-get-seo on a real, editable post must return its Yoast
+	 * SEO fields, not a not_found error.
+	 *
+	 * Regression coverage for Tool_Executor::execute_yoast_get_seo(): the REST
+	 * route is `/yoast/(?P<post_id>\d+)` and both Yoast_Bridge::get_seo() and
+	 * ::check_permissions() read `get_param('post_id')`, but the executor set
+	 * the target via `$request->set_param('id', $post_id)` and never passed
+	 * `post_id` through call_controller()'s $params. `get_param('post_id')`
+	 * then resolved to null -> `(int) null` -> 0 -> `get_post(0)` fails, so
+	 * every call to this ability 404'd with `not_found` regardless of the
+	 * caller's actual permissions.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_get_seo_ability_returns_fields() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+
+		$this->assertNotWPError( $result );
+		$this->assertIsArray( $result );
+		$this->assertSame( $post_id, (int) $result['post_id'] );
+	}
+
+	/**
+	 * Executing yoast-update-seo must persist a writable field — round-tripped
+	 * here via a follow-up yoast-get-seo read — rather than fail with
+	 * not_found before any field is written.
+	 *
+	 * Same root cause as test_yoast_get_seo_ability_returns_fields(), for the
+	 * write path: Tool_Executor::execute_yoast_update_seo() wrote the target
+	 * as `id` (via set_param() and the $params array) instead of `post_id`,
+	 * so Yoast_Bridge::update_seo() — which also reads `get_param('post_id')`
+	 * — resolved the target post as 0 and every call 404'd with `not_found`.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_update_seo_ability_round_trips_focus_keyword() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/yoast-update-seo' )->execute(
+			array(
+				'post_id'       => $post_id,
+				'focus_keyword' => 'block mcp abilities',
+			)
+		);
+		$this->assertNotWPError( $result );
+
+		$read = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+		$this->assertNotWPError( $read );
+		$this->assertSame( 'block mcp abilities', $read['focus_keyword'] );
+	}
+
+	/**
+	 * yoast-get-seo must deny an Author reading another author's Yoast SEO
+	 * metadata, matching the per-post `edit_post` gate its REST twin
+	 * (`Yoast_Bridge::check_permissions()`) already enforces — while still
+	 * allowing the post's own author to read it.
+	 *
+	 * Regression coverage for scripts/export-abilities-manifest.mjs's
+	 * permissionFor(): yoast_get_seo was mapped to the manifest permission
+	 * 'read', which Abilities_Registry::check_tool_permission() resolves to
+	 * REST_Controller::check_permissions() — a global `edit_posts` check with
+	 * no awareness of the target post. An Author has `edit_posts` but not
+	 * `edit_others_posts`, so they could read another author's SEO metadata
+	 * through the ability even though the REST route itself would 403 the
+	 * identical request. The fix maps yoast_get_seo to the 'edit_post'
+	 * permission, which additionally checks
+	 * `current_user_can('edit_post', post_id)`.
+	 *
+	 * @group yoast
+	 */
+	public function test_yoast_get_seo_ability_denies_reading_another_authors_post() {
+		$owner_id = self::factory()->user->create( array( 'role' => 'author' ) );
+		$post_id  = self::factory()->post->create(
+			array(
+				'post_status' => 'publish',
+				'post_author' => $owner_id,
+			)
+		);
+
+		$other_author = self::factory()->user->create( array( 'role' => 'author' ) );
+		wp_set_current_user( $other_author );
+
+		$this->setExpectedIncorrectUsage( 'WP_Ability::execute' );
+		$denied = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+		$this->assertWPError( $denied, "an author without edit_others_posts must not read another author's SEO metadata" );
+		$this->assertSame( 'ability_invalid_permissions', $denied->get_error_code() );
+
+		wp_set_current_user( $owner_id );
+		$allowed = wp_get_ability( 'gk-block-mcp/yoast-get-seo' )->execute( array( 'post_id' => $post_id ) );
+		$this->assertNotWPError( $allowed, "the post's own author must still be able to read their own SEO metadata" );
+	}
+
+	/**
 	 * Every registered ability carries meta.mcp.public = true and type = tool.
 	 *
 	 * This is what the MCP Adapter's discover-abilities meta-tool filters on;
@@ -524,6 +621,37 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * Executing update-block addressed by `ref` (rather than `flat_index`)
+	 * must persist the change, mirroring test_update_block_ability_persists_change().
+	 *
+	 * Regression coverage for the ref branch of Tool_Executor::execute_update_block():
+	 * it wrote the target ref via WP_REST_Request::set_param('ref', ...) and never
+	 * included `ref` in the $params array passed to call_controller(). set_param()
+	 * on a fresh PATCH request lands in the POST parameter bucket, and
+	 * call_controller()'s subsequent set_body_params($body) call (update-block always
+	 * pairs a target with a JSON body) unconditionally replaces that whole bucket,
+	 * dropping the ref. update_block_by_ref() then reads an empty ref and rejects
+	 * with invalid_ref. This mirrors the id/flat_index bucket-collision bug fixed in
+	 * commit c7690c9, which missed this ref-addressed branch. The fix routes `ref`
+	 * through the $params (URL) argument, which set_body_params() never touches.
+	 */
+	public function test_update_block_ability_by_ref_persists_change() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$post_id = $this->make_block_post( array( $this->paragraph_with_ref( '<p>Old</p>', 'blk_ref_test1' ) ) );
+
+		$result = wp_get_ability( 'gk-block-mcp/update-block' )->execute(
+			array(
+				'post_id'   => $post_id,
+				'ref'       => 'blk_ref_test1',
+				'innerHTML' => '<p>New</p>',
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( '<p>New</p>', $this->block_tree( $post_id )[0]['innerHTML'] );
+	}
+
+	/**
 	 * Executing create-post delegates through Tool_Executor to Post_Manager,
 	 * emitting canonical block-comment markup rather than a corrupted
 	 * classic-editor blob.
@@ -611,6 +739,24 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		return array(
 			'blockName'    => 'core/paragraph',
 			'attrs'        => array(),
+			'innerHTML'    => $html,
+			'innerContent' => array( $html ),
+			'innerBlocks'  => array(),
+		);
+	}
+
+	/**
+	 * Same as paragraph(), with a hand-assigned metadata.gk_ref so a test can
+	 * address the block by ref instead of relying on the lazily-assigned one.
+	 *
+	 * @param string $html Paragraph innerHTML.
+	 * @param string $ref  Stable ref to assign.
+	 * @return array
+	 */
+	private function paragraph_with_ref( string $html, string $ref ): array {
+		return array(
+			'blockName'    => 'core/paragraph',
+			'attrs'        => array( 'metadata' => array( 'gk_ref' => $ref ) ),
 			'innerHTML'    => $html,
 			'innerContent' => array( $html ),
 			'innerBlocks'  => array(),

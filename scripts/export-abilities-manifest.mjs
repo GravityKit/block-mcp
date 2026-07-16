@@ -51,10 +51,22 @@ const READ = new Set([
   'yoast_get_seo',
 ]);
 
+/**
+ * Read-only tools whose data is scoped to a single post, so the blanket
+ * global `read` permission (any caller with edit_posts) is too broad — the
+ * REST twin these abilities delegate to enforces a per-post edit_post check
+ * instead. Checked before the READ/readOnlyHint branch so membership here
+ * overrides it.
+ *
+ * @type {ReadonlySet<string>}
+ */
+const PER_POST_READ = new Set(['yoast_get_seo']);
+
 function permissionFor(name, annotations) {
   if (MANAGE_OPTIONS.has(name)) return 'manage_options';
   if (UPLOAD.has(name)) return 'upload_files';
   if (CREATE.has(name)) return 'create_post';
+  if (PER_POST_READ.has(name)) return 'edit_post';
   if (READ.has(name) || annotations?.readOnlyHint === true) return 'read';
   return 'edit_post';
 }

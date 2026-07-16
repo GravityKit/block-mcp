@@ -489,8 +489,15 @@ class Tool_Executor {
 		if ( $has_ref ) {
 			$ref     = rawurlencode( (string) $input['ref'] );
 			$request = new \WP_REST_Request( 'PATCH', '/' . REST_Controller::NAMESPACE . '/posts/' . $post_id . '/blocks/by-ref/' . $ref );
-			$request->set_param( 'ref', (string) $input['ref'] );
-			return $this->call_controller( array( $this->controller, 'update_block_by_ref' ), $request, array( 'id' => $post_id ), $body );
+			return $this->call_controller(
+				array( $this->controller, 'update_block_by_ref' ),
+				$request,
+				array(
+					'id'  => $post_id,
+					'ref' => (string) $input['ref'],
+				),
+				$body
+			);
 		}
 
 		$index   = (int) $input['flat_index'];
@@ -893,8 +900,7 @@ class Tool_Executor {
 		}
 
 		$request = new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/yoast/' . $post_id );
-		$request->set_param( 'id', $post_id );
-		return $this->call_controller( array( $this->yoast_bridge, 'get_seo' ), $request );
+		return $this->call_controller( array( $this->yoast_bridge, 'get_seo' ), $request, array( 'post_id' => $post_id ) );
 	}
 
 	/**
@@ -921,8 +927,7 @@ class Tool_Executor {
 		unset( $body['post_id'] );
 
 		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/yoast/' . $post_id );
-		$request->set_param( 'id', $post_id );
-		return $this->call_controller( array( $this->yoast_bridge, 'update_seo' ), $request, array( 'id' => $post_id ), $body );
+		return $this->call_controller( array( $this->yoast_bridge, 'update_seo' ), $request, array( 'post_id' => $post_id ), $body );
 	}
 
 	/**
