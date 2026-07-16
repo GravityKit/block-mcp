@@ -168,6 +168,79 @@ class Block_Inventory {
 	}
 
 	/**
+	 * Whether an innerHTML-only edit to this block can be safely re-synced by
+	 * re-deriving its sourced attributes from the new markup.
+	 *
+	 * True only when the block is registered, declares at least one attribute
+	 * this plugin can re-derive from innerHTML (source attribute/html/rich-text/
+	 * text), and carries no non-presentational array/object attribute that lacks
+	 * such a source. That last clause is the guard against blocks like
+	 * yoast/faq-block, whose `questions[]` array lives only in the delimiter JSON
+	 * and cannot be reconstructed from the rendered innerHTML — for those an
+	 * innerHTML-only edit must still be rejected, not auto-synced.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string               $block_name   Fully-qualified block type name.
+	 * @param array<string, mixed> $current_attrs The block's current attributes.
+	 *
+	 * @return bool
+	 */
+	public function is_innerhtml_rederivable( $block_name, array $current_attrs ) {
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( ! $registry ) {
+			return false;
+		}
+		$block_type = $registry->get_registered( $block_name );
+		if ( ! $block_type || empty( $block_type->attributes ) || ! is_array( $block_type->attributes ) ) {
+			return false;
+		}
+		$schema = $block_type->attributes;
+
+		// Sources Block_Reader::derive_sourced_attributes() can actually resolve.
+		static $derivable_sources = array(
+			'attribute' => 1,
+			'html'      => 1,
+			'rich-text' => 1,
+			'text'      => 1,
+		);
+
+		$has_derivable = false;
+		foreach ( $schema as $attr ) {
+			$is_derivable = is_array( $attr ) && isset( $attr['source'] ) && isset( $derivable_sources[ $attr['source'] ] );
+			if ( $is_derivable ) {
+				$has_derivable = true;
+				break;
+			}
+		}
+		if ( ! $has_derivable ) {
+			return false;
+		}
+
+		// Presentational containers never hold re-derivable "content"; their
+		// presence must not disqualify an otherwise-simple block.
+		static $presentational = array(
+			'metadata' => 1,
+			'style'    => 1,
+			'layout'   => 1,
+		);
+
+		foreach ( $current_attrs as $key => $value ) {
+			$is_structured = is_array( $value ) && array() !== $value;
+			if ( ! $is_structured || isset( $presentational[ $key ] ) ) {
+				continue;
+			}
+			$attr_def   = isset( $schema[ $key ] ) && is_array( $schema[ $key ] ) ? $schema[ $key ] : array();
+			$has_source = isset( $attr_def['source'] ) && isset( $derivable_sources[ $attr_def['source'] ] );
+			if ( ! $has_source ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
 	 * Scan all published content and classify every distinct block name
 	 * as static, dynamic, or dual.
 	 *

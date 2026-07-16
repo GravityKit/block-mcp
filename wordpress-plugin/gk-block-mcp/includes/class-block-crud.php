@@ -1093,6 +1093,42 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Attempt to make an innerHTML-only edit to a dual-storage block safe by
+	 * re-deriving its sourced attributes from the new markup.
+	 *
+	 * Write paths call this before rejecting an innerHTML-only update on a
+	 * dual-storage block. When the block is simple enough that its structured
+	 * content can be recomputed from innerHTML (see
+	 * Block_Inventory::is_innerhtml_rederivable), this returns the derived
+	 * attributes so the caller can apply them alongside the new innerHTML,
+	 * keeping both halves in sync. Returns null when the block cannot be safely
+	 * re-synced (unregistered, delimiter-only structured data like
+	 * yoast/faq-block's questions[], or nothing derivable from the markup), in
+	 * which case the caller keeps the original dual-storage rejection.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string               $block_name    Fully-qualified block type name.
+	 * @param array<string, mixed> $current_attrs The block's current attributes.
+	 * @param mixed                $inner_html    The new innerHTML being written.
+	 *
+	 * @return array<string, mixed>|null Derived attributes to apply, or null.
+	 */
+	public function auto_derive_dual_attributes( $block_name, array $current_attrs, $inner_html ) {
+		$rederivable = $this->inventory->is_innerhtml_rederivable( $block_name, $current_attrs );
+		if ( ! $rederivable ) {
+			return null;
+		}
+
+		$derived = $this->reader->derive_sourced_attributes( $block_name, $inner_html );
+		if ( empty( $derived ) ) {
+			return null;
+		}
+
+		return $derived;
+	}
+
+	/**
 	 * Flatten a nested block structure into a flat array with path references.
 	 *
 	 * Each entry contains the block data and a 'path' array indicating how to

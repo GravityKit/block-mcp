@@ -892,16 +892,25 @@ class Block_Writer {
 		$path  = $flat[ $index ]['path'];
 		$block = &$this->crud->get_block_by_path( $blocks, $path );
 
-		// BLOCK-14: refuse innerHTML-only updates on dual-storage blocks.
-		// Sending innerHTML alone on yoast/faq-block et al. silently desyncs
-		// the structured attributes (questions[], etc.) — see BLOCK-3.
+		// An innerHTML-only update on a dual-storage block would desync its
+		// structured attributes. When the content is re-derivable from the new
+		// markup, recompute those attributes and apply both together; reject
+		// only when it can't be re-synced (e.g. delimiter-only questions[]).
 		if (
 			null !== $inner_html
 			&& empty( $attributes )
 			&& isset( $block['blockName'] )
 			&& $this->crud->is_block_dual_storage( $block['blockName'] )
 		) {
-			return $this->crud->dual_storage_error( $block['blockName'] );
+			$derived = $this->crud->auto_derive_dual_attributes(
+				$block['blockName'],
+				isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				$inner_html
+			);
+			if ( null === $derived ) {
+				return $this->crud->dual_storage_error( $block['blockName'] );
+			}
+			$attributes = $derived;
 		}
 
 		// WP 6.5+ Block Bindings guard: reject writes that attempt to overwrite
@@ -1137,8 +1146,9 @@ class Block_Writer {
 			}
 			$seen_paths[ $path_key ] = $i;
 
-			// Dual-storage check: innerHTML-only on dual-storage blocks is
-			// rejected, matching single update_block semantics.
+			// Dual-storage check, matching single update_block semantics: an
+			// innerHTML-only item is auto-synced when the block's content is
+			// re-derivable from the new markup, else it fails the batch.
 			$target_block = $this->crud->get_block_by_path( $blocks, $path );
 			if (
 				null === $target_block
@@ -1157,17 +1167,25 @@ class Block_Writer {
 				&& isset( $target_block['blockName'] )
 				&& $this->crud->is_block_dual_storage( $target_block['blockName'] )
 			) {
-				$errors[] = array(
-					'index'   => $i,
-					'code'    => 'dual_storage_requires_both',
-					'message' => sprintf(
-						/* translators: %s: block name (e.g., yoast/faq-block) */
-						__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
-						$target_block['blockName']
-					),
-					'block'   => (string) $target_block['blockName'],
+				$derived = $this->crud->auto_derive_dual_attributes(
+					$target_block['blockName'],
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					$inner_html
 				);
-				continue;
+				if ( null === $derived ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => 'dual_storage_requires_both',
+						'message' => sprintf(
+							/* translators: %s: block name (e.g., yoast/faq-block) */
+							__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
+							$target_block['blockName']
+						),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				$attributes = $derived;
 			}
 
 			$resolved[] = array(

@@ -292,15 +292,24 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_html', __( 'update-html requires an "innerHTML" string.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 				}
 
-				// BLOCK-14: refuse update-html on dual-storage blocks. There is
-				// no `attributes` companion field on this op — the only safe
-				// path for dual blocks is `update-attrs` (with both fields)
-				// or `replace-block` (with both fields).
+				// update-html carries no `attributes` companion, so a dual-storage
+				// block can only stay in sync if its content is re-derivable from
+				// the new markup — derive and merge those attributes when it is,
+				// otherwise reject (use update-attrs or replace-block with both).
 				if (
 					isset( $parent[ $target_index ]['blockName'] )
 					&& $this->crud->is_block_dual_storage( $parent[ $target_index ]['blockName'] )
 				) {
-					return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
+					$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : array();
+					$derived        = $this->crud->auto_derive_dual_attributes(
+						$parent[ $target_index ]['blockName'],
+						$existing_attrs,
+						$inner_html
+					);
+					if ( null === $derived ) {
+						return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
+					}
+					$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $derived );
 				}
 
 				$parent[ $target_index ]['innerHTML'] = Block_Writer::sanitize_inner_html( $inner_html );
