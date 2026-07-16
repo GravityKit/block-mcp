@@ -75,7 +75,9 @@ export const WRITE_TOOLS = [
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Update one block' },
+    // destructiveHint is true: attributes/innerHTML overwrite the block's
+    // existing content rather than merging additively.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Update one block' },
     outputSchema: {
       type: 'object',
       properties: {
@@ -123,7 +125,8 @@ export const WRITE_TOOLS = [
     name: 'update_blocks',
     description:
       'Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors — no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post — keeps revision history clean. Pass `verbose: true` to include `saved.inner_html` + `saved.attributes` per result for per-item verification without a re-read.',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Batch-update blocks' },
+    // destructiveHint is true: same overwrite semantics as update_block, applied per item.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Batch-update blocks' },
     outputSchema: {
       type: 'object',
       properties: {
