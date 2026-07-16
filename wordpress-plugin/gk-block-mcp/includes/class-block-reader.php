@@ -707,7 +707,9 @@ class Block_Reader {
 	 * @return array Map of attribute name → value for every source that resolved.
 	 */
 	public function derive_sourced_attributes( $block_name, $inner_html ) {
-		if ( '' === (string) $block_name || empty( $inner_html ) ) {
+		// Explicit empty-string test, not empty(): a block whose rendered content
+		// is literally "0" is real markup, and empty('0') would skip it.
+		if ( '' === (string) $block_name || '' === (string) $inner_html ) {
 			return array();
 		}
 

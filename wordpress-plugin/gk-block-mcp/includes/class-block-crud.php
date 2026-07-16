@@ -1108,13 +1108,18 @@ class Block_CRUD {
 	 *
 	 * @since 2.1.0
 	 *
-	 * @param string               $block_name    Fully-qualified block type name.
-	 * @param array<string, mixed> $current_attrs The block's current attributes.
-	 * @param mixed                $inner_html    The new innerHTML being written.
+	 * @param string $block_name    Fully-qualified block type name.
+	 * @param mixed  $current_attrs The block's current attributes (non-array
+	 *                              delimiter JSON is treated as unsafe → null).
+	 * @param mixed  $inner_html    The new innerHTML being written.
 	 *
 	 * @return array<string, mixed>|null Derived attributes to apply, or null.
 	 */
-	public function auto_derive_dual_attributes( $block_name, array $current_attrs, $inner_html ) {
+	public function auto_derive_dual_attributes( $block_name, $current_attrs, $inner_html ) {
+		if ( ! is_array( $current_attrs ) ) {
+			return null;
+		}
+
 		$rederivable = $this->inventory->is_innerhtml_rederivable( $block_name, $current_attrs );
 		if ( ! $rederivable ) {
 			return null;
@@ -1141,13 +1146,14 @@ class Block_CRUD {
 	 * @since 2.1.0
 	 *
 	 * @param array<string, mixed> $attributes         Attributes about to be written.
-	 * @param array<string, mixed> $block_attrs         The target block's current attributes.
+	 * @param mixed                $block_attrs         The target block's current attributes
+	 *                                                 (non-array = no bindings to protect).
 	 * @param bool                 $allow_bound_writes  Caller opt-in to overwrite bound attrs.
 	 *
 	 * @return \WP_Error|null WP_Error('bound_attribute') when blocked, else null.
 	 */
-	public function reject_bound_write( array $attributes, array $block_attrs, $allow_bound_writes ) {
-		if ( $allow_bound_writes || empty( $attributes ) ) {
+	public function reject_bound_write( array $attributes, $block_attrs, $allow_bound_writes ) {
+		if ( $allow_bound_writes || empty( $attributes ) || ! is_array( $block_attrs ) ) {
 			return null;
 		}
 

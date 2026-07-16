@@ -225,6 +225,22 @@ class Block_Inventory {
 			'layout'   => 1,
 		);
 
+		// Schema shape: an attribute declared array/object with a derivable
+		// source can never be reconstructed (the source yields a string), so a
+		// re-derive would write a scalar into a structured slot. Reject on the
+		// schema regardless of the current value — this catches the empty and
+		// absent cases the value-level check below cannot see.
+		foreach ( $schema as $attr_name => $attr_def ) {
+			if ( ! is_array( $attr_def ) || isset( $presentational[ $attr_name ] ) ) {
+				continue;
+			}
+			$type       = isset( $attr_def['type'] ) ? $attr_def['type'] : '';
+			$has_source = isset( $attr_def['source'] ) && isset( $derivable_sources[ $attr_def['source'] ] );
+			if ( $has_source && ( 'array' === $type || 'object' === $type ) ) {
+				return false;
+			}
+		}
+
 		foreach ( $current_attrs as $key => $value ) {
 			$is_structured = is_array( $value ) && array() !== $value;
 			if ( ! $is_structured || isset( $presentational[ $key ] ) ) {

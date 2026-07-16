@@ -1162,11 +1162,12 @@ class Block_Writer {
 					continue;
 				}
 				// Derived attrs go through the same bound-write guard as
-				// update_block, so an auto-derived value can't clobber a binding.
+				// update_block, honoring the item's allow_bound_writes opt-in so
+				// the batch keeps parity with the single-block path.
 				$bound_error = $this->crud->reject_bound_write(
 					$derived,
 					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
-					false
+					! empty( $item['allow_bound_writes'] )
 				);
 				if ( null !== $bound_error ) {
 					$errors[] = array(

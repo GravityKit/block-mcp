@@ -416,4 +416,74 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 		$tree = $this->block_tree_visible( $post_id );
 		$this->assertSame( 'Bound', $tree[0]['attrs']['content'], 'bound value not clobbered' );
 	}
+
+	// ── Codex review hardening ────────────────────────────────────────────
+
+	/**
+	 * Defense in depth: the block grammar only admits object attrs, so
+	 * parse_blocks yields array|null, never a scalar. A hand-built block array
+	 * (mutator input, build_block_from_def) could still carry a scalar, so the
+	 * public helpers must treat a non-array attrs as "not safe to derive" rather
+	 * than fatal on their array type hints.
+	 */
+	public function test_derive_helpers_tolerate_non_array_attrs() {
+		$this->assertNull( $this->crud->auto_derive_dual_attributes( 'test/heading-like', 'scalar', '<h2>x</h2>' ) );
+		$this->assertNull( $this->crud->reject_bound_write( array( 'content' => 'x' ), 'scalar', false ) );
+	}
+
+	/**
+	 * The reachable malformed case: a block whose delimiter JSON is invalid
+	 * parses with attrs = null. The isset() ternary at each call site resolves
+	 * that to array(), so an innerHTML-only edit auto-syncs cleanly, no fatal.
+	 */
+	public function test_update_block_null_attrs_does_not_crash() {
+		$content = '<!-- wp:test/heading-like {bad json} --><h2>Old</h2><!-- /wp:test/heading-like -->';
+		$post_id = self::factory()->post->create( array(
+			'post_type'    => 'page',
+			'post_status'  => 'publish',
+			'post_content' => $content,
+		) );
+
+		$result = $this->crud->update_block( $post_id, 0, array(), '<h2>New</h2>' );
+
+		$this->assertNotWPError( $result );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( 'New', $tree[0]['attrs']['content'] );
+	}
+
+	/**
+	 * An EMPTY sourced array attribute is still structured: re-deriving would
+	 * write a string into an array slot. The discriminator must reject it on the
+	 * schema shape, not just on a non-empty current value.
+	 */
+	public function test_update_block_rejects_empty_sourced_array_attr() {
+		$post_id = $this->make_block_post( array(
+			$this->blk( 'test/list-like', array( 'items' => array() ), '<ul></ul>' ),
+		) );
+
+		$result = $this->crud->update_block( $post_id, 0, array(), '<ul><li>New</li></ul>' );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'dual_storage_requires_both', $result->get_error_code() );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( array(), $tree[0]['attrs']['items'], 'array-typed attr must not become a string' );
+	}
+
+	/**
+	 * Batch parity: `allow_bound_writes` on an item forces a bound derived write
+	 * through, the same escape hatch update_block and the mutator honor.
+	 */
+	public function test_batch_honors_allow_bound_writes_on_derived_item() {
+		$post_id = $this->make_block_post( array( $this->bound_heading( '<h2>Bound</h2>' ) ) );
+
+		$result = $this->crud->update_blocks_batch(
+			$post_id,
+			array( array( 'flat_index' => 0, 'innerHTML' => '<h2>Forced</h2>', 'allow_bound_writes' => true ) ),
+			true
+		);
+
+		$this->assertNotWPError( $result );
+		$tree = $this->block_tree_visible( $post_id );
+		$this->assertSame( 'Forced', $tree[0]['attrs']['content'], 'forced bound write applied' );
+	}
 }
