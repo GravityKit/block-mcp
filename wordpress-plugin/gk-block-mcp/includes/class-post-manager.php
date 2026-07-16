@@ -89,7 +89,10 @@ class Post_Manager {
 	 * @return array|\WP_Error
 	 */
 	public function create_post( array $args ) {
-		if ( empty( $args['title'] ) || ! is_string( $args['title'] ) ) {
+		// Explicit empty-string test, not empty(): "0" is a valid title, and
+		// empty('0') would reject it as missing.
+		$title = isset( $args['title'] ) ? $args['title'] : null;
+		if ( ! is_string( $title ) || '' === $title ) {
 			return new \WP_Error(
 				'missing_title',
 				__( 'A non-empty "title" is required.', 'gk-block-mcp' ),
@@ -712,8 +715,9 @@ class Post_Manager {
 				$inner_content[] = wp_kses_post( (string) $piece );
 			}
 		} else {
-			// Leaf block: innerContent is simply array( $innerHTML ) or empty.
-			$inner_content = ! empty( $inner_html ) ? array( $inner_html ) : array();
+			// Leaf block: innerContent is array( $innerHTML ) or empty. Explicit
+			// empty-string test so a "0" content survives (empty('0') is true).
+			$inner_content = '' !== (string) $inner_html ? array( $inner_html ) : array();
 		}
 
 		return array(

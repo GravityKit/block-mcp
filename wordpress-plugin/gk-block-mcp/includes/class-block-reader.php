@@ -642,7 +642,9 @@ class Block_Reader {
 	 * @return array Merged attribute map (parsed_attrs + any extracted sourced values).
 	 */
 	private function extract_sourced_attributes( $block_name, array $parsed_attrs, $inner_html ) {
-		if ( '' === $block_name || empty( $inner_html ) ) {
+		// Explicit empty-string test to match derive_sourced_attributes(): a
+		// block whose content is literally "0" is real markup.
+		if ( '' === $block_name || '' === (string) $inner_html ) {
 			return $parsed_attrs;
 		}
 

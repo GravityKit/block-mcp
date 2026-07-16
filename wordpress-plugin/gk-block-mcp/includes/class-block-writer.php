@@ -649,7 +649,9 @@ class Block_Writer {
 			'blockName'    => $name,
 			'attrs'        => $attrs,
 			'innerHTML'    => $inner_html,
-			'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
+			// Explicit empty-string test: a leaf whose content is "0" must keep
+			// it; empty('0') would collapse innerContent and drop the "0".
+			'innerContent' => '' !== (string) $inner_html ? array( $inner_html ) : array(),
 			'innerBlocks'  => array(),
 		);
 	}
