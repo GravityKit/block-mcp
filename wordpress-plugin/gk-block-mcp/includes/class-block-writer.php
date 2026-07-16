@@ -649,7 +649,9 @@ class Block_Writer {
 			'blockName'    => $name,
 			'attrs'        => $attrs,
 			'innerHTML'    => $inner_html,
-			'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
+			// Explicit empty-string test: a leaf whose content is "0" must keep
+			// it; empty('0') would collapse innerContent and drop the "0".
+			'innerContent' => '' !== (string) $inner_html ? array( $inner_html ) : array(),
 			'innerBlocks'  => array(),
 		);
 	}
@@ -892,53 +894,38 @@ class Block_Writer {
 		$path  = $flat[ $index ]['path'];
 		$block = &$this->crud->get_block_by_path( $blocks, $path );
 
-		// BLOCK-14: refuse innerHTML-only updates on dual-storage blocks.
-		// Sending innerHTML alone on yoast/faq-block et al. silently desyncs
-		// the structured attributes (questions[], etc.) — see BLOCK-3.
+		// An innerHTML-only update on a dual-storage block would desync its
+		// structured attributes. When the content is re-derivable from the new
+		// markup, recompute those attributes and apply both together; reject
+		// only when it can't be re-synced (e.g. delimiter-only questions[]).
 		if (
 			null !== $inner_html
 			&& empty( $attributes )
 			&& isset( $block['blockName'] )
 			&& $this->crud->is_block_dual_storage( $block['blockName'] )
 		) {
-			return $this->crud->dual_storage_error( $block['blockName'] );
+			$derived = $this->crud->auto_derive_dual_attributes(
+				$block['blockName'],
+				isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				$inner_html
+			);
+			if ( null === $derived ) {
+				return $this->crud->dual_storage_error( $block['blockName'] );
+			}
+			$attributes = $derived;
 		}
 
-		// WP 6.5+ Block Bindings guard: reject writes that attempt to overwrite
-		// a dynamically-bound attribute unless the caller explicitly opts in with
-		// allow_bound_writes:true. This prevents agents from silently clobbering
-		// a value that is resolved at render time from post-meta or another source.
+		// WP 6.5+ Block Bindings guard, applied here so the derived attributes
+		// above are checked too: an auto-derived `content` must not clobber a
+		// `content` binding any more than a caller-supplied one.
 		$allow_bound_writes = ! empty( $options['allow_bound_writes'] );
-		if ( ! $allow_bound_writes && ! empty( $attributes ) ) {
-			$bindings = isset( $block['attrs']['metadata']['bindings'] ) && is_array( $block['attrs']['metadata']['bindings'] )
-				? $block['attrs']['metadata']['bindings']
-				: array();
-
-			if ( ! empty( $bindings ) ) {
-				$blocked = array();
-				foreach ( array_keys( (array) $attributes ) as $attr_key ) {
-					// 'metadata' writes are structural; only individual attribute
-					// keys within bindings are protected. A write to 'metadata'
-					// itself (e.g. updating metadata.name) is always allowed.
-					if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
-						$blocked[] = $attr_key;
-					}
-				}
-				if ( ! empty( $blocked ) ) {
-					return new \WP_Error(
-						'bound_attribute',
-						sprintf(
-							/* translators: 1: comma-separated list of bound attribute names */
-							__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
-							implode( ', ', $blocked )
-						),
-						array(
-							'status'           => 400,
-							'bound_attributes' => $blocked,
-						)
-					);
-				}
-			}
+		$bound_error        = $this->crud->reject_bound_write(
+			(array) $attributes,
+			isset( $block['attrs'] ) ? $block['attrs'] : array(),
+			$allow_bound_writes
+		);
+		if ( null !== $bound_error ) {
+			return $bound_error;
 		}
 
 		// Apply attribute merge + auto-transform + innerHTML replacement.
@@ -1137,8 +1124,9 @@ class Block_Writer {
 			}
 			$seen_paths[ $path_key ] = $i;
 
-			// Dual-storage check: innerHTML-only on dual-storage blocks is
-			// rejected, matching single update_block semantics.
+			// Dual-storage check, matching single update_block semantics: an
+			// innerHTML-only item is auto-synced when the block's content is
+			// re-derivable from the new markup, else it fails the batch.
 			$target_block = $this->crud->get_block_by_path( $blocks, $path );
 			if (
 				null === $target_block
@@ -1157,17 +1145,42 @@ class Block_Writer {
 				&& isset( $target_block['blockName'] )
 				&& $this->crud->is_block_dual_storage( $target_block['blockName'] )
 			) {
-				$errors[] = array(
-					'index'   => $i,
-					'code'    => 'dual_storage_requires_both',
-					'message' => sprintf(
-						/* translators: %s: block name (e.g., yoast/faq-block) */
-						__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
-						$target_block['blockName']
-					),
-					'block'   => (string) $target_block['blockName'],
+				$derived = $this->crud->auto_derive_dual_attributes(
+					$target_block['blockName'],
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					$inner_html
 				);
-				continue;
+				if ( null === $derived ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => 'dual_storage_requires_both',
+						'message' => sprintf(
+							/* translators: %s: block name (e.g., yoast/faq-block) */
+							__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
+							$target_block['blockName']
+						),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				// Derived attrs go through the same bound-write guard as
+				// update_block, honoring the item's allow_bound_writes opt-in so
+				// the batch keeps parity with the single-block path.
+				$bound_error = $this->crud->reject_bound_write(
+					$derived,
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					! empty( $item['allow_bound_writes'] )
+				);
+				if ( null !== $bound_error ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $bound_error->get_error_code(),
+						'message' => $bound_error->get_error_message(),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				$attributes = $derived;
 			}
 
 			$resolved[] = array(

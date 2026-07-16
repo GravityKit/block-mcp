@@ -135,6 +135,7 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 * The replacement map is now entirely your own list. No built-in replacement suggestions ship anymore, so the mappings shown are the ones you added, and a mapping you remove stays removed.
 * Blocks whose plugin or theme is no longer active are flagged as "not active on this site" in the score table and in AI assistant responses, so you and your assistant can spot content that references a missing block.
 * Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings &rarr; Block MCP explains the new model and offers a one-click reset to the new defaults.
+* An assistant can now update a block that stores its text in two places (such as a heading) by sending just the new content, instead of the edit being refused unless both the content and the structured data were sent together. The plugin recomputes the structured data from the new markup and keeps both in sync. Blocks whose data cannot be rebuilt from the content, such as an FAQ block's list of questions, are still protected and left unchanged.
 
 #### 🔒 Security
 
@@ -152,6 +153,7 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 * Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
 * Moving a block into an empty container (or to the last position inside a container) no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 * Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
+* A post can now be created with the title "0". It was previously rejected as having no title.
 
 #### 💻 Developer Updates
 

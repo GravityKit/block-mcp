@@ -123,3 +123,10 @@ Prove it has teeth: revert the fix, watch the test go red, restore the fix. A te
 - Code already exercised by an existing test in a way that fails pre-fix — that existing test IS the regression test; note it in the commit.
 
 Otherwise: every behaviour change ships with a test that fails pre-fix and passes post-fix.
+
+## Gotchas
+
+- **A new `tests/<Dir>/` is invisible until added to `tests/phpunit.xml`.** Nothing fails when you forget — the tests silently never run under `composer test` or CI (`tests/Instructions/` sat unwired with 34 tests; `tests/Abilities/` with 4). After adding a directory, prove it's picked up: `vendor/bin/phpunit -c tests/phpunit.xml --list-tests | grep <ClassName>`.
+- **`wp_get_environment_type()` cannot be changed from a test.** It caches in a function-static on its first call, which happens during WP's own bootstrap — `putenv()` or constants set afterward are ignored. To simulate a local/production environment, shadow the *consuming* core function with a namespace-scoped override in the plugin's namespace (see `tests/Connect/ApplicationPasswordsSupportedStub.php`), not the environment itself.
+- **The Abilities API registry is a process-wide one-shot singleton.** `wp_abilities_api_init` fires once per PHP process, on first registry access — the first test to touch a `wp_*ability*()` function fixes the plugin's gating context for the whole run. Tests that need registration must enable `Block_Abilities::ENABLED_OPTION` in `set_up()` before that first touch; default-state gate tests need `@runInSeparateProcess` + `@preserveGlobalState disabled`.
+- **Ignore intelephense's "Undefined method `assertX`" on `WP_UnitTestCase` descendants.** The phpunit-polyfills `class_alias` chain defeats the IDE's static resolution, so it flags every assertion method as undefined while the suite runs green. `composer test` is the truth; don't "fix" these diagnostics.

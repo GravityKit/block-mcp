@@ -1093,6 +1093,102 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Attempt to make an innerHTML-only edit to a dual-storage block safe by
+	 * re-deriving its sourced attributes from the new markup.
+	 *
+	 * Write paths call this before rejecting an innerHTML-only update on a
+	 * dual-storage block. When the block is simple enough that its structured
+	 * content can be recomputed from innerHTML (see
+	 * Block_Inventory::is_innerhtml_rederivable), this returns the derived
+	 * attributes so the caller can apply them alongside the new innerHTML,
+	 * keeping both halves in sync. Returns null when the block cannot be safely
+	 * re-synced (unregistered, delimiter-only structured data like
+	 * yoast/faq-block's questions[], or nothing derivable from the markup), in
+	 * which case the caller keeps the original dual-storage rejection.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name    Fully-qualified block type name.
+	 * @param mixed  $current_attrs The block's current attributes (non-array
+	 *                              delimiter JSON is treated as unsafe → null).
+	 * @param mixed  $inner_html    The new innerHTML being written.
+	 *
+	 * @return array<string, mixed>|null Derived attributes to apply, or null.
+	 */
+	public function auto_derive_dual_attributes( $block_name, $current_attrs, $inner_html ) {
+		if ( ! is_array( $current_attrs ) ) {
+			return null;
+		}
+
+		$rederivable = $this->inventory->is_innerhtml_rederivable( $block_name, $current_attrs );
+		if ( ! $rederivable ) {
+			return null;
+		}
+
+		$derived = $this->reader->derive_sourced_attributes( $block_name, $inner_html );
+		if ( empty( $derived ) ) {
+			return null;
+		}
+
+		return $derived;
+	}
+
+	/**
+	 * Reject an attribute write that would overwrite a Block Bindings value.
+	 *
+	 * WP 6.5+ resolves a bound attribute at render time from a binding source
+	 * (post-meta, etc.), so writing it directly silently clobbers a value the
+	 * author never controls here. Every write path that applies attributes runs
+	 * this, including the dual-storage auto-derive paths whose derived `content`
+	 * could collide with a `content` binding. A write to `metadata` itself is
+	 * structural and always allowed.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param array<string, mixed> $attributes         Attributes about to be written.
+	 * @param mixed                $block_attrs         The target block's current attributes
+	 *                                                 (non-array = no bindings to protect).
+	 * @param bool                 $allow_bound_writes  Caller opt-in to overwrite bound attrs.
+	 *
+	 * @return \WP_Error|null WP_Error('bound_attribute') when blocked, else null.
+	 */
+	public function reject_bound_write( array $attributes, $block_attrs, $allow_bound_writes ) {
+		if ( $allow_bound_writes || empty( $attributes ) || ! is_array( $block_attrs ) ) {
+			return null;
+		}
+
+		$bindings = isset( $block_attrs['metadata']['bindings'] ) && is_array( $block_attrs['metadata']['bindings'] )
+			? $block_attrs['metadata']['bindings']
+			: array();
+		if ( empty( $bindings ) ) {
+			return null;
+		}
+
+		$blocked = array();
+		foreach ( array_keys( $attributes ) as $attr_key ) {
+			if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
+				$blocked[] = $attr_key;
+			}
+		}
+		if ( empty( $blocked ) ) {
+			return null;
+		}
+
+		return new \WP_Error(
+			'bound_attribute',
+			sprintf(
+				/* translators: 1: comma-separated list of bound attribute names */
+				__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
+				implode( ', ', $blocked )
+			),
+			array(
+				'status'           => 400,
+				'bound_attributes' => $blocked,
+			)
+		);
+	}
+
+	/**
 	 * Flatten a nested block structure into a flat array with path references.
 	 *
 	 * Each entry contains the block data and a 'path' array indicating how to

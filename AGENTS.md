@@ -250,6 +250,8 @@ On feature branches, the changelog header is `= develop =` until release.
 9. **Legacy-tier blocks are hard-rejected** on insert/replace (HTTP 400); avoid-tier warns but succeeds. Enforcement is insert-only — `update-attrs`/`update-html` don't re-check tiers.
 10. **No `dotenv` in the server.** It breaks the esbuild ESM→CJS bundle. Env vars come from the parent process only.
 11. **The agent role survives deactivation.** It lives in `wp_user_roles`; only `uninstall.php` (or `Agent_Provisioner::purge()`, gated by the `gk/block-mcp/agent/remove-on-uninstall` filter) tears it down.
+12. **External-contributor PR branches live on forks.** `git fetch origin <branch>` 404s for a fork-hosted PR head — use `gh pr checkout <n>` (fetches `refs/pull/<n>/head` and sets the fork as the push remote). Push follow-up fixes to the fork (`git push git@github.com:<owner>/block-mcp.git <branch>:<branch>`); this works while the PR has maintainer-edit enabled.
+13. **MCP `destructiveHint: false` promises additive-only.** Any tool that overwrites or removes existing content must declare `destructiveHint: true` in its `src/tools/*` annotations — a `false` hint tells MCP clients the tool never touches existing data, so they skip confirmation. Don't copy annotations from an update-style tool without checking: `update_block`/`update_blocks` shipped with a wrong `false`.
 
 ## Related Resources
 

@@ -642,7 +642,9 @@ class Block_Reader {
 	 * @return array Merged attribute map (parsed_attrs + any extracted sourced values).
 	 */
 	private function extract_sourced_attributes( $block_name, array $parsed_attrs, $inner_html ) {
-		if ( '' === $block_name || empty( $inner_html ) ) {
+		// Explicit empty-string test to match derive_sourced_attributes(): a
+		// block whose content is literally "0" is real markup.
+		if ( '' === $block_name || '' === (string) $inner_html ) {
 			return $parsed_attrs;
 		}
 
@@ -686,6 +688,61 @@ class Block_Reader {
 
 		// Delimiter-parsed attrs win — merge extracted underneath.
 		return array_merge( $extracted, $parsed_attrs );
+	}
+
+	/**
+	 * Freshly derive every innerHTML-sourced attribute from the given markup.
+	 *
+	 * Unlike extract_sourced_attributes(), this does NOT defer to delimiter
+	 * values — it re-reads each sourced attribute directly from `$inner_html`,
+	 * so callers replacing a block's innerHTML can recompute the structured
+	 * attributes that mirror it (e.g. core/heading `content`). Only the four
+	 * sources source_attribute_value() supports (attribute, html, rich-text,
+	 * text) resolve; anything else yields nothing. Returns just the derived
+	 * pairs — the caller decides how to merge them.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name Fully-qualified block type name.
+	 * @param string $inner_html Markup to derive attribute values from.
+	 *
+	 * @return array Map of attribute name → value for every source that resolved.
+	 */
+	public function derive_sourced_attributes( $block_name, $inner_html ) {
+		// Explicit empty-string test, not empty(): a block whose rendered content
+		// is literally "0" is real markup, and empty('0') would skip it.
+		if ( '' === (string) $block_name || '' === (string) $inner_html ) {
+			return array();
+		}
+
+		if ( ! isset( $this->block_schema_cache[ $block_name ] ) ) {
+			$registry = \WP_Block_Type_Registry::get_instance();
+			if ( ! $registry ) {
+				return array();
+			}
+			$block_type                              = $registry->get_registered( $block_name );
+			$this->block_schema_cache[ $block_name ] = ( $block_type && ! empty( $block_type->attributes ) )
+				? $block_type->attributes
+				: array();
+		}
+
+		$schema = $this->block_schema_cache[ $block_name ];
+		if ( empty( $schema ) ) {
+			return array();
+		}
+
+		$derived = array();
+		foreach ( $schema as $attr_name => $attr_def ) {
+			if ( ! is_array( $attr_def ) ) {
+				continue;
+			}
+			$value = $this->source_attribute_value( $attr_def, $inner_html );
+			if ( null !== $value ) {
+				$derived[ $attr_name ] = $value;
+			}
+		}
+
+		return $derived;
 	}
 
 	/**
