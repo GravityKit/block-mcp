@@ -414,6 +414,42 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertArrayHasKey( 'before_revision_id', $result );
 	}
 
+	/**
+	 * A batch item that writes a bound attribute directly must be rejected, the
+	 * same as the single-block path — not silently clobbered.
+	 *
+	 * update_block guards the final attributes with reject_bound_write
+	 * unconditionally, but the batch ran that guard only inside the dual-storage
+	 * derive branch (gated on empty attributes), so a batch item supplying
+	 * attributes directly skipped it and overwrote a bound attribute. This pins
+	 * that a direct bound-attribute write fails the batch and leaves the value
+	 * intact.
+	 */
+	public function test_update_blocks_batch_guards_bound_attributes_on_direct_write() {
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array(
+					'content'  => 'ORIGINAL',
+					'metadata' => array( 'bindings' => array( 'content' => array( 'source' => 'core/post-meta' ) ) ),
+				),
+				'<p>ORIGINAL</p>'
+			),
+		) );
+
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'flat_index' => 0, 'attributes' => array( 'content' => 'HACKED' ) ),
+		) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result, 'a direct bound-attribute write must fail the batch' );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertEquals( 'bound_attribute', $data['errors'][0]['code'], 'the item error must be the bound-attribute rejection' );
+
+		$saved = $this->current_blocks();
+		$this->assertEquals( 'ORIGINAL', $saved[0]['attrs']['content'], 'the bound attribute must not be clobbered' );
+	}
+
 	public function test_update_blocks_batch_rejects_empty_updates() {
 		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
 		$result = $this->crud->update_blocks_batch( $this->post_id, array() );

@@ -1163,6 +1163,28 @@ class Block_Writer {
 				);
 				continue;
 			}
+
+			// Caller-supplied attributes get the same Block Bindings guard as the
+			// single-block path. The dual-storage branch below guards only its
+			// DERIVED attributes, so a direct-attributes item would otherwise skip
+			// the check and clobber a bound attribute.
+			if ( ! empty( $attributes ) ) {
+				$bound_error = $this->crud->reject_bound_write(
+					$attributes,
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					! empty( $item['allow_bound_writes'] )
+				);
+				if ( null !== $bound_error ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $bound_error->get_error_code(),
+						'message' => $bound_error->get_error_message(),
+						'block'   => isset( $target_block['blockName'] ) ? (string) $target_block['blockName'] : '',
+					);
+					continue;
+				}
+			}
+
 			if (
 				null !== $inner_html
 				&& empty( $attributes )
