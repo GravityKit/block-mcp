@@ -130,7 +130,12 @@ class Post_Manager {
 			);
 		}
 
-		if ( 'publish' === $status ) {
+		// Every publish-equivalent status needs the publish cap, matching WP core's
+		// handle_status_param(): 'future' is auto-published by WP-Cron and 'private'
+		// is a published-visibility state, so gating only 'publish' let an
+		// edit_posts-only caller create scheduled or private posts.
+		$requires_publish_cap = in_array( $status, array( 'publish', 'future', 'private' ), true );
+		if ( $requires_publish_cap ) {
 			$publish_cap = ( $pt_object && isset( $pt_object->cap->publish_posts ) )
 				? $pt_object->cap->publish_posts
 				: 'publish_posts';
@@ -386,7 +391,10 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			if ( 'publish' === $new_status ) {
+			// Publish-equivalent statuses ('future', 'private') need the publish cap
+			// too, matching WP core's handle_status_param() and create_post above.
+			$requires_publish_cap = in_array( $new_status, array( 'publish', 'future', 'private' ), true );
+			if ( $requires_publish_cap ) {
 				$publish_cap = ( $pt_object && isset( $pt_object->cap->publish_posts ) )
 					? $pt_object->cap->publish_posts
 					: 'publish_posts';

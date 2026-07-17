@@ -630,6 +630,37 @@ class PostManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * 'private' is a publish-equivalent status and must require the publish cap on
+	 * create, the same as 'publish' — matching WP core's handle_status_param().
+	 *
+	 * The gate only checked `'publish' === $status`, so a draft-only agent (or any
+	 * edit_posts-but-not-publish_posts caller) could create private posts.
+	 */
+	public function test_create_post_private_status_requires_publish_cap() {
+		// Contributor: edit_posts yes, publish_posts no.
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'contributor' ) ) );
+		$result = $this->pm->create_post( array( 'title' => 'Secret', 'status' => 'private' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_publish', $result->get_error_code() );
+	}
+
+	/**
+	 * 'future' is a publish-equivalent status (WP-Cron auto-publishes it) and must
+	 * require the publish cap on update, the same as 'publish'.
+	 *
+	 * The contributor authors the draft so the edit check passes and the only
+	 * remaining gate is the publish cap.
+	 */
+	public function test_update_post_future_status_requires_publish_cap() {
+		$cid = self::factory()->user->create( array( 'role' => 'contributor' ) );
+		$id  = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'draft', 'post_title' => 'Scheduled', 'post_author' => $cid ) );
+		wp_set_current_user( $cid );
+		$result = $this->pm->update_post( $id, array( 'status' => 'future', 'date' => '2099-01-01 00:00:00' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_publish', $result->get_error_code() );
+	}
+
+	/**
 	 * With the trash toggle enabled, status:trash moves the post to trash.
 	 *
 	 * Trashing is off by default (see the gate tests below); this exercises the
