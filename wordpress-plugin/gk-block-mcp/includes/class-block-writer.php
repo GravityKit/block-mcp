@@ -362,6 +362,7 @@ class Block_Writer {
 		// Optimistic-concurrency guard: when the caller passes the snapshot its
 		// mutation was based on, persist via a portable compare-and-swap so a
 		// concurrent edit is never silently clobbered.
+		$did_cas_swap = false;
 		if ( null !== $expected ) {
 			global $wpdb;
 			// A write routes the verify + swap below to the primary, off any
@@ -413,6 +414,10 @@ class Block_Writer {
 					array( 'status' => 409 )
 				);
 			}
+
+			// The swap wrote $new_content. If the wp_update_post re-save below
+			// fails, this bytes-already-changed state must be rolled back.
+			$did_cas_swap = true;
 		}
 
 		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
@@ -453,6 +458,25 @@ class Block_Writer {
 		}
 
 		if ( is_wp_error( $result ) ) {
+			if ( $did_cas_swap ) {
+				// The raw swap already wrote $new_content, but wp_update_post
+				// rejected the save (e.g. WP core refuses to empty a title-less
+				// post). Restore the pre-swap content so a failed save never
+				// destroys the post, and drop the primed cache so readers do not
+				// serve the rolled-back value. The WHERE pins our own bytes so a
+				// writer that already moved the row on is not clobbered.
+				global $wpdb;
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->query(
+					$wpdb->prepare(
+						"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+						$expected,
+						$post_id,
+						$new_content
+					)
+				);
+				clean_post_cache( $post_id );
+			}
 			return $result;
 		}
 

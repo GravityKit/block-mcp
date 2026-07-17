@@ -142,6 +142,45 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A save that fails inside wp_update_post AFTER the compare-and-swap must not
+	 * destroy the post's content.
+	 *
+	 * The CAS path writes new content via a raw UPDATE, then re-saves through
+	 * wp_update_post for the revision + hooks. WP core refuses to empty a
+	 * title-less, excerpt-less post (WP_Error 'empty_content'), but by then the
+	 * raw swap has already emptied post_content. Without a rollback the post is
+	 * silently destroyed with no recoverable revision. This pins that the pre-swap
+	 * content is restored when wp_update_post fails.
+	 */
+	public function test_failed_wp_update_post_after_swap_restores_content() {
+		// A title-less, excerpt-less draft so emptying content trips WP core's
+		// empty_content guard inside wp_update_post.
+		$post_id = wp_insert_post(
+			array(
+				'post_title'   => '',
+				'post_excerpt' => '',
+				'post_status'  => 'draft',
+				'post_type'    => 'post',
+				'post_content' => serialize_blocks( array( $this->block( 'core/paragraph', array(), '<p>ONLY</p>' ) ) ),
+			)
+		);
+		$this->assertIsInt( $post_id );
+		$this->assertGreaterThan( 0, $post_id );
+
+		$snapshot = $this->persisted_content( $post_id );
+
+		// Deleting the only block serializes to empty content.
+		$result = $this->crud->save_blocks( $post_id, array(), $snapshot );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'empty_content', $result->get_error_code(), 'WP core must reject emptying a title-less post' );
+
+		$content = $this->persisted_content( $post_id );
+		$this->assertNotSame( '', $content, 'a rejected save must not leave post_content empty' );
+		$this->assertStringContainsString( 'ONLY', $content, 'the pre-swap content must be restored on a failed save' );
+	}
+
+	/**
 	 * The lazy gk_ref persist writes straight to post_content via $wpdb,
 	 * bypassing wp_update_post. With a snapshot it must compare-and-swap: a
 	 * concurrent content edit that landed after the ref walk read the post
