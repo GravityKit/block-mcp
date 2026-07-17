@@ -54,6 +54,7 @@ function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_dual_storage_blocks_manual' );
 	delete_option( 'gk_block_api_storage_modes' );
 	delete_option( 'gk_block_api_storage_modes_last_run' );
+	delete_option( 'gk_block_api_stats_refresh_last' );
 	delete_option( 'gk_block_api_db_version' );
 	delete_option( 'gk_block_api_instructions' );
 	delete_option( 'gk_block_api_instructions_updated_at' );
