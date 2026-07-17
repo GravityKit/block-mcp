@@ -39,6 +39,7 @@ class Media_Manager {
 	const SSRF_BLOCKED_IPV4_RANGES = array(
 		array( '0.0.0.0', '0.255.255.255' ),       // "This network."
 		array( '10.0.0.0', '10.255.255.255' ),      // RFC1918.
+		array( '100.64.0.0', '100.127.255.255' ),   // RFC6598 carrier-grade NAT.
 		array( '127.0.0.0', '127.255.255.255' ),    // Loopback.
 		array( '169.254.0.0', '169.254.255.255' ),  // Link-local (AWS/GCP/Azure metadata).
 		array( '172.16.0.0', '172.31.255.255' ),    // RFC1918.
@@ -276,9 +277,9 @@ class Media_Manager {
 		// SSRF defense: resolve host and reject reserved/private/link-local IPs.
 		// `wp_http_validate_url()` only catches loopback/0.0.0.0; cloud metadata
 		// endpoints (169.254.169.254) and RFC1918 private ranges sail past it.
-		$ssrf_check = $this->guard_ssrf( $url );
-		if ( is_wp_error( $ssrf_check ) ) {
-			return $ssrf_check;
+		$vetted = $this->guard_ssrf( $url );
+		if ( is_wp_error( $vetted ) ) {
+			return $vetted;
 		}
 
 		// Disable HTTP redirects for the fetch. guard_ssrf() validates only the
@@ -294,10 +295,29 @@ class Media_Manager {
 		};
 		add_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
 
+		// Pin the fetch to the exact IP(s) guard_ssrf just vetted via
+		// CURLOPT_RESOLVE, so download_url()'s independent second resolution of the
+		// host cannot be rebound to a private IP (a DNS-rebinding TOCTOU bypass of
+		// the guard). Only the cURL transport exposes a handle; the redirect block
+		// above still applies on the streams transport.
+		$resolve = $this->curl_resolve_entries( $url, $vetted );
+		$pin_ip  = static function ( $handle ) use ( $resolve ) {
+			$is_curl = ( $handle instanceof \CurlHandle ) || is_resource( $handle );
+			if ( ! empty( $resolve ) && $is_curl ) {
+				curl_setopt( $handle, CURLOPT_RESOLVE, $resolve ); // phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt
+			}
+		};
+		if ( ! empty( $resolve ) ) {
+			add_action( 'http_api_curl', $pin_ip, PHP_INT_MAX );
+		}
+
 		// Use a tighter timeout than core's 300s default. Slow-source amplification
 		// drops to ~10s of resource hold per request.
 		$tmp = download_url( $url, 10 );
 
+		if ( ! empty( $resolve ) ) {
+			remove_action( 'http_api_curl', $pin_ip, PHP_INT_MAX );
+		}
 		remove_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
 
 		if ( is_wp_error( $tmp ) ) {
@@ -519,7 +539,7 @@ class Media_Manager {
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
 	 * @param string $url URL to validate against reserved IP ranges.
-	 * @return true|\WP_Error
+	 * @return array{host:string,ipv4:string[],ipv6:string[]}|\WP_Error The vetted IPs on success (for pinning), or WP_Error.
 	 */
 	private function guard_ssrf( $url ) {
 		$host = wp_parse_url( $url, PHP_URL_HOST );
@@ -711,7 +731,43 @@ class Media_Manager {
 				}
 			}
 		}
-		return true;
+
+		// Return the vetted IP(s) so the caller can pin the fetch to exactly these
+		// addresses (see handle_url), closing the DNS-rebinding TOCTOU where
+		// download_url() would otherwise re-resolve the host to a private IP.
+		return array(
+			'host' => (string) $host,
+			'ipv4' => array_values( array_unique( $ipv4 ) ),
+			'ipv6' => array_values( array_unique( $ipv6 ) ),
+		);
+	}
+
+	/**
+	 * Build CURLOPT_RESOLVE entries pinning the URL's host+port to the vetted IPs.
+	 *
+	 * @param string              $url    The sideload URL.
+	 * @param array<string,mixed> $vetted guard_ssrf() result (host + ipv4/ipv6 lists).
+	 * @return string[] One "host:port:ip[,ip...]" entry, or empty when nothing to pin.
+	 */
+	private function curl_resolve_entries( $url, array $vetted ) {
+		$host = isset( $vetted['host'] ) && '' !== $vetted['host']
+			? (string) $vetted['host']
+			: (string) wp_parse_url( $url, PHP_URL_HOST );
+		$ips  = array_merge(
+			isset( $vetted['ipv4'] ) && is_array( $vetted['ipv4'] ) ? $vetted['ipv4'] : array(),
+			isset( $vetted['ipv6'] ) && is_array( $vetted['ipv6'] ) ? $vetted['ipv6'] : array()
+		);
+		if ( '' === $host || empty( $ips ) ) {
+			return array();
+		}
+
+		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
+		$port   = wp_parse_url( $url, PHP_URL_PORT );
+		if ( ! $port ) {
+			$port = ( 'https' === $scheme ) ? 443 : 80;
+		}
+
+		return array( sprintf( '%s:%d:%s', $host, (int) $port, implode( ',', $ips ) ) );
 	}
 
 	/**

@@ -70,6 +70,26 @@ class SsrfTest extends WP_UnitTestCase {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://10.0.0.1/admin' ) ), '10.0.0.1' );
 	}
 
+	public function test_blocks_cgn_100_64() {
+		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://100.64.0.1/' ) ), '100.64.0.1 carrier-grade NAT (RFC6598)' );
+	}
+
+	/**
+	 * The fetch is pinned to the exact IP(s) guard_ssrf vetted via CURLOPT_RESOLVE,
+	 * so download_url()'s independent second DNS lookup can't be rebound to a
+	 * private IP. This pins the resolve-entry construction (host:port:ips).
+	 */
+	public function test_curl_resolve_entries_pin_vetted_ips_to_host_and_port() {
+		$ref = new \ReflectionMethod( \GravityKit\BlockMCP\Media_Manager::class, 'curl_resolve_entries' );
+		$ref->setAccessible( true );
+
+		$https = $ref->invoke( $this->mm, 'https://cdn.example/img.png', array( 'host' => 'cdn.example', 'ipv4' => array( '93.184.216.34' ), 'ipv6' => array() ) );
+		$this->assertSame( array( 'cdn.example:443:93.184.216.34' ), $https, 'https pins to port 443 and the vetted IPv4' );
+
+		$http = $ref->invoke( $this->mm, 'http://cdn.example/img.png', array( 'host' => 'cdn.example', 'ipv4' => array( '1.2.3.4' ), 'ipv6' => array( '2001:db8::1' ) ) );
+		$this->assertSame( array( 'cdn.example:80:1.2.3.4,2001:db8::1' ), $http, 'http pins to port 80 and all vetted IPs' );
+	}
+
 	public function test_blocks_rfc1918_172_16() {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://172.16.42.7/' ) ), '172.16.42.7' );
 	}
