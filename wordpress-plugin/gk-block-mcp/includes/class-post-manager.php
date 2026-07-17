@@ -166,6 +166,13 @@ class Post_Manager {
 		$warnings = array();
 		$content  = '';
 		if ( ! empty( $args['blocks'] ) && is_array( $args['blocks'] ) ) {
+			// Enforce the depth bound like every other write path, so a
+			// pathologically deep tree can't persist and burden every later
+			// parse/serialize (Block_Writer guards its own paths separately).
+			$depth_check = Block_CRUD::validate_tree_depth( $args['blocks'] );
+			if ( is_wp_error( $depth_check ) ) {
+				return $depth_check;
+			}
 			$validation = $this->validate_blocks_for_insert( $args['blocks'] );
 			if ( is_wp_error( $validation ) ) {
 				return $validation;

@@ -91,6 +91,25 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertSame( array(), $result['warnings'] );
 	}
 
+	/**
+	 * create_post must enforce MAX_BLOCK_DEPTH like every other write path.
+	 *
+	 * create_post validated block names/tiers but never called
+	 * validate_tree_depth, so a pathologically deep tree persisted and every
+	 * later parse/serialize had to walk it. insert/replace/rewrite all reject a
+	 * tree deeper than MAX_BLOCK_DEPTH.
+	 */
+	public function test_create_post_rejects_over_deep_block_tree() {
+		$block = array( 'name' => 'core/paragraph', 'innerHTML' => '<p>deep</p>' );
+		for ( $i = 0; $i < 40; $i++ ) {
+			$block = array( 'name' => 'core/group', 'innerBlocks' => array( $block ) );
+		}
+
+		$result = $this->pm->create_post( array( 'title' => 'Deep', 'blocks' => array( $block ) ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'block_depth_exceeded', $result->get_error_code() );
+	}
+
 	// ── create_post: post type allow-list ────────────────────────────
 
 	public function test_create_post_rejects_invalid_post_type() {
