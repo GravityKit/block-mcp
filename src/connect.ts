@@ -447,8 +447,15 @@ export async function exchangeCode(
       }
       const current = new URL(url);
       const next = new URL(location, url);
+      // Only the standard HTTPS port counts as a "force HTTPS" upgrade. A
+      // redirect to https on a non-standard port is not ordinary HSTS behavior,
+      // so the credential must not follow it even when the host matches.
+      const upgradesToStandardHttpsPort = next.port === '' || next.port === '443';
       const sameHostHttpsUpgrade =
-        current.protocol === 'http:' && next.protocol === 'https:' && next.hostname === current.hostname;
+        current.protocol === 'http:' &&
+        next.protocol === 'https:' &&
+        next.hostname === current.hostname &&
+        upgradesToStandardHttpsPort;
       if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
         throw new Error(
           `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`

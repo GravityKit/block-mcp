@@ -40,4 +40,18 @@ describe('exchangeCode — same-host http→https upgrade', () => {
     const fetchFn = (async () => resp(301, { location: 'http://mysite.test/?rest_route=/gk-block-api/v1/connect/exchange' })) as unknown as typeof fetch;
     await expect(exchangeCode('https://mysite.test', 'code123', fetchFn)).rejects.toThrow(/different origin|off-site/i);
   });
+
+  it('refuses a same-host http→https upgrade to a non-standard port', async () => {
+    // The "force HTTPS" upgrade we follow is the standard port only. A redirect
+    // to https on an unusual port is not ordinary HSTS behavior, so the
+    // credential must not follow it even though the host matches.
+    const urls: string[] = [];
+    const fetchFn = (async (u: string) => {
+      urls.push(u);
+      return urls.length === 1
+        ? resp(301, { location: 'https://mysite.test:8443/?rest_route=/gk-block-api/v1/connect/exchange' })
+        : resp(200, { json: { success: true, data: { site: 'https://mysite.test:8443', user: 'block-mcp', password: 'leaked-pw' } } });
+    }) as unknown as typeof fetch;
+    await expect(exchangeCode('http://mysite.test', 'code123', fetchFn)).rejects.toThrow(/different origin|off-site/i);
+  });
 });

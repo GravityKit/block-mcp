@@ -53710,7 +53710,8 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
       }
       const current = new URL(url3);
       const next = new URL(location, url3);
-      const sameHostHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname;
+      const upgradesToStandardHttpsPort = next.port === "" || next.port === "443";
+      const sameHostHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && upgradesToStandardHttpsPort;
       if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
         throw new Error(
           `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
