@@ -48,6 +48,38 @@ jobs:
       - checkout
 
       - run:
+          name: Assert version lockstep (plugin, package.json, bundle)
+          command: |
+            set -euo pipefail
+            # The plugin and the MCP server share one version (see AGENTS.md
+            # "Versioning & Releases"). The plugin ZIP and the .mcpb ship the
+            # tracked server bundle as-is (CI never rebuilds it), so a bundle
+            # whose baked handshake version lags the plugin would ship stale.
+            # Fail the build before doing any expensive work if the five sources
+            # of truth disagree.
+            plugin_dir="wordpress-plugin/gk-block-mcp"
+            header=$(sed -n 's/^[[:space:]]*\*[[:space:]]*Version:[[:space:]]*\(.*\)/\1/p' "$plugin_dir/gk-block-mcp.php" | head -1 | tr -d '[:space:]')
+            constant=$(grep GK_BLOCK_MCP_VERSION "$plugin_dir/gk-block-mcp.php" | grep -oE "'[0-9]+\.[0-9]+[^']*'" | head -1 | tr -d "'")
+            stable=$(sed -n 's/^Stable tag:[[:space:]]*\(.*\)/\1/p' "$plugin_dir/readme.txt" | head -1 | tr -d '[:space:]')
+            pkg=$(grep -m1 '"version"' package.json | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+            baked=$(grep -oE 'version:[[:space:]]*"[0-9][^"]*"' "$plugin_dir/assets/mcp-server/index.cjs" | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
+            echo "plugin header (* Version:)   $header"
+            echo "GK_BLOCK_MCP_VERSION         $constant"
+            echo "readme.txt Stable tag        $stable"
+            echo "package.json version         $pkg"
+            echo "bundled server handshake     $baked"
+            fail=0
+            for v in "$constant" "$stable" "$pkg" "$baked"; do
+              [ "$v" = "$header" ] || fail=1
+            done
+            if [ "$fail" -ne 0 ]; then
+              echo "ERROR: versions are not in lockstep; every source must equal the plugin header ($header)."
+              echo "Fix: set them all to the same value, run 'npm run build' to rebake the bundle, and commit assets/mcp-server/index.cjs."
+              exit 1
+            fi
+            echo "Version lockstep OK: $header"
+
+      - run:
           name: Authenticate npm for gktools
           command: |
             # gktools is a private GitHub Packages module.
