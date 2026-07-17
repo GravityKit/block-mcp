@@ -308,25 +308,18 @@ class Block_Inventory {
 		}
 
 		// ── Pass 1: registry-based baseline.
-		// `WP_Block_Type_Registry` knows every block's render_callback (→ dynamic)
-		// and its `attributes` schema. Blocks with `attributes[*].source` set to
-		// 'html' / 'attribute' / 'children' / 'node' / 'rich-text' / 'tag' read
-		// from innerHTML at edit time — that's the structural dual-storage
-		// signal. Combine with `is_dynamic()` and we cover the whole registered
-		// surface without touching post_content.
+		// is_dynamic() splits blocks into static (content in innerHTML) and dynamic
+		// (rendered by PHP). A dynamic block is only a dual-storage CANDIDATE: dual
+		// is confirmed in pass 2 from stored-instance evidence, never from the
+		// registry alone — modern WP gives core/heading, core/button, core/image
+		// render callbacks + html-sourced attributes yet they store content plainly
+		// in innerHTML, so a registry-only dual verdict mislabeled them.
 		$classification     = array();
 		$registry           = \WP_Block_Type_Registry::get_instance();
 		$dynamic_candidates = array();
 		if ( $registry ) {
 			foreach ( $registry->get_all_registered() as $name => $block_type ) {
-				$is_dynamic  = $block_type->is_dynamic();
-				$reads_inner = $this->block_reads_innerhtml_via_attributes( $block_type );
-				if ( $is_dynamic && $reads_inner ) {
-					$classification[ $name ] = self::STORAGE_MODE_DUAL;
-				} elseif ( $is_dynamic ) {
-					// Dynamic blocks may still be dual via custom JS save() that
-					// PHP can't see (e.g., yoast/faq-block). Mark as dynamic
-					// here; pass 2 may upgrade to dual based on evidence.
+				if ( $block_type->is_dynamic() ) {
 					$classification[ $name ]     = self::STORAGE_MODE_DYNAMIC;
 					$dynamic_candidates[ $name ] = true;
 				} else {
@@ -423,36 +416,6 @@ class Block_Inventory {
 			'dynamic_count'  => $counts[ self::STORAGE_MODE_DYNAMIC ],
 			'static_count'   => $counts[ self::STORAGE_MODE_STATIC ],
 		);
-	}
-
-	/**
-	 * Whether any of the block type's registered attributes declares a
-	 * `source` that pulls from innerHTML — the structural signal of a
-	 * block whose attributes mirror its rendered HTML.
-	 *
-	 * @param \WP_Block_Type $block_type Registered block type to inspect.
-	 * @return bool
-	 */
-	private function block_reads_innerhtml_via_attributes( $block_type ) {
-		if ( empty( $block_type->attributes ) || ! is_array( $block_type->attributes ) ) {
-			return false;
-		}
-		// Sources that read from the saved markup (per Block API spec).
-		static $inner_sources = array(
-			'html'      => 1,
-			'attribute' => 1,
-			'children'  => 1,
-			'node'      => 1,
-			'rich-text' => 1,
-			'tag'       => 1,
-			'text'      => 1,
-		);
-		foreach ( $block_type->attributes as $attr ) {
-			if ( is_array( $attr ) && isset( $attr['source'] ) && isset( $inner_sources[ $attr['source'] ] ) ) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**

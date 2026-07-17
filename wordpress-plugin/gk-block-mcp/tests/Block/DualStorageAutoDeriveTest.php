@@ -134,6 +134,44 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 	// ── derive_sourced_attributes ─────────────────────────────────────────
 
 	/**
+	 * The storage-mode scan must not classify a dynamic, innerHTML-reading block
+	 * as dual from registry data alone.
+	 *
+	 * Modern WP registers core/heading, core/button, core/image with render
+	 * callbacks (is_dynamic() true) and html-sourced attributes, so pass 1
+	 * classified them dual purely from the registry — changing write semantics
+	 * for blocks that store content plainly in innerHTML. A dynamic block is now a
+	 * dynamic candidate; pass 2 upgrades it to dual only on stored-instance
+	 * evidence. With no stored instance it stays dynamic.
+	 */
+	public function test_scan_defers_dynamic_reads_inner_block_to_pass2_evidence() {
+		register_block_type(
+			'test/dyn-reads-inner',
+			array(
+				'attributes'      => array(
+					'content' => array( 'type' => 'string', 'source' => 'html', 'selector' => 'p' ),
+				),
+				'render_callback' => static function () {
+					return '<p>rendered</p>';
+				},
+			)
+		);
+
+		$inv = new Block_Inventory();
+		$inv->scan_storage_modes( true );
+		$modes = get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
+
+		unregister_block_type( 'test/dyn-reads-inner' );
+
+		$this->assertArrayHasKey( 'test/dyn-reads-inner', $modes );
+		$this->assertSame(
+			Block_Inventory::STORAGE_MODE_DYNAMIC,
+			$modes['test/dyn-reads-inner'],
+			'a dynamic, innerHTML-reading block must be a dynamic candidate, not dual, without stored evidence'
+		);
+	}
+
+	/**
 	 * Fresh-derives the sourced attribute from new markup, ignoring any prior
 	 * delimiter value — the recompute a re-synced innerHTML edit depends on.
 	 */
