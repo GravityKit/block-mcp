@@ -52091,7 +52091,7 @@ async function shikiHighlight(code, language, themeName) {
   const lang29 = langs.has(language) ? language : "plaintext";
   let html5 = hl.codeToHtml(code, { lang: lang29, theme: "css-variables" }).replace(/var\(--shiki-foreground\)/g, "var(--shiki-color-text)").replace(/var\(--shiki-background\)/g, "var(--shiki-color-background)");
   if (themeName && themeName !== "css-variables") {
-    html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, `$1 ${themeName}$2`);
+    html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, (_m, p1, p2) => `${p1} ${themeName}${p2}`);
   }
   return html5;
 }
@@ -52153,7 +52153,7 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   if (incomingInnerHTML !== "") {
     updatedInnerHTML = incomingInnerHTML.replace(
       /<pre class="shiki[\s\S]*?<\/pre>/,
-      codeHTML
+      () => codeHTML
     );
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,

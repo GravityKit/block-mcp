@@ -180,7 +180,8 @@ export async function shikiHighlight(code: string, language: string, themeName?:
     .replace(/var\(--shiki-foreground\)/g, 'var(--shiki-color-text)')
     .replace(/var\(--shiki-background\)/g, 'var(--shiki-color-background)');
   if (themeName && themeName !== 'css-variables') {
-    html = html.replace(/(<pre[^>]*class="shiki) css-variables(")/, `$1 ${themeName}$2`);
+    // Replacer function so a `$` in themeName is not read as a replacement token.
+    html = html.replace(/(<pre[^>]*class="shiki) css-variables(")/, (_m, p1, p2) => `${p1} ${themeName}${p2}`);
   }
   return html;
 }
@@ -305,9 +306,12 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   //     post renders a blank gap where the code should be.
   let updatedInnerHTML: string;
   if (incomingInnerHTML !== '') {
+    // Replacer function, not a string: codeHTML is arbitrary content and a
+    // `$`-sequence in it ($$, $&, $`) would otherwise be interpreted as a
+    // String.replace pattern and corrupt the rendered code.
     updatedInnerHTML = incomingInnerHTML.replace(
       /<pre class="shiki[\s\S]*?<\/pre>/,
-      codeHTML,
+      () => codeHTML,
     );
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,

@@ -186,6 +186,27 @@ describe('enrichBlock — Code Block Pro', () => {
   });
 
   /**
+   * Regression: when the enricher replaces an existing <pre class="shiki"> in
+   * innerHTML, the highlighted codeHTML was passed as the String.replace
+   * REPLACEMENT string, so a `$`-sequence in the source ($$ -> $, $& -> the
+   * whole matched <pre>) was interpreted as a replacement pattern and corrupted
+   * the rendered code. The replacement must be literal.
+   */
+  it('preserves $-sequences in code when replacing existing innerHTML', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'A $$MONEY$$ B $& C', language: 'plaintext', copyButton: false },
+      innerHTML: '<div class="wp-block-kevinbatdorf-code-block-pro"><pre class="shiki css-variables"><code>OLD</code></pre></div>',
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain('$$MONEY$$');
+    // $& would otherwise splice the whole old <pre> back in; the old content
+    // must be gone and the literal $& (shiki escapes the ampersand) preserved.
+    expect(result.innerHTML).not.toContain('OLD');
+    expect(result.innerHTML).toContain('$&#x26;');
+  });
+
+  /**
    * Wrapper-style values come straight from caller-supplied attributes. A
    * value containing `"` (whether malicious or just a quoted font-name like
    * `"Helvetica Neue"`) used to break out of the style="" attribute and
