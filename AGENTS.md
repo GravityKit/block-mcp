@@ -231,9 +231,10 @@ The plugin and MCP server version independently. The plugin follows WP plugin co
 
 **MCP server bump:** `package.json` `version` (+ optional readme mention if a TS change is user-observable).
 
-**Releasing = merging the version bump to `main`.** Two workflows fire from the merge and keep GitHub and npm in sync:
-- `build-plugin-zip.yml` reads the plugin `Version` header; when no `v{plugin-version}` tag exists yet it creates the tag + GitHub release (body = that version's `readme.txt` Changelog entry, `gk-block-mcp.zip` attached). A manually pushed `v*` tag still publishes a release as a backstop — note a workflow-created tag does NOT re-trigger workflows (`GITHUB_TOKEN` events don't cascade), which is why the release is created in the build job rather than via a tag push.
-- `npm-publish.yml` publishes `@gravitykit/block-mcp` (npm Trusted Publishing/OIDC, no token secret) whenever the `package.json` version isn't on the registry yet — independent of the plugin tag, since the two version separately.
+**Releasing = merging the version bump to `main`.** From that merge, three pieces fire:
+- **CircleCI's `build_package_release` job (`.circleci/config.yml`) is the sole creator of the `v{version}` tag and GitHub release.** It builds the ZIP, then runs `npx @gravitykit/gktools release` (tags `v{version}`, creates the release with that version's `readme.txt` Changelog as the body, posts to `#release-announcements`) and `gktools announce` (signs the build via the Release Manager). Commit-message switches: `[skip release]` skips the GitHub release, `[skip notify]` skips the announce. Release builds off `main` ship a clean version; other branches carry the commit hash.
+- `build-plugin-zip.yml` only builds the plugin ZIP and the rolling `latest` prerelease now; it no longer creates the version tag or release (CircleCI owns that).
+- `npm-publish.yml` publishes `@gravitykit/block-mcp` (npm Trusted Publishing/OIDC, no token secret) on every push to `main` and on release tags, skipping any version already on the registry — independent of the plugin tag, since the two version separately.
 
 On feature branches, the changelog header is `= develop =` until release.
 
