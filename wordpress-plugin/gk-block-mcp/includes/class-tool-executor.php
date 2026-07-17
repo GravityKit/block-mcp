@@ -177,7 +177,10 @@ class Tool_Executor {
 			'q'         => isset( $input['search'] ) ? (string) $input['search'] : null,
 			'synced'    => array_key_exists( 'synced', $input ) ? (bool) $input['synced'] : null,
 			'min_score' => isset( $input['min_score'] ) ? (int) $input['min_score'] : null,
-			'limit'     => $offset + $limit,
+			// Fetch the full filtered set (get_patterns builds all matches before
+			// its own limit slice regardless), so `total` below is the true count
+			// and next_offset is accurate; paginate the window here.
+			'limit'     => PHP_INT_MAX,
 			'refresh'   => ! empty( $input['refresh'] ),
 		);
 

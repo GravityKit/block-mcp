@@ -99,6 +99,37 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * Tool_Executor::execute('list_patterns') must report the true total across
+	 * pages and offer a next_offset when more patterns remain.
+	 *
+	 * The executor fetched only offset+limit patterns and then used that window's
+	 * size as `total`, so on a full first page `next_offset` was always null and
+	 * every pattern past the first page was invisible to an agent.
+	 */
+	public function test_execute_list_patterns_reports_true_total_across_pages() {
+		for ( $i = 0; $i < 5; $i++ ) {
+			register_block_pattern(
+				'gktest/pat' . $i,
+				array(
+					'title'   => 'Test Pattern ' . $i,
+					'content' => '<!-- wp:paragraph --><p>p' . $i . '</p><!-- /wp:paragraph -->',
+				)
+			);
+		}
+
+		$user_id = self::factory()->user->create( array( 'role' => 'editor' ) );
+		wp_set_current_user( $user_id );
+
+		$executor = new Tool_Executor( $this->controller, new Yoast_Bridge() );
+		$result   = $executor->execute( 'list_patterns', array( 'limit' => 2, 'offset' => 0 ) );
+
+		$this->assertIsArray( $result );
+		$this->assertCount( 2, $result['patterns'], 'the first page returns limit rows' );
+		$this->assertGreaterThanOrEqual( 5, (int) $result['total'], 'total must reflect all patterns, not the fetched window' );
+		$this->assertSame( 2, (int) $result['next_offset'], 'a full first page with more patterns must offer a next_offset' );
+	}
+
+	/**
 	 * Ability ids use the gk-block-mcp namespace and dashed slugs.
 	 *
 	 * Count excludes the three yoast_* tools: get_ability_ids() reflects what
