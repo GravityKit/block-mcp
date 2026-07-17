@@ -120,7 +120,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= 2.1.0 on July 16, 2026 =
+= 2.1.0 on July 20, 2026 =
 
 This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and adds reliability and security hardening across editing, media uploads, and the assistant account.
 
@@ -143,6 +143,7 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 * Strengthened how block content is saved so that text placed inside a block can't alter the structure of the surrounding page. This protection now applies on every editing path.
 * Hardened URL-based media uploads so a supplied link only downloads from the address you provide. If an image source relies on a redirect, provide the final image URL directly.
 * "Reset to defaults" now also returns the "allow the assistant to move posts to the trash" permission to off, so a reset fully restores the safe default settings.
+* Creating a scheduled (future-dated) or private post through the assistant now requires the account's publish permission, matching WordPress's own rules for those statuses.
 
 #### 🐛 Fixed
 
@@ -156,10 +157,16 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 * Moving a block into an empty container (or to the last position inside a container) no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 * Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
 * A post can now be created with the title "0". It was previously rejected as having no title.
+* Editing a Code block whose text contains dollar-sign sequences (such as `$1` or a price like `$5`) through the assistant no longer garbles that text.
+* Connecting an AI assistant now works on sites that don't use pretty permalinks; the connection reaches the REST API through its query-string address instead of a permalink path.
+* The per-page edit-rate limit is now counted reliably when several edits reach the same page at the same moment, so simultaneous edits can't slip past it.
 
 #### 💻 Developer Updates
 
 * Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
+* `find_posts` (the `list_posts` tool) now reports the true `total` and `total_pages` for the whole readable result set instead of only the current page, so a paginating integration gets accurate counts.
+* `list_patterns` now reports the true total for its result set, so pattern listings paginate correctly.
+* Write endpoints add a `rate_limit_locked` response (HTTP 429) for when simultaneous writes to the same post can't be rate-limited atomically. It clears within about a second, so retry shortly rather than backing off for a full minute.
 
 = 2.0.3 on June 17, 2026 =
 
