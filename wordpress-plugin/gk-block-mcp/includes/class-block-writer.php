@@ -92,46 +92,47 @@ class Block_Writer {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Check rate limits for a post.
+	 * Atomically reserve a rate-limit slot for a post, or reject when the limit is
+	 * reached.
+	 *
+	 * Check and record are ONE atomic step (a per-post advisory lock on MySQL), so
+	 * a parallel burst can't all pass the check before any of them record (the
+	 * race that let the per-post write limiter be bypassed). The slot is consumed
+	 * on the ATTEMPT, not on success, so a write that is later rejected still
+	 * counts against the budget. On the SQLite test harness (single-threaded) and
+	 * any non-MySQL store it degrades to an unlocked reserve.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Rate type: 'write' or 'put'.
 	 *
-	 * @return true|\WP_Error True if within limits, WP_Error if exceeded.
+	 * @return true|\WP_Error True when a slot was reserved, WP_Error (429) when over.
 	 */
 	public function check_rate_limit( $post_id, $type = 'write' ) {
-		$transient_key = 'gk_block_api_rate_' . $post_id;
-		$data          = get_transient( $transient_key );
+		$locked = $this->rate_lock_acquire( $post_id );
+		try {
+			$transient_key = 'gk_block_api_rate_' . $post_id;
+			$data          = get_transient( $transient_key );
+			if ( false === $data || ! is_array( $data ) ) {
+				$data = array(
+					'writes' => array(),
+					'puts'   => array(),
+				);
+			}
 
-		if ( false === $data ) {
-			return true;
-		}
+			$now          = time();
+			$window_start = $now - 60;
+			$prune        = static function ( $ts ) use ( $window_start ) {
+				return $ts >= $window_start;
+			};
 
-		$now          = time();
-		$window_start = $now - 60;
+			$data['writes'] = isset( $data['writes'] ) && is_array( $data['writes'] )
+				? array_values( array_filter( $data['writes'], $prune ) )
+				: array();
+			$data['puts']   = isset( $data['puts'] ) && is_array( $data['puts'] )
+				? array_values( array_filter( $data['puts'], $prune ) )
+				: array();
 
-		// Clean old entries.
-		if ( isset( $data['writes'] ) ) {
-			$data['writes'] = array_filter(
-				$data['writes'],
-				function ( $ts ) use ( $window_start ) {
-					return $ts >= $window_start;
-				}
-			);
-		}
-
-		if ( isset( $data['puts'] ) ) {
-			$data['puts'] = array_filter(
-				$data['puts'],
-				function ( $ts ) use ( $window_start ) {
-					return $ts >= $window_start;
-				}
-			);
-		}
-
-		if ( 'put' === $type ) {
-			$put_count = isset( $data['puts'] ) ? count( $data['puts'] ) : 0;
-			if ( $put_count >= Block_CRUD::RATE_LIMIT_PUT ) {
+			if ( 'put' === $type && count( $data['puts'] ) >= Block_CRUD::RATE_LIMIT_PUT ) {
 				return new \WP_Error(
 					'rate_limit_exceeded',
 					sprintf(
@@ -142,51 +143,95 @@ class Block_Writer {
 					array( 'status' => 429 )
 				);
 			}
-		}
 
-		$write_count = isset( $data['writes'] ) ? count( $data['writes'] ) : 0;
-		if ( $write_count >= Block_CRUD::RATE_LIMIT_WRITES ) {
-			return new \WP_Error(
-				'rate_limit_exceeded',
-				sprintf(
-					/* translators: %d: maximum number of writes per minute */
-					__( 'Write rate limit exceeded. Max %d per minute per post.', 'gk-block-mcp' ),
-					Block_CRUD::RATE_LIMIT_WRITES
-				),
-				array( 'status' => 429 )
-			);
-		}
+			if ( count( $data['writes'] ) >= Block_CRUD::RATE_LIMIT_WRITES ) {
+				return new \WP_Error(
+					'rate_limit_exceeded',
+					sprintf(
+						/* translators: %d: maximum number of writes per minute */
+						__( 'Write rate limit exceeded. Max %d per minute per post.', 'gk-block-mcp' ),
+						Block_CRUD::RATE_LIMIT_WRITES
+					),
+					array( 'status' => 429 )
+				);
+			}
 
-		return true;
+			// Within the limit — reserve the slot now, atomically with the check.
+			$data['writes'][] = $now;
+			if ( 'put' === $type ) {
+				$data['puts'][] = $now;
+			}
+			set_transient( $transient_key, $data, 120 );
+
+			return true;
+		} finally {
+			if ( $locked ) {
+				$this->rate_lock_release( $post_id );
+			}
+		}
 	}
 
 	/**
-	 * Record a write operation for rate limiting.
+	 * No-op: the rate-limit slot is now reserved atomically inside
+	 * check_rate_limit() at the start of the operation (check and record collapsed
+	 * into one critical section). Retained so existing call sites don't change.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Rate type: 'write' or 'put'.
+	 * @return void
 	 */
 	public function record_rate_limit( $post_id, $type = 'write' ) {
-		$transient_key = 'gk_block_api_rate_' . $post_id;
-		$data          = get_transient( $transient_key );
+		unset( $post_id, $type );
+	}
 
-		if ( false === $data ) {
-			$data = array(
-				'writes' => array(),
-				'puts'   => array(),
-			);
+	/**
+	 * Name of the per-post MySQL advisory lock guarding the rate-limit append.
+	 *
+	 * Scoped by DB_NAME so two installs on one MySQL server don't collide on the
+	 * same post id (GET_LOCK names are server-global), and hashed to stay within
+	 * MySQL's 64-char lock-name limit.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	private function rate_lock_name( $post_id ) {
+		$scope = defined( 'DB_NAME' ) ? DB_NAME : '';
+		return 'gkbmrate_' . md5( $scope . ':' . (int) $post_id );
+	}
+
+	/**
+	 * Acquire the per-post rate-limit advisory lock, best-effort.
+	 *
+	 * Only attempts a lock on MySQL ($wpdb->is_mysql); returns false everywhere
+	 * else so callers fall back to the unlocked append. Waits at most 1 second,
+	 * then proceeds unlocked rather than hanging: a slow lock degrades to
+	 * best-effort and never blocks a write.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool True when a lock is held (and must be released).
+	 */
+	private function rate_lock_acquire( $post_id ) {
+		global $wpdb;
+		if ( empty( $wpdb->is_mysql ) ) {
+			return false;
 		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- server-side advisory lock; not cacheable.
+		return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $this->rate_lock_name( $post_id ), 1 ) );
+	}
 
-		$now = time();
-
-		$data['writes'][] = $now;
-
-		if ( 'put' === $type ) {
-			$data['puts'][] = $now;
+	/**
+	 * Release the per-post rate-limit advisory lock.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private function rate_lock_release( $post_id ) {
+		global $wpdb;
+		if ( empty( $wpdb->is_mysql ) ) {
+			return;
 		}
-
-		// Store with 2-minute TTL (covers the 1-minute rolling window).
-		set_transient( $transient_key, $data, 120 );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releasing the advisory lock; not cacheable.
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $this->rate_lock_name( $post_id ) ) );
 	}
 
 	// -------------------------------------------------------------------------

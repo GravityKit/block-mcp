@@ -1677,25 +1677,45 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertTrue( $result );
 	}
 
-	public function test_rate_limit_records_writes() {
-		$this->crud->record_rate_limit( $this->post_id, 'write' );
-		$this->crud->record_rate_limit( $this->post_id, 'write' );
+	/**
+	 * check_rate_limit() reserves the slot at check time.
+	 *
+	 * The limiter consumes a slot on the ATTEMPT, not on later success: the
+	 * check and the append are one atomic critical section (record_rate_limit()
+	 * is a no-op). Two passing checks therefore leave two timestamps in the
+	 * window's `writes` bucket.
+	 */
+	public function test_rate_limit_check_reserves_write_slot() {
+		$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
+		$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
 		$data = get_transient( 'gk_block_api_rate_' . $this->post_id );
 		$this->assertCount( 2, $data['writes'] );
 	}
 
+	/**
+	 * The (limit+1)th write in the window is rejected with a 429.
+	 *
+	 * Because each check reserves its own slot, RATE_LIMIT_WRITES passing checks
+	 * fill the bucket and the next one exceeds it.
+	 */
 	public function test_rate_limit_exceeded_after_max_writes() {
 		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_WRITES; $i++ ) {
-			$this->crud->record_rate_limit( $this->post_id, 'write' );
+			$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
 		}
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertEquals( 'rate_limit_exceeded', $result->get_error_code() );
 	}
 
+	/**
+	 * Full-rewrite (`put`) requests draw from their own smaller budget.
+	 *
+	 * RATE_LIMIT_PUT passing `put` checks fill the put bucket; the next `put`
+	 * check is rejected even though the general write budget is untouched.
+	 */
 	public function test_rate_limit_put_separate_bucket() {
 		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_PUT; $i++ ) {
-			$this->crud->record_rate_limit( $this->post_id, 'put' );
+			$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'put' ) );
 		}
 		$result = $this->crud->check_rate_limit( $this->post_id, 'put' );
 		$this->assertInstanceOf( \WP_Error::class, $result );
@@ -1877,11 +1897,10 @@ class BlockCrudTest extends BlockApiTestCase {
 	/**
 	 * revert_to_revision must consume the per-post write rate-limit budget.
 	 *
-	 * Pre-fix, revert was the only write method that didn't call
-	 * check_rate_limit / record_rate_limit, so a caller could keep cycling
-	 * write -> revert -> write -> revert at unbounded frequency, effectively
-	 * unrate-limiting the post. Now revert checks + records on the same
-	 * writes bucket as the per-block writes.
+	 * revert is a write path: if it skipped the rate-limit a caller could cycle
+	 * write -> revert -> write -> revert at unbounded frequency and bypass the
+	 * per-post budget. revert reserves a slot on the same writes bucket as the
+	 * per-block writes, so a full bucket rejects it with rate_limit_exceeded.
 	 */
 	public function test_revert_to_revision_respects_rate_limit() {
 		// Pre-fill the writes bucket to the cap.
