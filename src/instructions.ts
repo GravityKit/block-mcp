@@ -25,6 +25,7 @@
  */
 
 import axios, { AxiosError } from 'axios';
+import { restRouteUrl } from './rest-url.js';
 
 /**
  * The baseline instructions string.
@@ -188,9 +189,8 @@ export async function fetchAddendum(wordpressUrl: string): Promise<string> {
     return '';
   }
 
-  // Normalize trailing slash and resolve relative to wp-json.
-  const base = wordpressUrl.replace(/\/+$/, '');
-  const url = `${base}/wp-json/gk-block-api/v1/instructions`;
+  // Permalink-independent ?rest_route= form: /wp-json/ 404s on plain permalinks.
+  const url = restRouteUrl(wordpressUrl, '/instructions');
 
   try {
     const response = await axios.get<InstructionsResponse>(url, {

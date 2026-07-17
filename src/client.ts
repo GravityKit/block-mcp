@@ -8,6 +8,7 @@
 
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
+import { restRouteUrl } from './rest-url.js';
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */
 function mimeForFilename(filename: string): string {
@@ -181,8 +182,9 @@ export class WordPressBlockClient {
       `${auth.username}:${auth.application_password}`
     ).toString('base64');
 
-    const trimmed = wordpress_url.replace(/\/+$/, '');
-    const baseURL = `${trimmed}/wp-json/gk-block-api/v1`;
+    // Permalink-independent ?rest_route= form so tool calls don't 404 on a
+    // plain-permalink site after the connector completes.
+    const baseURL = restRouteUrl(wordpress_url);
 
     this.client = axios.create({
       baseURL,

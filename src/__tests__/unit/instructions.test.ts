@@ -202,19 +202,19 @@ describe('fetchAddendum', () => {
     expect(result).toBe('hi');
   });
 
-  it('issues GET to /wp-json/gk-block-api/v1/instructions', async () => {
+  it('issues GET on the permalink-independent ?rest_route= form', async () => {
     vi.mocked(axios.get).mockResolvedValueOnce({ data: { addendum: 'use info callout' } });
     await fetchAddendum('https://example.com');
     expect(vi.mocked(axios.get)).toHaveBeenCalledOnce();
     const [url] = vi.mocked(axios.get).mock.calls[0]!;
-    expect(url).toBe('https://example.com/wp-json/gk-block-api/v1/instructions');
+    expect(url).toBe('https://example.com/?rest_route=/gk-block-api/v1/instructions');
   });
 
   it('normalizes trailing slashes in the base URL', async () => {
     vi.mocked(axios.get).mockResolvedValueOnce({ data: { addendum: 'x' } });
     await fetchAddendum('https://example.com///');
     const [url] = vi.mocked(axios.get).mock.calls[0]!;
-    expect(url).toBe('https://example.com/wp-json/gk-block-api/v1/instructions');
+    expect(url).toBe('https://example.com/?rest_route=/gk-block-api/v1/instructions');
   });
 
   it('passes a short timeout and JSON Accept header', async () => {

@@ -40000,6 +40000,12 @@ function formatPath(path2) {
   return `[${path2.join(", ")}]`;
 }
 
+// src/rest-url.ts
+function restRouteUrl(siteUrl, routeSuffix = "") {
+  const trimmed = siteUrl.replace(/\/+$/, "");
+  return `${trimmed}/?rest_route=/gk-block-api/v1${routeSuffix}`;
+}
+
 // src/client.ts
 function mimeForFilename(filename) {
   const ext = filename.toLowerCase().split(".").pop() ?? "";
@@ -40064,8 +40070,7 @@ var WordPressBlockClient = class {
     const credentials = Buffer.from(
       `${auth.username}:${auth.application_password}`
     ).toString("base64");
-    const trimmed = wordpress_url.replace(/\/+$/, "");
-    const baseURL = `${trimmed}/wp-json/gk-block-api/v1`;
+    const baseURL = restRouteUrl(wordpress_url);
     this.client = axios_default.create({
       baseURL,
       headers: {
@@ -40773,8 +40778,7 @@ async function fetchAddendum(wordpressUrl) {
   if (process.env[OFF_ENV_VAR] === "1") {
     return "";
   }
-  const base = wordpressUrl.replace(/\/+$/, "");
-  const url3 = `${base}/wp-json/gk-block-api/v1/instructions`;
+  const url3 = restRouteUrl(wordpressUrl, "/instructions");
   try {
     const response = await axios_default.get(url3, {
       timeout: FETCH_TIMEOUT_MS,

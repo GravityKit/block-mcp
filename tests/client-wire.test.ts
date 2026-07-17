@@ -50,7 +50,9 @@ describe('client request shaping (wire-level)', () => {
       auth: { username: 'u', application_password: 'p' },
     });
 
-  const PREFIX = '/wp-json/gk-block-api/v1';
+  // Permalink-independent ?rest_route= form (see src/rest-url.ts): the client
+  // must not hardcode /wp-json/, which 404s on plain-permalink sites.
+  const PREFIX = '/?rest_route=/gk-block-api/v1';
 
   it('upload_media url mode posts JSON, not multipart', async () => {
     await client().uploadMedia({ url: 'https://example.test/pic.png', title: 'T' });
