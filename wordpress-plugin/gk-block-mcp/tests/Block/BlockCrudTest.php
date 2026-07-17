@@ -359,6 +359,51 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertEquals( '<p>New</p>', $saved[0]['innerHTML'] );
 	}
 
+	/**
+	 * update_block's `saved` snapshot must reflect the persisted (normalized)
+	 * block after a gk/block-mcp/block/normalize repair.
+	 *
+	 * Contract pin: update_block now rebuilds the response from the persisted node
+	 * in $result['blocks'] (like update_blocks_batch) rather than reading its local
+	 * $block, whose match with post_content otherwise relies on fragile PHP
+	 * reference aliasing into the saved tree. This pins that `saved` carries the
+	 * normalizer's change so a future edit that breaks the aliasing is caught.
+	 */
+	public function test_update_block_saved_reflects_normalized_persisted_content() {
+		$normalizer = static function ( $block, $name ) {
+			if ( 'core/paragraph' === $name && isset( $block['innerHTML'] ) ) {
+				$block['innerHTML']    = str_replace( '</p>', ' [normalized]</p>', (string) $block['innerHTML'] );
+				$block['innerContent'] = array( $block['innerHTML'] );
+			}
+			return $block;
+		};
+		add_filter( 'gk/block-mcp/block/normalize', $normalizer, 10, 2 );
+
+		// A NESTED paragraph: save_blocks reassigns the parent group during
+		// normalize, breaking update_block's reference into the child, so the
+		// pre-normalization node no longer tracks the persisted content.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div>', array(
+				$this->block( 'core/paragraph', array(), '<p>child</p>' ),
+			) ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 1, array(), '<p>updated</p>' );
+
+		remove_filter( 'gk/block-mcp/block/normalize', $normalizer, 10 );
+
+		$this->assertTrue( $result['success'] );
+		$this->assertStringContainsString(
+			'[normalized]',
+			get_post_field( 'post_content', $this->post_id ),
+			'precondition: the normalizer must have changed the persisted content'
+		);
+		$this->assertStringContainsString(
+			'[normalized]',
+			$result['saved']['inner_html'],
+			'saved.inner_html must reflect the normalized, persisted block'
+		);
+	}
+
 	public function test_update_block_invalid_index_error() {
 		$this->make_post( array(
 			$this->block( 'core/paragraph', array(), '<p>A</p>' ),

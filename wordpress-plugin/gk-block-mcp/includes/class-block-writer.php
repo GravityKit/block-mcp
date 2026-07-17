@@ -964,29 +964,38 @@ class Block_Writer {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
+		// Build the response from the persisted (normalized) node in
+		// $result['blocks'], not the local $block, so `block` and `saved` are the
+		// canonical post-save snapshot the response promises even when a
+		// gk/block-mcp/block/normalize filter changed the block. This mirrors the
+		// deliberate rebuild in update_blocks_batch instead of relying on the
+		// fragile reference aliasing between $block and the saved tree.
+		$persisted      = isset( $result['blocks'] ) ? $this->crud->get_block_by_path( $result['blocks'], $path ) : null;
+		$response_block = is_array( $persisted ) ? $persisted : $block;
+
 		// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 		$block_data = apply_filters(
 			'gk/block-mcp/block/format',
 			array(
 				'index'      => $index,
-				'name'       => $block['blockName'],
-				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				'name'       => isset( $response_block['blockName'] ) ? $response_block['blockName'] : '',
+				'attributes' => isset( $response_block['attrs'] ) ? $response_block['attrs'] : array(),
 			),
-			$block['blockName']
+			isset( $response_block['blockName'] ) ? $response_block['blockName'] : ''
 		);
 
 		// Surface the stable ref so callers can chain mutations against the
 		// same block without re-reading. The TS outputSchema declares this
 		// field; without it agents that try to capture ref from update_block
 		// for follow-up edits would see undefined.
-		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
-			$block_data['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+		if ( isset( $response_block['attrs']['metadata']['gk_ref'] ) ) {
+			$block_data['ref'] = (string) $response_block['attrs']['metadata']['gk_ref'];
 		}
 
 		return array(
 			'success'            => true,
 			'block'              => $block_data,
-			'saved'              => $this->format_saved_block( $block, $index ),
+			'saved'              => $this->format_saved_block( $response_block, $index ),
 			'before_revision_id' => $result['before_revision_id'],
 			'revision_id'        => $result['revision_id'],
 		);
