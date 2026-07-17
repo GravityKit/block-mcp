@@ -83,8 +83,8 @@ export interface BlockType {
 export interface PatternPreference {
   /** Computed preference score */
   score: number;
-  /** Human-readable tier */
-  tier: 'recommended' | 'acceptable' | 'avoid' | 'legacy';
+  /** Human-readable tier (matches the server: preferred/acceptable/avoid/legacy) */
+  tier: 'preferred' | 'acceptable' | 'avoid' | 'legacy';
   /** Reasons contributing to the score */
   reasons: string[];
 }

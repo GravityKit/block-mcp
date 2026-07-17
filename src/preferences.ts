@@ -117,12 +117,13 @@ export function enrichPatternList(patterns: Pattern[]): {
     (a, b) => b.preference.score - a.preference.score
   );
 
-  // Classify by tier only — the server is the source of truth and already
-  // applied policy. Mixing in score-based fallbacks (the old logic) caused
-  // mis-bucketing: an `avoid`-tier pattern with score 5 leaked into the
-  // recommended bucket; a `recommended`-tier pattern with negative score
-  // was double-counted. Trust the tier.
-  const recommended = sorted.filter((p) => p.preference.tier === 'recommended');
+  // Classify by the tier the server emits (preferred/acceptable/avoid/legacy),
+  // which is the source of truth and has already applied policy. The
+  // "recommended" display bucket is the usable set (preferred + acceptable);
+  // avoid + legacy are the ones to steer away from.
+  const recommended = sorted.filter(
+    (p) => p.preference.tier === 'preferred' || p.preference.tier === 'acceptable'
+  );
   const avoid       = sorted.filter((p) => p.preference.tier === 'avoid' || p.preference.tier === 'legacy');
 
   const lines: string[] = [];

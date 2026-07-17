@@ -40875,7 +40875,9 @@ function enrichPatternList(patterns) {
   const sorted = [...patterns].sort(
     (a2, b3) => b3.preference.score - a2.preference.score
   );
-  const recommended = sorted.filter((p2) => p2.preference.tier === "recommended");
+  const recommended = sorted.filter(
+    (p2) => p2.preference.tier === "preferred" || p2.preference.tier === "acceptable"
+  );
   const avoid = sorted.filter((p2) => p2.preference.tier === "avoid" || p2.preference.tier === "legacy");
   const lines = [];
   if (recommended.length > 0) {
