@@ -132,8 +132,8 @@ class RateLimitBurstTest extends BlockApiTestCase {
 		$this->assertArrayHasKey( 'writes', $state );
 
 		// Even if all 100 writes were within 60s, the stored count
-		// shouldn't exceed the cap — record_rate_limit prunes on each
-		// write.
+		// shouldn't exceed the cap: check_rate_limit prunes the window
+		// on each reserve.
 		$this->assertLessThanOrEqual(
 			Block_CRUD::RATE_LIMIT_WRITES + 5, // grace for pre-prune writes
 			count( $state['writes'] ),

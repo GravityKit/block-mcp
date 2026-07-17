@@ -39979,6 +39979,10 @@ function translateWpError(code, data) {
       const where = hints.post_id !== void 0 ? `on post ${hints.post_id} ` : "";
       return `Too many writes ${where}in the last minute. Wait ~60s before retrying, or batch your edits into a single \`edit_block_tree\` call.`;
     }
+    case "rate_limit_locked": {
+      const where = hints.post_id !== void 0 ? ` on post ${hints.post_id}` : "";
+      return `Another write${where} is in progress. Retry in a moment; the lock clears within a second. To avoid contention, batch edits into a single \`edit_block_tree\` call.`;
+    }
     // ── v1.2 post lifecycle ────────────────────────────────────────
     case "mixed_trash_payload":
       return '`status: "trash"` cannot be combined with other fields. Trash the post in one call, then update other fields after.';

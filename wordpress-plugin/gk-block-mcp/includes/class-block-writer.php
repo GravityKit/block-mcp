@@ -93,22 +93,47 @@ class Block_Writer {
 
 	/**
 	 * Atomically reserve a rate-limit slot for a post, or reject when the limit is
-	 * reached.
+	 * reached or the reserve can't be serialized.
 	 *
-	 * Check and record are ONE atomic step (a per-post advisory lock on MySQL), so
-	 * a parallel burst can't all pass the check before any of them record (the
-	 * race that let the per-post write limiter be bypassed). The slot is consumed
-	 * on the ATTEMPT, not on success, so a write that is later rejected still
-	 * counts against the budget. On the SQLite test harness (single-threaded) and
-	 * any non-MySQL store it degrades to an unlocked reserve.
+	 * Check and reserve are ONE atomic step guarded by a per-post MySQL advisory
+	 * lock, so a parallel burst can't all pass the check before any of them
+	 * reserve (the race that let the per-post write limiter be bypassed). The slot
+	 * is consumed on the ATTEMPT, not on success, so a write later rejected for
+	 * another reason still counts against the budget.
+	 *
+	 * On MySQL a failed lock acquisition means the post is under concurrent write
+	 * pressure; this fails CLOSED (429) rather than reserving unlocked, which
+	 * would reopen the race precisely under the load the limiter exists to stop.
+	 * The SQLite test harness and any non-MySQL store have no lock and reserve
+	 * unlocked, which is correct there because those paths are single-threaded.
+	 *
+	 * The lock assumes one MySQL connection per request (stock wpdb); a
+	 * connection-pooling drop-in that routes the lock statements to different
+	 * servers weakens the guarantee. A fatal/exit inside the critical section
+	 * skips the release, but the server frees the lock when the connection closes.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Rate type: 'write' or 'put'.
 	 *
-	 * @return true|\WP_Error True when a slot was reserved, WP_Error (429) when over.
+	 * @return true|\WP_Error True when a slot was reserved, WP_Error (429) when
+	 *                        over the limit or when the reserve can't be serialized.
 	 */
 	public function check_rate_limit( $post_id, $type = 'write' ) {
-		$locked = $this->rate_lock_acquire( $post_id );
+		global $wpdb;
+
+		$needs_lock = ! empty( $wpdb->is_mysql );
+		$locked     = false;
+		if ( $needs_lock ) {
+			$locked = $this->rate_lock_acquire( $post_id );
+			if ( ! $locked ) {
+				return new \WP_Error(
+					'rate_limit_locked',
+					__( 'This post is busy with concurrent writes. Retry in a moment.', 'gk-block-mcp' ),
+					array( 'status' => 429 )
+				);
+			}
+		}
+
 		try {
 			$transient_key = 'gk_block_api_rate_' . $post_id;
 			$data          = get_transient( $transient_key );
@@ -185,36 +210,41 @@ class Block_Writer {
 	}
 
 	/**
-	 * Name of the per-post MySQL advisory lock guarding the rate-limit append.
+	 * Name of the per-post MySQL advisory lock guarding the rate-limit reserve.
 	 *
-	 * Scoped by DB_NAME so two installs on one MySQL server don't collide on the
-	 * same post id (GET_LOCK names are server-global), and hashed to stay within
-	 * MySQL's 64-char lock-name limit.
+	 * GET_LOCK names are server-global, so the scope must encode the install:
+	 * DB_NAME separates two installs on one MySQL server, and the table prefix
+	 * separates multisite sub-sites (which share DB_NAME but not the prefix) so
+	 * the same post id on different sites doesn't needlessly contend. Hashed to
+	 * stay within MySQL's 64-char lock-name limit.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return string
 	 */
 	private function rate_lock_name( $post_id ) {
-		$scope = defined( 'DB_NAME' ) ? DB_NAME : '';
-		return 'gkbmrate_' . md5( $scope . ':' . (int) $post_id );
+		global $wpdb;
+		$db     = defined( 'DB_NAME' ) ? DB_NAME : '';
+		$prefix = isset( $wpdb->prefix ) ? $wpdb->prefix : '';
+		return 'gkbmrate_' . md5( $db . ':' . $prefix . ':' . (int) $post_id );
 	}
 
 	/**
-	 * Acquire the per-post rate-limit advisory lock, best-effort.
+	 * Acquire the per-post rate-limit advisory lock on MySQL.
 	 *
-	 * Only attempts a lock on MySQL ($wpdb->is_mysql); returns false everywhere
-	 * else so callers fall back to the unlocked append. Waits at most 1 second,
-	 * then proceeds unlocked rather than hanging: a slow lock degrades to
-	 * best-effort and never blocks a write.
+	 * Only called when $wpdb->is_mysql (the caller owns that gate), so a false
+	 * return here unambiguously means the lock wasn't granted within the wait, or
+	 * GET_LOCK errored (it returns NULL then). Waits at most 1 second so a slow
+	 * lock becomes a fail-closed 429 at the caller, never a hung request.
+	 *
+	 * The reserve never nests a second GET_LOCK on the same connection, so the
+	 * pre-5.7.5 rule (a session holds one advisory lock, and acquiring another
+	 * releases the first) can't make this code drop its own lock.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return bool True when a lock is held (and must be released).
 	 */
 	private function rate_lock_acquire( $post_id ) {
 		global $wpdb;
-		if ( empty( $wpdb->is_mysql ) ) {
-			return false;
-		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- server-side advisory lock; not cacheable.
 		return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $this->rate_lock_name( $post_id ), 1 ) );
 	}

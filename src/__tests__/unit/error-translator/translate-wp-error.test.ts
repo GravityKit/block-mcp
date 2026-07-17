@@ -221,6 +221,18 @@ describe('translateWpError — rate limiting', () => {
     expect(msg).toMatch(/^Too many writes in the last minute/);
     expect(msg).not.toMatch(/on post/);
   });
+
+  it('rate_limit_locked advises a brief retry and embeds post_id', () => {
+    const msg = translateWpError('rate_limit_locked', { post_id: 7 })!;
+    expect(msg).toMatch(/on post 7/);
+    expect(msg).toMatch(/Retry in a moment/);
+  });
+
+  it('rate_limit_locked drops post_id clause when absent', () => {
+    const msg = translateWpError('rate_limit_locked', null)!;
+    expect(msg).toMatch(/^Another write is in progress/);
+    expect(msg).not.toMatch(/on post/);
+  });
 });
 
 describe('translateWpError — v1.2 post lifecycle', () => {

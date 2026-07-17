@@ -11,6 +11,8 @@
 
 use GravityKit\BlockMCP\Block_CRUD;
 
+require_once __DIR__ . '/RateLimitLockWpdbDouble.php';
+
 class BlockCrudTest extends BlockApiTestCase {
 
 	/** @var int */
@@ -1736,6 +1738,119 @@ class BlockCrudTest extends BlockApiTestCase {
 		// Stale entries should be filtered; check should pass.
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
 		$this->assertTrue( $result );
+	}
+
+	/**
+	 * On MySQL, a failed lock acquisition fails CLOSED, not open.
+	 *
+	 * When the per-post advisory lock can't be acquired the post is under
+	 * concurrent write pressure. Reserving unlocked there would let the burst
+	 * race past the limit (the very bypass the lock exists to close), so the
+	 * limiter must return a 429 instead of true.
+	 */
+	public function test_rate_limit_fails_closed_when_lock_unavailable_on_mysql() {
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 0 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rate_limit_locked', $result->get_error_code() );
+		$this->assertSame( 429, $result->get_error_data()['status'] );
+		$issued_get_lock = array_filter(
+			$double->captured,
+			static function ( $q ) {
+				return false !== strpos( $q, 'GET_LOCK' );
+			}
+		);
+		$this->assertNotEmpty( $issued_get_lock, 'the acquire must issue GET_LOCK' );
+	}
+
+	/**
+	 * A granted lock is acquired and then released around the reserve.
+	 *
+	 * Exercises the GET_LOCK / RELEASE_LOCK SQL that the SQLite harness never
+	 * runs (is_mysql is false there): a successful reserve issues GET_LOCK and,
+	 * on the way out, RELEASE_LOCK.
+	 */
+	public function test_rate_limit_acquires_and_releases_the_lock_on_mysql() {
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertTrue( $result );
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'GET_LOCK' );
+				}
+			),
+			'a successful reserve must acquire the lock'
+		);
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'RELEASE_LOCK' );
+				}
+			),
+			'the lock must be released after the reserve'
+		);
+	}
+
+	/**
+	 * The lock is released even when the reserve is rejected for being over budget.
+	 *
+	 * The release lives in a finally, so an over-limit 429 must still free the
+	 * lock rather than leaking it and blocking the post for the connection's life.
+	 */
+	public function test_rate_limit_releases_the_lock_when_over_budget() {
+		$now = time();
+		set_transient(
+			'gk_block_api_rate_' . $this->post_id,
+			array(
+				'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES, $now ),
+				'puts'   => array(),
+			),
+			120
+		);
+
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rate_limit_exceeded', $result->get_error_code() );
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'RELEASE_LOCK' );
+				}
+			),
+			'the lock must be released even when the write is rejected for being over budget'
+		);
 	}
 
 	// ── insert_blocks with innerBlocks ────────────────────────────
