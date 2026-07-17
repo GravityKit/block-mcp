@@ -242,6 +242,35 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The content-type allow-list must be submittable without JavaScript.
+	 *
+	 * The master "Allow all content types" toggle is JS-only (it has no name), and
+	 * it both hides the type fieldset and disables its checkboxes. A disabled input
+	 * is never submitted, so with JS off an admin could not move from allow-all to
+	 * a restricted set. The checkboxes must not be server-side disabled, and a
+	 * <noscript> rule must reveal the list so a no-JS admin can restrict types.
+	 */
+	public function test_content_type_allowlist_is_submittable_without_js() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertDoesNotMatchRegularExpression(
+			'/name="gk_block_api_post_types_allowlist\[\]"[^>]*\bdisabled\b/',
+			$html,
+			'type checkboxes must not be server-side disabled, or a no-JS admin cannot submit a restricted set'
+		);
+		$this->assertMatchesRegularExpression(
+			'/<noscript>.*#gk-block-mcp-type-list\s*\{\s*display:\s*block/s',
+			$html,
+			'a no-JS reveal must show the type list when JavaScript is unavailable'
+		);
+	}
+
+	/**
 	 * The admin submenu uses the "Block MCP" brand label.
 	 */
 	public function test_register_menu_uses_block_mcp_label() {

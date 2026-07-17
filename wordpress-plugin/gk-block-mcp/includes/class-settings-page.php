@@ -973,11 +973,18 @@ class Settings_Page {
 						$type_obj = $registered_post_types[ $slug ];
 						?>
 						<label>
-							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> <?php disabled( $gk_allow_all_types ); ?> />
+							<input type="checkbox" name="gk_block_api_post_types_allowlist[]" value="<?php echo esc_attr( $slug ); ?>" <?php checked( in_array( $slug, $post_type_allow, true ) ); ?> />
 							<?php echo esc_html( $type_obj->labels->singular_name ); ?> <code><?php echo esc_html( $slug ); ?></code>
 						</label>
 					<?php endfor; ?>
 				</fieldset>
+				<noscript>
+					<style>
+						/* Without JS the master toggle can neither reveal nor enable the list; show it and hide the dead toggle so a no-JS admin can still restrict types. */
+						#gk-block-mcp-type-list { display: block; }
+						.gk-block-mcp-allow-all-toggle { display: none; }
+					</style>
+				</noscript>
 				<style>
 					.gk-block-mcp-allowlist {
 						display: grid;
