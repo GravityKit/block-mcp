@@ -395,7 +395,9 @@ function run_pending_migrations() {
 	// Schema changed (or first install): drop caches a prior schema may have
 	// written so the new code never reads a stale payload.
 	delete_transient( Block_Inventory::CACHE_KEY );
-	update_option( DB_VERSION_OPTION, CURRENT_DB_VERSION, false );
+	// Autoloaded: run_pending_migrations() reads this on every request, so keep
+	// it in the autoloaded options bundle rather than paying a query per request.
+	update_option( DB_VERSION_OPTION, CURRENT_DB_VERSION, true );
 }
 
 /**

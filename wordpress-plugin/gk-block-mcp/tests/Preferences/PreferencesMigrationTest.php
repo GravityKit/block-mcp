@@ -75,6 +75,33 @@ class PreferencesMigrationTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The schema-version option must be autoloaded.
+	 *
+	 * run_pending_migrations() reads it on every request (plugins_loaded), so a
+	 * non-autoloaded value costs a DB query per request on sites without a
+	 * persistent object cache. Stamping it autoloaded keeps the check in the
+	 * autoloaded options bundle.
+	 */
+	public function test_maybe_migrate_stamps_the_version_autoloaded() {
+		global $wpdb;
+		\GravityKit\BlockMCP\maybe_migrate();
+
+		$autoload = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT autoload FROM {$wpdb->options} WHERE option_name = %s",
+				\GravityKit\BlockMCP\DB_VERSION_OPTION
+			)
+		);
+		// WP 6.6+ normalises autoload=true to 'on'/'auto-on'; older WP uses 'yes'.
+		// Assert an autoloaded state rather than a single literal.
+		$this->assertContains(
+			$autoload,
+			array( 'yes', 'on', 'auto', 'auto-on' ),
+			'the schema-version option must be autoloaded so the per-request check does not hit the DB'
+		);
+	}
+
+	/**
 	 * Saved preferences survive the migration byte-for-byte.
 	 *
 	 * The opinion-free read layer takes stored values verbatim, so the migration
