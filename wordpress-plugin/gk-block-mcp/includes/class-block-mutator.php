@@ -708,18 +708,24 @@ class Block_Mutator {
 					}
 				}
 
-				// Reject moving a block into itself or its own descendants.
+				$count = isset( $params['count'] ) ? max( 1, (int) $params['count'] ) : 1;
+
+				// Reject moving a block into itself or its own descendants. For a
+				// range move (count > 1) the moved blocks occupy
+				// [target_index, target_index + count - 1] under the source parent,
+				// so a destination descending into ANY of them is invalid, not just
+				// the first block at $path. Guard the whole range up front rather
+				// than relying on downstream path resolution to reject it.
 				$dest_len = count( $destination );
 				$path_len = count( $path );
 				if ( $dest_len > $path_len ) {
-					$is_descendant = true;
-					for ( $ci = 0; $ci < $path_len; $ci++ ) {
-						if ( $path[ $ci ] !== $destination[ $ci ] ) {
-							$is_descendant = false;
-							break;
-						}
-					}
-					if ( $is_descendant ) {
+					$src_parent_segs  = array_slice( $path, 0, $path_len - 1 );
+					$dest_prefix_segs = array_slice( $destination, 0, $path_len - 1 );
+					$dest_seg_at_src  = (int) $destination[ $path_len - 1 ];
+					$into_moved_range = $src_parent_segs === $dest_prefix_segs
+						&& $dest_seg_at_src >= $target_index
+						&& $dest_seg_at_src <= $target_index + $count - 1;
+					if ( $into_moved_range ) {
 						return new \WP_Error(
 							'invalid_destination',
 							__( 'Cannot move a block into itself or its own descendants.', 'gk-block-mcp' ),
@@ -727,8 +733,6 @@ class Block_Mutator {
 						);
 					}
 				}
-
-				$count = isset( $params['count'] ) ? max( 1, (int) $params['count'] ) : 1;
 
 				// Validate count doesn't exceed available blocks.
 				if ( $target_index + $count > count( $parent ) ) {

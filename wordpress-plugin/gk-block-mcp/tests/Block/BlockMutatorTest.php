@@ -1215,6 +1215,38 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertEquals( 'invalid_destination', $result->get_error_code() );
 	}
 
+	/**
+	 * A range move (count > 1) must reject a destination inside ANY block in the
+	 * moved range at the descendant guard, not just the first block.
+	 *
+	 * The upfront check only compared the first moved block's path; a destination
+	 * inside a later moved sibling was left for downstream path resolution to
+	 * reject. This pins that the guard itself rejects the whole moved range with
+	 * invalid_destination, so a future move-algorithm change can't reintroduce
+	 * silent misplacement.
+	 */
+	public function test_move_range_rejects_destination_inside_a_moved_sibling() {
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>A-child</p>' ),
+			) ),
+			$this->block( 'core/group', array(), '<div></div>', array(
+				$this->block( 'core/paragraph', array(), '<p>B-child</p>' ),
+			) ),
+			$this->block( 'core/paragraph', array(), '<p>C</p>' ),
+		) );
+		// Move blocks [0] and [1] (count=2); destination [1, 0] is inside the
+		// SECOND moved block.
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'move',
+			array( 0 ),
+			array( 'destination' => array( 1, 0 ), 'count' => 2 )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_destination', $result->get_error_code() );
+	}
+
 	public function test_move_invalid_destination_segment_error() {
 		$this->make_post( array(
 			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
