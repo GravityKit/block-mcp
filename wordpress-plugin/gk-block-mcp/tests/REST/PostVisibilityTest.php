@@ -97,15 +97,13 @@ class PostVisibilityTest extends WP_UnitTestCase {
 	// ── /find-posts ───────────────────────────────────────────────────────
 
 	/**
-	 * GET /find-posts pagination must reflect the post-filter, not the raw query.
+	 * GET /find-posts must never leak the existence of a password-protected post
+	 * the caller cannot read.
 	 *
-	 * Pre-fix, `total` and `total_pages` came from $query->found_posts /
-	 * $query->max_num_pages — which only honor the SQL-level `perm:'readable'`
-	 * filter, NOT the post-loop is_post_readable() check that catches
-	 * publish-with-password posts. A caller could see "there are 5 matching
-	 * posts" while only 1 was actually returned, leaking the existence of
-	 * password-protected publish posts they can't read. The fix derives both
-	 * metrics from the visible `$out` set so the metadata matches the body.
+	 * The query adds `has_password => false`, so password-protected posts are
+	 * excluded from the SQL count as well as the results. A caller therefore never
+	 * sees "there are N matching posts" for posts they can't read, and total /
+	 * count agree with the returned body.
 	 */
 	public function test_find_posts_pagination_reflects_visible_results_only() {
 		// Two publish posts; one is password-protected. An Author who is not
@@ -145,13 +143,48 @@ class PostVisibilityTest extends WP_UnitTestCase {
 		$this->assertSame(
 			count( $data['posts'] ),
 			(int) $data['total'],
-			'/find-posts total must equal the visible count, not the raw WP_Query found_posts.'
+			'a password-protected post must not be counted in /find-posts total.'
 		);
 		$this->assertSame(
 			count( $data['posts'] ),
 			(int) $data['count'],
-			'count and total must agree once metadata reflects $out instead of $query->found_posts.'
+			'count and total must agree when the single-page result set holds no hidden posts.'
 		);
+	}
+
+	/**
+	 * GET /find-posts must report the full matching total across all pages, not
+	 * collapse total_pages to 1.
+	 *
+	 * total/total_pages were derived from count($out) — the current page's rows —
+	 * so a multi-page result reported total_pages = 1 and a paginating caller
+	 * never fetched page 2, silently hiding results from an agent-facing API. They
+	 * now come from the query's found_posts / max_num_pages.
+	 */
+	public function test_find_posts_total_spans_all_pages() {
+		for ( $i = 0; $i < 5; $i++ ) {
+			self::factory()->post->create(
+				array(
+					'post_status' => 'publish',
+					'post_author' => $this->author_id,
+					'post_title'  => 'paginateme' . $i,
+				)
+			);
+		}
+		wp_set_current_user( $this->author_id );
+
+		$request = new \WP_REST_Request( 'GET', '/gk-block-api/v1/find-posts' );
+		$request->set_param( 'post_status', 'publish' );
+		$request->set_param( 's', 'paginateme' );
+		$request->set_param( 'per_page', 2 );
+		$request->set_param( 'page', 1 );
+		$response = rest_get_server()->dispatch( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertCount( 2, $data['posts'], 'page 1 returns per_page rows' );
+		$this->assertSame( 5, (int) $data['total'], 'total must span all matching posts, not just this page' );
+		$this->assertSame( 3, (int) $data['total_pages'], 'total_pages must reflect the full result set' );
 	}
 
 	/**

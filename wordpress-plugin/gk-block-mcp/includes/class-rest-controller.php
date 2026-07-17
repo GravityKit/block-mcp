@@ -1491,6 +1491,10 @@ class REST_Controller {
 				// applies Block_CRUD::is_post_readable() to catch the
 				// password-protected case.
 				'perm'                => 'readable',
+				// Exclude password-protected posts from the SQL count so
+				// found_posts / max_num_pages neither leak their existence nor
+				// count posts the caller cannot read.
+				'has_password'        => false,
 			);
 			if ( ! empty( $search ) ) {
 				$args['s'] = $search;
@@ -1514,21 +1518,16 @@ class REST_Controller {
 				);
 			}
 
-			// $query->found_posts reflects the SQL `perm:'readable'` filter but
-			// NOT the post-loop password gate above — so reporting it as `total`
-			// can leak the existence of password-protected publish posts the
-			// caller cannot see. Derive both `total` and `total_pages` from the
-			// visible `$out` instead so the metadata mirrors what the caller
-			// actually receives.
-			$visible_total = count( $out );
-			$total_pages   = $per_page > 0 ? (int) ceil( $visible_total / max( 1, (int) $per_page ) ) : 0;
-
+			// `has_password => false` already excludes password-protected posts
+			// from the SQL count, so found_posts / max_num_pages neither leak their
+			// existence nor collapse a multi-page result to one page. `count` is
+			// the number of rows returned on this page.
 			return new \WP_REST_Response(
 				array(
 					'posts'       => $out,
-					'count'       => $visible_total,
-					'total'       => $visible_total,
-					'total_pages' => $total_pages,
+					'count'       => count( $out ),
+					'total'       => (int) $query->found_posts,
+					'total_pages' => (int) $query->max_num_pages,
 					'page'        => (int) $page,
 					'per_page'    => (int) $per_page,
 				),
