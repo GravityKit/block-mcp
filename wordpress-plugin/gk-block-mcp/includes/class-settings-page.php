@@ -505,15 +505,17 @@ class Settings_Page {
 	 * @return string Admin URL for the Block MCP settings page.
 	 */
 	private function settings_return_url() {
-		$args = array( 'page' => self::PAGE_SLUG );
-
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only nav param, no state change.
-		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( '' !== $tab ) {
-			$args['tab'] = $tab;
-		}
-
-		return add_query_arg( $args, admin_url( 'options-general.php' ) );
+		// The only options.php form lives in the policy panel, so a save always
+		// returns to that tab. Reading $_GET['tab'] at render time returned the
+		// admin to whatever tab the page first loaded on, which is the wrong tab
+		// after a client-side tab switch.
+		return add_query_arg(
+			array(
+				'page' => self::PAGE_SLUG,
+				'tab'  => 'policy',
+			),
+			admin_url( 'options-general.php' )
+		);
 	}
 
 	// ──────────────────────────────────────────────────────────────────
@@ -1419,6 +1421,8 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Replacement map', 'gk-block-mcp' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'When an AI assistant is blocked from using an older block, it suggests the replacement you set here. Start typing in the Replacement column to search the blocks available on your site, or type any block name.', 'gk-block-mcp' ); ?></p>
+				<?php // Always-present marker so an emptied table still submits replacement_rows; the sanitizer then clears the stored map instead of merging the old one forward. ?>
+				<input type="hidden" name="gk_block_api_preferences[replacement_rows][__present]" value="1" />
 				<table class="widefat striped gk-block-mcp-growable" data-row-prefix="gk_block_api_preferences[replacement_rows]" style="max-width: 820px;">
 					<thead>
 						<tr>

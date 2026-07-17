@@ -271,6 +271,54 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The replacement-map table must submit an always-present marker so emptying
+	 * every row clears the stored map instead of resurrecting it.
+	 *
+	 * When the admin removed all rows the form sent no replacement_rows at all, so
+	 * the sanitizer never set replacement_map and array_merge() carried the old
+	 * map forward. A hidden replacement_rows[__present] marker keeps the key
+	 * present so the sanitizer clears it.
+	 */
+	public function test_replacement_map_form_emits_present_marker() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString(
+			'name="gk_block_api_preferences[replacement_rows][__present]"',
+			$html,
+			'the replacement-map form must emit an always-present marker so an emptied table clears the stored map'
+		);
+	}
+
+	/**
+	 * The settings save must return to the policy tab, where the only options.php
+	 * form lives, regardless of the tab the page first loaded on.
+	 *
+	 * settings_return_url read $_GET['tab'] at render time, so after a client-side
+	 * tab switch a save returned the admin to the wrong tab.
+	 */
+	public function test_settings_form_return_url_targets_policy_tab() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['tab'] = 'connect'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+		unset( $_GET['tab'] );
+
+		$this->assertMatchesRegularExpression(
+			'/name="_wp_http_referer"\s+value="[^"]*tab=policy/',
+			$html,
+			'the save must return to the policy tab, not the render-time tab'
+		);
+	}
+
+	/**
 	 * The admin submenu uses the "Block MCP" brand label.
 	 */
 	public function test_register_menu_uses_block_mcp_label() {
