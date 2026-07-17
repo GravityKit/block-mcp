@@ -1478,35 +1478,46 @@ class REST_Controller {
 				'ignore_sticky_posts' => true,
 				'no_found_rows'       => false,
 				'suppress_filters'    => false,
-				// `perm: readable` pushes the user-cap filter into WP_Query's
-				// SQL via posts_where_paged (built-in WP behaviour). Without
-				// this, requests for post_status=draft / private / pending
-				// would return every matching post regardless of caller —
-				// Author-level users could see each other's drafts. Filtering
-				// in the query (not the result loop) also keeps found_posts
-				// and pagination counts honest.
-				//
-				// Note: WP's `perm` check is status + ownership only — it does
-				// NOT consider post_password. The post-result loop below
-				// applies Block_CRUD::is_post_readable() to catch the
-				// password-protected case.
+				// `perm: readable` is a cheap first-pass SQL filter (status +
+				// ownership). It is NOT the authoritative gate: is_post_readable()
+				// below is stricter (per-post read_post/edit_post + the password
+				// rule), so the total is derived from ITS output, not
+				// $query->found_posts, which would count and leak unreadable posts.
 				'perm'                => 'readable',
-				// Exclude password-protected posts from the SQL count so
-				// found_posts / max_num_pages neither leak their existence nor
-				// count posts the caller cannot read.
-				'has_password'        => false,
 			);
 			if ( ! empty( $search ) ) {
 				$args['s'] = $search;
 			}
 
-			$query = new \WP_Query( $args );
-			$out   = array();
-			foreach ( $query->posts as $p ) {
-				// Post-filter for password-protected (perm:'readable' misses it).
-				if ( ! \GravityKit\BlockMCP\Block_CRUD::is_post_readable( $p ) ) {
-					continue;
+			// Fetch every candidate id (cheap: fields=ids), keep only the ones
+			// is_post_readable() allows, and derive total / total_pages / the page
+			// from THAT readable set — so the count reflects exactly what the caller
+			// can see and never leaks the existence of an unreadable post.
+			$args['posts_per_page'] = -1;
+			$args['paged']          = 1;
+			$args['fields']         = 'ids';
+			$args['no_found_rows']  = true;
+
+			$id_query = new \WP_Query( $args );
+			$ids      = array_map( 'intval', (array) $id_query->posts );
+			if ( ! empty( $ids ) ) {
+				_prime_post_caches( $ids, false, false );
+			}
+
+			$readable = array();
+			foreach ( $ids as $id ) {
+				$p = get_post( $id );
+				if ( $p instanceof \WP_Post && \GravityKit\BlockMCP\Block_CRUD::is_post_readable( $p ) ) {
+					$readable[] = $p;
 				}
+			}
+
+			$total       = count( $readable );
+			$total_pages = $per_page > 0 ? (int) ceil( $total / (int) $per_page ) : 0;
+			$offset      = ( max( 1, (int) $page ) - 1 ) * (int) $per_page;
+
+			$out = array();
+			foreach ( array_slice( $readable, $offset, (int) $per_page ) as $p ) {
 				$out[] = array(
 					'post_id'     => (int) $p->ID,
 					'title'       => $p->post_title,
@@ -1518,16 +1529,12 @@ class REST_Controller {
 				);
 			}
 
-			// `has_password => false` already excludes password-protected posts
-			// from the SQL count, so found_posts / max_num_pages neither leak their
-			// existence nor collapse a multi-page result to one page. `count` is
-			// the number of rows returned on this page.
 			return new \WP_REST_Response(
 				array(
 					'posts'       => $out,
 					'count'       => count( $out ),
-					'total'       => (int) $query->found_posts,
-					'total_pages' => (int) $query->max_num_pages,
+					'total'       => $total,
+					'total_pages' => $total_pages,
 					'page'        => (int) $page,
 					'per_page'    => (int) $per_page,
 				),

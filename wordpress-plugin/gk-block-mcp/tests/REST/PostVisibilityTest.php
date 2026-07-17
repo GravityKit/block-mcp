@@ -188,6 +188,42 @@ class PostVisibilityTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * GET /find-posts must not leak the existence of a post the caller cannot read
+	 * through `total` / `total_pages`.
+	 *
+	 * WP's `perm: readable` is a status+ownership SQL filter and does not match
+	 * is_post_readable() (which applies read_post/edit_post per post), so another
+	 * user's draft can appear in $query->found_posts while it is dropped from the
+	 * returned rows. Reporting found_posts as `total` then leaked "there is 1
+	 * matching post you can't see". `total` must count only readable posts.
+	 */
+	public function test_find_posts_total_excludes_unreadable_posts() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$draft_id = self::factory()->post->create(
+			array(
+				'post_status' => 'draft',
+				'post_author' => $admin_id,
+				'post_title'  => 'secretdraftxyz',
+			)
+		);
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'contributor' ) ) );
+
+		$request = new \WP_REST_Request( 'GET', '/gk-block-api/v1/find-posts' );
+		$request->set_param( 'post_status', 'any' );
+		$request->set_param( 's', 'secretdraftxyz' );
+		$request->set_param( 'per_page', 100 );
+		$response = rest_get_server()->dispatch( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$ids  = array_map( static fn( $p ) => $p['post_id'], $data['posts'] ?? array() );
+		$this->assertNotContains( $draft_id, $ids, "a contributor must not see another user's draft" );
+		$this->assertSame( 0, (int) $data['total'], 'total must not count posts the caller cannot read (no existence leak)' );
+		$this->assertSame( 0, (int) $data['total_pages'] );
+	}
+
+	/**
 	 * GET /find-posts?post_status=draft must NOT return another user's drafts.
 	 *
 	 * Pre-fix, WP_Query ran without `perm` set — so SQL returned every
