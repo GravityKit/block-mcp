@@ -55,6 +55,20 @@ class Connections {
 	const META_OPTION = 'gk_block_api_connection_meta';
 
 	/**
+	 * Prefix for a single connection's own meta row (one network option per UUID).
+	 *
+	 * Each connection's meta lives in its own option so record_meta()/forget_meta()
+	 * never read-modify-write a shared array — a concurrent mint or revoke can't
+	 * clobber a sibling's row and leave its credential unrevoked at uninstall.
+	 * Rows recorded before this split still live in META_OPTION and are read as a
+	 * fallback (and migrated to their own row on the next write).
+	 *
+	 * @since 2.1.0
+	 * @var   string
+	 */
+	const META_ROW_PREFIX = 'gk_block_api_conn_meta_';
+
+	/**
 	 * Record the approving human and host account for a minted credential.
 	 *
 	 * Merges into any existing entry so partial updates don't clobber siblings.
@@ -70,10 +84,12 @@ class Connections {
 		if ( '' === $uuid ) {
 			return;
 		}
-		$all          = self::meta_all();
-		$existing     = isset( $all[ $uuid ] ) && is_array( $all[ $uuid ] ) ? $all[ $uuid ] : array();
-		$all[ $uuid ] = array_merge( $existing, $meta );
-		update_network_option( null, self::META_OPTION, $all );
+		// Write only this connection's own row — no read-modify-write of a shared
+		// array, so a concurrent mint/revoke can't drop a sibling's meta. A partial
+		// update still merges over any existing value (including a legacy row).
+		$existing = self::get_meta( $uuid );
+		$existing = is_array( $existing ) ? $existing : array();
+		update_network_option( null, self::META_ROW_PREFIX . $uuid, array_merge( $existing, $meta ) );
 	}
 
 	/**
@@ -85,9 +101,17 @@ class Connections {
 	 * @return array|null
 	 */
 	public static function get_meta( $uuid ) {
-		$all  = self::meta_all();
 		$uuid = (string) $uuid;
-		return isset( $all[ $uuid ] ) && is_array( $all[ $uuid ] ) ? $all[ $uuid ] : null;
+		if ( '' === $uuid ) {
+			return null;
+		}
+		$row = get_network_option( null, self::META_ROW_PREFIX . $uuid, null );
+		if ( is_array( $row ) ) {
+			return $row;
+		}
+		// Backward-compat: entries recorded before the per-row split.
+		$legacy = self::legacy_meta_all();
+		return isset( $legacy[ $uuid ] ) && is_array( $legacy[ $uuid ] ) ? $legacy[ $uuid ] : null;
 	}
 
 	/**
@@ -99,11 +123,16 @@ class Connections {
 	 * @return void
 	 */
 	public static function forget_meta( $uuid ) {
-		$all  = self::meta_all();
 		$uuid = (string) $uuid;
-		if ( isset( $all[ $uuid ] ) ) {
-			unset( $all[ $uuid ] );
-			update_network_option( null, self::META_OPTION, $all );
+		if ( '' === $uuid ) {
+			return;
+		}
+		delete_network_option( null, self::META_ROW_PREFIX . $uuid );
+		// Also drop a legacy aggregate entry if this connection predates the split.
+		$legacy = self::legacy_meta_all();
+		if ( isset( $legacy[ $uuid ] ) ) {
+			unset( $legacy[ $uuid ] );
+			update_network_option( null, self::META_OPTION, $legacy );
 		}
 	}
 
@@ -115,8 +144,60 @@ class Connections {
 	 * @return array
 	 */
 	private static function meta_all() {
+		// Per-UUID rows (authoritative) merged over any legacy aggregate entries.
+		$all = self::legacy_meta_all();
+		foreach ( self::meta_row_names() as $name ) {
+			$uuid = substr( (string) $name, strlen( self::META_ROW_PREFIX ) );
+			$row  = get_network_option( null, (string) $name, null );
+			if ( '' !== $uuid && is_array( $row ) ) {
+				$all[ $uuid ] = $row;
+			}
+		}
+		return $all;
+	}
+
+	/**
+	 * The legacy pre-split aggregate map (UUID => meta). Always an array.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return array
+	 */
+	private static function legacy_meta_all() {
 		$all = get_network_option( null, self::META_OPTION, array() );
 		return is_array( $all ) ? $all : array();
+	}
+
+	/**
+	 * Option/meta-key names of every per-UUID connection-meta row.
+	 *
+	 * Network options live in sitemeta on multisite and wp_options on single-site,
+	 * so the prefix scan targets the right table for the current install.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string[]
+	 */
+	private static function meta_row_names() {
+		global $wpdb;
+		$like = $wpdb->esc_like( self::META_ROW_PREFIX ) . '%';
+		if ( is_multisite() ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no caching layer covers a LIKE.
+			return (array) $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT meta_key FROM {$wpdb->sitemeta} WHERE site_id = %d AND meta_key LIKE %s",
+					get_current_network_id(),
+					$like
+				)
+			);
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no caching layer covers a LIKE.
+		return (array) $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$like
+			)
+		);
 	}
 
 	/**
