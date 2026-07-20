@@ -19,6 +19,7 @@
         "phpunit/phpunit": "^9.6",
         "roots/wordpress": "^6.7",
         "squizlabs/php_codesniffer": "^3.10",
+        "wordpress/mcp-adapter": "^0.5",
         "wp-coding-standards/wpcs": "^3.0",
         "wp-phpunit/wp-phpunit": "^6.7",
         "wpackagist-plugin/wordpress-seo": ">=23.0",
@@ -66,7 +67,12 @@
             "@refresh-core-blocks-if-missing",
             "phpunit -c tests/phpunit.xml",
             "phpunit -c tests/phpunit/yoast.xml",
+            "phpunit -c tests/phpunit/adapter.xml",
             "phpunit -c tests/phpunit/multisite.xml"
+        ],
+        "test:adapter": [
+            "@refresh-core-blocks-if-missing",
+            "phpunit -c tests/phpunit/adapter.xml"
         ],
         "test:yoast": [
             "@refresh-core-blocks-if-missing",

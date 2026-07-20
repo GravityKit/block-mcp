@@ -43,6 +43,21 @@ tests_add_filter(
 		if ( $load_yoast && is_file( $yoast ) ) {
 			require $yoast;
 		}
+
+		// The WordPress MCP Adapter (wordpress/mcp-adapter, a dev dependency) is
+		// loaded only for the dedicated tests/phpunit/adapter.xml run, which sets
+		// GK_LOAD_MCP_ADAPTER. The general suite leaves it unset so the adapter's
+		// class is absent there — matching a site without the adapter, where the
+		// plugin's register_mcp_server() feature-detects it and no-ops. An env
+		// var (not a const) is used so it survives into @runInSeparateProcess
+		// children. Loaded before the plugin so `\WP\MCP\Core\McpAdapter` exists
+		// when the plugin registers its mcp_adapter_init handler.
+		$load_adapter = '1' === getenv( 'GK_LOAD_MCP_ADAPTER' );
+		$adapter      = $plugin_root . '/vendor/wordpress/wordpress/wp-content/plugins/mcp-adapter/mcp-adapter.php';
+		if ( $load_adapter && is_file( $adapter ) ) {
+			require $adapter;
+		}
+
 		require dirname( __DIR__ ) . '/gk-block-mcp.php';
 	}
 );

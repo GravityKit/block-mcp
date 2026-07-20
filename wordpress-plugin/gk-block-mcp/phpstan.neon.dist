@@ -49,13 +49,4 @@ parameters:
 		- '#Function GravityKit\\BlockMCP\\Foundation\\should_load not found\.#'
 		- '#Call to static method register\(\) on an unknown class GravityKit\\BlockMCP\\Foundation\\Core\.#'
 
-		# The WP MCP Adapter package (wordpress/mcp-adapter) is an optional
-		# third-party integration, not a composer dependency of this plugin, so
-		# its classes are never present when PHPStan analyzes the codebase.
-		# register_mcp_server() only reaches these references after a runtime
-		# class_exists( '\WP\MCP\Core\McpAdapter' ) guard.
-		- '#Class WP\\MCP\\Transport\\HttpTransport not found\.#'
-		- '#Class WP\\MCP\\Infrastructure\\ErrorHandling\\ErrorLogMcpErrorHandler not found\.#'
-		- '#Class WP\\MCP\\Infrastructure\\Observability\\NullMcpObservabilityHandler not found\.#'
-
 	treatPhpDocTypesAsCertain: false

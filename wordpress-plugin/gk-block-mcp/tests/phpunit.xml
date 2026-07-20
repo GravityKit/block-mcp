@@ -35,6 +35,7 @@
         <exclude>
             <group>ms-required</group>
             <group>yoast</group>
+            <group>mcp-adapter</group>
         </exclude>
     </groups>
 </phpunit>

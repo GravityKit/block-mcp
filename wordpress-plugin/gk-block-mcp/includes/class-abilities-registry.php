@@ -129,12 +129,7 @@ class Abilities_Registry {
 			return;
 		}
 
-		$adapter = \WP\MCP\Core\McpAdapter::instance();
-		if ( ! method_exists( $adapter, 'create_server' ) ) {
-			return;
-		}
-
-		$adapter->create_server(
+		\WP\MCP\Core\McpAdapter::instance()->create_server(
 			'gk-block-mcp',
 			'gk-block-mcp',
 			'mcp',

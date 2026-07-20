@@ -94,6 +94,14 @@ jobs:
       - name: Run PHPUnit (Yoast — yoast group)
         run: vendor/bin/phpunit -c tests/phpunit/yoast.xml --colors=never
 
+      # The mcp-adapter group is excluded from the single-site config (it needs
+      # the real WordPress MCP Adapter loaded). This config sets
+      # GK_LOAD_MCP_ADAPTER so the bootstrap loads wordpress/mcp-adapter and runs
+      # exactly that group — exercising the create_server / tools path the
+      # general suite can't reach because the adapter class is absent there.
+      - name: Run PHPUnit (MCP Adapter — mcp-adapter group)
+        run: vendor/bin/phpunit -c tests/phpunit/adapter.xml --colors=never
+
       # The ms-required group is excluded from the single-site config (it would
       # self-skip there). The multisite config runs exactly that group under a
       # real multisite install, so the multisite-only contracts (per-blog cap
