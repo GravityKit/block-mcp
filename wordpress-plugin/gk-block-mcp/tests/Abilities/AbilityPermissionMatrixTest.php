@@ -130,6 +130,50 @@ class AbilityPermissionMatrixTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * The content-reading tools, which gate on the lenient global `read`
+	 * permission but must still not hand back another user's private content.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function read_content_tool_provider(): array {
+		return array(
+			'get-page-blocks' => array( 'gk-block-mcp/get-page-blocks' ),
+			'get-block'       => array( 'gk-block-mcp/get-block' ),
+			'get-post-info'   => array( 'gk-block-mcp/get-post-info' ),
+		);
+	}
+
+	/**
+	 * An author has the global edit_posts the `read` permission checks, so the
+	 * ability gate passes; the handler's own per-post readability re-check must
+	 * still deny reading another author's private post. Pins the defense in depth
+	 * that the lenient read gate alone doesn't provide.
+	 *
+	 * @dataProvider read_content_tool_provider
+	 */
+	public function test_author_cannot_read_another_authors_private_post( string $ability_id ) {
+		$owner_id = self::factory()->user->create( array( 'role' => 'author' ) );
+		$post_id  = $this->make_block_post(
+			array( $this->paragraph( '<p>Secret</p>' ) ),
+			array(
+				'post_author' => $owner_id,
+				'post_status' => 'private',
+			)
+		);
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'author' ) ) );
+
+		$input = array( 'post_id' => $post_id );
+		if ( 'gk-block-mcp/get-block' === $ability_id ) {
+			$input['flat_index'] = 0;
+		}
+
+		$result = wp_get_ability( $ability_id )->execute( $input );
+
+		$this->assertWPError( $result, $ability_id . ' must not leak another author\'s private post' );
+	}
+
+	/**
 	 * Build a flat core/paragraph block in WP-internal shape for make_block_post().
 	 *
 	 * @param string $html Paragraph innerHTML.
