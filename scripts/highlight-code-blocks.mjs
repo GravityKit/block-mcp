@@ -34,7 +34,7 @@
 import { createHighlighter, createCssVariablesTheme } from 'shiki';
 import axios from 'axios';
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -174,18 +174,18 @@ if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
 }
 
 const api = axios.create({
-  baseURL: `${WORDPRESS_URL.replace(/\/$/, '')}/wp-json/gk-block-api/v1`,
+  baseURL: WORDPRESS_URL.replace(/\/$/, '') + '/wp-json/gk-block-api/v1',
   auth: { username: WORDPRESS_USER, password: WORDPRESS_APP_PASSWORD },
   timeout: 30_000,
 });
 
 async function getBlocks(postId) {
-  const { data } = await api.get(`/posts/${postId}/blocks`);
+  const { data } = await api.get('/posts/' + postId + '/blocks');
   return data.blocks ?? [];
 }
 
 async function updateBlock(postId, flatIndex, attributes) {
-  await api.patch(`/posts/${postId}/blocks/${flatIndex}`, { attributes });
+  await api.patch('/posts/' + postId + '/blocks/' + flatIndex, { attributes });
 }
 
 // ── WP-CLI (discovery only) ───────────────────────────────────────────────────
@@ -195,17 +195,21 @@ const gkcloneDir = process.env.GKCLONE_DIR ?? join(__dirname, '..', '..', 'Tooli
 const wpCliSsh   = process.env.WP_CLI_SSH ?? '';
 
 function wpExec(cmd, { input } = {}) {
-  const full = wpCliSsh
-    ? `${wpCliSsh} ${cmd}`
-    : `npx wp-env run cli -- wp ${cmd}`;
-  return execSync(full, {
+  const spawnOpts = {
     encoding: 'utf-8',
     maxBuffer: 50 * 1024 * 1024,
-    cwd: wpCliSsh ? undefined : gkcloneDir,
     input,
     stdio: input !== undefined ? ['pipe', 'pipe', 'pipe'] : undefined,
-    shell: wpCliSsh ? '/bin/bash' : undefined,
-  }).split('\n')
+  };
+  const cmdArgs = cmd.split(/\s+/).filter(Boolean);
+  let result;
+  if (wpCliSsh) {
+    const [sshBin, ...sshArgs] = wpCliSsh.split(/\s+/).filter(Boolean);
+    result = spawnSync(sshBin, [...sshArgs, ...cmdArgs], spawnOpts);
+  } else {
+    result = spawnSync('npx', ['wp-env', 'run', 'cli', '--', 'wp', ...cmdArgs], { ...spawnOpts, cwd: gkcloneDir });
+  }
+  return String(result.stdout ?? '').split('\n')
     .filter(l => !l.startsWith('ℹ') && !l.startsWith('✔') && !l.startsWith('PHP Warning') && !l.startsWith('PHP Notice'))
     .join('\n')
     .trim();
@@ -222,17 +226,17 @@ function discoverPostIds(blockNames) {
     return [];
   }
 
-  const likeList = safeNames.map(n => `post_content LIKE '%${n}%'`).join(' OR ');
-  const php = `
-global $wpdb;
-$ids = $wpdb->get_col(
-  "SELECT ID FROM {$wpdb->posts}
-   WHERE (${likeList})
-   AND post_type NOT IN ('revision','auto-draft','attachment','inherit')
-   AND post_status IN ('publish','draft')"
-);
-echo implode(",", $ids);
-`;
+  const likeList = safeNames.map(n => "post_content LIKE '%" + n + "%'").join(' OR ');
+  const php = [
+    'global $wpdb;',
+    '$ids = $wpdb->get_col(',
+    '  "SELECT ID FROM {$wpdb->posts}',
+    '   WHERE (' + likeList + ')',
+    "   AND post_type NOT IN ('revision','auto-draft','attachment','inherit')",
+    "   AND post_status IN ('publish','draft')\"",
+    ');',
+    'echo implode(",", $ids);',
+  ].join('\n');
   const raw = wpExec('eval-file -', { input: php });
   return raw ? raw.split(',').filter(Boolean) : [];
 }
@@ -258,7 +262,7 @@ if (postIdArg) {
   postIds = discoverPostIds(blockNames);
 }
 
-console.log(`Posts to process: ${postIds.length}`);
+console.log('Posts to process: ' + postIds.length);
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
@@ -277,22 +281,22 @@ for (const postId of postIds) {
       if (!updatedAttrs) continue;
 
       if (dryRun) {
-        console.log(`  [DRY RUN] Post ${postId} block ${block.index} (${block.name}): language=${updatedAttrs.language ?? block.attributes?.language}`);
+        console.log('  [DRY RUN] Post ' + postId + ' block ' + block.index + ' (' + block.name + '): language=' + (updatedAttrs.language ?? block.attributes?.language));
         postChanges++;
         continue;
       }
 
       await updateBlock(postId, block.index, updatedAttrs);
-      console.log(`  Post ${postId} block ${block.index} (${block.name}): highlighted as ${updatedAttrs.language ?? '?'}`);
+      console.log('  Post ' + postId + ' block ' + block.index + ' (' + block.name + '): highlighted as ' + (updatedAttrs.language ?? '?'));
       postChanges++;
     }
 
     if (postChanges === 0) { skipped++; } else { updated++; }
   } catch (err) {
-    console.error(`  Error on post ${postId}: ${err.message}`);
+    console.error('  Error on post ' + postId + ': ' + err.message);
     errors++;
   }
 }
 
-console.log(`\nDone. Updated: ${updated}, Skipped: ${skipped}, Errors: ${errors}`);
+console.log('\nDone. Updated: ' + updated + ', Skipped: ' + skipped + ', Errors: ' + errors);
 highlighter.dispose();
