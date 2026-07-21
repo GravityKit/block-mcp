@@ -611,9 +611,10 @@ class Block_Writer {
 	 * @param array       &$block      Block array to mutate in place.
 	 * @param array       $attributes  Partial attributes to merge (may be empty).
 	 * @param string|null $inner_html  Replacement innerHTML, or null to skip.
+	 * @param array|null  &$warnings   Optional. Collects static-block safety warnings when an array is passed; the single and batch update paths pass none and stay silent.
 	 * @return void
 	 */
-	public function apply_block_update_in_place( &$block, $attributes, $inner_html ) {
+	public function apply_block_update_in_place( &$block, $attributes, $inner_html, &$warnings = null ) {
 		$block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
 
 		if ( ! empty( $attributes ) ) {
@@ -656,10 +657,13 @@ class Block_Writer {
 					$block['innerContent'] = array( $auto_transformed );
 				}
 			} else {
-				// No auto-transform — surface the safety check for completeness.
-				// Result is currently silent (matches single-update behavior); a
-				// future revision can plumb safety_warnings into the response.
-				$this->safety->check_mutation( $block_name, array_keys( $attributes ), false );
+				// No auto-transform available. The mutate path passes $warnings to
+				// surface the static-block safety check in its response; the single
+				// and batch update paths pass none and stay silent.
+				$safety_warnings = $this->safety->check_mutation( $block_name, array_keys( $attributes ), false );
+				if ( is_array( $warnings ) && ! empty( $safety_warnings ) ) {
+					$warnings = array_merge( $warnings, $safety_warnings );
+				}
 			}
 		}
 

@@ -193,7 +193,7 @@ function build_block_services() {
 	$block_safety     = new Block_Safety();
 	$html_transformer = new HTML_Transformer();
 	$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer, $block_inventory );
-	$block_mutator    = new Block_Mutator( $block_crud, $preferences, $block_safety, $html_transformer );
+	$block_mutator    = new Block_Mutator( $block_crud, $preferences );
 	$post_manager     = new Post_Manager( $block_crud );
 	$term_manager     = new Term_Manager();
 	$media_manager    = new Media_Manager();

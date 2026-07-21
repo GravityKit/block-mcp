@@ -42,7 +42,7 @@ class BlockReaderSchemaAwareAttrsTest extends BlockApiTestCase {
 		$safety        = new Block_Safety();
 		$transformer   = new HTML_Transformer();
 		$this->crud    = new Block_CRUD( $preferences, $safety, $transformer, new Block_Inventory() );
-		$this->mutator = new \GravityKit\BlockMCP\Block_Mutator( $this->crud, $preferences, $safety, $transformer );
+		$this->mutator = new \GravityKit\BlockMCP\Block_Mutator( $this->crud, $preferences );
 
 		$prop = new ReflectionProperty( Block_CRUD::class, 'reader' );
 		$prop->setAccessible( true );

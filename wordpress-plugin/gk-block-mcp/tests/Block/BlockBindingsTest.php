@@ -42,7 +42,7 @@ class BlockBindingsTest extends BlockApiTestCase {
 		$safety        = new Block_Safety();
 		$transformer   = new HTML_Transformer();
 		$this->crud    = new Block_CRUD( $prefs, $safety, $transformer, new Block_Inventory() );
-		$this->mutator = new Block_Mutator( $this->crud, $prefs, $safety, $transformer );
+		$this->mutator = new Block_Mutator( $this->crud, $prefs );
 
 		$prop = new ReflectionProperty( Block_CRUD::class, 'reader' );
 		$prop->setAccessible( true );

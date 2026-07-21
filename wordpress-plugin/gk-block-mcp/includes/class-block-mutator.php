@@ -39,32 +39,14 @@ class Block_Mutator {
 	private $preferences;
 
 	/**
-	 * Block safety checker.
-	 *
-	 * @var Block_Safety
-	 */
-	private $safety;
-
-	/**
-	 * HTML transformer.
-	 *
-	 * @var HTML_Transformer
-	 */
-	private $transformer;
-
-	/**
 	 * Constructor.
 	 *
-	 * @param Block_CRUD       $crud        Block CRUD instance.
-	 * @param Preferences      $preferences Preferences instance.
-	 * @param Block_Safety     $safety      Block safety checker.
-	 * @param HTML_Transformer $transformer HTML transformer.
+	 * @param Block_CRUD  $crud        Block CRUD instance.
+	 * @param Preferences $preferences Preferences instance.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
-		$this->safety      = $safety;
-		$this->transformer = $transformer;
 	}
 
 	/**
@@ -190,95 +172,26 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_attributes', __( 'update-attrs requires an "attributes" object.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 				}
 
-				// Block Bindings write-guard. Block_Writer::update_block enforces
-				// this for the per-block PATCH route, but the mutate endpoint had
-				// no such check — an agent could bypass the guard by switching
-				// from update_block to edit_block_tree's update-attrs. Mirror
-				// the contract here so the protection is uniform across write
-				// paths. Caller opts in to the bypass via allow_bound_writes:true.
-				$allow_bound_writes = ! empty( $params['allow_bound_writes'] );
-				if ( ! $allow_bound_writes ) {
-					$bindings = isset( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
-						&& is_array( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
-							? $parent[ $target_index ]['attrs']['metadata']['bindings']
-							: array();
-					if ( ! empty( $bindings ) ) {
-						$blocked = array();
-						foreach ( array_keys( $attributes ) as $attr_key ) {
-							// `metadata` writes are structural; only individual bound attrs are protected.
-							if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
-								$blocked[] = $attr_key;
-							}
-						}
-						if ( ! empty( $blocked ) ) {
-							return new \WP_Error(
-								'bound_attribute',
-								sprintf(
-									/* translators: 1: comma-separated bound attribute names */
-									__( 'Cannot overwrite bound attribute(s): %s. Pass allow_bound_writes:true to force.', 'gk-block-mcp' ),
-									implode( ', ', $blocked )
-								),
-								array(
-									'status'           => 400,
-									'bound_attributes' => $blocked,
-								)
-							);
-						}
-					}
-				}
-
-				// Top-level merge is shallow; `metadata` itself is deep-merged
-				// so a partial metadata payload (e.g. {name: 'Hero'}) keeps
-				// existing keys like gk_ref (ref stability) and bindings
-				// (write-guard inputs) intact.
+				// Block Bindings write-guard, uniform with the per-block update_block
+				// path so an agent can't bypass it via edit_block_tree. Opt out with
+				// allow_bound_writes:true.
 				$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) && is_array( $parent[ $target_index ]['attrs'] )
 					? $parent[ $target_index ]['attrs']
 					: array();
-				if ( isset( $attributes['metadata'] ) && is_array( $attributes['metadata'] ) ) {
-					$existing_meta          = isset( $existing_attrs['metadata'] ) && is_array( $existing_attrs['metadata'] )
-						? $existing_attrs['metadata']
-						: array();
-					$attributes['metadata'] = array_merge( $existing_meta, $attributes['metadata'] );
-				}
-				$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $attributes );
-
-				// Auto-transform innerHTML for known attribute-to-HTML mappings.
-				$auto_transformed = $this->transformer->auto_transform_html(
-					$parent[ $target_index ]['blockName'],
+				$bound_error = $this->crud->reject_bound_write(
 					$attributes,
-					isset( $parent[ $target_index ]['innerHTML'] ) ? $parent[ $target_index ]['innerHTML'] : ''
+					$existing_attrs,
+					! empty( $params['allow_bound_writes'] )
 				);
-
-				if ( null !== $auto_transformed ) {
-					$block_type_name                      = $parent[ $target_index ]['blockName'];
-					$parent[ $target_index ]['innerHTML'] = $auto_transformed;
-
-					// Update innerContent: apply the same transform to each string
-					// element while preserving null positions (innerBlock placeholders).
-					if ( ! empty( $parent[ $target_index ]['innerContent'] ) ) {
-						$transformer                             = $this->transformer;
-						$parent[ $target_index ]['innerContent'] = array_map(
-							function ( $piece ) use ( $transformer, $block_type_name, $attributes ) {
-								if ( null === $piece ) {
-									return null; // Preserve innerBlock placeholder.
-								}
-								$result = $transformer->auto_transform_html( $block_type_name, $attributes, $piece );
-								return null !== $result ? $result : $piece;
-							},
-							$parent[ $target_index ]['innerContent']
-						);
-					} else {
-						$parent[ $target_index ]['innerContent'] = array( $auto_transformed );
-					}
-				} else {
-					// No auto-transform available — check static block safety.
-					$safety_warnings = $this->safety->check_mutation(
-						$parent[ $target_index ]['blockName'],
-						array_keys( $attributes ),
-						false
-					);
-					$warnings        = array_merge( $warnings, $safety_warnings );
+				if ( null !== $bound_error ) {
+					return $bound_error;
 				}
+
+				// Merge → auto-transform → innerContent reconciliation via the shared
+				// pipeline (metadata deep-merged, other attrs shallow-merged, null
+				// placeholders preserved). Passing $warnings surfaces the static-block
+				// safety check the mutate response reports.
+				$this->crud->apply_block_update_in_place( $parent[ $target_index ], $attributes, null, $warnings );
 
 				$result_block = array(
 					'name'       => $parent[ $target_index ]['blockName'],
@@ -321,16 +234,11 @@ class Block_Mutator {
 					$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $derived );
 				}
 
-				$parent[ $target_index ]['innerHTML'] = Block_Writer::sanitize_inner_html( $inner_html );
-				// Preserve innerBlock placeholders (null) in innerContent for container blocks.
-				if ( ! empty( $parent[ $target_index ]['innerBlocks'] ) && ! empty( $parent[ $target_index ]['innerContent'] ) ) {
-					$parent[ $target_index ]['innerContent'] = $this->transformer->rebuild_inner_content(
-						$parent[ $target_index ]['innerContent'],
-						$parent[ $target_index ]['innerHTML']
-					);
-				} else {
-					$parent[ $target_index ]['innerContent'] = array( $parent[ $target_index ]['innerHTML'] );
-				}
+				// innerHTML replacement via the shared pipeline, so /mutate applies
+				// the same sanitize + strip_empty_class_attributes + innerContent
+				// reconciliation as the per-block update_block path, and both persist
+				// identical markup for the same edit. Dual-storage attrs merged above.
+				$this->crud->apply_block_update_in_place( $parent[ $target_index ], array(), $inner_html );
 
 				$result_block = array(
 					'name'       => $parent[ $target_index ]['blockName'],

@@ -395,11 +395,12 @@ class Block_CRUD {
 	 * @param array       &$block      Block array to mutate in place.
 	 * @param array       $attributes  Partial attributes to merge (may be empty).
 	 * @param string|null $inner_html  Replacement innerHTML, or null to skip.
+	 * @param array|null  &$warnings   Optional. Collects static-block safety warnings when an array is passed.
 	 *
 	 * @return void
 	 */
-	public function apply_block_update_in_place( &$block, $attributes, $inner_html ) {
-		$this->writer->apply_block_update_in_place( $block, $attributes, $inner_html );
+	public function apply_block_update_in_place( &$block, $attributes, $inner_html, &$warnings = null ) {
+		$this->writer->apply_block_update_in_place( $block, $attributes, $inner_html, $warnings );
 	}
 
 	/**

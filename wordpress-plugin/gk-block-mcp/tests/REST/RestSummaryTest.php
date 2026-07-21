@@ -58,7 +58,7 @@ class RestSummaryTest extends WP_UnitTestCase {
 		$transformer     = new HTML_Transformer();
 		$block_inventory = new Block_Inventory();
 		$crud            = new Block_CRUD( $preferences, $safety, $transformer, $block_inventory );
-		$mutator         = new Block_Mutator( $crud, $preferences, $safety, $transformer );
+		$mutator         = new Block_Mutator( $crud, $preferences );
 		$registry        = new Block_Registry( $preferences, $block_inventory );
 		$patterns        = new Pattern_Manager( $preferences );
 

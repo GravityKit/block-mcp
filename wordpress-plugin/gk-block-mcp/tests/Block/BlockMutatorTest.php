@@ -201,6 +201,32 @@ class BlockMutatorTest extends BlockApiTestCase {
 		$this->assertEquals( 'center', $result['block']['attributes']['align'] );
 	}
 
+	// ── update-html ────────────────────────────────────────────────
+
+	/**
+	 * update-html strips empty class attributes, matching the per-block
+	 * update path (Block_Writer::apply_block_update_in_place). Both write
+	 * paths must persist byte-identical markup for the same edit. The mutate
+	 * path formerly sanitized the innerHTML without the strip step, so a
+	 * `class=""` survived through /mutate but not through the per-block PATCH,
+	 * and the block then flagged "unexpected or invalid content" in the editor.
+	 */
+	public function test_update_html_strips_empty_class_attributes() {
+		$this->make_post( array( $this->block( 'core/paragraph', array(), '<p>A</p>' ) ) );
+
+		$result = $this->mutator->mutate(
+			$this->post_id,
+			'update-html',
+			array( 0 ),
+			array( 'innerHTML' => '<p class="">hello</p>' )
+		);
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertSame( '<p>hello</p>', $saved[0]['innerHTML'] );
+	}
+
 	/**
 	 * update-attrs deep-merges metadata; partial writes must preserve siblings.
 	 *
