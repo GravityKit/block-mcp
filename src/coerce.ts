@@ -24,14 +24,16 @@ export function coercePostId(value: unknown, label: string): number | undefined 
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
     return value;
   }
   if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
     const parsed = parseInt(value, 10);
     // Re-apply the positive check so a zero-valued string ("0", "00") is
     // rejected exactly like the number 0, not silently accepted as 0.
-    if (parsed > 0) {
+    // Number.isSafeInteger rejects values above 2^53-1, which parseInt would
+    // otherwise round to a different id — targeting the wrong post.
+    if (parsed > 0 && Number.isSafeInteger(parsed)) {
       return parsed;
     }
   }

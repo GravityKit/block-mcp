@@ -175,15 +175,20 @@ export async function handleMutateTool(
       requestBody.block = block as MutationRequest['block'];
       if (op === 'insert-child' && args.position !== undefined) {
         const position = args.position;
-        if (typeof position === 'number' && Number.isInteger(position)) {
+        if (typeof position === 'number' && Number.isInteger(position) && position >= -1) {
           requestBody.position = position;
         } else if (position === 'start' || position === 'end') {
           requestBody.position = position;
-        } else if (typeof position === 'string' && /^\d+$/.test(position)) {
+        } else if (typeof position === 'string' && /^-?\d+$/.test(position)) {
           // The schema advertises `position` as integer|string; accept a
-          // numeric string ("3") as the index it plainly denotes rather than
-          // rejecting a schema-conformant value.
-          requestBody.position = parseInt(position, 10);
+          // numeric string ("3", or the "-1" append sentinel) as the index it
+          // plainly denotes rather than rejecting a schema-conformant value.
+          // -1 appends; anything below -1 is out of contract.
+          const parsedPosition = parseInt(position, 10);
+          if (parsedPosition < -1) {
+            throw new Error('position must be an integer >= -1, "start", or "end"');
+          }
+          requestBody.position = parsedPosition;
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }

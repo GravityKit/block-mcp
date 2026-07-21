@@ -259,6 +259,27 @@ describe('edit_block_tree — insert-child', () => {
     }));
   });
 
+  it('accepts the "-1" append sentinel as a string', async () => {
+    // -1 is the documented append sentinel; its string form must behave like
+    // the number -1, not be rejected as a non-numeric position.
+    await handleMutateTool('edit_block_tree', {
+      post_id: 1, op: 'insert-child', path: [0],
+      block: { name: 'core/paragraph' }, position: '-1',
+    }, client as any);
+    expect(client.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
+      position: -1,
+    }));
+  });
+
+  it('rejects positions below the -1 append sentinel', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', {
+        post_id: 1, op: 'insert-child', path: [0],
+        block: { name: 'core/paragraph' }, position: '-2',
+      }, client as any)
+    ).rejects.toThrow(/position must be/);
+  });
+
   it('rejects invalid position string', async () => {
     await expect(
       handleMutateTool('edit_block_tree', {

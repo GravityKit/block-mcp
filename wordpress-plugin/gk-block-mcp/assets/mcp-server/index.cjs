@@ -40993,12 +40993,12 @@ function coercePostId(value, label) {
   if (value === void 0 || value === null) {
     return void 0;
   }
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
     return value;
   }
   if (typeof value === "string" && /^[0-9]+$/.test(value)) {
     const parsed = parseInt(value, 10);
-    if (parsed > 0) {
+    if (parsed > 0 && Number.isSafeInteger(parsed)) {
       return parsed;
     }
   }
@@ -41376,7 +41376,7 @@ async function handleReadTool(toolName, args, client) {
     case "get_block": {
       const postId = args.post_id;
       const ref = typeof args.ref === "string" && args.ref.length > 0 ? args.ref : void 0;
-      const flatIndex = typeof args.flat_index === "number" && Number.isFinite(args.flat_index) && args.flat_index >= 0 ? args.flat_index : void 0;
+      const flatIndex = typeof args.flat_index === "number" && Number.isInteger(args.flat_index) && args.flat_index >= 0 ? args.flat_index : void 0;
       if (postId === void 0 || postId === null) {
         throw new Error("post_id is required");
       }
@@ -52840,12 +52840,16 @@ async function handleMutateTool(toolName, args, client) {
       requestBody.block = block;
       if (op === "insert-child" && args.position !== void 0) {
         const position = args.position;
-        if (typeof position === "number" && Number.isInteger(position)) {
+        if (typeof position === "number" && Number.isInteger(position) && position >= -1) {
           requestBody.position = position;
         } else if (position === "start" || position === "end") {
           requestBody.position = position;
-        } else if (typeof position === "string" && /^\d+$/.test(position)) {
-          requestBody.position = parseInt(position, 10);
+        } else if (typeof position === "string" && /^-?\d+$/.test(position)) {
+          const parsedPosition = parseInt(position, 10);
+          if (parsedPosition < -1) {
+            throw new Error('position must be an integer >= -1, "start", or "end"');
+          }
+          requestBody.position = parsedPosition;
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }

@@ -55,6 +55,13 @@ describe('get_block — input validation', () => {
     ).rejects.toThrow(/exactly one of ref or flat_index/);
   });
 
+  it('treats a fractional flat_index as missing (must be an integer)', async () => {
+    await expect(
+      handleReadTool('get_block', { post_id: 1, flat_index: 1.5 }, client as any)
+    ).rejects.toThrow(/exactly one of ref or flat_index/);
+    expect(client.getBlock).not.toHaveBeenCalled();
+  });
+
   // update_block / delete_block reject a negative flat_index client-side;
   // get_block must match so a negative index is treated as absent, not sent
   // to the server as a valid target.
