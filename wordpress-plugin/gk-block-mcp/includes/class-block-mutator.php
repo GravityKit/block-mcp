@@ -374,7 +374,7 @@ class Block_Mutator {
 				// (the wrapper HTML is built by string concatenation, not
 				// wp_kses_post, since it's never user-facing markup until
 				// serialize_blocks() round-trips it).
-				$allowed_wrapper_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$allowed_wrapper_tags = HTML_Transformer::CONTAINER_TAGS;
 				$wrapper_tag          = 'div';
 				if ( isset( $wrapper_attrs['tagName'] ) ) {
 					$candidate = sanitize_key( $wrapper_attrs['tagName'] );

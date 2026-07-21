@@ -25,6 +25,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 class HTML_Transformer {
 
 	/**
+	 * Container (non-void) tags a core/group wrapper may use.
+	 *
+	 * The single allowlist shared by the group tagName auto-transform (here) and
+	 * Block_Mutator's wrap-in-group builder, so a wrapper the mutator creates is
+	 * always one this transform can retag.
+	 *
+	 * @var string[]
+	 */
+	const CONTAINER_TAGS = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+
+	/**
 	 * Auto-transform innerHTML when attribute changes imply HTML structure changes.
 	 *
 	 * Uses WP_HTML_Tag_Processor for safe attribute manipulation (no regex for
@@ -76,16 +87,17 @@ class HTML_Transformer {
 			// container (non-void) tags. We rewrite both opening and closing
 			// tags so the block stays a well-formed container.
 			if ( 'core/group' === $block_name && array_key_exists( 'tagName', $changed_attrs ) ) {
-				$container_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$container_tags = self::CONTAINER_TAGS;
 				$new_tag        = sanitize_key( $changed_attrs['tagName'] );
 				if ( in_array( $new_tag, $container_tags, true ) ) {
-					$html = preg_replace(
-						'/^(\s*)<(div|section|aside|main|header|footer|article)(\s|>)/i',
+					$alternation = implode( '|', $container_tags );
+					$html        = preg_replace(
+						'/^(\s*)<(' . $alternation . ')(\s|>)/i',
 						'$1<' . $new_tag . '$3',
 						$html
 					);
 					$html = preg_replace(
-						'/<\/(div|section|aside|main|header|footer|article)>(\s*)$/i',
+						'/<\/(' . $alternation . ')>(\s*)$/i',
 						'</' . $new_tag . '>$2',
 						$html
 					);
