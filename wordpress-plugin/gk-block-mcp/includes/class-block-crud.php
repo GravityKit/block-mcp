@@ -1070,6 +1070,25 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Whether a block is server-rendered (dynamic).
+	 *
+	 * The single authority for the API `dynamic` / `is_dynamic` fields, so the
+	 * read (get_page_blocks) and write (update_block's `saved`) paths agree.
+	 * Delegates to Block_Inventory, which classifies an unregistered block as
+	 * static. This differs from Block_Safety::is_dynamic_block, a separate
+	 * warning-suppression concern that treats an unknown block as dynamic.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 *
+	 * @return bool
+	 */
+	public function is_block_dynamic( $block_name ) {
+		return $this->inventory->is_block_dynamic( $block_name );
+	}
+
+	/**
 	 * Build the BLOCK-14 dual-storage rejection error.
 	 *
 	 * @param string $block_name The dual-storage block being mutated.

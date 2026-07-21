@@ -362,6 +362,32 @@ class BlockCrudTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * The write field `is_dynamic` (update_block's `saved`) and the read field
+	 * `dynamic` (format_blocks) must agree for one block, including an orphan
+	 * block whose namespace has no registered provider. Both now derive from the
+	 * single authority Block_CRUD::is_block_dynamic (Block_Inventory), which
+	 * classifies an unregistered block as static. update_block formerly read the
+	 * field from Block_Safety, which reports an unknown block as dynamic for its
+	 * own warning-suppression purpose, so the read said static while the write
+	 * said dynamic for the very same block.
+	 */
+	public function test_is_dynamic_write_and_read_agree_for_orphan_block() {
+		$this->make_post( array(
+			$this->block( 'ghost/widget', array(), '<div>orphan</div>' ),
+		) );
+
+		$formatted    = $this->crud->format_blocks( $this->current_blocks() );
+		$read_dynamic = $formatted[0]['dynamic'];
+
+		$result = $this->crud->update_block( $this->post_id, 0, array( 'foo' => 'bar' ), null );
+		$this->assertTrue( $result['success'] );
+		$write_dynamic = $result['saved']['is_dynamic'];
+
+		$this->assertFalse( $read_dynamic, 'An orphan block reads as not dynamic.' );
+		$this->assertSame( $read_dynamic, $write_dynamic, 'is_dynamic (write) and dynamic (read) must agree for one block.' );
+	}
+
+	/**
 	 * update_block's `saved` snapshot must reflect the persisted (normalized)
 	 * block after a gk/block-mcp/block/normalize repair.
 	 *

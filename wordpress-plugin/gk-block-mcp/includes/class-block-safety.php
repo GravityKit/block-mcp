@@ -96,11 +96,14 @@ class Block_Safety {
 	}
 
 	/**
-	 * Check whether a block is dynamic (renders via PHP at runtime).
+	 * Whether a block should skip the static-markup staleness check.
 	 *
-	 * Returns true if the block has a render callback, a render file,
-	 * or is not registered (unknown blocks are treated as dynamic since
-	 * their behaviour cannot be validated).
+	 * True if the block renders at runtime (render callback or file) OR is not
+	 * registered: an unknown block is treated as dynamic here so check_mutation()
+	 * suppresses a stale-markup warning it cannot validate. This is the
+	 * warning-suppression question, NOT the API `dynamic` / `is_dynamic` field,
+	 * which is Block_Inventory's authority and classifies an unknown block as
+	 * static.
 	 *
 	 * @param string $block_name Full block name (e.g., "core/paragraph").
 	 *

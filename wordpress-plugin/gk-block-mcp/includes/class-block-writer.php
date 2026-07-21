@@ -590,7 +590,7 @@ class Block_Writer {
 			'block_name' => $block_name,
 			'attributes' => isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : array(),
 			'inner_html' => isset( $block['innerHTML'] ) ? (string) $block['innerHTML'] : '',
-			'is_dynamic' => $block_name ? $this->safety->is_dynamic_block( $block_name ) : false,
+			'is_dynamic' => $block_name ? $this->crud->is_block_dynamic( $block_name ) : false,
 		);
 
 		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {

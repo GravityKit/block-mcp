@@ -470,9 +470,8 @@ class Block_Inventory {
 	/**
 	 * Whether a registered block type is server-rendered.
 	 *
-	 * Cached per block name. Wraps WP_Block_Type_Registry to give
-	 * Block_CRUD a single discovery point that can be replaced by the
-	 * scan-cached map once BLOCK-13 lands.
+	 * Cached per block name. The single discovery point for the API `dynamic`
+	 * / `is_dynamic` fields; an unregistered block is classified as static.
 	 *
 	 * @param string $block_name Fully-qualified block name.
 	 * @return bool

@@ -458,15 +458,9 @@ class Block_Reader {
 			// so it can recursively format the pattern's own block tree under render
 			// mode without touching this loop.
 
-			// Mark blocks as dynamic or static (cached per block name).
-			static $dynamic_cache = array();
-
-			if ( ! isset( $dynamic_cache[ $block['blockName'] ] ) ) {
-				$registry                             = \WP_Block_Type_Registry::get_instance();
-				$block_type                           = $registry ? $registry->get_registered( $block['blockName'] ) : null;
-				$dynamic_cache[ $block['blockName'] ] = $block_type ? $block_type->is_dynamic() : false;
-			}
-			$is_dynamic      = $dynamic_cache[ $block['blockName'] ];
+			// Dynamic vs static classification. Block_Inventory is the single
+			// authority (caches per block name; an unregistered block is static).
+			$is_dynamic      = $this->inventory->is_block_dynamic( $block['blockName'] );
 			$data['dynamic'] = $is_dynamic;
 
 			// storage_mode disambiguates the existing `dynamic` flag for AI consumers:
