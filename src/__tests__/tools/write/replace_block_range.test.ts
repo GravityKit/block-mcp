@@ -67,6 +67,24 @@ describe('replace_block_range — validation', () => {
       handleWriteTool('replace_block_range', { post_id: 1, start: 0, count: 1 }, client as any)
     ).rejects.toThrow('block');
   });
+
+  it('rejects a fractional start', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', { post_id: 1, start: 1.5, count: 1, blocks: [] }, client as any)
+    ).rejects.toThrow('start must be a non-negative integer');
+  });
+
+  it('rejects a NaN count', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', { post_id: 1, start: 0, count: NaN, blocks: [] }, client as any)
+    ).rejects.toThrow('count must be a non-negative integer');
+  });
+
+  it('rejects an Infinity start', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', { post_id: 1, start: Infinity, count: 1, blocks: [] }, client as any)
+    ).rejects.toThrow('start must be a non-negative integer');
+  });
 });
 
 describe('replace_block_range — forwarding', () => {

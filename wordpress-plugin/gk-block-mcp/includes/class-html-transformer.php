@@ -96,7 +96,7 @@ class HTML_Transformer {
 						'$1<' . $new_tag . '$3',
 						$html
 					);
-					$html = preg_replace(
+					$html        = preg_replace(
 						'/<\/(' . $alternation . ')>(\s*)$/i',
 						'</' . $new_tag . '>$2',
 						$html

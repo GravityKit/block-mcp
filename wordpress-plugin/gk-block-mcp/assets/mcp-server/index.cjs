@@ -52652,8 +52652,8 @@ async function handleWriteTool(toolName, args, client) {
       const count = args.count;
       const blocks = args.blocks;
       if (postId === void 0) throw new Error("post_id is required");
-      if (typeof start !== "number" || start < 0) throw new Error("start must be a non-negative integer");
-      if (typeof count !== "number" || count < 0) throw new Error("count must be a non-negative integer");
+      if (!Number.isSafeInteger(start) || start < 0) throw new Error("start must be a non-negative integer");
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error("count must be a non-negative integer");
       if (!Array.isArray(blocks)) throw new Error("blocks must be an array (may be empty for a pure delete)");
       const result = await client.replaceBlocksRange(postId, { start, count, blocks: await enrichBlocks(blocks) });
       return withFormattedWarnings(result, formatPreferenceWarning);

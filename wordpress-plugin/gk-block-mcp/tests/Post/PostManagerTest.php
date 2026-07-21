@@ -624,6 +624,19 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertSame( 'New', get_post( $id )->post_title );
 	}
 
+	/**
+	 * A non-string date is rejected with invalid_date, not a PHP "Array to string
+	 * conversion" warning or a fatal on a non-stringable object. update_post
+	 * passes `date` to normalize_date_arg() without its own type guard, so the
+	 * guard lives in normalize_date_arg().
+	 */
+	public function test_update_post_rejects_non_string_date() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'X', 'post_status' => 'draft' ) );
+		$result = $this->pm->update_post( $id, array( 'date' => new \stdClass() ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_date', $result->get_error_code() );
+	}
+
 	public function test_update_post_publish_transitions() {
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'draft', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'publish' ) );

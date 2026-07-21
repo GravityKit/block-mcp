@@ -644,9 +644,9 @@ class Post_Manager {
 	/**
 	 * Whether the current user may set a status, gated on the publish capability.
 	 *
-	 * publish/future/private are all publish-equivalent (WP core's
-	 * handle_status_param): 'future' is auto-published by cron and 'private' is a
-	 * published-visibility state, so gating only 'publish' would let an
+	 * The publish, future, and private statuses are all publish-equivalent (WP
+	 * core's handle_status_param): future is auto-published by cron and private
+	 * is a published-visibility state, so gating only publish would let an
 	 * edit_posts-only caller create scheduled or private posts.
 	 *
 	 * @param string             $status    Requested post status.
@@ -710,7 +710,18 @@ class Post_Manager {
 	 * @return array{post_date_gmt: string, post_date: string}|\WP_Error
 	 */
 	private function normalize_date_arg( $raw ) {
-		$ts = strtotime( sanitize_text_field( (string) $raw ) );
+		// Reject non-strings before casting: `(string) $array` warns, and a
+		// non-stringable object fatals, before the parse can return invalid_date.
+		$is_string_date = is_string( $raw );
+		if ( ! $is_string_date ) {
+			return new \WP_Error(
+				'invalid_date',
+				__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$ts = strtotime( sanitize_text_field( $raw ) );
 		if ( false === $ts ) {
 			return new \WP_Error(
 				'invalid_date',

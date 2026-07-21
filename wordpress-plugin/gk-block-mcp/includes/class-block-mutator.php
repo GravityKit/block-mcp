@@ -178,7 +178,7 @@ class Block_Mutator {
 				$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) && is_array( $parent[ $target_index ]['attrs'] )
 					? $parent[ $target_index ]['attrs']
 					: array();
-				$bound_error = $this->crud->reject_bound_write(
+				$bound_error    = $this->crud->reject_bound_write(
 					$attributes,
 					$existing_attrs,
 					! empty( $params['allow_bound_writes'] )
