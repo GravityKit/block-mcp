@@ -58,6 +58,21 @@ class Block_Abilities {
 	}
 
 	/**
+	 * Whether the WordPress MCP Adapter is present to expose the abilities as MCP tools.
+	 *
+	 * The Adapter is a separate plugin, not part of WordPress core. Without it,
+	 * enabling the toggle still registers the abilities for the Abilities REST
+	 * API, but no MCP endpoint exists for AI agents to connect to.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return bool
+	 */
+	public static function adapter_available() {
+		return class_exists( '\WP\MCP\Core\McpAdapter' );
+	}
+
+	/**
 	 * Whether registering Block MCP abilities is enabled for this site.
 	 *
 	 * Default off (opt-in): registration exposes the operations to the Abilities

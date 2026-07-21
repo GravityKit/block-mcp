@@ -566,6 +566,11 @@ class Settings_Page {
 		delete_option( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION );
 		delete_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION );
 		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
+		// Clear the scan/refresh throttle stamps too, or the next scan and
+		// site-usage refresh stay throttled for up to an hour against the
+		// results just wiped.
+		delete_option( Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION );
+		delete_option( Block_Inventory::REFRESH_LAST_RUN_OPTION );
 		delete_option( Instructions::OPTION_KEY );
 		delete_option( Instructions::UPDATED_AT_OPTION );
 		delete_transient( Block_Inventory::CACHE_KEY );
@@ -1161,37 +1166,26 @@ class Settings_Page {
 				endif;
 				?>
 
-				<h2><?php esc_html_e( 'AI agents', 'gk-block-mcp' ); ?></h2>
+				<h2><?php esc_html_e( 'WordPress MCP Adapter', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Turn this on so AI agents that connect through WordPress can edit your pages and posts using Block MCP, instead of connecting Block MCP to each one separately. Each agent still has to sign in and have permission to edit, the same as the apps on the Connect tab.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this on to make Block MCP\'s editing tools available to AI agents through the WordPress MCP Adapter. Each agent still has to sign in and have permission to edit, the same as the apps on the Connect tab.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				$abilities_available = \GravityKit\BlockMCP\Block_Abilities::is_available();
+				$adapter_available   = \GravityKit\BlockMCP\Block_Abilities::adapter_available();
 				if ( ! $abilities_available ) :
 					?>
-					<p class="description"><em><?php esc_html_e( 'Your site is not on WordPress 6.9 yet, so this does nothing for now. Your choice is saved and takes effect once you update.', 'gk-block-mcp' ); ?></em></p>
+					<p class="description"><em><?php esc_html_e( 'This needs WordPress 6.9 or newer, and your site is not there yet, so it does nothing for now. Your choice is saved and takes effect once you update.', 'gk-block-mcp' ); ?></em></p>
 					<?php
-				endif;
-				?>
-				<input type="hidden" name="<?php echo esc_attr( $abilities_option ); ?>" value="0" />
-				<label>
-					<input
-						type="checkbox"
-						name="<?php echo esc_attr( $abilities_option ); ?>"
-						value="1"
-						<?php checked( $abilities_enabled ); ?>
-					/>
-					<?php esc_html_e( 'Let AI agents that connect through WordPress edit my pages and posts', 'gk-block-mcp' ); ?>
-				</label>
-				<p class="description">
-					<details class="gk-block-mcp-tech-details">
-						<summary><?php esc_html_e( 'Technical details', 'gk-block-mcp' ); ?></summary>
+				elseif ( ! $adapter_available ) :
+					?>
+					<p class="description"><em>
 						<?php
 						echo wp_kses(
 							sprintf(
-								/* translators: %s: "Learn more" documentation link */
-								__( 'Registers Block MCP\'s operations as WordPress Abilities. The official MCP Adapter exposes them to AI agents as MCP tools, and any Abilities consumer can discover and run them. Every operation stays capability-gated, identical to the REST API. %s', 'gk-block-mcp' ),
-								'<a href="https://www.gravitykit.com/wordpress-block-mcp/" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Learn more', 'gk-block-mcp' ) . '</a>'
+								/* translators: %s: link labeled "download the latest release" pointing to the WordPress MCP Adapter GitHub releases page */
+								__( 'To let AI agents connect, install and activate the WordPress MCP Adapter plugin. It is a separate plugin on GitHub, not in the WordPress plugin directory: %s, then upload it under Plugins → Add New → Upload Plugin. Until it is active, your choice is saved but there is no endpoint for agents to connect to.', 'gk-block-mcp' ),
+								'<a href="https://github.com/WordPress/mcp-adapter/releases/latest" target="_blank" rel="noopener noreferrer">' . esc_html__( 'download the latest release', 'gk-block-mcp' ) . '</a>'
 							),
 							array(
 								'a' => array(
@@ -1202,8 +1196,24 @@ class Settings_Page {
 							)
 						);
 						?>
-					</details>
+					</em></p>
+					<?php
+				endif;
+				?>
+				<p class="description gk-block-mcp-tech-details">
+					<strong><?php esc_html_e( 'Technical details:', 'gk-block-mcp' ); ?></strong>
+					<?php esc_html_e( 'Registers Block MCP\'s operations as WordPress Abilities. The WordPress MCP Adapter exposes them to AI agents as MCP tools, and any Abilities consumer can discover and run them. Every operation stays capability-gated, identical to the REST API.', 'gk-block-mcp' ); ?>
 				</p>
+				<input type="hidden" name="<?php echo esc_attr( $abilities_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $abilities_option ); ?>"
+						value="1"
+						<?php checked( $abilities_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Let AI agents edit my pages and posts through the WordPress MCP Adapter', 'gk-block-mcp' ); ?>
+				</label>
 				<?php
 				// Surface filter-driven overrides so the box reflects the value the API actually honors.
 				$abilities_raw    = get_option( $abilities_option, '0' );

@@ -122,11 +122,11 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 = 2.1.0 on July 20, 2026 =
 
-This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and adds reliability and security hardening across editing, media uploads, and the assistant account.
+This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and hardens reliability and security across editing, media uploads, and the assistant account.
 
 #### 🚀 Added
 
-* Block MCP's block-tree operations are now exposed as native WordPress Abilities (`gk-block-mcp/*`) on sites running WordPress 6.9 or newer, so the official WordPress MCP Adapter (and any other Abilities consumer) can discover and run them as tools: read a page, update/insert/delete a block, create a post, list block types, and fetch the site's theme presets (so an assistant writes theme-aligned markup). Each ability requires the same login and editing permission as the REST API, and they delegate to the same engine, so behavior is identical whichever way they're called. It's off by default; turn it on at **Settings → Block MCP** when you want AI agents that connect through WordPress to reach Block MCP. On WordPress 6.8 and earlier it is simply skipped.
+* Block MCP's editing operations can now be registered as native WordPress Abilities, so the WordPress MCP Adapter (or any other Abilities consumer) can offer them to AI agents as tools: read a page, update, insert, or delete a block, create a post, list block types, and read your theme's style presets so an assistant matches your theme. Every ability requires the same sign-in and editing permission as the REST API and runs through the same engine, so it behaves identically either way. This is off by default; turn it on at **Settings → Block MCP**. It requires WordPress 6.9 or newer and the WordPress MCP Adapter plugin, which you install separately (it is not part of WordPress). Until both are in place, your choice is saved and takes effect once they are.
 
 #### ✨ Improved
 
@@ -134,8 +134,8 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 * No block is treated as legacy out of the box. Only WordPress core blocks are preferred by default, and every other block family is fine to use until you score it down. The built-in opinions about which third-party blocks to avoid have been removed.
 * The replacement map is now entirely your own list. No built-in replacement suggestions ship anymore, so the mappings shown are the ones you added, and a mapping you remove stays removed.
 * Blocks whose plugin or theme is no longer active are flagged as "not active on this site" in the score table and in AI assistant responses, so you and your assistant can spot content that references a missing block.
-* Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings &rarr; Block MCP explains the new model and offers a one-click reset to the new defaults.
-* An assistant can now update a block that stores its text in two places (such as a heading) by sending just the new content, instead of the edit being refused unless both the content and the structured data were sent together. The plugin recomputes the structured data from the new markup and keeps both in sync. Blocks whose data cannot be rebuilt from the content, such as an FAQ block's list of questions, are still protected and left unchanged.
+* Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings → Block MCP explains the new model and offers a one-click reset to the new defaults.
+* An assistant can now update a block that keeps its text in two forms (such as a heading) by sending just the new text, instead of the change being refused unless both forms were sent together. The plugin rebuilds the second form from the new text and keeps them in sync. Blocks whose second form cannot be rebuilt from the text, such as an FAQ block's list of questions, are left unchanged.
 
 #### 🔒 Security
 
@@ -148,11 +148,12 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 #### 🐛 Fixed
 
 * Fixes a block edit sometimes undoing a change made moments earlier, such as a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
-* Two edits to the same page at once can no longer silently overwrite each other. If the content changed between when an edit was read and when it's saved, the save stops with a clear conflict instead of clobbering the other change. Your revision history and editor integrations are left intact.
+* When two edits reach the same page at nearly the same time, the second save now stops and reports a conflict instead of replacing the first edit's changes. Your revision history is preserved.
 * Fixes URL lookups returning the site's front page when given a query-string permalink such as `?p=123` or `?post_type=docs&p=123`. The query string is now preserved, so the lookup resolves to the intended post. Pretty permalinks were unaffected.
 * Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
 * Connecting an AI assistant now explains what went wrong when approval fails, instead of the Approve screen appearing to stall with nothing shown in your AI app. An expired approval link, a lapsed sign-in, or a rejected request each show a clear message on the screen, and approving after your WordPress sign-in has lapsed asks you to sign in and try again rather than returning a blank page.
 * Saving Block MCP settings now reliably returns you to the Block MCP page. On sites reached at a different address than their configured site URL (for example behind a reverse proxy), a save could land on the WordPress General Settings screen; the settings form now carries its own return address so the save stays on the Block MCP page.
+* Fixes the "what AI assistants can create" content-type list on **Settings → Block MCP** not saving when the browser has JavaScript turned off.
 * Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
 * Moving a block into an empty container (or to the last position inside a container) no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
 * Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
@@ -163,8 +164,9 @@ This release exposes Block MCP's operations as native WordPress Abilities for th
 
 #### 💻 Developer Updates
 
+* The `update_block` and `update_blocks` tools now declare `destructiveHint: true`, since they overwrite a block's existing content rather than adding to it, so MCP clients that honor the hint can ask you to confirm before an assistant overwrites a block.
 * Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
-* `find_posts` (the `list_posts` tool) now reports the true `total` and `total_pages` for the whole readable result set instead of only the current page, so a paginating integration gets accurate counts.
+* The `list_posts` tool (REST route `GET /find-posts`) now reports the true `total` and `total_pages` for the whole readable result set instead of only the current page, so a paginating integration gets accurate counts.
 * `list_patterns` now reports the true total for its result set, so pattern listings paginate correctly.
 * Write endpoints add a `rate_limit_locked` response (HTTP 429) for when simultaneous writes to the same post can't be rate-limited atomically. It clears within about a second, so retry shortly rather than backing off for a full minute.
 

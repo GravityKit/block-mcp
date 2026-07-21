@@ -349,6 +349,10 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	 * toggle and the one-time preferences upgrade notice. Pins that no
 	 * delete_option() can be silently dropped from handle_reset(), which would
 	 * leave a setting stuck after a reset.
+	 *
+	 * Includes the storage-scan results AND their throttle stamps: deleting the
+	 * results but keeping a recent last-run stamp left "Run scan now" throttled
+	 * for up to an hour against wiped data.
 	 */
 	public function test_reset_clears_all_ui_managed_options() {
 		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
@@ -363,6 +367,12 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 			// The trash grant is a security-relevant permission; a reset must
 			// return it to the OFF default, not leave it enabled.
 			\GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION,
+			// Storage-scan results and both throttle stamps: a reset must clear
+			// the stamps too, or the next scan/refresh throttles against the
+			// wiped results.
+			\GravityKit\BlockMCP\Block_Inventory::STORAGE_MODES_OPTION,
+			\GravityKit\BlockMCP\Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION,
+			\GravityKit\BlockMCP\Block_Inventory::REFRESH_LAST_RUN_OPTION,
 		);
 		foreach ( $options as $opt ) {
 			update_option( $opt, 'sentinel' );
