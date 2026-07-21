@@ -128,12 +128,73 @@ class Connections {
 			return;
 		}
 		delete_network_option( null, self::META_ROW_PREFIX . $uuid );
-		// Also drop a legacy aggregate entry if this connection predates the split.
-		$legacy = self::legacy_meta_all();
-		if ( isset( $legacy[ $uuid ] ) ) {
-			unset( $legacy[ $uuid ] );
-			update_network_option( null, self::META_OPTION, $legacy );
+
+		// Dropping a legacy aggregate entry (a pre-2.1.0 connection) is a
+		// read-modify-write of one shared option, so serialize it under an
+		// advisory lock: two concurrent forget_meta() calls for different legacy
+		// uuids must not each write back a stale snapshot and re-introduce the
+		// other's removed entry. Best-effort: on a non-MySQL store or a lock
+		// timeout it proceeds unlocked, which the single-threaded stores it
+		// degrades to don't need.
+		$locked = self::legacy_lock_acquire();
+		try {
+			$legacy = self::legacy_meta_all();
+			if ( isset( $legacy[ $uuid ] ) ) {
+				unset( $legacy[ $uuid ] );
+				update_network_option( null, self::META_OPTION, $legacy );
+			}
+		} finally {
+			if ( $locked ) {
+				self::legacy_lock_release();
+			}
 		}
+	}
+
+	/**
+	 * Name of the advisory lock guarding the legacy connection-meta aggregate.
+	 *
+	 * GET_LOCK names are server-global, so scope by DB_NAME. Hashed to stay
+	 * within MySQL's 64-char lock-name limit.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string
+	 */
+	private static function legacy_lock_name() {
+		$scope = defined( 'DB_NAME' ) ? DB_NAME : '';
+		return 'gkbmconn_' . md5( $scope . ':' . self::META_OPTION );
+	}
+
+	/**
+	 * Acquire the legacy-aggregate advisory lock, best-effort.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return bool True when the lock is held (and must be released).
+	 */
+	private static function legacy_lock_acquire() {
+		global $wpdb;
+		if ( empty( $wpdb->is_mysql ) ) {
+			return false;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- server-side advisory lock; not cacheable.
+		return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', self::legacy_lock_name(), 2 ) );
+	}
+
+	/**
+	 * Release the legacy-aggregate advisory lock.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return void
+	 */
+	private static function legacy_lock_release() {
+		global $wpdb;
+		if ( empty( $wpdb->is_mysql ) ) {
+			return;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releasing the advisory lock; not cacheable.
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', self::legacy_lock_name() ) );
 	}
 
 	/**

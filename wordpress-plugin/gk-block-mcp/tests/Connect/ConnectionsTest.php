@@ -238,6 +238,35 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * forget_meta() drops a legacy (pre-2.1.0) aggregate entry and leaves a
+	 * sibling legacy entry intact.
+	 *
+	 * Pre-2.1.0 connections live as keys in the shared META_OPTION array, not as
+	 * per-UUID rows, so removing one is a read-modify-write of that shared option.
+	 * The cleanup must drop only the target key; a concurrent forget_meta() for a
+	 * different legacy uuid must not re-introduce it. The advisory lock serializes
+	 * that on MySQL; the single-threaded harness degrades to an unlocked but
+	 * still-correct sequential path, which this exercises.
+	 */
+	public function test_forget_meta_removes_legacy_aggregate_entry_only() {
+		update_network_option(
+			null,
+			Connections::META_OPTION,
+			array(
+				'legacy-A' => array( 'user_id' => 11, 'created_by' => 1 ),
+				'legacy-B' => array( 'user_id' => 22, 'created_by' => 2 ),
+			)
+		);
+
+		Connections::forget_meta( 'legacy-A' );
+
+		$this->assertNull( Connections::get_meta( 'legacy-A' ), 'the forgotten legacy entry is gone' );
+		$survivor = Connections::get_meta( 'legacy-B' );
+		$this->assertIsArray( $survivor, 'the sibling legacy entry survives' );
+		$this->assertSame( 22, (int) $survivor['user_id'] );
+	}
+
+	/**
 	 * list() joins the recorded meta onto each row: created_by and
 	 * own_account=false for agent-hosted credentials.
 	 */
