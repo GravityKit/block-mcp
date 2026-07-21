@@ -19,6 +19,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * Tool execution layer for the Abilities API.
+ *
+ * @since 2.1.0
  */
 class Tool_Executor {
 
@@ -39,6 +41,8 @@ class Tool_Executor {
 	/**
 	 * Constructor.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param REST_Controller   $controller   REST controller instance.
 	 * @param Yoast_Bridge|null $yoast_bridge Yoast bridge, when available.
 	 */
@@ -49,6 +53,8 @@ class Tool_Executor {
 
 	/**
 	 * Run a named MCP tool with validated input.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @param string               $tool_name MCP tool name (snake_case).
 	 * @param array<string, mixed> $input     Pre-validated tool arguments.

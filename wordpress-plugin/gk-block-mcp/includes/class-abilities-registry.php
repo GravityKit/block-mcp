@@ -20,6 +20,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * Abilities API registration for all Block MCP tools.
+ *
+ * @since 2.1.0
  */
 class Abilities_Registry {
 
@@ -52,6 +54,8 @@ class Abilities_Registry {
 	/**
 	 * Constructor.
 	 *
+	 * @since 2.1.0
+	 *
 	 * @param Tool_Executor   $executor   Tool runner.
 	 * @param REST_Controller $controller REST controller for permission callbacks.
 	 */
@@ -62,6 +66,8 @@ class Abilities_Registry {
 
 	/**
 	 * Register the ability category (call on wp_abilities_api_categories_init).
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return void
 	 */
@@ -81,6 +87,8 @@ class Abilities_Registry {
 
 	/**
 	 * Register every exported tool as an ability (call on wp_abilities_api_init).
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return void
 	 */
@@ -105,6 +113,8 @@ class Abilities_Registry {
 	 * On the default MCP Adapter server, public abilities are invoked through
 	 * discover-abilities / execute-ability. A dedicated server lists the Block MCP
 	 * tools directly — matching the npm block-mcp server's tool surface.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return void
 	 */
@@ -147,6 +157,8 @@ class Abilities_Registry {
 
 	/**
 	 * Return every registered ability id from the manifest.
+	 *
+	 * @since 2.1.0
 	 *
 	 * @return string[]
 	 */
