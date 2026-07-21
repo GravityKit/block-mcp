@@ -723,27 +723,11 @@ class Block_Writer {
 		}
 
 		if ( ! empty( $children ) ) {
-			$n = count( $children );
-			if ( ! empty( $inner_html ) ) {
-				// Split wrapper HTML into opening/closing halves and interleave nulls.
-				$first_close = strpos( $inner_html, '>' );
-				if ( false !== $first_close ) {
-					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
-					for ( $i = 0; $i < $n; $i++ ) {
-						$inner_content[] = null;
-					}
-					$inner_content[] = substr( $inner_html, $first_close + 1 );
-				} else {
-					$inner_content = array_fill( 0, $n, null );
-				}
-			} else {
-				$inner_content = array_fill( 0, $n, null );
-			}
 			return array(
 				'blockName'    => $name,
 				'attrs'        => $attrs,
 				'innerHTML'    => '',
-				'innerContent' => $inner_content,
+				'innerContent' => self::wrapper_inner_content( $inner_html, count( $children ) ),
 				'innerBlocks'  => $children,
 			);
 		}
@@ -757,6 +741,37 @@ class Block_Writer {
 			'innerContent' => '' !== (string) $inner_html ? array( $inner_html ) : array(),
 			'innerBlocks'  => array(),
 		);
+	}
+
+	/**
+	 * Build a container block's innerContent: the wrapper HTML split at its first
+	 * `>` with one null placeholder per child interleaved between the halves.
+	 *
+	 * This is the innerContent null-placeholder invariant (one null per child)
+	 * shared by build_block_from_def() and Post_Manager's insert normalizer.
+	 * Wrapper HTML with no parseable tag, or empty wrapper HTML, degrades to all
+	 * nulls so serialize_blocks() still emits each child.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $inner_html  Wrapper innerHTML (may be empty).
+	 * @param int    $child_count Number of child blocks.
+	 *
+	 * @return array<int, string|null> innerContent for serialize_blocks().
+	 */
+	public static function wrapper_inner_content( $inner_html, $child_count ) {
+		$first_close = '' === (string) $inner_html ? false : strpos( $inner_html, '>' );
+		if ( false === $first_close ) {
+			return array_fill( 0, $child_count, null );
+		}
+
+		$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
+		for ( $i = 0; $i < $child_count; $i++ ) {
+			$inner_content[] = null;
+		}
+		$inner_content[] = substr( $inner_html, $first_close + 1 );
+
+		return $inner_content;
 	}
 
 	/**

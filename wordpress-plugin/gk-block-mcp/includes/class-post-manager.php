@@ -699,23 +699,7 @@ class Post_Manager {
 
 		// Build innerContent.
 		if ( ! empty( $children ) ) {
-			$n = count( $children );
-			if ( ! empty( $inner_html ) ) {
-				// Split the wrapper HTML into opening/closing halves and
-				// interleave null placeholders for each child block.
-				$first_close = strpos( $inner_html, '>' );
-				if ( false !== $first_close ) {
-					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
-					for ( $i = 0; $i < $n; $i++ ) {
-						$inner_content[] = null;
-					}
-					$inner_content[] = substr( $inner_html, $first_close + 1 );
-				} else {
-					$inner_content = array_fill( 0, $n, null );
-				}
-			} else {
-				$inner_content = array_fill( 0, $n, null );
-			}
+			$inner_content = Block_Writer::wrapper_inner_content( $inner_html, count( $children ) );
 		} elseif ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
 			// This branch runs only for a childless block. A null in
 			// innerContent is a child placeholder, and serialize_block()
