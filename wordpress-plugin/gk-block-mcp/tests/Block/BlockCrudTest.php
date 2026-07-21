@@ -2201,6 +2201,31 @@ class BlockCrudTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * insert_pattern rejects a position below -1, matching insert_blocks.
+	 * The two share the insert-position algorithm, but insert_pattern omitted
+	 * insert_blocks' guard, so a position like -5 silently mapped to the start
+	 * of the post instead of erroring.
+	 */
+	public function test_insert_pattern_rejects_position_below_negative_one() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Hero',
+				'post_content' => '<!-- wp:paragraph --><p>X</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$result = $this->crud->insert_pattern( $this->post_id, $pattern_id, -5, false );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_position', $result->get_error_code() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
+
+		wp_delete_post( $pattern_id, true );
+	}
+
+	/**
 	 * insert_pattern response index is the VISIBLE index, not the raw position.
 	 *
 	 * Pre-fix, the returned `inserted.index` was $insert_at — the raw array
