@@ -151,7 +151,7 @@ jobs:
             cp wordpress-plugin/gk-block-mcp/readme.txt readme.txt
             # --merge-to none: develop requires PRs, and --atomic would take the tag
             # down with the rejected push. .gktools.json cannot express this.
-            npx -y @gravitykit/gktools@latest release \
+            npx -y @gravitykit/gktools@1.1.1 release \
               --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php \
               --build-file "$BUILD_FILE" \
               --merge-to none
@@ -172,7 +172,7 @@ jobs:
             # pulled by the composer step. Reads GK_SIGNING_PRIVATE_KEY,
             # GK_RELEASE_MANAGER_URL/TOKEN, and the Dropbox keys from the `shared`
             # context.
-            npx -y @gravitykit/gktools@latest announce \
+            npx -y @gravitykit/gktools@1.1.1 announce \
               --build-file "$BUILD_FILE" \
               --plugin-file wordpress-plugin/gk-block-mcp/gk-block-mcp.php
 

@@ -2,18 +2,17 @@
 /**
  * Regressions for empty() mishandling the literal string "0".
  *
- * empty('0') is true, so a guard written as empty($string) silently treats a
- * value of "0" as absent. Two reachable cases:
+ * empty('0') is true, so a guard written as empty($string) treats a value of
+ * "0" as absent. Two contracts this pins:
  *
- *  1. create_post rejected a post titled "0" as a missing title. That was a
- *     gk-owned bug — WordPress core itself accepts a "0" title as long as the
- *     post has content — so this pins that gk no longer adds the extra rejection.
+ *  1. create_post accepts a post titled "0" when the post has content (WordPress
+ *     core accepts a "0" title on its own).
  *
- *  2. The block builders dropped a leaf whose innerHTML is "0" from innerContent.
- *     Fixing the builders keeps the correct in-memory shape; note that WordPress
- *     core's serialize_block still voids a bare "0" (get_comment_delimited_block_
- *     content uses empty($block_content)), which gk cannot override — so this
- *     pins the builder contract, not a full round-trip.
+ *  2. The block builders keep a leaf whose innerHTML is "0" in innerContent.
+ *     WordPress core's serialize_block still voids a bare "0"
+ *     (get_comment_delimited_block_content() uses empty($block_content)), which a
+ *     plugin cannot override, so this pins the builder's in-memory shape, not a
+ *     full serialize round-trip.
  *
  * @package GravityKit\BlockMCP\Tests
  */
@@ -33,8 +32,8 @@ class EmptyZeroValueRegressionTest extends BlockApiTestCase {
 	}
 
 	/**
-	 * A post titled "0" (with content, so WP core doesn't reject it as all-empty)
-	 * must be created; gk's own guard used empty('0') and rejected the title.
+	 * A post titled "0" is created when the post has content (so WP core doesn't
+	 * reject it as all-empty).
 	 */
 	public function test_create_post_allows_title_of_literal_zero() {
 		$result = $this->pm->create_post( array(
@@ -47,9 +46,9 @@ class EmptyZeroValueRegressionTest extends BlockApiTestCase {
 	}
 
 	/**
-	 * The block builders keep a leaf's "0" content in innerContent rather than
-	 * dropping it via empty('0'). Pins both build paths (insert via
-	 * build_block_from_def, create via normalize_block_def_for_insert).
+	 * The block builders keep a leaf's "0" innerHTML in innerContent. Pins both
+	 * build paths (insert via build_block_from_def, create via
+	 * normalize_block_def_for_insert).
 	 */
 	public function test_builders_keep_zero_innerhtml_in_inner_content() {
 		$rw = new ReflectionProperty( Block_CRUD::class, 'writer' );

@@ -119,13 +119,10 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 	 * create_post's block builder must strip block-comment delimiters from a
 	 * block's innerHTML, the same as every other block-def write path.
 	 *
-	 * normalize_block_def_for_insert() sanitized innerHTML with bare
-	 * wp_kses_post(), which keeps `<!-- wp:… -->` delimiters; every other
-	 * block-def path routes through Block_Writer::sanitize_inner_html(), which
-	 * also strips them. Without the strip, a create_post innerHTML carrying a
-	 * heading delimiter serializes a live comment that parses as a phantom
-	 * sibling block. Route the builder through sanitize_inner_html and the
-	 * phantom cannot materialize; revert it and this goes red.
+	 * An unstripped `<!-- wp:… -->` delimiter in a block's innerHTML serializes a
+	 * live comment that parse_blocks reads as a phantom sibling block, injecting
+	 * content the caller never authored. Stripping on every write path is the
+	 * contract that prevents it.
 	 */
 	public function test_create_post_blocks_innerhtml_strips_comment_delimiters() {
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );

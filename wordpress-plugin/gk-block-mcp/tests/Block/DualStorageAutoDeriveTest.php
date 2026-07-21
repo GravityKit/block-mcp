@@ -99,7 +99,7 @@ class DualStorageAutoDeriveTest extends BlockApiTestCase {
 
 	public function tear_down(): void {
 		$registry = \WP_Block_Type_Registry::get_instance();
-		foreach ( array( 'test/heading-like', 'test/faq-like', 'test/opaque' ) as $name ) {
+		foreach ( array( 'test/heading-like', 'test/faq-like', 'test/opaque', 'test/list-like' ) as $name ) {
 			if ( $registry->is_registered( $name ) ) {
 				$registry->unregister( $name );
 			}
