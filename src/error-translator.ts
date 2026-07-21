@@ -18,14 +18,24 @@ interface ErrorContextHints {
   ref?: string;
   /** Block path (e.g. [0, 2, 1]) that was rejected, when applicable. */
   path?: number[];
-  /** Block name involved in a legacy/avoid rejection. */
+  /** Block name involved in a legacy/avoid/dual-storage rejection. */
   block?: string;
-  /** Replacement block name suggested by the preference engine. */
+  /** Suggested replacement block name suggested by the preference engine. */
   suggested_replacement?: string;
   /** Status from the data envelope, sometimes present even on success. */
   status?: number;
   /** Some endpoints return `block_name` instead of `block`. */
   block_name?: string;
+  /** flat_index that was rejected as out of range (invalid_index). */
+  flat_index?: number;
+  /** Revision ID the caller's If-Match expected (stale_revision). */
+  expected_revision?: number;
+  /** Revision ID currently stored (stale_revision). */
+  current_revision?: number;
+  /** Configured max nesting depth (block_depth_exceeded). */
+  max_depth?: number;
+  /** Actual nesting depth that exceeded max_depth (block_depth_exceeded). */
+  actual_depth?: number;
   /** Allow extra fields without typing every one. */
   [key: string]: unknown;
 }
@@ -49,6 +59,11 @@ function extractHints(data: unknown): ErrorContextHints {
   if (typeof d.block_name === 'string')          hints.block_name = d.block_name;
   if (typeof d.suggested_replacement === 'string') hints.suggested_replacement = d.suggested_replacement;
   if (typeof d.status === 'number')              hints.status = d.status;
+  if (typeof d.flat_index === 'number')          hints.flat_index = d.flat_index;
+  if (typeof d.expected_revision === 'number')   hints.expected_revision = d.expected_revision;
+  if (typeof d.current_revision === 'number')    hints.current_revision = d.current_revision;
+  if (typeof d.max_depth === 'number')           hints.max_depth = d.max_depth;
+  if (typeof d.actual_depth === 'number')        hints.actual_depth = d.actual_depth;
 
   return hints;
 }
@@ -79,8 +94,11 @@ export function translateWpError(code: string | undefined, data: unknown): strin
       return 'Authentication failed. Confirm WORDPRESS_USER and WORDPRESS_APP_PASSWORD are set to a valid Application Password (not a regular login password).';
 
     // ── Post lookup ────────────────────────────────────────────────
+    // `post_not_found` is the code the plugin actually emits;
+    // `rest_post_invalid_id` is WordPress core's equivalent, kept as an
+    // alias in case a core route ever surfaces it.
     case 'rest_post_invalid_id':
-    case 'invalid_post_id': {
+    case 'post_not_found': {
       const target = hints.post_id !== undefined ? `Post ${hints.post_id}` : 'Post';
       return `${target} not found. List pages with \`list_posts\` to find the right ID.`;
     }
@@ -92,18 +110,23 @@ export function translateWpError(code: string | undefined, data: unknown): strin
         : 'Resource not found. It may have been deleted, or the ID is wrong.';
 
     // ── Block ref / path resolution ────────────────────────────────
-    case 'gk_block_api_invalid_ref':
     case 'invalid_ref':
-      return `Block ref \`${hints.ref ?? '?'}\` not found in post ${hints.post_id ?? '?'}. The post may have been edited since you last fetched it — call \`get_page_blocks\` again to get the current refs.`;
+      return 'Ref must be a non-empty string. Use the `ref` value returned by `get_page_blocks` — not a made-up ID.';
 
-    case 'path_not_found':
+    case 'ref_stale': {
+      const where = hints.post_id !== undefined ? ` in post ${hints.post_id}` : '';
+      return `Block ref \`${hints.ref ?? '?'}\`${where} no longer resolves to a block. It may have been deleted, or the ref is from an older snapshot — call \`get_page_blocks\` again to get current refs.`;
+    }
+
     case 'invalid_path':
-      return `Block path ${formatPath(hints.path)} doesn't address an existing block. Re-fetch the post with \`get_page_blocks\` to get current paths — paths shift when blocks are added or removed.`;
+      return `Block path ${formatPath(hints.path)} doesn't address an existing block (or isn't a valid array of non-negative integers). Re-fetch the post with \`get_page_blocks\` to get current paths — paths shift when blocks are added or removed.`;
 
-    case 'path_out_of_bounds':
-      return `Block path ${formatPath(hints.path)} is out of bounds. The post has fewer blocks than expected — re-fetch with \`get_page_blocks\` for current state.`;
+    case 'invalid_index': {
+      const idx = typeof hints.flat_index === 'number' ? ` ${hints.flat_index}` : '';
+      return `Block index${idx} out of range. Re-fetch the post with \`get_page_blocks\` to get current indices — they shift when blocks are added or removed.`;
+    }
 
-    // ── Block tier / preference enforcement ────────────────────────
+    // ── Block tier / preference / storage enforcement ───────────────
     case 'legacy_block':
       return blockName
         ? `${blockName} is in a namespace this site has configured as legacy. Use ${hints.suggested_replacement ?? 'a core block instead'}.`
@@ -120,6 +143,27 @@ export function translateWpError(code: string | undefined, data: unknown): strin
 
     case 'static_markup_stale_risk':
       return 'Updating attributes on a static block without new innerHTML may leave its rendered markup stale. Pass `innerHTML` alongside `attributes`, or use a dynamic block.';
+
+    case 'dual_storage_requires_both':
+      return blockName
+        ? `${blockName} is dual-storage: \`attributes\` and \`innerHTML\` carry the same data and must be sent together — sending only one silently desyncs the other. Pass both fields in the same call.`
+        : 'This block is dual-storage: `attributes` and `innerHTML` carry the same data and must be sent together — sending only one silently desyncs the other. Pass both fields in the same call.';
+
+    case 'block_depth_exceeded': {
+      const depth = typeof hints.max_depth === 'number' && typeof hints.actual_depth === 'number'
+        ? ` (max ${hints.max_depth}, got ${hints.actual_depth})`
+        : '';
+      return `Block tree exceeds the maximum nesting depth${depth}. Flatten the structure — split deeply nested groups into separate top-level blocks.`;
+    }
+
+    // ── Concurrency / staleness ──────────────────────────────────────
+    case 'edit_conflict':
+      return 'The post content changed since it was read (a concurrent write raced this one). Re-fetch the page with `get_page_blocks` and retry your edit against the current content.';
+
+    case 'stale_revision': {
+      const rev = typeof hints.current_revision === 'number' ? ` (current revision: ${hints.current_revision})` : '';
+      return `The post has changed since you fetched it${rev}. Re-fetch with \`get_page_blocks\` and retry.`;
+    }
 
     // ── Rate limiting ──────────────────────────────────────────────
     case 'rate_limit_exceeded': {
@@ -141,6 +185,9 @@ export function translateWpError(code: string | undefined, data: unknown): strin
 
     case 'invalid_status':
       return 'Post status not allowed. Valid values: draft, pending, publish, future, private. To trash, call update_post with status:"trash" (on its own, not combined with other fields).';
+
+    case 'trash_disabled':
+      return 'Moving posts to trash is turned off for this site. A site administrator can enable it under Block MCP → Settings, or use update_post with a different status.';
 
     // ── Media uploads ──────────────────────────────────────────────
     case 'invalid_url':

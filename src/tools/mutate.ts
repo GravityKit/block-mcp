@@ -11,8 +11,9 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import type { MutationOp, MutationRequest, MutationResponse, StaticBlockWarning } from '../types.js';
-import { formatPreferenceWarning } from '../preferences.js';
+import { formatPreferenceWarning, withFormattedWarnings } from '../preferences.js';
 import { BLOCK_INPUT_SCHEMA } from './write.js';
+import { coercePostId } from '../coerce.js';
 
 const OPS: readonly MutationOp[] = [
   'update-attrs',
@@ -115,12 +116,12 @@ export async function handleMutateTool(
     throw new Error(`Unknown mutate tool: ${toolName}`);
   }
 
-  const postId = args.post_id as number;
+  const postId = coercePostId(args.post_id, 'edit_block_tree');
   const op = args.op as string;
   const path = args.path;
   const ref = args.ref as string | undefined;
 
-  if (postId === undefined || postId === null) throw new Error('post_id is required');
+  if (postId === undefined) throw new Error('post_id is required');
   // Op validation comes from the schema enum at request time; this guard
   // exists for direct programmatic callers that bypass the MCP transport.
   if (!op || !(OPS as readonly string[]).includes(op)) {
@@ -237,12 +238,7 @@ export async function handleMutateTool(
 
   const result: MutationResponse = await client.mutateBlockTree(postId, requestBody);
 
-  if (result.warnings && result.warnings.length > 0) {
-    const formattedWarnings = result.warnings.map((warning) => {
-      if (isStaticBlockWarning(warning)) return formatStaticBlockWarning(warning);
-      return formatPreferenceWarning(warning);
-    });
-    return { ...result, formatted_warnings: formattedWarnings };
-  }
-  return result;
+  return withFormattedWarnings(result, (warning) =>
+    isStaticBlockWarning(warning) ? formatStaticBlockWarning(warning) : formatPreferenceWarning(warning)
+  );
 }

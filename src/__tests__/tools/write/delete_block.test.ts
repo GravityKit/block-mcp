@@ -23,6 +23,24 @@ describe('delete_block — validation', () => {
     ).rejects.toThrow('post_id');
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleWriteTool('delete_block', { post_id: 1.5, top_level_counter: 0 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleWriteTool('delete_block', { post_id: -1, top_level_counter: 0 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleWriteTool('delete_block', { post_id: Number.MAX_SAFE_INTEGER + 1, top_level_counter: 0 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('requires top_level_counter OR ref (not neither)', async () => {
     await expect(
       handleWriteTool('delete_block', { post_id: 1 }, client as any)

@@ -12,27 +12,23 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import { coercePostId } from '../coerce.js';
-import type {
-  YoastSchemaPageType,
-  YoastSchemaArticleType,
-  YoastRobotsAdvanced,
-  YoastUpdateRequest,
-  YoastBulkUpdateItem,
+import {
+  YOAST_SCHEMA_PAGE_TYPES,
+  YOAST_SCHEMA_ARTICLE_TYPES,
+  YOAST_ROBOTS_ADVANCED,
+  type YoastSchemaPageType,
+  type YoastSchemaArticleType,
+  type YoastRobotsAdvanced,
+  type YoastUpdateRequest,
+  type YoastBulkUpdateItem,
 } from '../types.js';
 
-const SCHEMA_PAGE_TYPES: YoastSchemaPageType[] = [
-  'WebPage', 'ItemPage', 'AboutPage', 'FAQPage', 'QAPage',
-  'ProfilePage', 'ContactPage', 'MedicalWebPage', 'CollectionPage',
-  'CheckoutPage', 'RealEstateListing', 'SearchResultsPage',
-];
-
-const SCHEMA_ARTICLE_TYPES: YoastSchemaArticleType[] = [
-  'Article', 'BlogPosting', 'SocialMediaPosting', 'NewsArticle',
-  'AdvertiserContentArticle', 'SatiricalArticle', 'ScholarlyArticle',
-  'TechArticle', 'Report', 'None',
-];
-
-const ROBOTS_ADVANCED: YoastRobotsAdvanced[] = ['noimageindex', 'noarchive', 'nosnippet'];
+// Local aliases: the enum values themselves live in types.ts (single source
+// shared with the TS union types); these names keep the rest of this file
+// unchanged.
+const SCHEMA_PAGE_TYPES = YOAST_SCHEMA_PAGE_TYPES;
+const SCHEMA_ARTICLE_TYPES = YOAST_SCHEMA_ARTICLE_TYPES;
+const ROBOTS_ADVANCED = YOAST_ROBOTS_ADVANCED;
 
 /** Field-level schema reused by yoast_update_seo and yoast_bulk_update_seo. */
 const YOAST_FIELD_PROPERTIES = {

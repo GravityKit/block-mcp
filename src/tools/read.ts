@@ -8,6 +8,7 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import { enrichBlockList } from '../preferences.js';
+import { coercePostId } from '../coerce.js';
 
 /**
  * Tool definitions for the read category.
@@ -137,7 +138,7 @@ export async function handleReadTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'get_page_blocks': {
-      let postId = args.post_id as number | undefined;
+      let postId = coercePostId(args.post_id, 'get_page_blocks');
       const url = args.url as string | undefined;
       const fields = args.fields as string | undefined;
       const render = args.render as boolean | undefined;
@@ -150,11 +151,11 @@ export async function handleReadTool(
       const limit = args.limit as number | undefined;
       const cursor = args.cursor as string | undefined;
 
-      if ((postId === undefined || postId === null) && !url) {
+      if (postId === undefined && !url) {
         throw new Error('Either post_id or url is required');
       }
 
-      if (postId === undefined || postId === null) {
+      if (postId === undefined) {
         const resolved = await client.resolveUrl(url as string);
         postId = resolved.post_id;
       }
@@ -192,14 +193,14 @@ export async function handleReadTool(
     }
 
     case 'get_block': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'get_block');
       const ref = typeof args.ref === 'string' && args.ref.length > 0 ? (args.ref as string) : undefined;
       const flatIndex =
         typeof args.flat_index === 'number' && Number.isInteger(args.flat_index) && args.flat_index >= 0
           ? (args.flat_index as number)
           : undefined;
 
-      if (postId === undefined || postId === null) {
+      if (postId === undefined) {
         throw new Error('post_id is required');
       }
       const hasRef = ref !== undefined;

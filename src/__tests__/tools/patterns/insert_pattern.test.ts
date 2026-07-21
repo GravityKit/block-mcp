@@ -27,6 +27,22 @@ describe('insert_pattern — validation', () => {
       .rejects.toThrow('post_id');
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(handlePatternTool('insert_pattern', { post_id: 1.5, pattern_id: 1 }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(handlePatternTool('insert_pattern', { post_id: -1, pattern_id: 1 }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handlePatternTool('insert_pattern', { post_id: Number.MAX_SAFE_INTEGER + 1, pattern_id: 1 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('requires pattern_id', async () => {
     await expect(handlePatternTool('insert_pattern', { post_id: 1 }, client as any))
       .rejects.toThrow('pattern_id');

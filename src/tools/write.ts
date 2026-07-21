@@ -9,8 +9,9 @@
  */
 
 import type { WordPressBlockClient } from '../client.js';
-import { formatPreferenceWarning } from '../preferences.js';
+import { formatPreferenceWarning, withFormattedWarnings } from '../preferences.js';
 import { enrichBlock, enrichBlocks, type BlockDef } from '../enrichers.js';
+import { coercePostId } from '../coerce.js';
 
 /** Shape shared by every block-input arg in this module. */
 export const BLOCK_INPUT_SCHEMA = {
@@ -336,14 +337,14 @@ export async function handleWriteTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'update_block': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'update_block');
       const flatIndex = args.flat_index as number | undefined;
       const ref = args.ref as string | undefined;
       const blockName = args.block_name as string | undefined;
       let attributes = args.attributes as Record<string, unknown> | undefined;
       let innerHTML = args.innerHTML as string | undefined;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       const hasIndex = typeof flatIndex === 'number' && Number.isFinite(flatIndex) && flatIndex >= 0;
       const hasRef = typeof ref === 'string' && ref.length > 0;
       if (!hasIndex && !hasRef) {
@@ -372,7 +373,7 @@ export async function handleWriteTool(
     }
 
     case 'update_blocks': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'update_blocks');
       const updates = args.updates as Array<{
         ref?: string;
         flat_index?: number;
@@ -381,7 +382,7 @@ export async function handleWriteTool(
         innerHTML?: string;
       }> | undefined;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (!Array.isArray(updates) || updates.length === 0) {
         throw new Error('updates must be a non-empty array');
       }
@@ -443,7 +444,7 @@ export async function handleWriteTool(
     }
 
     case 'insert_blocks': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'insert_blocks');
       const after = args.after_top_level as number | 'start' | undefined;
       const before = args.before_top_level as number | undefined;
       const afterRef = args.after_ref as string | undefined;
@@ -454,7 +455,7 @@ export async function handleWriteTool(
         innerHTML?: string;
       }>;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (!blocks || blocks.length === 0) throw new Error('At least one block is required in the blocks array');
 
       const result = await client.insertBlocks(postId, {
@@ -464,19 +465,16 @@ export async function handleWriteTool(
         ...(beforeRef ? { before_ref: beforeRef } : {}),
         blocks: await enrichBlocks(blocks as BlockDef[]),
       });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
 
     case 'delete_block': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'delete_block');
       const topLevelCounter = args.top_level_counter as number | undefined;
       const ref = args.ref as string | undefined;
       const count = args.count as number | undefined;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       const hasCounter = typeof topLevelCounter === 'number' && Number.isFinite(topLevelCounter) && topLevelCounter >= 0;
       const hasRef = typeof ref === 'string' && ref.length > 0;
       if (!hasCounter && !hasRef) {
@@ -498,7 +496,7 @@ export async function handleWriteTool(
     }
 
     case 'replace_block_range': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'replace_block_range');
       const start = args.start as number;
       const count = args.count as number;
       const blocks = args.blocks as Array<{
@@ -507,40 +505,34 @@ export async function handleWriteTool(
         innerHTML?: string;
       }>;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (typeof start !== 'number' || start < 0) throw new Error('start must be a non-negative integer');
       if (typeof count !== 'number' || count < 0) throw new Error('count must be a non-negative integer');
       if (!Array.isArray(blocks)) throw new Error('blocks must be an array (may be empty for a pure delete)');
 
       const result = await client.replaceBlocksRange(postId, { start, count, blocks: await enrichBlocks(blocks as BlockDef[]) });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
 
     case 'rewrite_post_blocks': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'rewrite_post_blocks');
       const blocks = args.blocks as Array<{
         name: string;
         attributes?: Record<string, unknown>;
         innerHTML?: string;
       }>;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (!blocks || blocks.length === 0) throw new Error('At least one block is required for a full page rewrite');
 
       const result = await client.replaceAllBlocks(postId, await enrichBlocks(blocks as BlockDef[]));
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
 
     case 'revert_to_revision': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'revert_to_revision');
       const revisionId = args.revision_id as number;
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (revisionId === undefined || revisionId === null) throw new Error('revision_id is required');
       return await client.revertToRevision(postId, revisionId);
     }

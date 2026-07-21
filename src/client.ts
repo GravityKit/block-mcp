@@ -9,6 +9,7 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 import { restRouteUrl } from './rest-url.js';
+import { coercePostId } from './coerce.js';
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */
 function mimeForFilename(filename: string): string {
@@ -450,9 +451,11 @@ export class WordPressBlockClient {
       cursor?: string;
     }
   ): Promise<PageBlocksResponse> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'get_page_blocks');
+    if (coercedPostId === undefined) {
       throw new Error('Post ID is required');
     }
+    postId = coercedPostId;
 
     const queryParams: Record<string, string> = {};
     if (params?.fields) queryParams.fields = params.fields;
@@ -542,7 +545,9 @@ export class WordPressBlockClient {
     index: number,
     data: BlockPatch
   ): Promise<BlockUpdateResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'update_block');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (index < 0) throw new Error('Block index must be non-negative');
     if (!data.attributes && !data.innerHTML) {
       throw new Error('At least one of attributes or innerHTML must be provided');
@@ -569,7 +574,9 @@ export class WordPressBlockClient {
     ref: string,
     data: BlockPatch
   ): Promise<BlockUpdateResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'update_block');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
     if (!data.attributes && !data.innerHTML) {
       throw new Error('At least one of attributes or innerHTML must be provided');
@@ -603,7 +610,9 @@ export class WordPressBlockClient {
     updates: BlockBatchUpdateItem[],
     options: { verbose?: boolean } = {}
   ): Promise<BlockBatchUpdateResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'update_blocks');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error('updates must be a non-empty array');
     }
@@ -635,7 +644,9 @@ export class WordPressBlockClient {
     postId: number,
     target: { ref?: string; flatIndex?: number }
   ): Promise<GetBlockResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'get_block');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     const hasRef = typeof target.ref === 'string' && target.ref !== '';
     const hasIdx = typeof target.flatIndex === 'number';
     if (hasRef === hasIdx) {
@@ -668,7 +679,9 @@ export class WordPressBlockClient {
       blocks: BlockInput[];
     }
   ): Promise<BlockWriteResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'insert_blocks');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (!data.blocks || data.blocks.length === 0) {
       throw new Error('At least one block is required');
     }
@@ -693,7 +706,9 @@ export class WordPressBlockClient {
     index: number,
     count?: number
   ): Promise<BlockDeleteResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'delete_block');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (index < 0) throw new Error('Block index must be non-negative');
 
     const params: Record<string, string> = {};
@@ -718,7 +733,9 @@ export class WordPressBlockClient {
     ref: string,
     count?: number
   ): Promise<BlockDeleteResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'delete_block');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (!ref || typeof ref !== 'string') throw new Error('Ref is required');
 
     const params: Record<string, string> = {};
@@ -749,7 +766,9 @@ export class WordPressBlockClient {
       blocks: BlockInput[];
     }
   ): Promise<BlockReplaceRangeResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'replace_block_range');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (typeof data.start !== 'number' || data.start < 0) {
       throw new Error('start must be a non-negative integer');
     }
@@ -781,7 +800,9 @@ export class WordPressBlockClient {
     postId: number,
     blocks: BlockInput[]
   ): Promise<BlockWriteResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'rewrite_post_blocks');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (!blocks || blocks.length === 0) {
       throw new Error('At least one block is required for a full rewrite');
     }
@@ -805,9 +826,11 @@ export class WordPressBlockClient {
    * @returns Mutation result with revision IDs and optional warnings
    */
   async mutateBlockTree(postId: number, data: MutationRequest): Promise<MutationResponse> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'edit_block_tree');
+    if (coercedPostId === undefined) {
       throw new Error('Post ID is required');
     }
+    postId = coercedPostId;
 
     const response = await this.client.post<MutationResponse>(
       `/posts/${postId}/mutate`,
@@ -828,9 +851,11 @@ export class WordPressBlockClient {
    * @returns Revert result with revision IDs
    */
   async revertToRevision(postId: number, revisionId: number): Promise<unknown> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'revert_to_revision');
+    if (coercedPostId === undefined) {
       throw new Error('Post ID is required');
     }
+    postId = coercedPostId;
     const response = await this.client.post(`/posts/${postId}/revert`, { revision_id: revisionId });
     return response.data;
   }
@@ -855,7 +880,9 @@ export class WordPressBlockClient {
       synced?: boolean;
     }
   ): Promise<PatternInsertResponse> {
-    if (postId === undefined || postId === null) throw new Error('Post ID is required');
+    const coercedPostId = coercePostId(postId, 'insert_pattern');
+    if (coercedPostId === undefined) throw new Error('Post ID is required');
+    postId = coercedPostId;
     if (data.pattern_id === undefined || data.pattern_id === null) throw new Error('Pattern ID is required');
 
     const response = await this.client.post<PatternInsertResponse>(
@@ -894,9 +921,11 @@ export class WordPressBlockClient {
    * Use `status: trash` to trash; any non-trash status untrashes a trashed post.
    */
   async updatePost(postId: number, data: UpdatePostRequest): Promise<PostMutationResponse> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'update_post');
+    if (coercedPostId === undefined) {
       throw new Error('update_post: post_id is required');
     }
+    postId = coercedPostId;
     const response = await this.client.patch<PostMutationResponse>(`/posts/${postId}`, data);
     return response.data;
   }
@@ -968,18 +997,22 @@ export class WordPressBlockClient {
 
   /** Read all Yoast SEO metadata for a post. */
   async getYoastSEO(postId: number): Promise<YoastSEOMeta> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'yoast_get_seo');
+    if (coercedPostId === undefined) {
       throw new Error('yoast_get_seo: post_id is required');
     }
+    postId = coercedPostId;
     const response = await this.client.get<YoastSEOMeta>(`/yoast/${postId}`);
     return response.data;
   }
 
   /** Partial update of Yoast SEO fields on a single post. */
   async updateYoastSEO(postId: number, fields: YoastUpdateRequest): Promise<YoastSEOMeta> {
-    if (postId === undefined || postId === null) {
+    const coercedPostId = coercePostId(postId, 'yoast_update_seo');
+    if (coercedPostId === undefined) {
       throw new Error('yoast_update_seo: post_id is required');
     }
+    postId = coercedPostId;
     const response = await this.client.patch<YoastSEOMeta>(`/yoast/${postId}`, fields);
     return response.data;
   }

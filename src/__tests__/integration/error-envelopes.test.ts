@@ -125,14 +125,14 @@ describe.skipIf(skip)('real REST error envelopes (integration)', () => {
     expect(result.message).toBeTruthy();
   });
 
-  it('invalid_path: mutate with out-of-range path returns 400 + path error code', async () => {
+  it('invalid_path: mutate with out-of-range path returns 400 + invalid_path', async () => {
     const result = await rawRequest('post', `/posts/${livePostId}/mutate`, {
       op: 'update-attrs',
       path: [999, 999, 999],
       attributes: { content: 'never land' },
     });
     expect(result.status).toBe(400);
-    expect(['invalid_path', 'path_not_found', 'path_out_of_bounds']).toContain(result.code);
+    expect(result.code).toBe('invalid_path');
     expect(result.message).toBeTruthy();
   });
 

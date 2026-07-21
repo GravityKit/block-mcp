@@ -48,6 +48,22 @@ describe('update_block — validation', () => {
       .rejects.toThrow('post_id');
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(handleWriteTool('update_block', { post_id: 1.5, flat_index: 0, attributes: {} }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(handleWriteTool('update_block', { post_id: -1, flat_index: 0, attributes: {} }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleWriteTool('update_block', { post_id: Number.MAX_SAFE_INTEGER + 1, flat_index: 0, attributes: {} }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('requires flat_index OR ref (not neither)', async () => {
     await expect(handleWriteTool('update_block', { post_id: 1, attributes: {} }, client as any))
       .rejects.toThrow(/Provide either flat_index/);

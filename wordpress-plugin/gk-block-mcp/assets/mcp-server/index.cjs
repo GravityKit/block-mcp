@@ -39931,6 +39931,11 @@ function extractHints(data) {
   if (typeof d2.block_name === "string") hints.block_name = d2.block_name;
   if (typeof d2.suggested_replacement === "string") hints.suggested_replacement = d2.suggested_replacement;
   if (typeof d2.status === "number") hints.status = d2.status;
+  if (typeof d2.flat_index === "number") hints.flat_index = d2.flat_index;
+  if (typeof d2.expected_revision === "number") hints.expected_revision = d2.expected_revision;
+  if (typeof d2.current_revision === "number") hints.current_revision = d2.current_revision;
+  if (typeof d2.max_depth === "number") hints.max_depth = d2.max_depth;
+  if (typeof d2.actual_depth === "number") hints.actual_depth = d2.actual_depth;
   return hints;
 }
 function translateWpError(code, data) {
@@ -39949,23 +39954,30 @@ function translateWpError(code, data) {
     case "rest_authentication_required":
       return "Authentication failed. Confirm WORDPRESS_USER and WORDPRESS_APP_PASSWORD are set to a valid Application Password (not a regular login password).";
     // ── Post lookup ────────────────────────────────────────────────
+    // `post_not_found` is the code the plugin actually emits;
+    // `rest_post_invalid_id` is WordPress core's equivalent, kept as an
+    // alias in case a core route ever surfaces it.
     case "rest_post_invalid_id":
-    case "invalid_post_id": {
+    case "post_not_found": {
       const target = hints.post_id !== void 0 ? `Post ${hints.post_id}` : "Post";
       return `${target} not found. List pages with \`list_posts\` to find the right ID.`;
     }
     case "not_found":
       return hints.post_id ? `Post ${hints.post_id} not found. It may have been deleted, or the ID is wrong.` : "Resource not found. It may have been deleted, or the ID is wrong.";
     // ── Block ref / path resolution ────────────────────────────────
-    case "gk_block_api_invalid_ref":
     case "invalid_ref":
-      return `Block ref \`${hints.ref ?? "?"}\` not found in post ${hints.post_id ?? "?"}. The post may have been edited since you last fetched it \u2014 call \`get_page_blocks\` again to get the current refs.`;
-    case "path_not_found":
+      return "Ref must be a non-empty string. Use the `ref` value returned by `get_page_blocks` \u2014 not a made-up ID.";
+    case "ref_stale": {
+      const where = hints.post_id !== void 0 ? ` in post ${hints.post_id}` : "";
+      return `Block ref \`${hints.ref ?? "?"}\`${where} no longer resolves to a block. It may have been deleted, or the ref is from an older snapshot \u2014 call \`get_page_blocks\` again to get current refs.`;
+    }
     case "invalid_path":
-      return `Block path ${formatPath(hints.path)} doesn't address an existing block. Re-fetch the post with \`get_page_blocks\` to get current paths \u2014 paths shift when blocks are added or removed.`;
-    case "path_out_of_bounds":
-      return `Block path ${formatPath(hints.path)} is out of bounds. The post has fewer blocks than expected \u2014 re-fetch with \`get_page_blocks\` for current state.`;
-    // ── Block tier / preference enforcement ────────────────────────
+      return `Block path ${formatPath(hints.path)} doesn't address an existing block (or isn't a valid array of non-negative integers). Re-fetch the post with \`get_page_blocks\` to get current paths \u2014 paths shift when blocks are added or removed.`;
+    case "invalid_index": {
+      const idx = typeof hints.flat_index === "number" ? ` ${hints.flat_index}` : "";
+      return `Block index${idx} out of range. Re-fetch the post with \`get_page_blocks\` to get current indices \u2014 they shift when blocks are added or removed.`;
+    }
+    // ── Block tier / preference / storage enforcement ───────────────
     case "legacy_block":
       return blockName ? `${blockName} is in a namespace this site has configured as legacy. Use ${hints.suggested_replacement ?? "a core block instead"}.` : "Legacy block rejected. Use a core block (or a higher-tier alternative) instead.";
     case "inner_html_required": {
@@ -39974,6 +39986,19 @@ function translateWpError(code, data) {
     }
     case "static_markup_stale_risk":
       return "Updating attributes on a static block without new innerHTML may leave its rendered markup stale. Pass `innerHTML` alongside `attributes`, or use a dynamic block.";
+    case "dual_storage_requires_both":
+      return blockName ? `${blockName} is dual-storage: \`attributes\` and \`innerHTML\` carry the same data and must be sent together \u2014 sending only one silently desyncs the other. Pass both fields in the same call.` : "This block is dual-storage: `attributes` and `innerHTML` carry the same data and must be sent together \u2014 sending only one silently desyncs the other. Pass both fields in the same call.";
+    case "block_depth_exceeded": {
+      const depth = typeof hints.max_depth === "number" && typeof hints.actual_depth === "number" ? ` (max ${hints.max_depth}, got ${hints.actual_depth})` : "";
+      return `Block tree exceeds the maximum nesting depth${depth}. Flatten the structure \u2014 split deeply nested groups into separate top-level blocks.`;
+    }
+    // ── Concurrency / staleness ──────────────────────────────────────
+    case "edit_conflict":
+      return "The post content changed since it was read (a concurrent write raced this one). Re-fetch the page with `get_page_blocks` and retry your edit against the current content.";
+    case "stale_revision": {
+      const rev = typeof hints.current_revision === "number" ? ` (current revision: ${hints.current_revision})` : "";
+      return `The post has changed since you fetched it${rev}. Re-fetch with \`get_page_blocks\` and retry.`;
+    }
     // ── Rate limiting ──────────────────────────────────────────────
     case "rate_limit_exceeded": {
       const where = hints.post_id !== void 0 ? `on post ${hints.post_id} ` : "";
@@ -39990,6 +40015,8 @@ function translateWpError(code, data) {
       return "Post type not allowed by this site's gk_block_api_post_types_allowlist option. Ask the site admin to add it, or pick a supported type.";
     case "invalid_status":
       return 'Post status not allowed. Valid values: draft, pending, publish, future, private. To trash, call update_post with status:"trash" (on its own, not combined with other fields).';
+    case "trash_disabled":
+      return "Moving posts to trash is turned off for this site. A site administrator can enable it under Block MCP \u2192 Settings, or use update_post with a different status.";
     // ── Media uploads ──────────────────────────────────────────────
     case "invalid_url":
       return "URL rejected by SSRF guard. Hostnames pointing at private/loopback/cloud-metadata IPs are blocked. Use a publicly reachable URL.";
@@ -40008,6 +40035,23 @@ function formatPath(path2) {
 function restRouteUrl(siteUrl, routeSuffix = "") {
   const trimmed = siteUrl.replace(/\/+$/, "");
   return `${trimmed}/?rest_route=/gk-block-api/v1${routeSuffix}`;
+}
+
+// src/coerce.ts
+function coercePostId(value, label) {
+  if (value === void 0 || value === null) {
+    return void 0;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    const parsed = parseInt(value, 10);
+    if (parsed > 0 && Number.isSafeInteger(parsed)) {
+      return parsed;
+    }
+  }
+  throw new Error(`${label}: post_id must be a positive integer`);
 }
 
 // src/client.ts
@@ -40272,9 +40316,11 @@ var WordPressBlockClient = class {
    * @returns Array of parsed blocks
    */
   async getPageBlocks(postId, params) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "get_page_blocks");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const queryParams = {};
     if (params?.fields) queryParams.fields = params.fields;
     if (params?.render) queryParams.render = "true";
@@ -40341,7 +40387,9 @@ var WordPressBlockClient = class {
    * @returns Updated block details with revision ID
    */
   async updateBlock(postId, index, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (index < 0) throw new Error("Block index must be non-negative");
     if (!data.attributes && !data.innerHTML) {
       throw new Error("At least one of attributes or innerHTML must be provided");
@@ -40362,7 +40410,9 @@ var WordPressBlockClient = class {
    * @returns 404 ref_stale if the ref no longer matches any block.
    */
   async updateBlockByRef(postId, ref, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!ref || typeof ref !== "string") throw new Error("Ref is required");
     if (!data.attributes && !data.innerHTML) {
       throw new Error("At least one of attributes or innerHTML must be provided");
@@ -40390,7 +40440,9 @@ var WordPressBlockClient = class {
    * @returns       Per-item results plus the single revision ID.
    */
   async updateBlocksBatch(postId, updates, options = {}) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error("updates must be a non-empty array");
     }
@@ -40416,7 +40468,9 @@ var WordPressBlockClient = class {
    * @returns       { success, saved } where `saved` mirrors update_block's saved.
    */
   async getBlock(postId, target) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "get_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     const hasRef = typeof target.ref === "string" && target.ref !== "";
     const hasIdx = typeof target.flatIndex === "number";
     if (hasRef === hasIdx) {
@@ -40436,7 +40490,9 @@ var WordPressBlockClient = class {
    * @returns Inserted blocks with new indices, warnings, and revision ID
    */
   async insertBlocks(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "insert_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!data.blocks || data.blocks.length === 0) {
       throw new Error("At least one block is required");
     }
@@ -40455,7 +40511,9 @@ var WordPressBlockClient = class {
    * @returns Deletion confirmation with revision ID
    */
   async deleteBlock(postId, index, count) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "delete_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (index < 0) throw new Error("Block index must be non-negative");
     const params = {};
     if (count && count > 1) params.count = String(count);
@@ -40473,7 +40531,9 @@ var WordPressBlockClient = class {
    * @param count  - Consecutive blocks to remove (default 1)
    */
   async deleteBlockByRef(postId, ref, count) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "delete_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!ref || typeof ref !== "string") throw new Error("Ref is required");
     const params = {};
     if (count && count > 1) params.count = String(count);
@@ -40493,7 +40553,9 @@ var WordPressBlockClient = class {
    * @returns Result with `removed`, `inserted[]`, warnings, revision IDs
    */
   async replaceBlocksRange(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "replace_block_range");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (typeof data.start !== "number" || data.start < 0) {
       throw new Error("start must be a non-negative integer");
     }
@@ -40520,7 +40582,9 @@ var WordPressBlockClient = class {
    * @returns Written blocks with revision ID
    */
   async replaceAllBlocks(postId, blocks) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "rewrite_post_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!blocks || blocks.length === 0) {
       throw new Error("At least one block is required for a full rewrite");
     }
@@ -40541,9 +40605,11 @@ var WordPressBlockClient = class {
    * @returns Mutation result with revision IDs and optional warnings
    */
   async mutateBlockTree(postId, data) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "edit_block_tree");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const response = await this.client.post(
       `/posts/${postId}/mutate`,
       data
@@ -40561,9 +40627,11 @@ var WordPressBlockClient = class {
    * @returns Revert result with revision IDs
    */
   async revertToRevision(postId, revisionId) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "revert_to_revision");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const response = await this.client.post(`/posts/${postId}/revert`, { revision_id: revisionId });
     return response.data;
   }
@@ -40578,7 +40646,9 @@ var WordPressBlockClient = class {
    * @returns Inserted pattern details with revision ID
    */
   async insertPattern(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "insert_pattern");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (data.pattern_id === void 0 || data.pattern_id === null) throw new Error("Pattern ID is required");
     const response = await this.client.post(
       `/posts/${postId}/insert-pattern`,
@@ -40613,9 +40683,11 @@ var WordPressBlockClient = class {
    * Use `status: trash` to trash; any non-trash status untrashes a trashed post.
    */
   async updatePost(postId, data) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "update_post");
+    if (coercedPostId === void 0) {
       throw new Error("update_post: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.patch(`/posts/${postId}`, data);
     return response.data;
   }
@@ -40675,17 +40747,21 @@ var WordPressBlockClient = class {
   // ──────────────────────────────────────────────────────────
   /** Read all Yoast SEO metadata for a post. */
   async getYoastSEO(postId) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "yoast_get_seo");
+    if (coercedPostId === void 0) {
       throw new Error("yoast_get_seo: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.get(`/yoast/${postId}`);
     return response.data;
   }
   /** Partial update of Yoast SEO fields on a single post. */
   async updateYoastSEO(postId, fields) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "yoast_update_seo");
+    if (coercedPostId === void 0) {
       throw new Error("yoast_update_seo: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.patch(`/yoast/${postId}`, fields);
     return response.data;
   }
@@ -40933,50 +41009,38 @@ function enrichBlockTypes(types) {
     }
   }
   const lines = [];
-  if (preferred.length > 0) {
-    const grouped = groupByNamespace(preferred);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(", ");
-      lines.push(`PREFERRED (${ns}/): ${names}`);
-    }
-  }
-  if (acceptable.length > 0) {
-    const grouped = groupByNamespace(acceptable);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(", ");
-      lines.push(`ACCEPTABLE (${ns}/): ${names}`);
-    }
-  }
-  if (avoid.length > 0) {
-    const grouped = groupByNamespace(avoid);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`AVOID (${ns}/): ${mappings.join(", ")}`);
-    }
-  }
-  if (legacy.length > 0) {
-    const grouped = groupByNamespace(legacy);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`LEGACY \u2014 DO NOT USE (${ns}/): ${mappings.join(", ")}`);
-    }
-  }
+  pushTierLines(lines, preferred, "PREFERRED", false);
+  pushTierLines(lines, acceptable, "ACCEPTABLE", false);
+  pushTierLines(lines, avoid, "AVOID", true);
+  pushTierLines(lines, legacy, "LEGACY \u2014 DO NOT USE", true);
   const guidance = lines.join("\n");
   return { block_types: types, guidance };
+}
+function pushTierLines(lines, bucket, label, withReplacement) {
+  if (bucket.length === 0) return;
+  const grouped = groupByNamespace(bucket);
+  for (const [ns, blocks] of Object.entries(grouped)) {
+    const names = blocks.map((t) => {
+      const shortName = getShortName(t.name);
+      if (!withReplacement) return shortName;
+      const replacement = t.preference.replacement;
+      return replacement ? `${shortName} -> use ${replacement}` : shortName;
+    });
+    lines.push(`${label} (${ns}/): ${names.join(", ")}`);
+  }
 }
 function formatPreferenceWarning(warning) {
   if (warning.suggested_replacement) {
     return `WARNING: ${warning.block} is non-preferred. Use ${warning.suggested_replacement} instead.`;
   }
   return `WARNING: ${warning.message}`;
+}
+function withFormattedWarnings(result, formatWarning) {
+  if (result.warnings && result.warnings.length > 0) {
+    const warnings = result.warnings;
+    return { ...result, formatted_warnings: warnings.map(formatWarning) };
+  }
+  return result;
 }
 function groupByNamespace(types) {
   const groups = {};
@@ -40986,23 +41050,6 @@ function groupByNamespace(types) {
     groups[ns].push(t);
   }
   return groups;
-}
-
-// src/coerce.ts
-function coercePostId(value, label) {
-  if (value === void 0 || value === null) {
-    return void 0;
-  }
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
-    return value;
-  }
-  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
-    const parsed = parseInt(value, 10);
-    if (parsed > 0 && Number.isSafeInteger(parsed)) {
-      return parsed;
-    }
-  }
-  throw new Error(`${label}: post_id must be a positive integer`);
 }
 
 // src/tools/discovery.ts
@@ -41325,7 +41372,7 @@ var READ_TOOLS = [
 async function handleReadTool(toolName, args, client) {
   switch (toolName) {
     case "get_page_blocks": {
-      let postId = args.post_id;
+      let postId = coercePostId(args.post_id, "get_page_blocks");
       const url3 = args.url;
       const fields = args.fields;
       const render = args.render;
@@ -41337,10 +41384,10 @@ async function handleReadTool(toolName, args, client) {
       const persistRefs = args.persist_refs;
       const limit = args.limit;
       const cursor = args.cursor;
-      if ((postId === void 0 || postId === null) && !url3) {
+      if (postId === void 0 && !url3) {
         throw new Error("Either post_id or url is required");
       }
-      if (postId === void 0 || postId === null) {
+      if (postId === void 0) {
         const resolved = await client.resolveUrl(url3);
         postId = resolved.post_id;
       }
@@ -41374,10 +41421,10 @@ async function handleReadTool(toolName, args, client) {
       };
     }
     case "get_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "get_block");
       const ref = typeof args.ref === "string" && args.ref.length > 0 ? args.ref : void 0;
       const flatIndex = typeof args.flat_index === "number" && Number.isInteger(args.flat_index) && args.flat_index >= 0 ? args.flat_index : void 0;
-      if (postId === void 0 || postId === null) {
+      if (postId === void 0) {
         throw new Error("post_id is required");
       }
       const hasRef = ref !== void 0;
@@ -52482,13 +52529,13 @@ var WRITE_TOOLS = [
 async function handleWriteTool(toolName, args, client) {
   switch (toolName) {
     case "update_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "update_block");
       const flatIndex = args.flat_index;
       const ref = args.ref;
       const blockName = args.block_name;
       let attributes = args.attributes;
       let innerHTML = args.innerHTML;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       const hasIndex = typeof flatIndex === "number" && Number.isFinite(flatIndex) && flatIndex >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasIndex && !hasRef) {
@@ -52512,9 +52559,9 @@ async function handleWriteTool(toolName, args, client) {
       return await client.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
     case "update_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "update_blocks");
       const updates = args.updates;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!Array.isArray(updates) || updates.length === 0) {
         throw new Error("updates must be a non-empty array");
       }
@@ -52558,13 +52605,13 @@ async function handleWriteTool(toolName, args, client) {
       return await client.updateBlocksBatch(postId, normalized);
     }
     case "insert_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "insert_blocks");
       const after = args.after_top_level;
       const before = args.before_top_level;
       const afterRef = args.after_ref;
       const beforeRef = args.before_ref;
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!blocks || blocks.length === 0) throw new Error("At least one block is required in the blocks array");
       const result = await client.insertBlocks(postId, {
         after,
@@ -52573,17 +52620,14 @@ async function handleWriteTool(toolName, args, client) {
         ...beforeRef ? { before_ref: beforeRef } : {},
         blocks: await enrichBlocks(blocks)
       });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "delete_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "delete_block");
       const topLevelCounter = args.top_level_counter;
       const ref = args.ref;
       const count = args.count;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       const hasCounter = typeof topLevelCounter === "number" && Number.isFinite(topLevelCounter) && topLevelCounter >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasCounter && !hasRef) {
@@ -52603,35 +52647,29 @@ async function handleWriteTool(toolName, args, client) {
       return await client.deleteBlock(postId, topLevelCounter, count);
     }
     case "replace_block_range": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "replace_block_range");
       const start = args.start;
       const count = args.count;
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (typeof start !== "number" || start < 0) throw new Error("start must be a non-negative integer");
       if (typeof count !== "number" || count < 0) throw new Error("count must be a non-negative integer");
       if (!Array.isArray(blocks)) throw new Error("blocks must be an array (may be empty for a pure delete)");
       const result = await client.replaceBlocksRange(postId, { start, count, blocks: await enrichBlocks(blocks) });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "rewrite_post_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "rewrite_post_blocks");
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!blocks || blocks.length === 0) throw new Error("At least one block is required for a full page rewrite");
       const result = await client.replaceAllBlocks(postId, await enrichBlocks(blocks));
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "revert_to_revision": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "revert_to_revision");
       const revisionId = args.revision_id;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (revisionId === void 0 || revisionId === null) throw new Error("revision_id is required");
       return await client.revertToRevision(postId, revisionId);
     }
@@ -52677,12 +52715,12 @@ var PATTERN_TOOLS = [
 async function handlePatternTool(toolName, args, client) {
   switch (toolName) {
     case "insert_pattern": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "insert_pattern");
       const patternId = args.pattern_id;
       const after = args.after_top_level;
       const before = args.before_top_level;
       const synced = args.synced;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (patternId === void 0 || patternId === null) throw new Error("pattern_id is required");
       const result = await client.insertPattern(postId, {
         pattern_id: patternId,
@@ -52788,11 +52826,11 @@ async function handleMutateTool(toolName, args, client) {
   if (toolName !== "edit_block_tree") {
     throw new Error(`Unknown mutate tool: ${toolName}`);
   }
-  const postId = args.post_id;
+  const postId = coercePostId(args.post_id, "edit_block_tree");
   const op = args.op;
   const path2 = args.path;
   const ref = args.ref;
-  if (postId === void 0 || postId === null) throw new Error("post_id is required");
+  if (postId === void 0) throw new Error("post_id is required");
   if (!op || !OPS.includes(op)) {
     throw new Error(`op must be one of: ${OPS.join(", ")}. Got: ${JSON.stringify(op)}`);
   }
@@ -52891,14 +52929,10 @@ async function handleMutateTool(toolName, args, client) {
     }
   }
   const result = await client.mutateBlockTree(postId, requestBody);
-  if (result.warnings && result.warnings.length > 0) {
-    const formattedWarnings = result.warnings.map((warning) => {
-      if (isStaticBlockWarning(warning)) return formatStaticBlockWarning(warning);
-      return formatPreferenceWarning(warning);
-    });
-    return { ...result, formatted_warnings: formattedWarnings };
-  }
-  return result;
+  return withFormattedWarnings(
+    result,
+    (warning) => isStaticBlockWarning(warning) ? formatStaticBlockWarning(warning) : formatPreferenceWarning(warning)
+  );
 }
 
 // src/tools/posts.ts
@@ -53020,12 +53054,8 @@ async function handlePostTool(toolName, args, client) {
       throw new Error(`Unknown post tool: ${toolName}`);
   }
 }
-function narrowCreatePost(input) {
-  const out = { title: input.title };
-  if (typeof input.post_type === "string") out.post_type = input.post_type;
-  if (typeof input.status === "string") out.status = input.status;
-  if (typeof input.content === "string") out.content = input.content;
-  if (Array.isArray(input.blocks)) out.blocks = input.blocks;
+function narrowCommonPostFields(input) {
+  const out = {};
   if (typeof input.slug === "string") out.slug = input.slug;
   if (typeof input.parent === "number") out.parent = input.parent;
   if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
@@ -53042,24 +53072,18 @@ function narrowCreatePost(input) {
   if (typeof input.author === "number") out.author = input.author;
   return out;
 }
+function narrowCreatePost(input) {
+  const out = { title: input.title, ...narrowCommonPostFields(input) };
+  if (typeof input.post_type === "string") out.post_type = input.post_type;
+  if (typeof input.status === "string") out.status = input.status;
+  if (typeof input.content === "string") out.content = input.content;
+  if (Array.isArray(input.blocks)) out.blocks = input.blocks;
+  return out;
+}
 function narrowUpdatePost(input) {
-  const out = {};
+  const out = narrowCommonPostFields(input);
   if (typeof input.title === "string") out.title = input.title;
   if (typeof input.status === "string") out.status = input.status;
-  if (typeof input.slug === "string") out.slug = input.slug;
-  if (typeof input.parent === "number") out.parent = input.parent;
-  if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
-  if (typeof input.featured_media === "number") out.featured_media = input.featured_media;
-  if (Array.isArray(input.categories)) out.categories = input.categories.filter((n) => typeof n === "number");
-  if (Array.isArray(input.tags)) out.tags = input.tags.filter((n) => typeof n === "number");
-  if (input.terms && typeof input.terms === "object" && !Array.isArray(input.terms)) {
-    out.terms = narrowTermsMap(input.terms);
-  }
-  if (typeof input.date === "string") out.date = input.date;
-  if (typeof input.menu_order === "number") out.menu_order = input.menu_order;
-  if (input.comment_status === "open" || input.comment_status === "closed") out.comment_status = input.comment_status;
-  if (input.ping_status === "open" || input.ping_status === "closed") out.ping_status = input.ping_status;
-  if (typeof input.author === "number") out.author = input.author;
   return out;
 }
 function narrowTermsMap(input) {
@@ -53169,8 +53193,8 @@ async function handleMediaTool(toolName, args, client) {
   }
 }
 
-// src/tools/yoast.ts
-var SCHEMA_PAGE_TYPES = [
+// src/types.ts
+var YOAST_SCHEMA_PAGE_TYPES = [
   "WebPage",
   "ItemPage",
   "AboutPage",
@@ -53184,7 +53208,7 @@ var SCHEMA_PAGE_TYPES = [
   "RealEstateListing",
   "SearchResultsPage"
 ];
-var SCHEMA_ARTICLE_TYPES = [
+var YOAST_SCHEMA_ARTICLE_TYPES = [
   "Article",
   "BlogPosting",
   "SocialMediaPosting",
@@ -53196,7 +53220,12 @@ var SCHEMA_ARTICLE_TYPES = [
   "Report",
   "None"
 ];
-var ROBOTS_ADVANCED = ["noimageindex", "noarchive", "nosnippet"];
+var YOAST_ROBOTS_ADVANCED = ["noimageindex", "noarchive", "nosnippet"];
+
+// src/tools/yoast.ts
+var SCHEMA_PAGE_TYPES = YOAST_SCHEMA_PAGE_TYPES;
+var SCHEMA_ARTICLE_TYPES = YOAST_SCHEMA_ARTICLE_TYPES;
+var ROBOTS_ADVANCED = YOAST_ROBOTS_ADVANCED;
 var YOAST_FIELD_PROPERTIES = {
   title: { type: "string", description: "SEO title (supports Yoast variables like %%title%%)." },
   description: { type: "string", description: "Meta description." },

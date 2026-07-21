@@ -40,6 +40,26 @@ describe('edit_block_tree — common validation', () => {
     ).rejects.toThrow(/post_id is required/);
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', { post_id: 1.5, op: 'update-attrs', path: [0], attributes: {} }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', { post_id: -1, op: 'update-attrs', path: [0], attributes: {} }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', {
+        post_id: Number.MAX_SAFE_INTEGER + 1, op: 'update-attrs', path: [0], attributes: {},
+      }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('rejects unknown op', async () => {
     await expect(
       handleMutateTool('edit_block_tree', { post_id: 1, op: 'frobnicate', path: [0] }, client as any)

@@ -33,6 +33,27 @@ describe('update_blocks — validation: post_id', () => {
       handleWriteTool('update_blocks', { updates: [{ ref: 'blk_a', innerHTML: 'x' }] }, client as any)
     ).rejects.toThrow('post_id');
   });
+
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleWriteTool('update_blocks', { post_id: 1.5, updates: [{ ref: 'blk_a', innerHTML: 'x' }] }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleWriteTool('update_blocks', { post_id: -1, updates: [{ ref: 'blk_a', innerHTML: 'x' }] }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleWriteTool('update_blocks', {
+        post_id: Number.MAX_SAFE_INTEGER + 1,
+        updates: [{ ref: 'blk_a', innerHTML: 'x' }],
+      }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
 });
 
 describe('update_blocks — validation: updates array', () => {

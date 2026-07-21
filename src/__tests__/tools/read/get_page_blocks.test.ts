@@ -32,6 +32,24 @@ describe('get_page_blocks — input validation', () => {
     ).rejects.toThrow(/post_id or url/);
   });
 
+  it('rejects a float post_id (does not silently fall through to url resolution)', async () => {
+    await expect(
+      handleReadTool('get_page_blocks', { post_id: 1.5 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleReadTool('get_page_blocks', { post_id: -1 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleReadTool('get_page_blocks', { post_id: Number.MAX_SAFE_INTEGER + 1 }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('accepts post_id alone', async () => {
     await expect(
       handleReadTool('get_page_blocks', { post_id: 42 }, client as any)

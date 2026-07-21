@@ -31,6 +31,24 @@ describe('get_block — input validation', () => {
     ).rejects.toThrow(/post_id is required/);
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleReadTool('get_block', { post_id: 1.5, ref: 'blk_a' }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleReadTool('get_block', { post_id: -1, ref: 'blk_a' }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleReadTool('get_block', { post_id: Number.MAX_SAFE_INTEGER + 1, ref: 'blk_a' }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('requires exactly one of ref or flat_index (rejects neither)', async () => {
     await expect(
       handleReadTool('get_block', { post_id: 1 }, client as any)

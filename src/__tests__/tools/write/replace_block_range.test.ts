@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleWriteTool } from '../../../tools/write.js';
 import { makeMockClient } from '../../helpers/mock-client.js';
+import { assertHasFormattedWarning, assertNoFormattedWarnings } from '../../helpers/request-matchers.js';
 
 vi.mock('../../../enrichers.js', () => ({
   enrichBlock: vi.fn(async (block: any) => block),
@@ -27,6 +28,26 @@ describe('replace_block_range — validation', () => {
     await expect(
       handleWriteTool('replace_block_range', { start: 0, count: 1, blocks: [] }, client as any)
     ).rejects.toThrow('post_id');
+  });
+
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', { post_id: 1.5, start: 0, count: 1, blocks: [] }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', { post_id: -1, start: 0, count: 1, blocks: [] }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleWriteTool('replace_block_range', {
+        post_id: Number.MAX_SAFE_INTEGER + 1, start: 0, count: 1, blocks: [],
+      }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
   });
 
   it('requires start', async () => {
@@ -86,5 +107,37 @@ describe('replace_block_range — forwarding', () => {
       post_id: 1, start: 0, count: 2, blocks: [],
     }, client as any);
     expect(client.replaceBlocksRange).toHaveBeenCalled();
+  });
+});
+
+describe('replace_block_range — warning enrichment', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => { client = makeMockClient(); vi.clearAllMocks(); });
+
+  it('adds formatted_warnings when response has warnings', async () => {
+    client.replaceBlocksRange = vi.fn().mockResolvedValue({
+      success: true, removed: 1,
+      inserted: [{ index: 0, name: 'oldns/heading' }],
+      warnings: [{ block: 'oldns/heading', message: 'AVOID', suggested_replacement: 'core/heading' }],
+      before_revision_id: 1, revision_id: 2,
+    }) as any;
+    const result = await handleWriteTool('replace_block_range', {
+      post_id: 1, start: 0, count: 1, blocks: [{ name: 'oldns/heading' }],
+    }, client as any);
+    assertHasFormattedWarning(result, 'WARNING');
+    assertHasFormattedWarning(result, 'oldns/heading');
+  });
+
+  it('no formatted_warnings when response has none', async () => {
+    client.replaceBlocksRange = vi.fn().mockResolvedValue({
+      success: true, removed: 1,
+      inserted: [{ index: 0, name: 'core/heading' }],
+      warnings: [],
+      before_revision_id: 1, revision_id: 2,
+    }) as any;
+    const result = await handleWriteTool('replace_block_range', {
+      post_id: 1, start: 0, count: 1, blocks: [{ name: 'core/heading' }],
+    }, client as any);
+    assertNoFormattedWarnings(result);
   });
 });

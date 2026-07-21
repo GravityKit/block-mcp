@@ -7,6 +7,7 @@
  */
 
 import type { WordPressBlockClient } from '../client.js';
+import { coercePostId } from '../coerce.js';
 
 /**
  * Tool definitions for the pattern category.
@@ -61,13 +62,13 @@ export async function handlePatternTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'insert_pattern': {
-      const postId = args.post_id as number;
+      const postId = coercePostId(args.post_id, 'insert_pattern');
       const patternId = args.pattern_id as number | string;
       const after = args.after_top_level as number | undefined;
       const before = args.before_top_level as number | undefined;
       const synced = args.synced as boolean | undefined;
 
-      if (postId === undefined || postId === null) throw new Error('post_id is required');
+      if (postId === undefined) throw new Error('post_id is required');
       if (patternId === undefined || patternId === null) throw new Error('pattern_id is required');
 
       const result = await client.insertPattern(postId, {
