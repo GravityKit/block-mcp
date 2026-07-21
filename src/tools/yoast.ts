@@ -11,27 +11,24 @@
  */
 
 import type { WordPressBlockClient } from '../client.js';
-import type {
-  YoastSchemaPageType,
-  YoastSchemaArticleType,
-  YoastRobotsAdvanced,
-  YoastUpdateRequest,
-  YoastBulkUpdateItem,
+import { coercePostId } from '../coerce.js';
+import {
+  YOAST_SCHEMA_PAGE_TYPES,
+  YOAST_SCHEMA_ARTICLE_TYPES,
+  YOAST_ROBOTS_ADVANCED,
+  type YoastSchemaPageType,
+  type YoastSchemaArticleType,
+  type YoastRobotsAdvanced,
+  type YoastUpdateRequest,
+  type YoastBulkUpdateItem,
 } from '../types.js';
 
-const SCHEMA_PAGE_TYPES: YoastSchemaPageType[] = [
-  'WebPage', 'ItemPage', 'AboutPage', 'FAQPage', 'QAPage',
-  'ProfilePage', 'ContactPage', 'MedicalWebPage', 'CollectionPage',
-  'CheckoutPage', 'RealEstateListing', 'SearchResultsPage',
-];
-
-const SCHEMA_ARTICLE_TYPES: YoastSchemaArticleType[] = [
-  'Article', 'BlogPosting', 'SocialMediaPosting', 'NewsArticle',
-  'AdvertiserContentArticle', 'SatiricalArticle', 'ScholarlyArticle',
-  'TechArticle', 'Report', 'None',
-];
-
-const ROBOTS_ADVANCED: YoastRobotsAdvanced[] = ['noimageindex', 'noarchive', 'nosnippet'];
+// Local aliases: the enum values themselves live in types.ts (single source
+// shared with the TS union types); these names keep the rest of this file
+// unchanged.
+const SCHEMA_PAGE_TYPES = YOAST_SCHEMA_PAGE_TYPES;
+const SCHEMA_ARTICLE_TYPES = YOAST_SCHEMA_ARTICLE_TYPES;
+const ROBOTS_ADVANCED = YOAST_ROBOTS_ADVANCED;
 
 /** Field-level schema reused by yoast_update_seo and yoast_bulk_update_seo. */
 const YOAST_FIELD_PROPERTIES = {
@@ -40,8 +37,8 @@ const YOAST_FIELD_PROPERTIES = {
   canonical: { type: 'string', description: 'Canonical URL override.' },
   focus_keyword: { type: 'string', description: 'Focus keyphrase.' },
   noindex: {
-    type: ['boolean', 'null'],
-    description: 'Tri-state: true=noindex, false=explicit index, null=post-type default.',
+    type: 'boolean',
+    description: 'true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients — e.g. Google Gemini — reject a "null" member in a type array; the handler still accepts an explicit null.)',
   },
   nofollow: { type: 'boolean', description: 'true=nofollow, false=follow.' },
   robots_advanced: {
@@ -132,17 +129,17 @@ export async function handleYoastTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'yoast_get_seo': {
-      const postId = args.post_id;
-      if (typeof postId !== 'number') {
-        throw new Error('yoast_get_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'yoast_get_seo');
+      if (postId === undefined) {
+        throw new Error('yoast_get_seo: "post_id" is required');
       }
       return client.getYoastSEO(postId);
     }
 
     case 'yoast_update_seo': {
-      const postId = args.post_id;
-      if (typeof postId !== 'number') {
-        throw new Error('yoast_update_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'yoast_update_seo');
+      if (postId === undefined) {
+        throw new Error('yoast_update_seo: "post_id" is required');
       }
       const { post_id: _omit, ...rest } = args;
       void _omit;
@@ -163,11 +160,13 @@ export async function handleYoastTool(
           throw new Error('yoast_bulk_update_seo: each item in `posts` must be an object');
         }
         const obj = raw as Record<string, unknown>;
-        if (typeof obj.post_id !== 'number') {
-          throw new Error('yoast_bulk_update_seo: each item requires `post_id` (number)');
+        const id = coercePostId(obj.post_id, 'yoast_bulk_update_seo');
+        if (id === undefined) {
+          throw new Error('yoast_bulk_update_seo: each item requires `post_id`');
         }
-        const { post_id: id, ...rest } = obj;
-        items.push({ post_id: id as number, ...narrowYoastFields(rest) });
+        const { post_id: _omit, ...rest } = obj;
+        void _omit;
+        items.push({ post_id: id, ...narrowYoastFields(rest) });
       }
       return client.bulkUpdateYoastSEO(items);
     }

@@ -66,6 +66,17 @@ class Block_Reader {
 	private $inventory;
 
 	/**
+	 * Namespaces with at least one registered block type, memoized per instance.
+	 *
+	 * Built lazily from WP_Block_Type_Registry the first time a block is checked,
+	 * then reused for the rest of the read. Used to flag orphaned blocks: a block
+	 * whose namespace has no registered provider on this site.
+	 *
+	 * @var array<string, true>|null
+	 */
+	private $registered_namespaces = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Block_CRUD      $crud        Owning CRUD instance for shared utilities.
@@ -76,6 +87,34 @@ class Block_Reader {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
 		$this->inventory   = $inventory;
+	}
+
+	/**
+	 * Whether a block's namespace has any registered block type on this site.
+	 *
+	 * Memoizes the set of registered namespaces on first use so a single read
+	 * walks the registry once. A namespace with no registered block type means
+	 * the providing plugin or theme is inactive, which marks its blocks orphaned.
+	 *
+	 * @param string $block_name Full block name (e.g. "core/paragraph").
+	 * @return bool
+	 */
+	private function namespace_has_registered_block( $block_name ) {
+		if ( null === $this->registered_namespaces ) {
+			$this->registered_namespaces = array();
+			$registry                    = \WP_Block_Type_Registry::get_instance();
+			if ( $registry ) {
+				foreach ( array_keys( $registry->get_all_registered() ) as $registered_name ) {
+					$namespace = $this->preferences->extract_namespace( $registered_name );
+					if ( '' !== $namespace ) {
+						$this->registered_namespaces[ $namespace ] = true;
+					}
+				}
+			}
+		}
+
+		$namespace = $this->preferences->extract_namespace( $block_name );
+		return '' !== $namespace && isset( $this->registered_namespaces[ $namespace ] );
 	}
 
 	/**
@@ -229,19 +268,23 @@ class Block_Reader {
 							$this->parse_cache[ $post_id . ':' . md5( $fresh_content ) ] = $blocks;
 						}
 						if ( $this->crud->assign_missing_refs_recursive( $blocks ) ) {
-							$persisted = $this->crud->persist_ref_assignments( $post_id, $blocks );
+							$persisted = $this->crud->persist_ref_assignments( $post_id, $blocks, $fresh_content );
 							if ( $persisted ) {
 								// Persist succeeded — re-warm cache from authoritative DB content.
 								$this->invalidate( $post_id );
 								$new_content = (string) get_post_field( 'post_content', $post_id );
 								$this->parse_cache[ $post_id . ':' . md5( $new_content ) ] = $blocks;
 							} else {
-								// Persist failed (read-only DB, replica lag, broken column). Refs
-								// exist only in $blocks, not on disk. Caching them would surface
-								// stable-looking refs in the response that the next write-by-ref
-								// would reject as ref_stale. Drop the cache for this post so the
-								// next read re-parses disk truth and tries again.
+								// Persist failed: a concurrent edit moved the row, or the DB is
+								// read-only / replica-lagged. The refs we assigned exist only in
+								// $blocks, not on disk, so the response must surface disk truth
+								// instead — otherwise a follow-up write-by-ref targets a ref that
+								// was never persisted. Re-read the authoritative content.
 								$this->invalidate( $post_id );
+								$disk_content = (string) get_post_field( 'post_content', $post_id );
+								$disk_blocks  = parse_blocks( $disk_content );
+								$blocks       = is_array( $disk_blocks ) ? $disk_blocks : array();
+								$this->parse_cache[ $post_id . ':' . md5( $disk_content ) ] = $blocks;
 							}
 						}
 					} finally {
@@ -415,15 +458,9 @@ class Block_Reader {
 			// so it can recursively format the pattern's own block tree under render
 			// mode without touching this loop.
 
-			// Mark blocks as dynamic or static (cached per block name).
-			static $dynamic_cache = array();
-
-			if ( ! isset( $dynamic_cache[ $block['blockName'] ] ) ) {
-				$registry                             = \WP_Block_Type_Registry::get_instance();
-				$block_type                           = $registry ? $registry->get_registered( $block['blockName'] ) : null;
-				$dynamic_cache[ $block['blockName'] ] = $block_type ? $block_type->is_dynamic() : false;
-			}
-			$is_dynamic      = $dynamic_cache[ $block['blockName'] ];
+			// Dynamic vs static classification. Block_Inventory is the single
+			// authority (caches per block name; an unregistered block is static).
+			$is_dynamic      = $this->inventory->is_block_dynamic( $block['blockName'] );
 			$data['dynamic'] = $is_dynamic;
 
 			// storage_mode disambiguates the existing `dynamic` flag for AI consumers:
@@ -435,16 +472,26 @@ class Block_Reader {
 
 			// Preference tier from the (admin-editable, filter-extensible) Preferences
 			// config. Replaces hardcoded namespace lists in client-side enrichment.
-			// Only attach for non-preferred tiers — preferred is the default and adding
-			// the field on every block bloats the response.
-			$pref = $this->preferences->get_block_score( $block['blockName'] );
-			if ( isset( $pref['tier'] ) && 'preferred' !== $pref['tier'] ) {
+			// Attach for any non-preferred tier (preferred is the default and adding
+			// the field on every block bloats the response), or whenever the block is
+			// orphaned (its namespace has no registered provider on this site) so an
+			// agent always sees that signal even on an otherwise-preferred namespace.
+			// blockName is a non-empty string here (empty/whitespace blocks are
+			// skipped earlier in the loop); namespace_has_registered_block() guards
+			// the empty-namespace edge internally.
+			$pref     = $this->preferences->get_block_score( $block['blockName'] );
+			$tier     = isset( $pref['tier'] ) ? $pref['tier'] : 'acceptable';
+			$orphaned = ! $this->namespace_has_registered_block( $block['blockName'] );
+			if ( 'preferred' !== $tier || $orphaned ) {
 				$data['preference'] = array(
-					'tier' => $pref['tier'],
+					'tier' => $tier,
 				);
 				$replacement        = $this->preferences->get_replacement( $block['blockName'] );
 				if ( $replacement ) {
 					$data['preference']['suggested_replacement'] = $replacement;
+				}
+				if ( $orphaned ) {
+					$data['preference']['orphaned'] = true;
 				}
 			}
 
@@ -589,7 +636,9 @@ class Block_Reader {
 	 * @return array Merged attribute map (parsed_attrs + any extracted sourced values).
 	 */
 	private function extract_sourced_attributes( $block_name, array $parsed_attrs, $inner_html ) {
-		if ( '' === $block_name || empty( $inner_html ) ) {
+		// Explicit empty-string test to match derive_sourced_attributes(): a
+		// block whose content is literally "0" is real markup.
+		if ( '' === $block_name || '' === (string) $inner_html ) {
 			return $parsed_attrs;
 		}
 
@@ -633,6 +682,61 @@ class Block_Reader {
 
 		// Delimiter-parsed attrs win — merge extracted underneath.
 		return array_merge( $extracted, $parsed_attrs );
+	}
+
+	/**
+	 * Freshly derive every innerHTML-sourced attribute from the given markup.
+	 *
+	 * Unlike extract_sourced_attributes(), this does NOT defer to delimiter
+	 * values — it re-reads each sourced attribute directly from `$inner_html`,
+	 * so callers replacing a block's innerHTML can recompute the structured
+	 * attributes that mirror it (e.g. core/heading `content`). Only the four
+	 * sources source_attribute_value() supports (attribute, html, rich-text,
+	 * text) resolve; anything else yields nothing. Returns just the derived
+	 * pairs — the caller decides how to merge them.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name Fully-qualified block type name.
+	 * @param string $inner_html Markup to derive attribute values from.
+	 *
+	 * @return array Map of attribute name → value for every source that resolved.
+	 */
+	public function derive_sourced_attributes( $block_name, $inner_html ) {
+		// Explicit empty-string test, not empty(): a block whose rendered content
+		// is literally "0" is real markup, and empty('0') would skip it.
+		if ( '' === (string) $block_name || '' === (string) $inner_html ) {
+			return array();
+		}
+
+		if ( ! isset( $this->block_schema_cache[ $block_name ] ) ) {
+			$registry = \WP_Block_Type_Registry::get_instance();
+			if ( ! $registry ) {
+				return array();
+			}
+			$block_type                              = $registry->get_registered( $block_name );
+			$this->block_schema_cache[ $block_name ] = ( $block_type && ! empty( $block_type->attributes ) )
+				? $block_type->attributes
+				: array();
+		}
+
+		$schema = $this->block_schema_cache[ $block_name ];
+		if ( empty( $schema ) ) {
+			return array();
+		}
+
+		$derived = array();
+		foreach ( $schema as $attr_name => $attr_def ) {
+			if ( ! is_array( $attr_def ) ) {
+				continue;
+			}
+			$value = $this->source_attribute_value( $attr_def, $inner_html );
+			if ( null !== $value ) {
+				$derived[ $attr_name ] = $value;
+			}
+		}
+
+		return $derived;
 	}
 
 	/**

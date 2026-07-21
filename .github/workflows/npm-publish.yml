@@ -4,8 +4,8 @@ name: Publish to npm
 # yet on the registry. Runs on every push to main and on release tags, so a
 # version bump merged to main publishes immediately and the release tag acts
 # as a backstop; already-published versions are skipped, which makes both
-# triggers idempotent (the plugin and the MCP server version independently —
-# a v* tag whose package.json version is already live is a no-op).
+# triggers idempotent (the plugin and the MCP server share one version
+# (lockstep), so a v* tag whose package.json version is already live is a no-op).
 #
 # Auth is npm Trusted Publishing (OIDC) — no NPM_TOKEN secret to rotate or
 # leak. One-time setup on npmjs.com: package Settings → Trusted Publisher →

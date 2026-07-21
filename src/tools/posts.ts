@@ -12,6 +12,7 @@
 import type { WordPressBlockClient } from '../client.js';
 import type { CreatePostRequest, UpdatePostRequest } from '../types.js';
 import { BLOCK_INPUT_SCHEMA } from './write.js';
+import { coercePostId } from '../coerce.js';
 
 const POST_STATUS_CREATE = ['draft', 'pending', 'private', 'publish', 'future'] as const;
 const POST_STATUS_UPDATE = ['draft', 'pending', 'private', 'publish', 'future', 'trash'] as const;
@@ -128,15 +129,17 @@ export async function handlePostTool(
     }
 
     case 'update_post': {
-      if (typeof args.post_id !== 'number') {
-        throw new Error('update_post: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, 'update_post');
+      if (postId === undefined) {
+        throw new Error('update_post: "post_id" is required');
       }
-      const { post_id: postId, ...rest } = args;
+      const { post_id: _omit, ...rest } = args;
+      void _omit;
       if (Object.keys(rest).length === 0) {
         throw new Error('update_post: provide at least one mutating field besides post_id');
       }
       const update = narrowUpdatePost(rest);
-      return client.updatePost(postId as number, update);
+      return client.updatePost(postId, update);
     }
 
     default:
@@ -144,13 +147,14 @@ export async function handlePostTool(
   }
 }
 
-function narrowCreatePost(input: Record<string, unknown>): CreatePostRequest {
-  // input.title is already validated as a non-empty string by the caller.
-  const out: CreatePostRequest = { title: input.title as string };
-  if (typeof input.post_type === 'string') out.post_type = input.post_type;
-  if (typeof input.status === 'string') out.status = input.status as CreatePostRequest['status'];
-  if (typeof input.content === 'string') out.content = input.content;
-  if (Array.isArray(input.blocks)) out.blocks = input.blocks as CreatePostRequest['blocks'];
+/** Fields narrowed identically for create_post and update_post (everything except title/status/content/blocks/post_type — those differ in requiredness or are create-only). */
+type CommonPostFields = Pick<
+  UpdatePostRequest,
+  'slug' | 'parent' | 'excerpt' | 'featured_media' | 'categories' | 'tags' | 'terms' | 'date' | 'menu_order' | 'comment_status' | 'ping_status' | 'author'
+>;
+
+function narrowCommonPostFields(input: Record<string, unknown>): CommonPostFields {
+  const out: CommonPostFields = {};
   if (typeof input.slug === 'string') out.slug = input.slug;
   if (typeof input.parent === 'number') out.parent = input.parent;
   if (typeof input.excerpt === 'string') out.excerpt = input.excerpt;
@@ -168,24 +172,20 @@ function narrowCreatePost(input: Record<string, unknown>): CreatePostRequest {
   return out;
 }
 
+function narrowCreatePost(input: Record<string, unknown>): CreatePostRequest {
+  // input.title is already validated as a non-empty string by the caller.
+  const out: CreatePostRequest = { title: input.title as string, ...narrowCommonPostFields(input) };
+  if (typeof input.post_type === 'string') out.post_type = input.post_type;
+  if (typeof input.status === 'string') out.status = input.status as CreatePostRequest['status'];
+  if (typeof input.content === 'string') out.content = input.content;
+  if (Array.isArray(input.blocks)) out.blocks = input.blocks as CreatePostRequest['blocks'];
+  return out;
+}
+
 function narrowUpdatePost(input: Record<string, unknown>): UpdatePostRequest {
-  const out: UpdatePostRequest = {};
+  const out: UpdatePostRequest = narrowCommonPostFields(input);
   if (typeof input.title === 'string') out.title = input.title;
   if (typeof input.status === 'string') out.status = input.status as UpdatePostRequest['status'];
-  if (typeof input.slug === 'string') out.slug = input.slug;
-  if (typeof input.parent === 'number') out.parent = input.parent;
-  if (typeof input.excerpt === 'string') out.excerpt = input.excerpt;
-  if (typeof input.featured_media === 'number') out.featured_media = input.featured_media;
-  if (Array.isArray(input.categories)) out.categories = (input.categories as unknown[]).filter((n) => typeof n === 'number') as number[];
-  if (Array.isArray(input.tags)) out.tags = (input.tags as unknown[]).filter((n) => typeof n === 'number') as number[];
-  if (input.terms && typeof input.terms === 'object' && !Array.isArray(input.terms)) {
-    out.terms = narrowTermsMap(input.terms as Record<string, unknown>);
-  }
-  if (typeof input.date === 'string') out.date = input.date;
-  if (typeof input.menu_order === 'number') out.menu_order = input.menu_order;
-  if (input.comment_status === 'open' || input.comment_status === 'closed') out.comment_status = input.comment_status;
-  if (input.ping_status === 'open' || input.ping_status === 'closed') out.ping_status = input.ping_status;
-  if (typeof input.author === 'number') out.author = input.author;
   return out;
 }
 

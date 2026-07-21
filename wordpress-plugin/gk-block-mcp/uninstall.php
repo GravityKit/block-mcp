@@ -32,9 +32,11 @@ require_once __DIR__ . '/includes/class-connections.php';
  */
 function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_preferences' );
+	delete_option( 'gk_block_api_preferences_notice' );
 	delete_option( 'gk_block_api_post_types_allowlist' );
 	delete_option( 'gk_block_api_uploads_enabled' );
 	delete_option( 'gk_block_api_allow_trash' );
+	delete_option( 'gk_block_api_abilities_enabled' );
 
 	// Revoke any own-account credentials (Application Passwords minted on real
 	// users for "use my own account" connections) BEFORE dropping the meta that
@@ -52,6 +54,7 @@ function gk_block_api_uninstall_blog() {
 	delete_option( 'gk_block_api_dual_storage_blocks_manual' );
 	delete_option( 'gk_block_api_storage_modes' );
 	delete_option( 'gk_block_api_storage_modes_last_run' );
+	delete_option( 'gk_block_api_stats_refresh_last' );
 	delete_option( 'gk_block_api_db_version' );
 	delete_option( 'gk_block_api_instructions' );
 	delete_option( 'gk_block_api_instructions_updated_at' );

@@ -4,7 +4,7 @@
 
 ## Quick Start
 
-**What this is:** Two components that ship and version independently.
+**What this is:** Two components shipped as separate artifacts (an npm package + a WordPress plugin) that carry one shared version (lockstep).
 1. **MCP server** (`src/`, built to `dist/index.cjs`) — a thin stdio MCP server that exposes ~30 tools, validates input, calls the plugin's REST API, and enriches responses with AI-friendly guidance (tier groupings, legacy warnings, error translation). Also contains the **connector** (`src/connect.ts`) — the `block-mcp connect` subcommand that drives a browser-Approve handshake and writes the client's MCP config.
 2. **WordPress plugin** (`wordpress-plugin/gk-block-mcp/`) — registers the `gk-block-api/v1` REST namespace, owns block parsing/serialization/mutation, the preference/scoring engine, post/term/media lifecycle, and the Connect onboarding UI + credential flow.
 
@@ -17,7 +17,7 @@
 
 **Key namespaces:** PHP `GravityKit\BlockMCP`; REST `gk-block-api/v1`; npm `@gravitykit/block-mcp`.
 
-**Versions:** the MCP server and plugin version independently. `package.json` `version` is the server; `readme.txt` `Stable tag` + `gk-block-mcp.php` `Version`/`GK_BLOCK_MCP_VERSION` are the plugin (current: 2.0.0). See **Versioning & Releases**.
+**Versions:** the MCP server and plugin share one version (lockstep). `package.json` `version` (npm) always equals `readme.txt` `Stable tag` + `gk-block-mcp.php` `Version`/`GK_BLOCK_MCP_VERSION` (plugin). See **Versioning & Releases**.
 
 ```bash
 cd MCPs/block-mcp && npm install
@@ -49,7 +49,7 @@ MCPs/block-mcp/
 └── wordpress-plugin/gk-block-mcp/
     ├── gk-block-mcp.php          # Bootstrap: autoloader, rest_api_init wiring, admin wiring, CLI
     ├── uninstall.php             # Full data + agent teardown (multisite-aware)
-    ├── readme.txt                # Canonical changelog + Upgrade Notice (WordPress plugin readme)
+    ├── readme.txt                # Canonical changelog (WordPress plugin readme)
     ├── phpcs.xml.dist            # WordPress-Extra + WordPress-Docs + PHPCompatibilityWP (testVersion 7.4-)
     ├── phpstan.neon.dist         # PHPStan level 5, analyze-as-PHP-8.2, WP stubs
     ├── phpstan-bootstrap.php     # Placeholder constants for static analysis
@@ -168,7 +168,7 @@ Write them as standalone documentation of what the code does **today** — never
 Don't name specific third-party block namespaces as "legacy" in comments, error messages, REST responses, or changelog text — the legacy tier is site-configurable via `Preferences`. Use generic phrasing ("the namespace is configured as legacy"). Test *fixtures* may use a concrete namespace, but resolve it from `Preferences::get_defaults()` at runtime rather than hardcoding.
 
 ### Version annotations
-`@since {version}` for released members; update `@since` when adding members. New connect/identity code uses `@since 2.1.0` as a placeholder until the release version is settled.
+`@since {version}` annotates **shipped public members** — production classes, methods, hooks, and REST routes. Update `@since` when adding such a member; new code uses `@since 2.1.0` as a placeholder until the release version is settled. **Test files (`tests/**`) do not carry `@since`** — they pin contracts, not API surface, and the suite is uniformly free of it.
 
 ## Extension Patterns
 
@@ -217,22 +217,25 @@ composer analyze   # PHPStan (level 5, analyze-as-PHP-8.2, WordPress stubs)
 
 ## Versioning & Releases
 
-The plugin and MCP server version independently. The plugin follows WP plugin conventions (`readme.txt` is the canonical changelog).
+The plugin and the MCP server share **one version (lockstep)** — `package.json` `version` always equals the plugin version. They ship as separate artifacts (an npm package and a WP plugin), but the plugin *bundles* the built server (`.mcpb` + Connect flow serve `assets/mcp-server/index.cjs`, not npm), so they are one product and one number identifies everything: the `v{version}` tag, the GitHub release, the npm package, the `.mcpb` manifest, and the server's MCP handshake (`serverInfo.version`). The plugin follows WP plugin conventions (`readme.txt` is the canonical changelog).
 
-**Semver (plugin):** MAJOR = breaking REST/tool changes; MINOR = additive endpoints/tools/fields/settings; PATCH = fixes/hardening/refactors/i18n/tests.
+**Semver:** MAJOR = breaking REST/tool changes; MINOR = additive endpoints/tools/fields/settings; PATCH = fixes/hardening/refactors/i18n/tests.
 
-**Every plugin version bump updates all five:**
-1. `gk-block-mcp.php` `* Version:` header
-2. `gk-block-mcp.php` `GK_BLOCK_MCP_VERSION` constant
-3. `readme.txt` `Stable tag:`
-4. `readme.txt` `== Upgrade Notice ==` (1–3 sentences, headline value, newest at top — this is what the WP update screen shows)
-5. `readme.txt` `== Changelog ==` (grouped `New`/`Improved`/`Fixed`/etc., newest at top)
+**Every version bump updates all five, in one commit:**
+1. `package.json` `version` (the npm package)
+2. `gk-block-mcp.php` `* Version:` header
+3. `gk-block-mcp.php` `GK_BLOCK_MCP_VERSION` constant
+4. `readme.txt` `Stable tag:`
+5. `readme.txt` `== Changelog ==` (a `= {version} on {date} =` entry with a one-sentence summary, grouped `Added`/`Improved`/`Fixed`/`Updated`, newest at top)
 
-**MCP server bump:** `package.json` `version` (+ optional readme mention if a TS change is user-observable).
+`package.json` also has a copy in `package-lock.json` — bump **both** root entries (top-level `version` and `packages."".version`); don't blind-replace the version string, since a dependency can coincidentally share it. Then run **`npm run build`**: it bakes the version into `dist/index.cjs` and (via `postbuild`) refreshes the tracked bundle `wordpress-plugin/gk-block-mcp/assets/mcp-server/index.cjs`. Commit the rebuilt bundle. CircleCI does NOT rebuild the server — the ZIP and `.mcpb` ship the tracked copy as-is — so a bundle whose baked version doesn't match the plugin header ships stale; treat a mismatch as a release blocker. Lockstep holds even when only one side changed: a PHP-only release still publishes a new npm version (its only delta is the baked version string, and `npm-publish.yml` skips an already-published version, so a re-push is idempotent), and a server-only fix still cuts a plugin release, which its bundled users need anyway.
 
-**Releasing = merging the version bump to `main`.** Two workflows fire from the merge and keep GitHub and npm in sync:
-- `build-plugin-zip.yml` reads the plugin `Version` header; when no `v{plugin-version}` tag exists yet it creates the tag + GitHub release (body = that version's `readme.txt` Upgrade Notice, `gk-block-mcp.zip` attached). A manually pushed `v*` tag still publishes a release as a backstop — note a workflow-created tag does NOT re-trigger workflows (`GITHUB_TOKEN` events don't cascade), which is why the release is created in the build job rather than via a tag push.
-- `npm-publish.yml` publishes `@gravitykit/block-mcp` (npm Trusted Publishing/OIDC, no token secret) whenever the `package.json` version isn't on the registry yet — independent of the plugin tag, since the two version separately.
+**No `== Upgrade Notice ==` section.** GravityKit plugins update through Foundation, not the WP.org directory, so it is never surfaced to users; the GitHub release notes are sourced from the Changelog entry instead. `readme.txt` ends at `== Changelog ==`.
+
+**Releasing = merging the version bump to `main`.** From that merge, three pieces fire:
+- **CircleCI's `build_package_release` job (`.circleci/config.yml`) is the sole creator of the `v{version}` tag and GitHub release.** It builds the ZIP, then runs `npx @gravitykit/gktools release` (tags `v{version}`, creates the release with that version's `readme.txt` Changelog as the body, posts to `#release-announcements`) and `gktools announce` (signs the build via the Release Manager). Commit-message switches: `[skip release]` skips the GitHub release, `[skip notify]` skips the announce. Release builds off `main` ship a clean version; other branches carry the commit hash.
+- `build-plugin-zip.yml` only builds the plugin ZIP and the rolling `latest` prerelease now; it no longer creates the version tag or release (CircleCI owns that).
+- `npm-publish.yml` publishes `@gravitykit/block-mcp` (npm Trusted Publishing/OIDC, no token secret) on every push to `main` and on release tags, skipping any version already on the registry. Under lockstep the npm version equals the plugin version, so the merge that releases the plugin publishes the matching npm package in the same push, and the skip-if-present guard makes the release-tag trigger idempotent.
 
 On feature branches, the changelog header is `= develop =` until release.
 
@@ -249,6 +252,10 @@ On feature branches, the changelog header is `= develop =` until release.
 9. **Legacy-tier blocks are hard-rejected** on insert/replace (HTTP 400); avoid-tier warns but succeeds. Enforcement is insert-only — `update-attrs`/`update-html` don't re-check tiers.
 10. **No `dotenv` in the server.** It breaks the esbuild ESM→CJS bundle. Env vars come from the parent process only.
 11. **The agent role survives deactivation.** It lives in `wp_user_roles`; only `uninstall.php` (or `Agent_Provisioner::purge()`, gated by the `gk/block-mcp/agent/remove-on-uninstall` filter) tears it down.
+12. **External-contributor PR branches live on forks.** `git fetch origin <branch>` 404s for a fork-hosted PR head — use `gh pr checkout <n>` (fetches `refs/pull/<n>/head` and sets the fork as the push remote). Push follow-up fixes to the fork (`git push git@github.com:<owner>/block-mcp.git <branch>:<branch>`); this works while the PR has maintainer-edit enabled.
+13. **MCP `destructiveHint: false` promises additive-only.** Any tool that overwrites or removes existing content must declare `destructiveHint: true` in its `src/tools/*` annotations — a `false` hint tells MCP clients the tool never touches existing data, so they skip confirmation. Don't copy annotations from an update-style tool without checking: `update_block`/`update_blocks` shipped with a wrong `false`.
+
+14. **The Adapter serves Block MCP's abilities from Block MCP's OWN endpoint, not a generic Adapter URL.** When enabled, `Abilities_Registry` calls `McpAdapter::instance()->create_server( 'gk-block-mcp', 'gk-block-mcp', 'mcp', … )`, so the tools live at `/wp-json/gk-block-mcp/mcp` (Block MCP's namespace/route, mounted via the Adapter). That is ours, distinct from the Adapter's own default server at `/wp-json/mcp/mcp-adapter-default-server`. The WordPress MCP Adapter is a **separate** plugin (github.com/WordPress/mcp-adapter, installed from its GitHub Releases, not the WP.org directory) that requires WordPress 6.9 and is not bundled with core, so gate the Connect/settings UI on `class_exists( '\WP\MCP\Core\McpAdapter' )`, never on the WP version alone. Transport is streamable HTTP (POST plus an `Mcp-Session-Id` session header; GET returns 405; no SSE); auth is a WordPress Application Password over Basic (no OAuth in adapter 0.5.0), so standard streamable-HTTP clients (Claude Code, Cursor) connect without extra config. [live-verified + endpoint correction, 2026-07]
 
 ## Related Resources
 

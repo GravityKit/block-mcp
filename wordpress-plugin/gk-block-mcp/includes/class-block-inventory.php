@@ -168,6 +168,97 @@ class Block_Inventory {
 	}
 
 	/**
+	 * Whether an innerHTML-only edit to this block can be safely re-synced by
+	 * re-deriving its sourced attributes from the new markup.
+	 *
+	 * True only when the block is registered, declares at least one attribute
+	 * this plugin can re-derive from innerHTML (source attribute/html/rich-text/
+	 * text), and carries no non-presentational array/object attribute at all.
+	 * That last clause is the guard against blocks like yoast/faq-block, whose
+	 * `questions[]` array lives only in the delimiter JSON and cannot be
+	 * reconstructed from a string source — for those an innerHTML-only edit must
+	 * still be rejected, not auto-synced.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string               $block_name   Fully-qualified block type name.
+	 * @param array<string, mixed> $current_attrs The block's current attributes.
+	 *
+	 * @return bool
+	 */
+	public function is_innerhtml_rederivable( $block_name, array $current_attrs ) {
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( ! $registry ) {
+			return false;
+		}
+		$block_type = $registry->get_registered( $block_name );
+		if ( ! $block_type || empty( $block_type->attributes ) || ! is_array( $block_type->attributes ) ) {
+			return false;
+		}
+		$schema = $block_type->attributes;
+
+		// Sources Block_Reader::derive_sourced_attributes() can actually resolve.
+		static $derivable_sources = array(
+			'attribute' => 1,
+			'html'      => 1,
+			'rich-text' => 1,
+			'text'      => 1,
+		);
+
+		$has_derivable = false;
+		foreach ( $schema as $attr ) {
+			$is_derivable = is_array( $attr ) && isset( $attr['source'] ) && isset( $derivable_sources[ $attr['source'] ] );
+			if ( $is_derivable ) {
+				$has_derivable = true;
+				break;
+			}
+		}
+		if ( ! $has_derivable ) {
+			return false;
+		}
+
+		// Presentational containers never hold re-derivable "content"; their
+		// presence must not disqualify an otherwise-simple block.
+		static $presentational = array(
+			'metadata' => 1,
+			'style'    => 1,
+			'layout'   => 1,
+		);
+
+		// Schema shape: an attribute declared array/object with a derivable
+		// source can never be reconstructed (the source yields a string), so a
+		// re-derive would write a scalar into a structured slot. Reject on the
+		// schema regardless of the current value — this catches the empty and
+		// absent cases the value-level check below cannot see.
+		foreach ( $schema as $attr_name => $attr_def ) {
+			if ( ! is_array( $attr_def ) || isset( $presentational[ $attr_name ] ) ) {
+				continue;
+			}
+			$type       = isset( $attr_def['type'] ) ? $attr_def['type'] : '';
+			$has_source = isset( $attr_def['source'] ) && isset( $derivable_sources[ $attr_def['source'] ] );
+			if ( $has_source && ( 'array' === $type || 'object' === $type ) ) {
+				return false;
+			}
+		}
+
+		foreach ( $current_attrs as $key => $value ) {
+			$is_structured = is_array( $value ) && array() !== $value;
+			if ( ! $is_structured || isset( $presentational[ $key ] ) ) {
+				continue;
+			}
+			// A non-presentational array/object value can never be auto-synced:
+			// all four derivable sources resolve to a string, so re-deriving it
+			// would overwrite the structured value with a scalar. This holds even
+			// when the attribute declares a source (a string source on an array
+			// attribute still yields a string) — the yoast/faq-block questions[]
+			// case is only the sourceless variant of the same hazard.
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
 	 * Scan all published content and classify every distinct block name
 	 * as static, dynamic, or dual.
 	 *
@@ -217,25 +308,18 @@ class Block_Inventory {
 		}
 
 		// ── Pass 1: registry-based baseline.
-		// `WP_Block_Type_Registry` knows every block's render_callback (→ dynamic)
-		// and its `attributes` schema. Blocks with `attributes[*].source` set to
-		// 'html' / 'attribute' / 'children' / 'node' / 'rich-text' / 'tag' read
-		// from innerHTML at edit time — that's the structural dual-storage
-		// signal. Combine with `is_dynamic()` and we cover the whole registered
-		// surface without touching post_content.
+		// is_dynamic() splits blocks into static (content in innerHTML) and dynamic
+		// (rendered by PHP). A dynamic block is only a dual-storage CANDIDATE: dual
+		// is confirmed in pass 2 from stored-instance evidence, never from the
+		// registry alone — modern WP gives core/heading, core/button, core/image
+		// render callbacks + html-sourced attributes yet they store content plainly
+		// in innerHTML, so a registry-only dual verdict mislabeled them.
 		$classification     = array();
 		$registry           = \WP_Block_Type_Registry::get_instance();
 		$dynamic_candidates = array();
 		if ( $registry ) {
 			foreach ( $registry->get_all_registered() as $name => $block_type ) {
-				$is_dynamic  = $block_type->is_dynamic();
-				$reads_inner = $this->block_reads_innerhtml_via_attributes( $block_type );
-				if ( $is_dynamic && $reads_inner ) {
-					$classification[ $name ] = self::STORAGE_MODE_DUAL;
-				} elseif ( $is_dynamic ) {
-					// Dynamic blocks may still be dual via custom JS save() that
-					// PHP can't see (e.g., yoast/faq-block). Mark as dynamic
-					// here; pass 2 may upgrade to dual based on evidence.
+				if ( $block_type->is_dynamic() ) {
 					$classification[ $name ]     = self::STORAGE_MODE_DYNAMIC;
 					$dynamic_candidates[ $name ] = true;
 				} else {
@@ -335,36 +419,6 @@ class Block_Inventory {
 	}
 
 	/**
-	 * Whether any of the block type's registered attributes declares a
-	 * `source` that pulls from innerHTML — the structural signal of a
-	 * block whose attributes mirror its rendered HTML.
-	 *
-	 * @param \WP_Block_Type $block_type Registered block type to inspect.
-	 * @return bool
-	 */
-	private function block_reads_innerhtml_via_attributes( $block_type ) {
-		if ( empty( $block_type->attributes ) || ! is_array( $block_type->attributes ) ) {
-			return false;
-		}
-		// Sources that read from the saved markup (per Block API spec).
-		static $inner_sources = array(
-			'html'      => 1,
-			'attribute' => 1,
-			'children'  => 1,
-			'node'      => 1,
-			'rich-text' => 1,
-			'tag'       => 1,
-			'text'      => 1,
-		);
-		foreach ( $block_type->attributes as $attr ) {
-			if ( is_array( $attr ) && isset( $attr['source'] ) && isset( $inner_sources[ $attr['source'] ] ) ) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * Combined evidence walker (pass 2 of scan_storage_modes).
 	 *
 	 * For each parsed block:
@@ -416,9 +470,8 @@ class Block_Inventory {
 	/**
 	 * Whether a registered block type is server-rendered.
 	 *
-	 * Cached per block name. Wraps WP_Block_Type_Registry to give
-	 * Block_CRUD a single discovery point that can be replaced by the
-	 * scan-cached map once BLOCK-13 lands.
+	 * Cached per block name. The single discovery point for the API `dynamic`
+	 * / `is_dynamic` fields; an unregistered block is classified as static.
 	 *
 	 * @param string $block_name Fully-qualified block name.
 	 * @return bool

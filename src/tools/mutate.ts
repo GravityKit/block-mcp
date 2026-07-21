@@ -11,8 +11,9 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import type { MutationOp, MutationRequest, MutationResponse, StaticBlockWarning } from '../types.js';
-import { formatPreferenceWarning } from '../preferences.js';
+import { formatPreferenceWarning, withFormattedWarnings } from '../preferences.js';
 import { BLOCK_INPUT_SCHEMA } from './write.js';
+import { coercePostId } from '../coerce.js';
 
 const OPS: readonly MutationOp[] = [
   'update-attrs',
@@ -115,12 +116,12 @@ export async function handleMutateTool(
     throw new Error(`Unknown mutate tool: ${toolName}`);
   }
 
-  const postId = args.post_id as number;
+  const postId = coercePostId(args.post_id, 'edit_block_tree');
   const op = args.op as string;
   const path = args.path;
   const ref = args.ref as string | undefined;
 
-  if (postId === undefined || postId === null) throw new Error('post_id is required');
+  if (postId === undefined) throw new Error('post_id is required');
   // Op validation comes from the schema enum at request time; this guard
   // exists for direct programmatic callers that bypass the MCP transport.
   if (!op || !(OPS as readonly string[]).includes(op)) {
@@ -175,10 +176,20 @@ export async function handleMutateTool(
       requestBody.block = block as MutationRequest['block'];
       if (op === 'insert-child' && args.position !== undefined) {
         const position = args.position;
-        if (typeof position === 'number' && Number.isInteger(position)) {
+        if (typeof position === 'number' && Number.isInteger(position) && position >= -1) {
           requestBody.position = position;
         } else if (position === 'start' || position === 'end') {
           requestBody.position = position;
+        } else if (typeof position === 'string' && /^-?\d+$/.test(position)) {
+          // The schema advertises `position` as integer|string; accept a
+          // numeric string ("3", or the "-1" append sentinel) as the index it
+          // plainly denotes rather than rejecting a schema-conformant value.
+          // -1 appends; anything below -1 is out of contract.
+          const parsedPosition = parseInt(position, 10);
+          if (parsedPosition < -1) {
+            throw new Error('position must be an integer >= -1, "start", or "end"');
+          }
+          requestBody.position = parsedPosition;
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }
@@ -227,12 +238,7 @@ export async function handleMutateTool(
 
   const result: MutationResponse = await client.mutateBlockTree(postId, requestBody);
 
-  if (result.warnings && result.warnings.length > 0) {
-    const formattedWarnings = result.warnings.map((warning) => {
-      if (isStaticBlockWarning(warning)) return formatStaticBlockWarning(warning);
-      return formatPreferenceWarning(warning);
-    });
-    return { ...result, formatted_warnings: formattedWarnings };
-  }
-  return result;
+  return withFormattedWarnings(result, (warning) =>
+    isStaticBlockWarning(warning) ? formatStaticBlockWarning(warning) : formatPreferenceWarning(warning)
+  );
 }

@@ -117,12 +117,13 @@ export function enrichPatternList(patterns: Pattern[]): {
     (a, b) => b.preference.score - a.preference.score
   );
 
-  // Classify by tier only — the server is the source of truth and already
-  // applied policy. Mixing in score-based fallbacks (the old logic) caused
-  // mis-bucketing: an `avoid`-tier pattern with score 5 leaked into the
-  // recommended bucket; a `recommended`-tier pattern with negative score
-  // was double-counted. Trust the tier.
-  const recommended = sorted.filter((p) => p.preference.tier === 'recommended');
+  // Classify by the tier the server emits (preferred/acceptable/avoid/legacy),
+  // which is the source of truth and has already applied policy. The
+  // "recommended" display bucket is the usable set (preferred + acceptable);
+  // avoid + legacy are the ones to steer away from.
+  const recommended = sorted.filter(
+    (p) => p.preference.tier === 'preferred' || p.preference.tier === 'acceptable'
+  );
   const avoid       = sorted.filter((p) => p.preference.tier === 'avoid' || p.preference.tier === 'legacy');
 
   const lines: string[] = [];
@@ -196,47 +197,39 @@ export function enrichBlockTypes(types: BlockType[]): {
   }
 
   const lines: string[] = [];
-
-  if (preferred.length > 0) {
-    const grouped = groupByNamespace(preferred);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(', ');
-      lines.push(`PREFERRED (${ns}/): ${names}`);
-    }
-  }
-  if (acceptable.length > 0) {
-    const grouped = groupByNamespace(acceptable);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(', ');
-      lines.push(`ACCEPTABLE (${ns}/): ${names}`);
-    }
-  }
-  if (avoid.length > 0) {
-    const grouped = groupByNamespace(avoid);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`AVOID (${ns}/): ${mappings.join(', ')}`);
-    }
-  }
-  if (legacy.length > 0) {
-    const grouped = groupByNamespace(legacy);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`LEGACY — DO NOT USE (${ns}/): ${mappings.join(', ')}`);
-    }
-  }
+  pushTierLines(lines, preferred, 'PREFERRED', false);
+  pushTierLines(lines, acceptable, 'ACCEPTABLE', false);
+  pushTierLines(lines, avoid, 'AVOID', true);
+  pushTierLines(lines, legacy, 'LEGACY — DO NOT USE', true);
 
   const guidance = lines.join('\n');
 
   return { block_types: types, guidance };
+}
+
+/**
+ * Append one guidance line per namespace group within a tier bucket.
+ * No-ops when the bucket is empty, so callers don't need their own length
+ * check. `withReplacement` switches between a plain name list (preferred /
+ * acceptable) and a `name -> use replacement` mapping (avoid / legacy).
+ */
+function pushTierLines(
+  lines: string[],
+  bucket: BlockType[],
+  label: string,
+  withReplacement: boolean
+): void {
+  if (bucket.length === 0) return;
+  const grouped = groupByNamespace(bucket);
+  for (const [ns, blocks] of Object.entries(grouped)) {
+    const names = blocks.map((t) => {
+      const shortName = getShortName(t.name);
+      if (!withReplacement) return shortName;
+      const replacement = t.preference.replacement;
+      return replacement ? `${shortName} -> use ${replacement}` : shortName;
+    });
+    lines.push(`${label} (${ns}/): ${names.join(', ')}`);
+  }
 }
 
 /**
@@ -250,6 +243,26 @@ export function formatPreferenceWarning(warning: PreferenceWarning): string {
     return `WARNING: ${warning.block} is non-preferred. Use ${warning.suggested_replacement} instead.`;
   }
   return `WARNING: ${warning.message}`;
+}
+
+/**
+ * Decorate a write-tool result with `formatted_warnings` when its `warnings`
+ * array is non-empty. Returns the result unchanged (no `formatted_warnings`
+ * key) when there are none, so callers don't leak an empty array into every
+ * clean response.
+ *
+ * @param result - A write-tool response shape carrying an optional `warnings` array
+ * @param formatWarning - Per-warning formatter (e.g. formatPreferenceWarning)
+ */
+export function withFormattedWarnings<T extends { warnings?: unknown[] }>(
+  result: T,
+  formatWarning: (warning: NonNullable<T['warnings']>[number]) => string
+): T & { formatted_warnings?: string[] } {
+  if (result.warnings && result.warnings.length > 0) {
+    const warnings = result.warnings as NonNullable<T['warnings']>;
+    return { ...result, formatted_warnings: warnings.map(formatWarning) };
+  }
+  return result;
 }
 
 // ============================================

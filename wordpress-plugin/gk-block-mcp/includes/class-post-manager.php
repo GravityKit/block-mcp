@@ -89,7 +89,10 @@ class Post_Manager {
 	 * @return array|\WP_Error
 	 */
 	public function create_post( array $args ) {
-		if ( empty( $args['title'] ) || ! is_string( $args['title'] ) ) {
+		// Explicit empty-string test, not empty(): "0" is a valid title, and
+		// empty('0') would reject it as missing.
+		$title = isset( $args['title'] ) ? $args['title'] : null;
+		if ( ! is_string( $title ) || '' === $title ) {
 			return new \WP_Error(
 				'missing_title',
 				__( 'A non-empty "title" is required.', 'gk-block-mcp' ),
@@ -127,17 +130,9 @@ class Post_Manager {
 			);
 		}
 
-		if ( 'publish' === $status ) {
-			$publish_cap = ( $pt_object && isset( $pt_object->cap->publish_posts ) )
-				? $pt_object->cap->publish_posts
-				: 'publish_posts';
-			if ( ! current_user_can( $publish_cap ) ) {
-				return new \WP_Error(
-					'rest_cannot_publish',
-					__( 'You cannot publish posts of this type.', 'gk-block-mcp' ),
-					array( 'status' => 403 )
-				);
-			}
+		$publish_cap_error = $this->require_publish_cap( $status, $pt_object );
+		if ( is_wp_error( $publish_cap_error ) ) {
+			return $publish_cap_error;
 		}
 
 		if ( 'future' === $status ) {
@@ -158,12 +153,20 @@ class Post_Manager {
 		$warnings = array();
 		$content  = '';
 		if ( ! empty( $args['blocks'] ) && is_array( $args['blocks'] ) ) {
+			// Enforce the depth bound like every other write path, so a
+			// pathologically deep tree can't persist and burden every later
+			// parse/serialize (Block_Writer guards its own paths separately).
+			$depth_check = Block_CRUD::validate_tree_depth( $args['blocks'] );
+			if ( is_wp_error( $depth_check ) ) {
+				return $depth_check;
+			}
 			$validation = $this->validate_blocks_for_insert( $args['blocks'] );
 			if ( is_wp_error( $validation ) ) {
 				return $validation;
 			}
-			$warnings = $validation['warnings'];
-			$content  = serialize_blocks( $validation['blocks'] );
+			$warnings          = $validation['warnings'];
+			$normalized_blocks = Block_Normalizer::normalize_tree( $validation['blocks'] );
+			$content           = serialize_blocks( $normalized_blocks );
 		} elseif ( isset( $args['content'] ) && is_string( $args['content'] ) ) {
 			$content = wp_kses_post( $args['content'] );
 		}
@@ -189,81 +192,41 @@ class Post_Manager {
 			$postarr['post_parent'] = (int) $args['parent'];
 		}
 		if ( isset( $args['date'] ) && is_string( $args['date'] ) ) {
-			// Same parse-and-normalize gate update_post enforces — without
-			// this, sanitize_text_field accepts arbitrary strings and wp_insert_post
-			// stores them verbatim, corrupting admin sort order and date queries.
-			$date_raw = sanitize_text_field( $args['date'] );
-			$ts       = strtotime( $date_raw );
-			if ( false === $ts ) {
-				return new \WP_Error(
-					'invalid_date',
-					__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$date_fields = $this->normalize_date_arg( $args['date'] );
+			if ( is_wp_error( $date_fields ) ) {
+				return $date_fields;
 			}
-			$gmt_datetime             = gmdate( 'Y-m-d H:i:s', $ts );
-			$postarr['post_date_gmt'] = $gmt_datetime;
-			// post_date stores the site-local clock; post_date_gmt the
-			// timezone-invariant counterpart. WordPress reads post_date
-			// directly for admin sort and date queries, so it MUST be
-			// converted to the site's timezone — get_date_from_gmt does
-			// the conversion in one call.
-			$postarr['post_date'] = get_date_from_gmt( $gmt_datetime );
+			$postarr = array_merge( $postarr, $date_fields );
 		}
 		if ( isset( $args['menu_order'] ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];
 		}
 		if ( isset( $args['comment_status'] ) ) {
-			if ( ! in_array( $args['comment_status'], array( 'open', 'closed' ), true ) ) {
-				return new \WP_Error(
-					'invalid_status',
-					__( 'comment_status must be "open" or "closed".', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$comment_status_error = $this->validate_open_closed( $args['comment_status'], 'comment_status' );
+			if ( is_wp_error( $comment_status_error ) ) {
+				return $comment_status_error;
 			}
 			$postarr['comment_status'] = $args['comment_status'];
 		}
 		if ( isset( $args['ping_status'] ) ) {
-			if ( ! in_array( $args['ping_status'], array( 'open', 'closed' ), true ) ) {
-				return new \WP_Error(
-					'invalid_status',
-					__( 'ping_status must be "open" or "closed".', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$ping_status_error = $this->validate_open_closed( $args['ping_status'], 'ping_status' );
+			if ( is_wp_error( $ping_status_error ) ) {
+				return $ping_status_error;
 			}
 			$postarr['ping_status'] = $args['ping_status'];
 		}
 		if ( isset( $args['author'] ) ) {
-			$author_id = (int) $args['author'];
-			if ( $author_id < 1 || ! get_userdata( $author_id ) ) {
-				return new \WP_Error(
-					'invalid_author',
-					__( 'The supplied author ID does not match an existing user.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
-			}
-			if ( get_current_user_id() !== $author_id ) {
-				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
-					? $pt_object->cap->edit_others_posts
-					: 'edit_others_posts';
-				if ( ! current_user_can( $others_cap ) ) {
-					return new \WP_Error(
-						'rest_cannot_assign_author',
-						__( 'You cannot assign authorship to other users.', 'gk-block-mcp' ),
-						array( 'status' => 403 )
-					);
-				}
+			$author_id    = (int) $args['author'];
+			$author_error = $this->validate_author_arg( $author_id, $pt_object );
+			if ( is_wp_error( $author_error ) ) {
+				return $author_error;
 			}
 			$postarr['post_author'] = $author_id;
 		}
 		if ( isset( $args['featured_media'] ) ) {
-			$fm = (int) $args['featured_media'];
-			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
-				return new \WP_Error(
-					'invalid_featured_media',
-					__( 'featured_media is not a valid image attachment.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$featured_media_error = $this->validate_featured_media_arg( (int) $args['featured_media'] );
+			if ( is_wp_error( $featured_media_error ) ) {
+				return $featured_media_error;
 			}
 		}
 
@@ -284,12 +247,7 @@ class Post_Manager {
 		}
 
 		if ( isset( $args['featured_media'] ) ) {
-			$fm = (int) $args['featured_media'];
-			if ( $fm > 0 ) {
-				set_post_thumbnail( $post_id, $fm );
-			} else {
-				delete_post_thumbnail( $post_id );
-			}
+			$this->apply_featured_media( $post_id, (int) $args['featured_media'] );
 		}
 
 		$term_assignment = $this->assign_terms( $post_id, $post_type, $args );
@@ -357,13 +315,9 @@ class Post_Manager {
 		// Validate featured_media BEFORE any writes so partial state can't leak
 		// when the attachment is invalid.
 		if ( array_key_exists( 'featured_media', $args ) ) {
-			$fm = (int) $args['featured_media'];
-			if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
-				return new \WP_Error(
-					'invalid_featured_media',
-					__( 'featured_media is not a valid image attachment.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$featured_media_error = $this->validate_featured_media_arg( (int) $args['featured_media'] );
+			if ( is_wp_error( $featured_media_error ) ) {
+				return $featured_media_error;
 			}
 		}
 
@@ -382,17 +336,9 @@ class Post_Manager {
 					array( 'status' => 400 )
 				);
 			}
-			if ( 'publish' === $new_status ) {
-				$publish_cap = ( $pt_object && isset( $pt_object->cap->publish_posts ) )
-					? $pt_object->cap->publish_posts
-					: 'publish_posts';
-				if ( ! current_user_can( $publish_cap ) ) {
-					return new \WP_Error(
-						'rest_cannot_publish',
-						__( 'You cannot publish posts of this type.', 'gk-block-mcp' ),
-						array( 'status' => 403 )
-					);
-				}
+			$publish_cap_error = $this->require_publish_cap( $new_status, $pt_object );
+			if ( is_wp_error( $publish_cap_error ) ) {
+				return $publish_cap_error;
 			}
 			if ( 'future' === $new_status ) {
 				$future_date  = array_key_exists( 'date', $args ) ? $args['date'] : $post->post_date;
@@ -468,45 +414,26 @@ class Post_Manager {
 			$postarr['post_excerpt'] = sanitize_text_field( (string) $args['excerpt'] );
 		}
 		if ( array_key_exists( 'date', $args ) ) {
-			// Reject malformed dates BEFORE wp_update_post() — WP stores whatever
-			// post_date string is given and a garbage value renders posts unsortable
-			// in admin lists. Validate as a real ISO 8601 / MySQL datetime.
-			$date_raw = sanitize_text_field( (string) $args['date'] );
-			$ts       = strtotime( $date_raw );
-			if ( false === $ts ) {
-				return new \WP_Error(
-					'invalid_date',
-					__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$date_fields = $this->normalize_date_arg( $args['date'] );
+			if ( is_wp_error( $date_fields ) ) {
+				return $date_fields;
 			}
-			$gmt_datetime             = gmdate( 'Y-m-d H:i:s', $ts );
-			$postarr['post_date_gmt'] = $gmt_datetime;
-			$postarr['post_date']     = get_date_from_gmt( $gmt_datetime );
+			$postarr = array_merge( $postarr, $date_fields );
 		}
 		if ( array_key_exists( 'menu_order', $args ) ) {
 			$postarr['menu_order'] = (int) $args['menu_order'];
 		}
 		if ( array_key_exists( 'comment_status', $args ) ) {
-			// Reject unknown values explicitly instead of silently coercing to
-			// 'closed' — a typo like 'opn' shouldn't quietly disable comments
-			// while reporting success to the caller.
-			if ( ! in_array( $args['comment_status'], array( 'open', 'closed' ), true ) ) {
-				return new \WP_Error(
-					'invalid_status',
-					__( 'comment_status must be "open" or "closed".', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$comment_status_error = $this->validate_open_closed( $args['comment_status'], 'comment_status' );
+			if ( is_wp_error( $comment_status_error ) ) {
+				return $comment_status_error;
 			}
 			$postarr['comment_status'] = $args['comment_status'];
 		}
 		if ( array_key_exists( 'ping_status', $args ) ) {
-			if ( ! in_array( $args['ping_status'], array( 'open', 'closed' ), true ) ) {
-				return new \WP_Error(
-					'invalid_status',
-					__( 'ping_status must be "open" or "closed".', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
+			$ping_status_error = $this->validate_open_closed( $args['ping_status'], 'ping_status' );
+			if ( is_wp_error( $ping_status_error ) ) {
+				return $ping_status_error;
 			}
 			$postarr['ping_status'] = $args['ping_status'];
 		}
@@ -518,25 +445,10 @@ class Post_Manager {
 			$postarr['post_parent'] = (int) $args['parent'];
 		}
 		if ( array_key_exists( 'author', $args ) ) {
-			$author_id = (int) $args['author'];
-			if ( $author_id < 1 || ! get_userdata( $author_id ) ) {
-				return new \WP_Error(
-					'invalid_author',
-					__( 'The supplied author ID does not match an existing user.', 'gk-block-mcp' ),
-					array( 'status' => 400 )
-				);
-			}
-			if ( get_current_user_id() !== $author_id ) {
-				$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
-					? $pt_object->cap->edit_others_posts
-					: 'edit_others_posts';
-				if ( ! current_user_can( $others_cap ) ) {
-					return new \WP_Error(
-						'rest_cannot_assign_author',
-						__( 'You cannot assign authorship to other users.', 'gk-block-mcp' ),
-						array( 'status' => 403 )
-					);
-				}
+			$author_id    = (int) $args['author'];
+			$author_error = $this->validate_author_arg( $author_id, $pt_object );
+			if ( is_wp_error( $author_error ) ) {
+				return $author_error;
 			}
 			$postarr['post_author'] = $author_id;
 		}
@@ -555,12 +467,7 @@ class Post_Manager {
 
 		// featured_media was already validated above, before any writes.
 		if ( array_key_exists( 'featured_media', $args ) ) {
-			$fm = (int) $args['featured_media'];
-			if ( $fm > 0 ) {
-				set_post_thumbnail( $post_id, $fm );
-			} else {
-				delete_post_thumbnail( $post_id );
-			}
+			$this->apply_featured_media( $post_id, (int) $args['featured_media'] );
 		}
 
 		$term_assignment = $this->assign_terms( $post_id, $post->post_type, $args );
@@ -666,7 +573,7 @@ class Post_Manager {
 	 * @return array WP internal block shape.
 	 */
 	private function normalize_block_def_for_insert( array $block ) {
-		$inner_html = isset( $block['innerHTML'] ) ? wp_kses_post( $block['innerHTML'] ) : '';
+		$inner_html = isset( $block['innerHTML'] ) ? Block_Writer::sanitize_inner_html( $block['innerHTML'] ) : '';
 		$attrs      = isset( $block['attributes'] ) && is_array( $block['attributes'] ) ? $block['attributes'] : array();
 
 		// Recurse into children first so container blocks have a fully-formed
@@ -680,32 +587,24 @@ class Post_Manager {
 
 		// Build innerContent.
 		if ( ! empty( $children ) ) {
-			$n = count( $children );
-			if ( ! empty( $inner_html ) ) {
-				// Split the wrapper HTML into opening/closing halves and
-				// interleave null placeholders for each child block.
-				$first_close = strpos( $inner_html, '>' );
-				if ( false !== $first_close ) {
-					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
-					for ( $i = 0; $i < $n; $i++ ) {
-						$inner_content[] = null;
-					}
-					$inner_content[] = substr( $inner_html, $first_close + 1 );
-				} else {
-					$inner_content = array_fill( 0, $n, null );
-				}
-			} else {
-				$inner_content = array_fill( 0, $n, null );
-			}
+			$inner_content = Block_Writer::wrapper_inner_content( $inner_html, count( $children ) );
 		} elseif ( isset( $block['innerContent'] ) && is_array( $block['innerContent'] ) ) {
-			// Caller supplied explicit innerContent — sanitize each string piece.
+			// This branch runs only for a childless block. A null in
+			// innerContent is a child placeholder, and serialize_block()
+			// dereferences innerBlocks[$index] for each null — with no children
+			// that reads past an empty array and emits corrupt content. Drop
+			// the nulls; a childless block has no placeholders to preserve.
 			$inner_content = array();
 			foreach ( $block['innerContent'] as $piece ) {
-				$inner_content[] = ( null === $piece ) ? null : wp_kses_post( (string) $piece );
+				if ( null === $piece ) {
+					continue;
+				}
+				$inner_content[] = Block_Writer::sanitize_inner_html( (string) $piece );
 			}
 		} else {
-			// Leaf block: innerContent is simply array( $innerHTML ) or empty.
-			$inner_content = ! empty( $inner_html ) ? array( $inner_html ) : array();
+			// Leaf block: innerContent is array( $innerHTML ) or empty. Explicit
+			// empty-string test so a "0" content survives (empty('0') is true).
+			$inner_content = '' !== (string) $inner_html ? array( $inner_html ) : array();
 		}
 
 		return array(
@@ -740,6 +639,166 @@ class Post_Manager {
 			);
 		}
 		return true;
+	}
+
+	/**
+	 * Whether the current user may set a status, gated on the publish capability.
+	 *
+	 * The publish, future, and private statuses are all publish-equivalent (WP
+	 * core's handle_status_param): future is auto-published by cron and private
+	 * is a published-visibility state, so gating only publish would let an
+	 * edit_posts-only caller create scheduled or private posts.
+	 *
+	 * @param string             $status    Requested post status.
+	 * @param \WP_Post_Type|null $pt_object Post-type object for the cap map.
+	 *
+	 * @return \WP_Error|null 403 WP_Error when the publish cap is missing, else null.
+	 */
+	private function require_publish_cap( $status, $pt_object ) {
+		if ( ! in_array( $status, array( 'publish', 'future', 'private' ), true ) ) {
+			return null;
+		}
+		$publish_cap = ( $pt_object && isset( $pt_object->cap->publish_posts ) )
+			? $pt_object->cap->publish_posts
+			: 'publish_posts';
+		if ( ! current_user_can( $publish_cap ) ) {
+			return new \WP_Error(
+				'rest_cannot_publish',
+				__( 'You cannot publish posts of this type.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+		return null;
+	}
+
+	/**
+	 * Validate an open/closed field (comment_status, ping_status).
+	 *
+	 * Rejects unknown values instead of silently coercing to 'closed', so a typo
+	 * like 'opn' can't quietly disable comments while reporting success.
+	 *
+	 * @param mixed  $value Raw field value.
+	 * @param string $field Field name, used in the error message.
+	 *
+	 * @return \WP_Error|null
+	 */
+	private function validate_open_closed( $value, $field ) {
+		if ( in_array( $value, array( 'open', 'closed' ), true ) ) {
+			return null;
+		}
+		return new \WP_Error(
+			'invalid_status',
+			sprintf(
+				/* translators: %s: field name (comment_status or ping_status) */
+				__( '%s must be "open" or "closed".', 'gk-block-mcp' ),
+				$field
+			),
+			array( 'status' => 400 )
+		);
+	}
+
+	/**
+	 * Validate and normalize a date arg into post_date / post_date_gmt fields.
+	 *
+	 * WordPress stores whatever post_date string it is given, so an unparseable
+	 * value corrupts admin sort order and date queries. Validates as a real
+	 * ISO 8601 / MySQL datetime; post_date carries the site-local clock (which WP
+	 * reads directly for admin sort and date queries) converted from the GMT form.
+	 *
+	 * @param mixed $raw Raw date arg.
+	 *
+	 * @return array{post_date_gmt: string, post_date: string}|\WP_Error
+	 */
+	private function normalize_date_arg( $raw ) {
+		// Reject non-strings before casting: `(string) $array` warns, and a
+		// non-stringable object fatals, before the parse can return invalid_date.
+		$is_string_date = is_string( $raw );
+		if ( ! $is_string_date ) {
+			return new \WP_Error(
+				'invalid_date',
+				__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$ts = strtotime( sanitize_text_field( $raw ) );
+		if ( false === $ts ) {
+			return new \WP_Error(
+				'invalid_date',
+				__( 'date must be a parseable ISO 8601 or MySQL datetime.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+		$gmt_datetime = gmdate( 'Y-m-d H:i:s', $ts );
+		return array(
+			'post_date_gmt' => $gmt_datetime,
+			'post_date'     => get_date_from_gmt( $gmt_datetime ),
+		);
+	}
+
+	/**
+	 * Validate an author arg: a real user, and edit_others_posts when reassigning.
+	 *
+	 * @param int                $author_id Author user ID.
+	 * @param \WP_Post_Type|null $pt_object Post-type object for the cap map.
+	 *
+	 * @return \WP_Error|null
+	 */
+	private function validate_author_arg( $author_id, $pt_object ) {
+		if ( $author_id < 1 || ! get_userdata( $author_id ) ) {
+			return new \WP_Error(
+				'invalid_author',
+				__( 'The supplied author ID does not match an existing user.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+		if ( get_current_user_id() !== $author_id ) {
+			$others_cap = ( $pt_object && isset( $pt_object->cap->edit_others_posts ) )
+				? $pt_object->cap->edit_others_posts
+				: 'edit_others_posts';
+			if ( ! current_user_can( $others_cap ) ) {
+				return new \WP_Error(
+					'rest_cannot_assign_author',
+					__( 'You cannot assign authorship to other users.', 'gk-block-mcp' ),
+					array( 'status' => 403 )
+				);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Validate a featured_media arg: a real image attachment, or 0 to clear.
+	 *
+	 * @param int $fm Attachment ID (0 clears).
+	 *
+	 * @return \WP_Error|null
+	 */
+	private function validate_featured_media_arg( $fm ) {
+		if ( $fm > 0 && ! $this->is_valid_image_attachment( $fm ) ) {
+			return new \WP_Error(
+				'invalid_featured_media',
+				__( 'featured_media is not a valid image attachment.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+		return null;
+	}
+
+	/**
+	 * Set or clear a post's featured image.
+	 *
+	 * @param int $post_id Post ID.
+	 * @param int $fm      Attachment ID (0 clears).
+	 *
+	 * @return void
+	 */
+	private function apply_featured_media( $post_id, $fm ) {
+		if ( $fm > 0 ) {
+			set_post_thumbnail( $post_id, $fm );
+		} else {
+			delete_post_thumbnail( $post_id );
+		}
 	}
 
 	/**

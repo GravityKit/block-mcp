@@ -40,6 +40,26 @@ describe('edit_block_tree — common validation', () => {
     ).rejects.toThrow(/post_id is required/);
   });
 
+  it('rejects a float post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', { post_id: 1.5, op: 'update-attrs', path: [0], attributes: {} }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects a negative post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', { post_id: -1, op: 'update-attrs', path: [0], attributes: {} }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
+  it('rejects an overflow post_id', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', {
+        post_id: Number.MAX_SAFE_INTEGER + 1, op: 'update-attrs', path: [0], attributes: {},
+      }, client as any)
+    ).rejects.toThrow('post_id must be a positive integer');
+  });
+
   it('rejects unknown op', async () => {
     await expect(
       handleMutateTool('edit_block_tree', { post_id: 1, op: 'frobnicate', path: [0] }, client as any)
@@ -245,6 +265,39 @@ describe('edit_block_tree — insert-child', () => {
     expect(client.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
       position: 'end',
     }));
+  });
+
+  it('coerces a numeric-string position to an integer', async () => {
+    // The inputSchema advertises position as integer|string, so a numeric
+    // string ("3") is schema-conformant and must be accepted as the index.
+    await handleMutateTool('edit_block_tree', {
+      post_id: 1, op: 'insert-child', path: [0],
+      block: { name: 'core/paragraph' }, position: '3',
+    }, client as any);
+    expect(client.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
+      position: 3,
+    }));
+  });
+
+  it('accepts the "-1" append sentinel as a string', async () => {
+    // -1 is the documented append sentinel; its string form must behave like
+    // the number -1, not be rejected as a non-numeric position.
+    await handleMutateTool('edit_block_tree', {
+      post_id: 1, op: 'insert-child', path: [0],
+      block: { name: 'core/paragraph' }, position: '-1',
+    }, client as any);
+    expect(client.mutateBlockTree).toHaveBeenCalledWith(1, expect.objectContaining({
+      position: -1,
+    }));
+  });
+
+  it('rejects positions below the -1 append sentinel', async () => {
+    await expect(
+      handleMutateTool('edit_block_tree', {
+        post_id: 1, op: 'insert-child', path: [0],
+        block: { name: 'core/paragraph' }, position: '-2',
+      }, client as any)
+    ).rejects.toThrow(/position must be/);
   });
 
   it('rejects invalid position string', async () => {

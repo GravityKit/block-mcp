@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<phpunit bootstrap="../bootstrap-wp.php" colors="true">
+    <php>
+        <!-- BlockApiTestCase is the shared abstract base for every block-aware test. -->
+        <const name="GK_BLOCK_MCP_TEST_BASE_PATH" value="BlockApiTestCase.php"/>
+        <!-- Tell the bootstrap to load the WordPress MCP Adapter for this run
+             only. The general single-site config (tests/phpunit.xml) leaves this
+             unset, so the adapter's class is absent there and register_mcp_server()
+             no-ops — matching a site without the adapter. An env var (not a const)
+             is used so it survives into @runInSeparateProcess children. -->
+        <env name="GK_LOAD_MCP_ADAPTER" value="1"/>
+    </php>
+    <testsuites>
+        <testsuite name="GK Block API (MCP Adapter)">
+            <directory>../Abilities</directory>
+        </testsuite>
+    </testsuites>
+    <!--
+        This config runs ONLY the mcp-adapter group — the tests whose contract
+        needs the real WordPress MCP Adapter loaded, so the plugin's dedicated
+        adapter server (Abilities_Registry::register_mcp_server) actually creates
+        an MCP server and exposes the tools. Every other run leaves the adapter
+        unloaded and excludes this group.
+    -->
+    <groups>
+        <include>
+            <group>mcp-adapter</group>
+        </include>
+    </groups>
+</phpunit>

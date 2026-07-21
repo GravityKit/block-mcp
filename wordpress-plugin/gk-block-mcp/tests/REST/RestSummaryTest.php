@@ -35,12 +35,30 @@ class RestSummaryTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
+
+		// Legacy/avoid tiers are admin-configured now (opinion-free defaults); seed
+		// the namespaces this summary coverage exercises before Preferences reads.
+		update_option(
+			Preferences::OPTION_KEY,
+			array(
+				'namespace_scores' => array(
+					'ugb'       => 0,
+					'jetpack'   => 0,
+					'stackable' => 10,
+				),
+				'replacement_map'  => array(
+					'ugb/text'          => 'core/paragraph',
+					'stackable/heading' => 'core/heading',
+				),
+			)
+		);
+
 		$preferences     = new Preferences();
 		$safety          = new Block_Safety();
 		$transformer     = new HTML_Transformer();
 		$block_inventory = new Block_Inventory();
 		$crud            = new Block_CRUD( $preferences, $safety, $transformer, $block_inventory );
-		$mutator         = new Block_Mutator( $crud, $preferences, $safety, $transformer );
+		$mutator         = new Block_Mutator( $crud, $preferences );
 		$registry        = new Block_Registry( $preferences, $block_inventory );
 		$patterns        = new Pattern_Manager( $preferences );
 

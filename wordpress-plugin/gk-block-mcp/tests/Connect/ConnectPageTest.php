@@ -49,6 +49,8 @@
 
 declare( strict_types=1 );
 
+require_once __DIR__ . '/ApplicationPasswordsSupportedStub.php';
+
 use GravityKit\BlockMCP\Agent_Provisioner;
 use GravityKit\BlockMCP\Connect_Page;
 use GravityKit\BlockMCP\Connections;
@@ -1595,6 +1597,109 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertFalse( $agent, 'no credential must be minted for an unauthorized user' );
 	}
 
+	/**
+	 * The fetch (XHR) Approve path must return a readable JSON error on failure,
+	 * not an opaque wp_die() HTML page.
+	 *
+	 * The in-page handler POSTs via fetch() and can only read a JSON body; a
+	 * wp_die() error is an opaque non-2xx it cannot surface, so the reason a
+	 * connection failed ("bombed") never reaches the user. This pins that an XHR
+	 * authorize with a rejected (non-loopback) callback answers with
+	 * { success:false, data:{ message, code:'bad_callback' } } and mints nothing.
+	 * Revert the JSON error branch and the handler wp_die()s, leaving an empty
+	 * body — this goes red.
+	 */
+	public function test_handle_authorize_xhr_error_returns_json_not_html() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$nonce = wp_create_nonce( Connect_Page::ACTION_AUTHORIZE );
+
+		$_POST['action']      = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback']    = 'https://evil.example.com/steal';
+		$_POST['state']       = 'xhr-error-state';
+		$_POST['client']      = 'block-mcp';
+		$_POST['gk_xhr']      = '1';
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		try {
+			$raw = $this->capture_authorize_output( new Connect_Page() );
+		} finally {
+			unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['gk_xhr'], $_POST['_wpnonce'], $_REQUEST['_wpnonce'] );
+		}
+
+		$json = json_decode( $raw, true );
+		$this->assertIsArray( $json, 'the XHR error path must emit a JSON body, not an opaque wp_die page' );
+		$this->assertFalse( $json['success'], 'the envelope must report failure' );
+		$this->assertSame( 'bad_callback', $json['data']['code'], 'the error carries a machine-readable code' );
+		$this->assertNotEmpty( $json['data']['message'], 'the error carries a human-readable message' );
+
+		$this->assertFalse( get_user_by( 'login', Agent_Provisioner::LOGIN ), 'a rejected callback must mint nothing' );
+	}
+
+	/**
+	 * register() must wire the authorize handler on the nopriv hook too.
+	 *
+	 * If the admin cookie lapses between rendering the Approve screen and the
+	 * native submit, the POST hits admin-post.php as a logged-out request. With
+	 * only admin_post_{authorize} hooked, admin-post.php fires the nopriv variant,
+	 * finds no handler, and returns a blank page ("bombed, no info"). Wiring the
+	 * nopriv hook lets handle_authorize() render a clear session-expired message.
+	 * Drop the nopriv wiring and admin-post.php serves the logged-out POST a blank
+	 * page — this goes red.
+	 */
+	public function test_register_hooks_nopriv_authorize_handler() {
+		$page = new Connect_Page();
+		$page->register();
+
+		$priv   = has_action( 'admin_post_' . Connect_Page::ACTION_AUTHORIZE, array( $page, 'handle_authorize' ) );
+		$nopriv = has_action( 'admin_post_nopriv_' . Connect_Page::ACTION_AUTHORIZE, array( $page, 'handle_authorize' ) );
+
+		// Remove the hooks this test registered so they do not leak into others.
+		remove_action( 'admin_post_' . Connect_Page::ACTION_CONNECT, array( $page, 'handle_connect' ) );
+		remove_action( 'admin_post_' . Connect_Page::ACTION_AUTHORIZE, array( $page, 'handle_authorize' ) );
+		remove_action( 'admin_post_nopriv_' . Connect_Page::ACTION_AUTHORIZE, array( $page, 'handle_authorize' ) );
+		remove_action( 'admin_post_' . Connect_Page::ACTION_REVOKE, array( $page, 'handle_revoke' ) );
+		remove_action( 'admin_post_' . Connect_Page::ACTION_EXCHANGE, array( $page, 'handle_exchange' ) );
+		remove_action( 'admin_post_nopriv_' . Connect_Page::ACTION_EXCHANGE, array( $page, 'handle_exchange' ) );
+
+		$this->assertNotFalse( $priv, 'the authorize action must be wired for logged-in admins' );
+		$this->assertNotFalse( $nopriv, 'the authorize action must also be wired on the nopriv hook so a lapsed session gets a clear error, not a blank page' );
+	}
+
+	/**
+	 * A logged-out Approve POST must return a clear "session expired" error, not a
+	 * blank page or an opaque permission wp_die.
+	 *
+	 * With the nopriv handler wired, a POST whose admin session has lapsed reaches
+	 * handle_authorize() logged-out. The XHR path must answer with
+	 * { success:false, data:{ code:'session_expired', message } } so the connector
+	 * shows why it failed. Without the session gate the handler wp_die()s on the
+	 * capability check, leaving an unreadable body — this goes red.
+	 */
+	public function test_handle_authorize_logged_out_returns_session_expired_json() {
+		wp_set_current_user( 0 );
+
+		$_POST['action']   = Connect_Page::ACTION_AUTHORIZE;
+		$_POST['callback'] = 'http://127.0.0.1:51793/cb';
+		$_POST['state']    = 'lapsed-state';
+		$_POST['client']   = 'block-mcp';
+		$_POST['gk_xhr']   = '1';
+
+		try {
+			$raw = $this->capture_authorize_output( new Connect_Page() );
+		} finally {
+			unset( $_POST['action'], $_POST['callback'], $_POST['state'], $_POST['client'], $_POST['gk_xhr'] );
+		}
+
+		$json = json_decode( $raw, true );
+		$this->assertIsArray( $json, 'a logged-out XHR authorize must emit a JSON error, not a blank/opaque page' );
+		$this->assertFalse( $json['success'], 'the envelope must report failure' );
+		$this->assertSame( 'session_expired', $json['data']['code'], 'the error must identify a lapsed session' );
+		$this->assertNotEmpty( $json['data']['message'], 'the error must carry a human-readable message' );
+	}
+
 	// ──────────────────────────────────────────────────────────────────────
 	// connection_state().
 	// ──────────────────────────────────────────────────────────────────────
@@ -1628,6 +1733,136 @@ class ConnectPageTest extends WP_UnitTestCase {
 		wp_delete_file( $result['path'] );
 
 		$this->assertSame( 'connected', $page->connection_state() );
+	}
+
+	/**
+	 * connection_state() must not report 'needs_https' when HTTPS is on.
+	 *
+	 * Regression: connection_state() collapsed every reason core reports
+	 * Application Passwords unavailable into 'needs_https', which renders an
+	 * "HTTPS required" notice. On a site that already serves HTTPS but has
+	 * Application Passwords switched off (a security plugin, a hardening
+	 * constant, or the wp_is_application_passwords_available filter), that
+	 * message is a misdiagnosis — it sent users to chase an HTTPS problem that
+	 * did not exist. The state must now distinguish the two: 'needs_https'
+	 * only when the site genuinely lacks HTTPS, 'app_passwords_disabled' when
+	 * HTTPS is fine but the feature is off.
+	 */
+	public function test_connection_state_app_passwords_disabled_when_https_on() {
+		$page                 = new Connect_Page();
+		$original_https       = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+		$original_server_port = isset( $_SERVER['SERVER_PORT'] ) ? $_SERVER['SERVER_PORT'] : null;
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		try {
+			// HTTPS on (Apache native SSL termination) but feature disabled.
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertTrue( is_ssl(), 'guard: is_ssl() must be true with HTTPS on' );
+			$this->assertSame( 'app_passwords_disabled', $page->connection_state() );
+
+			// HTTPS genuinely absent → the real HTTPS-required state.
+			unset( $_SERVER['HTTPS'] );
+			$_SERVER['SERVER_PORT'] = '80';
+			$this->assertFalse( is_ssl(), 'guard: is_ssl() must be false without HTTPS' );
+			$this->assertSame( 'needs_https', $page->connection_state() );
+		} finally {
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+
+			if ( null === $original_server_port ) {
+				unset( $_SERVER['SERVER_PORT'] );
+			} else {
+				$_SERVER['SERVER_PORT'] = $original_server_port;
+			}
+		}
+	}
+
+	/**
+	 * connection_state() must not report 'app_passwords_disabled' on a
+	 * local-environment install without HTTPS.
+	 *
+	 * Regression: wp_is_application_passwords_supported() returns true when
+	 * wp_get_environment_type() is 'local', even without HTTPS, so gating
+	 * 'app_passwords_disabled' on that combined predicate told a local dev
+	 * site with Application Passwords filtered off that HTTPS was on when it
+	 * was not. The gate must key off is_ssl() alone. wp_get_environment_type()
+	 * cannot be made to report 'local' from a test in this process (see
+	 * ApplicationPasswordsSupportedStub.php), so the 'local' condition is
+	 * simulated by stubbing wp_is_application_passwords_supported() directly.
+	 */
+	public function test_connection_state_local_env_without_ssl_reports_needs_https() {
+		$page                  = new Connect_Page();
+		$original_https        = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+		$original_server_port  = isset( $_SERVER['SERVER_PORT'] ) ? $_SERVER['SERVER_PORT'] : null;
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		// Simulates wp_get_environment_type() === 'local' without touching it.
+		$GLOBALS['GK_TEST_APP_PASSWORDS_SUPPORTED_OVERRIDE'] = true;
+
+		try {
+			unset( $_SERVER['HTTPS'] );
+			$_SERVER['SERVER_PORT'] = '80';
+			$this->assertFalse( is_ssl(), 'guard: is_ssl() must be false without HTTPS' );
+
+			$this->assertSame( 'needs_https', $page->connection_state() );
+		} finally {
+			unset( $GLOBALS['GK_TEST_APP_PASSWORDS_SUPPORTED_OVERRIDE'] );
+
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+
+			if ( null === $original_server_port ) {
+				unset( $_SERVER['SERVER_PORT'] );
+			} else {
+				$_SERVER['SERVER_PORT'] = $original_server_port;
+			}
+		}
+	}
+
+	/**
+	 * render_section() must show the disabled-feature notice, not "HTTPS
+	 * required", when HTTPS is on but Application Passwords are off.
+	 *
+	 * Pins the user-visible half of the misdiagnosis fix: the notice must say
+	 * the feature is turned off and tell the user the connection is already
+	 * secure, rather than telling them to enable HTTPS they already have.
+	 */
+	public function test_render_section_app_passwords_disabled_notice_when_https_on() {
+		$page           = new Connect_Page();
+		$original_https = isset( $_SERVER['HTTPS'] ) ? $_SERVER['HTTPS'] : null;
+
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		remove_filter( 'wp_is_application_passwords_available', '__return_true' );
+		add_filter( 'wp_is_application_passwords_available', '__return_false' );
+
+		try {
+			$_SERVER['HTTPS'] = 'on';
+
+			ob_start();
+			$page->render_section();
+			$html = ob_get_clean();
+
+			$this->assertStringContainsString( 'Application Passwords are turned off', $html );
+			$this->assertStringNotContainsString( 'HTTPS required', $html );
+		} finally {
+			if ( null === $original_https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $original_https;
+			}
+		}
 	}
 
 	// ──────────────────────────────────────────────────────────────────────
@@ -2182,6 +2417,36 @@ class ConnectPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Allow your AI app to connect', $html, 'the Approve screen must still render' );
 		$this->assertStringNotContainsString( 'value="self"', $html, 'the self option must be hidden when the filter forbids it' );
 		$this->assertStringNotContainsString( 'name="self_ack"', $html, 'the acknowledgment gate must be hidden when self is forbidden' );
+	}
+
+	/**
+	 * The Approve screen must surface a server-side error inline instead of blindly
+	 * re-submitting the form.
+	 *
+	 * The fetch handler must read the server's { data: { message } } and display
+	 * it in a dedicated error region, reserving the native-submit fallback for the
+	 * case where fetch itself is unavailable. Collapsing every failure into a
+	 * native re-submit hides an expired-nonce / bad-callback / session error, so
+	 * the connection "just bombs" with no reason shown. This pins the error region
+	 * and the message read into the rendered script; remove them and it goes red.
+	 */
+	public function test_authorize_screen_surfaces_server_error_instead_of_blind_resubmit() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['gk_authorize'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$_GET['callback']     = 'http://127.0.0.1:9999/cb';
+		$_GET['state']        = 'tok123';
+		$_GET['client']       = 'block-mcp';
+
+		ob_start();
+		( new Connect_Page() )->render_section();
+		$html = ob_get_clean();
+
+		unset( $_GET['gk_authorize'], $_GET['callback'], $_GET['state'], $_GET['client'] );
+
+		$this->assertStringContainsString( 'gk-block-mcp-authorize-error', $html, 'a dedicated error region must be rendered for auth failures' );
+		$this->assertStringContainsString( 'json.data.message', $html, 'the fetch handler must read the server-provided error message' );
 	}
 
 	// ──────────────────────────────────────────────────────────────────────

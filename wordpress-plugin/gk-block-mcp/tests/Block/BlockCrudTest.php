@@ -11,6 +11,8 @@
 
 use GravityKit\BlockMCP\Block_CRUD;
 
+require_once __DIR__ . '/RateLimitLockWpdbDouble.php';
+
 class BlockCrudTest extends BlockApiTestCase {
 
 	/** @var int */
@@ -153,6 +155,45 @@ class BlockCrudTest extends BlockApiTestCase {
 
 	public function test_format_blocks_empty_returns_empty_array() {
 		$this->assertEquals( array(), $this->crud->format_blocks( array() ) );
+	}
+
+	/**
+	 * A block whose namespace has no registered block type is flagged orphaned.
+	 *
+	 * When a block's provider plugin or theme is not active, WordPress cannot
+	 * render the block properly. The reader sets preference.orphaned so an agent
+	 * editing the page knows the block's source is missing rather than treating
+	 * it as a normal acceptable-tier block. ghostpkg is not registered in this
+	 * suite, so its block must carry the flag.
+	 */
+	public function test_format_blocks_flags_orphaned_block_for_unregistered_namespace() {
+		$formatted = $this->crud->format_blocks(
+			array( $this->block( 'ghostpkg/widget', array(), '<div>orphan</div>' ) )
+		);
+
+		$this->assertArrayHasKey( 'preference', $formatted[0] );
+		$this->assertArrayHasKey( 'orphaned', $formatted[0]['preference'] );
+		$this->assertTrue( $formatted[0]['preference']['orphaned'] );
+	}
+
+	/**
+	 * A block whose namespace is registered is never flagged orphaned.
+	 *
+	 * core is registered and preferred, so it gets no preference block at all and
+	 * therefore no orphaned flag. stackable is registered but scored avoid, so it
+	 * gets a preference block whose orphaned key must stay absent.
+	 */
+	public function test_format_blocks_does_not_flag_registered_namespace_as_orphaned() {
+		$formatted = $this->crud->format_blocks(
+			array(
+				$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+				$this->block( 'stackable/heading', array(), '<h2>B</h2>' ),
+			)
+		);
+
+		$this->assertArrayNotHasKey( 'preference', $formatted[0], 'a registered preferred block carries no preference block' );
+		$this->assertArrayHasKey( 'preference', $formatted[1], 'a registered avoid-tier block carries a preference block' );
+		$this->assertArrayNotHasKey( 'orphaned', $formatted[1]['preference'], 'a registered namespace must not be flagged orphaned' );
 	}
 
 	// ── text_preview ───────────────────────────────────────────────
@@ -320,6 +361,77 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertEquals( '<p>New</p>', $saved[0]['innerHTML'] );
 	}
 
+	/**
+	 * The write field `is_dynamic` (update_block's `saved`) and the read field
+	 * `dynamic` (format_blocks) must agree for one block, including an orphan
+	 * block whose namespace has no registered provider. Both now derive from the
+	 * single authority Block_CRUD::is_block_dynamic (Block_Inventory), which
+	 * classifies an unregistered block as static. update_block formerly read the
+	 * field from Block_Safety, which reports an unknown block as dynamic for its
+	 * own warning-suppression purpose, so the read said static while the write
+	 * said dynamic for the very same block.
+	 */
+	public function test_is_dynamic_write_and_read_agree_for_orphan_block() {
+		$this->make_post( array(
+			$this->block( 'ghost/widget', array(), '<div>orphan</div>' ),
+		) );
+
+		$formatted    = $this->crud->format_blocks( $this->current_blocks() );
+		$read_dynamic = $formatted[0]['dynamic'];
+
+		$result = $this->crud->update_block( $this->post_id, 0, array( 'foo' => 'bar' ), null );
+		$this->assertTrue( $result['success'] );
+		$write_dynamic = $result['saved']['is_dynamic'];
+
+		$this->assertFalse( $read_dynamic, 'An orphan block reads as not dynamic.' );
+		$this->assertSame( $read_dynamic, $write_dynamic, 'is_dynamic (write) and dynamic (read) must agree for one block.' );
+	}
+
+	/**
+	 * update_block's `saved` snapshot must reflect the persisted (normalized)
+	 * block after a gk/block-mcp/block/normalize repair.
+	 *
+	 * Contract pin: update_block now rebuilds the response from the persisted node
+	 * in $result['blocks'] (like update_blocks_batch) rather than reading its local
+	 * $block, whose match with post_content otherwise relies on fragile PHP
+	 * reference aliasing into the saved tree. This pins that `saved` carries the
+	 * normalizer's change so a future edit that breaks the aliasing is caught.
+	 */
+	public function test_update_block_saved_reflects_normalized_persisted_content() {
+		$normalizer = static function ( $block, $name ) {
+			if ( 'core/paragraph' === $name && isset( $block['innerHTML'] ) ) {
+				$block['innerHTML']    = str_replace( '</p>', ' [normalized]</p>', (string) $block['innerHTML'] );
+				$block['innerContent'] = array( $block['innerHTML'] );
+			}
+			return $block;
+		};
+		add_filter( 'gk/block-mcp/block/normalize', $normalizer, 10, 2 );
+
+		// A NESTED paragraph: save_blocks reassigns the parent group during
+		// normalize, breaking update_block's reference into the child, so the
+		// pre-normalization node no longer tracks the persisted content.
+		$this->make_post( array(
+			$this->block( 'core/group', array(), '<div>', array(
+				$this->block( 'core/paragraph', array(), '<p>child</p>' ),
+			) ),
+		) );
+		$result = $this->crud->update_block( $this->post_id, 1, array(), '<p>updated</p>' );
+
+		remove_filter( 'gk/block-mcp/block/normalize', $normalizer, 10 );
+
+		$this->assertTrue( $result['success'] );
+		$this->assertStringContainsString(
+			'[normalized]',
+			get_post_field( 'post_content', $this->post_id ),
+			'precondition: the normalizer must have changed the persisted content'
+		);
+		$this->assertStringContainsString(
+			'[normalized]',
+			$result['saved']['inner_html'],
+			'saved.inner_html must reflect the normalized, persisted block'
+		);
+	}
+
 	public function test_update_block_invalid_index_error() {
 		$this->make_post( array(
 			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
@@ -373,6 +485,42 @@ class BlockCrudTest extends BlockApiTestCase {
 		// in the test bootstrap. Just assert presence here.
 		$this->assertArrayHasKey( 'revision_id', $result );
 		$this->assertArrayHasKey( 'before_revision_id', $result );
+	}
+
+	/**
+	 * A batch item that writes a bound attribute directly must be rejected, the
+	 * same as the single-block path — not silently clobbered.
+	 *
+	 * update_block guards the final attributes with reject_bound_write
+	 * unconditionally, but the batch ran that guard only inside the dual-storage
+	 * derive branch (gated on empty attributes), so a batch item supplying
+	 * attributes directly skipped it and overwrote a bound attribute. This pins
+	 * that a direct bound-attribute write fails the batch and leaves the value
+	 * intact.
+	 */
+	public function test_update_blocks_batch_guards_bound_attributes_on_direct_write() {
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array(
+					'content'  => 'ORIGINAL',
+					'metadata' => array( 'bindings' => array( 'content' => array( 'source' => 'core/post-meta' ) ) ),
+				),
+				'<p>ORIGINAL</p>'
+			),
+		) );
+
+		$result = $this->crud->update_blocks_batch( $this->post_id, array(
+			array( 'flat_index' => 0, 'attributes' => array( 'content' => 'HACKED' ) ),
+		) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result, 'a direct bound-attribute write must fail the batch' );
+		$this->assertEquals( 'batch_validation_failed', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertEquals( 'bound_attribute', $data['errors'][0]['code'], 'the item error must be the bound-attribute rejection' );
+
+		$saved = $this->current_blocks();
+		$this->assertEquals( 'ORIGINAL', $saved[0]['attrs']['content'], 'the bound attribute must not be clobbered' );
 	}
 
 	public function test_update_blocks_batch_rejects_empty_updates() {
@@ -523,6 +671,48 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertCount( 2, $saved );
 		$this->assertEquals( '<p>NEW</p>', $saved[0]['innerHTML'] );
 		$this->assertEquals( '<p>A</p>', $saved[1]['innerHTML'] );
+	}
+
+	/**
+	 * Position -1 is the documented "append" sentinel (matches the MCP
+	 * server's `after_top_level: -1` / `insert_pattern` position contract)
+	 * and must keep working as append, not be swept up by rejecting other
+	 * negative positions.
+	 */
+	public function test_insert_blocks_position_negative_one_still_appends() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			-1,
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertTrue( $result['success'] );
+		$saved = $this->current_blocks();
+		$this->assertCount( 2, $saved );
+		$this->assertEquals( '<p>NEW</p>', $saved[1]['innerHTML'] );
+	}
+
+	/**
+	 * A position more negative than the documented -1 "append" sentinel has
+	 * no defined meaning and was previously silently clamped to a prepend
+	 * (array_splice at 0) instead of erroring — surprising an agent that
+	 * passed a bad value. It must now be rejected with a 400 error, the same
+	 * style update_block/delete_blocks use for an out-of-range index.
+	 */
+	public function test_insert_blocks_rejects_position_more_negative_than_append_sentinel() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+		) );
+		$result = $this->crud->insert_blocks(
+			$this->post_id,
+			-2,
+			array( array( 'name' => 'core/paragraph', 'innerHTML' => '<p>NEW</p>' ) )
+		);
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertEquals( 'invalid_position', $result->get_error_code() );
+		$this->assertCount( 1, $this->current_blocks(), 'the rejected insert must not have modified the post' );
 	}
 
 	public function test_insert_blocks_legacy_rejected() {
@@ -691,15 +881,18 @@ class BlockCrudTest extends BlockApiTestCase {
 		// Pick the first namespace whose default tier is "legacy" from the
 		// shipped preference defaults. Test stays valid as the policy
 		// configuration evolves.
-		$defaults         = \GravityKit\BlockMCP\Preferences::get_defaults();
+		// Legacy is admin-configured now (the shipped defaults are opinion-free), so
+		// resolve the legacy namespace from the effective preferences the test base
+		// seeds — not from get_defaults(), which no longer brands anything legacy.
+		$prefs            = ( new \GravityKit\BlockMCP\Preferences() )->get_preferences();
 		$legacy_namespace = null;
-		foreach ( ( $defaults['namespace_scores'] ?? array() ) as $ns => $score ) {
+		foreach ( ( $prefs['namespace_scores'] ?? array() ) as $ns => $score ) {
 			if ( \GravityKit\BlockMCP\Preferences::score_to_tier( $score ) === 'legacy' ) {
 				$legacy_namespace = $ns;
 				break;
 			}
 		}
-		$this->assertNotNull( $legacy_namespace, 'Default preferences must contain at least one legacy namespace.' );
+		$this->assertNotNull( $legacy_namespace, 'A legacy namespace must be configured for this test.' );
 
 		$block_name = $legacy_namespace . '/never-installed';
 		$registry   = \WP_Block_Type_Registry::get_instance();
@@ -1512,25 +1705,45 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertTrue( $result );
 	}
 
-	public function test_rate_limit_records_writes() {
-		$this->crud->record_rate_limit( $this->post_id, 'write' );
-		$this->crud->record_rate_limit( $this->post_id, 'write' );
+	/**
+	 * check_rate_limit() reserves the slot at check time.
+	 *
+	 * The limiter consumes a slot on the ATTEMPT, not on later success: the
+	 * check and the append are one atomic critical section (record_rate_limit()
+	 * is a no-op). Two passing checks therefore leave two timestamps in the
+	 * window's `writes` bucket.
+	 */
+	public function test_rate_limit_check_reserves_write_slot() {
+		$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
+		$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
 		$data = get_transient( 'gk_block_api_rate_' . $this->post_id );
 		$this->assertCount( 2, $data['writes'] );
 	}
 
+	/**
+	 * The (limit+1)th write in the window is rejected with a 429.
+	 *
+	 * Because each check reserves its own slot, RATE_LIMIT_WRITES passing checks
+	 * fill the bucket and the next one exceeds it.
+	 */
 	public function test_rate_limit_exceeded_after_max_writes() {
 		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_WRITES; $i++ ) {
-			$this->crud->record_rate_limit( $this->post_id, 'write' );
+			$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'write' ) );
 		}
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertEquals( 'rate_limit_exceeded', $result->get_error_code() );
 	}
 
+	/**
+	 * Full-rewrite (`put`) requests draw from their own smaller budget.
+	 *
+	 * RATE_LIMIT_PUT passing `put` checks fill the put bucket; the next `put`
+	 * check is rejected even though the general write budget is untouched.
+	 */
 	public function test_rate_limit_put_separate_bucket() {
 		for ( $i = 0; $i < Block_CRUD::RATE_LIMIT_PUT; $i++ ) {
-			$this->crud->record_rate_limit( $this->post_id, 'put' );
+			$this->assertTrue( $this->crud->check_rate_limit( $this->post_id, 'put' ) );
 		}
 		$result = $this->crud->check_rate_limit( $this->post_id, 'put' );
 		$this->assertInstanceOf( \WP_Error::class, $result );
@@ -1551,6 +1764,119 @@ class BlockCrudTest extends BlockApiTestCase {
 		// Stale entries should be filtered; check should pass.
 		$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
 		$this->assertTrue( $result );
+	}
+
+	/**
+	 * On MySQL, a failed lock acquisition fails CLOSED, not open.
+	 *
+	 * When the per-post advisory lock can't be acquired the post is under
+	 * concurrent write pressure. Reserving unlocked there would let the burst
+	 * race past the limit (the very bypass the lock exists to close), so the
+	 * limiter must return a 429 instead of true.
+	 */
+	public function test_rate_limit_fails_closed_when_lock_unavailable_on_mysql() {
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 0 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rate_limit_locked', $result->get_error_code() );
+		$this->assertSame( 429, $result->get_error_data()['status'] );
+		$issued_get_lock = array_filter(
+			$double->captured,
+			static function ( $q ) {
+				return false !== strpos( $q, 'GET_LOCK' );
+			}
+		);
+		$this->assertNotEmpty( $issued_get_lock, 'the acquire must issue GET_LOCK' );
+	}
+
+	/**
+	 * A granted lock is acquired and then released around the reserve.
+	 *
+	 * Exercises the GET_LOCK / RELEASE_LOCK SQL that the SQLite harness never
+	 * runs (is_mysql is false there): a successful reserve issues GET_LOCK and,
+	 * on the way out, RELEASE_LOCK.
+	 */
+	public function test_rate_limit_acquires_and_releases_the_lock_on_mysql() {
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertTrue( $result );
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'GET_LOCK' );
+				}
+			),
+			'a successful reserve must acquire the lock'
+		);
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'RELEASE_LOCK' );
+				}
+			),
+			'the lock must be released after the reserve'
+		);
+	}
+
+	/**
+	 * The lock is released even when the reserve is rejected for being over budget.
+	 *
+	 * The release lives in a finally, so an over-limit 429 must still free the
+	 * lock rather than leaking it and blocking the post for the connection's life.
+	 */
+	public function test_rate_limit_releases_the_lock_when_over_budget() {
+		$now = time();
+		set_transient(
+			'gk_block_api_rate_' . $this->post_id,
+			array(
+				'writes' => array_fill( 0, Block_CRUD::RATE_LIMIT_WRITES, $now ),
+				'puts'   => array(),
+			),
+			120
+		);
+
+		global $wpdb;
+		$real   = $wpdb;
+		$double = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->check_rate_limit( $this->post_id, 'write' );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rate_limit_exceeded', $result->get_error_code() );
+		$this->assertNotEmpty(
+			array_filter(
+				$double->captured,
+				static function ( $q ) {
+					return false !== strpos( $q, 'RELEASE_LOCK' );
+				}
+			),
+			'the lock must be released even when the write is rejected for being over budget'
+		);
 	}
 
 	// ── insert_blocks with innerBlocks ────────────────────────────
@@ -1712,11 +2038,10 @@ class BlockCrudTest extends BlockApiTestCase {
 	/**
 	 * revert_to_revision must consume the per-post write rate-limit budget.
 	 *
-	 * Pre-fix, revert was the only write method that didn't call
-	 * check_rate_limit / record_rate_limit, so a caller could keep cycling
-	 * write -> revert -> write -> revert at unbounded frequency, effectively
-	 * unrate-limiting the post. Now revert checks + records on the same
-	 * writes bucket as the per-block writes.
+	 * revert is a write path: if it skipped the rate-limit a caller could cycle
+	 * write -> revert -> write -> revert at unbounded frequency and bypass the
+	 * per-post budget. revert reserves a slot on the same writes bucket as the
+	 * per-block writes, so a full bucket rejects it with rate_limit_exceeded.
 	 */
 	public function test_revert_to_revision_respects_rate_limit() {
 		// Pre-fill the writes bucket to the cap.
@@ -1871,6 +2196,31 @@ class BlockCrudTest extends BlockApiTestCase {
 			'insert_pattern must overwrite source pattern gk_ref to keep refs globally unique.'
 		);
 		$this->assertNotEmpty( $persisted_ref, 'inlined block must end up with a fresh, non-empty gk_ref.' );
+
+		wp_delete_post( $pattern_id, true );
+	}
+
+	/**
+	 * insert_pattern rejects a position below -1, matching insert_blocks.
+	 * The two share the insert-position algorithm, but insert_pattern omitted
+	 * insert_blocks' guard, so a position like -5 silently mapped to the start
+	 * of the post instead of erroring.
+	 */
+	public function test_insert_pattern_rejects_position_below_negative_one() {
+		$pattern_id = self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'Hero',
+				'post_content' => '<!-- wp:paragraph --><p>X</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$result = $this->crud->insert_pattern( $this->post_id, $pattern_id, -5, false );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_position', $result->get_error_code() );
+		$this->assertSame( 400, $result->get_error_data()['status'] );
 
 		wp_delete_post( $pattern_id, true );
 	}

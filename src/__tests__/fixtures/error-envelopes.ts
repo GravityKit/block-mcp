@@ -43,19 +43,23 @@ export const ERROR_ENVELOPES: ErrorEnvelope[] = [
   { code: 'not_found',           httpStatus: 404, data: null },
   { code: 'not_found_with_post', httpStatus: 404, data: { post_id: 77 } },
 
-  // ── Precondition / concurrency (412) ────────────────────────────────────
-  { code: 'stale_revision', httpStatus: 412, data: null },
+  // ── Precondition / concurrency (409/412) ────────────────────────────────
+  { code: 'stale_revision', httpStatus: 412, data: { current_revision: 88 } },
+  { code: 'edit_conflict',  httpStatus: 409, data: null },
 
   // ── Validation (400) ────────────────────────────────────────────────────
   { code: 'legacy_block',              httpStatus: 400, data: { block: 'ugb/text', suggested_replacement: 'core/paragraph' } },
+  { code: 'inner_html_required',       httpStatus: 400, data: { block: 'core/paragraph', source_bound_attributes: ['content'] } },
+  { code: 'static_markup_stale_risk',  httpStatus: 400, data: null },
   { code: 'dual_storage_requires_both', httpStatus: 400, data: { block_name: 'yoast/faq-block' } },
   { code: 'bound_attribute',           httpStatus: 400, data: null },
   { code: 'batch_too_large',           httpStatus: 400, data: null },
   { code: 'batch_validation_failed',   httpStatus: 400, data: { errors: [{ index: 0, code: 'ref_stale' }] } },
   { code: 'empty_batch',               httpStatus: 400, data: null },
-  { code: 'block_depth_exceeded',      httpStatus: 400, data: null },
+  { code: 'block_depth_exceeded',      httpStatus: 400, data: { max_depth: 32, actual_depth: 33 } },
   { code: 'invalid_path',              httpStatus: 400, data: { path: [0, 99] } },
   { code: 'invalid_ref',               httpStatus: 400, data: null },
+  { code: 'invalid_index',             httpStatus: 400, data: { flat_index: 12 } },
   { code: 'ref_not_top_level',         httpStatus: 400, data: { ref: 'blk_nested' } },
   { code: 'invalid_op',                httpStatus: 400, data: null },
   { code: 'invalid_block',             httpStatus: 400, data: null },
@@ -70,9 +74,11 @@ export const ERROR_ENVELOPES: ErrorEnvelope[] = [
   { code: 'file_too_large',            httpStatus: 400, data: null },
   { code: 'invalid_url',               httpStatus: 400, data: null },
   { code: 'empty_pattern',             httpStatus: 400, data: null },
+  { code: 'trash_disabled',            httpStatus: 403, data: null },
 
   // ── Rate limit (429) ────────────────────────────────────────────────────
   { code: 'rate_limit_exceeded', httpStatus: 429, data: { post_id: 42 } },
+  { code: 'rate_limit_locked',   httpStatus: 429, data: { post_id: 42 } },
   { code: 'scan_rate_limited',   httpStatus: 429, data: null },
 
   // ── Upstream (502) ──────────────────────────────────────────────────────
@@ -97,19 +103,25 @@ export const TRANSLATED_CODES = new Set([
   'rest_cookie_invalid_nonce',
   'rest_authentication_required',
   'rest_post_invalid_id',
-  'invalid_post_id',
+  'post_not_found',
   'not_found',
-  'gk_block_api_invalid_ref',
   'invalid_ref',
-  'path_not_found',
+  'ref_stale',
   'invalid_path',
-  'path_out_of_bounds',
+  'invalid_index',
   'legacy_block',
+  'inner_html_required',
   'static_markup_stale_risk',
+  'dual_storage_requires_both',
+  'block_depth_exceeded',
+  'edit_conflict',
+  'stale_revision',
   'rate_limit_exceeded',
+  'rate_limit_locked',
   'mixed_trash_payload',
   'invalid_post_type',
   'invalid_status',
+  'trash_disabled',
   'invalid_url',
   'disallowed_mime',
 ]);

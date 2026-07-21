@@ -1357,13 +1357,11 @@ class REST_Controller {
 		try {
 			$url = $request->get_param( 'url' );
 
-			// Extract path from full URL if needed.
-			if ( false !== strpos( $url, '://' ) ) {
-				$url = wp_parse_url( $url, PHP_URL_PATH );
-			}
-
-			// Use url_to_postid() which handles all post types, permalinks, etc.
-			$post_id = url_to_postid( home_url( $url ) );
+			// Keep the query string: url_to_postid() resolves ?p=/?page_id=
+			// forms from it, so stripping to the path alone collapses every
+			// query-permalink to the front page.
+			$path    = $this->url_to_resolvable_path( $url );
+			$post_id = url_to_postid( home_url( $path ) );
 
 			if ( ! $post_id ) {
 				return new \WP_Error(
@@ -1401,6 +1399,31 @@ class REST_Controller {
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Reduce a full URL or path to the site-relative string url_to_postid()
+	 * resolves, preserving the query string so the ?p= / ?page_id= /
+	 * ?post_type=&p= permalink forms resolve instead of collapsing to the
+	 * front page.
+	 *
+	 * @param string $url Full URL, or an already site-relative path/query.
+	 *
+	 * @return string Path, with the query string appended when present.
+	 */
+	private function url_to_resolvable_path( $url ) {
+		if ( false === strpos( $url, '://' ) ) {
+			return $url;
+		}
+
+		$parts = wp_parse_url( $url );
+		$path  = isset( $parts['path'] ) ? $parts['path'] : '/';
+
+		if ( ! empty( $parts['query'] ) ) {
+			$path .= '?' . $parts['query'];
+		}
+
+		return $path;
 	}
 
 	/**
@@ -1455,31 +1478,46 @@ class REST_Controller {
 				'ignore_sticky_posts' => true,
 				'no_found_rows'       => false,
 				'suppress_filters'    => false,
-				// `perm: readable` pushes the user-cap filter into WP_Query's
-				// SQL via posts_where_paged (built-in WP behaviour). Without
-				// this, requests for post_status=draft / private / pending
-				// would return every matching post regardless of caller —
-				// Author-level users could see each other's drafts. Filtering
-				// in the query (not the result loop) also keeps found_posts
-				// and pagination counts honest.
-				//
-				// Note: WP's `perm` check is status + ownership only — it does
-				// NOT consider post_password. The post-result loop below
-				// applies Block_CRUD::is_post_readable() to catch the
-				// password-protected case.
+				// `perm: readable` is a cheap first-pass SQL filter (status +
+				// ownership). It is NOT the authoritative gate: is_post_readable()
+				// below is stricter (per-post read_post/edit_post + the password
+				// rule), so the total is derived from ITS output, not
+				// $query->found_posts, which would count and leak unreadable posts.
 				'perm'                => 'readable',
 			);
 			if ( ! empty( $search ) ) {
 				$args['s'] = $search;
 			}
 
-			$query = new \WP_Query( $args );
-			$out   = array();
-			foreach ( $query->posts as $p ) {
-				// Post-filter for password-protected (perm:'readable' misses it).
-				if ( ! \GravityKit\BlockMCP\Block_CRUD::is_post_readable( $p ) ) {
-					continue;
+			// Fetch every candidate id (cheap: fields=ids), keep only the ones
+			// is_post_readable() allows, and derive total / total_pages / the page
+			// from THAT readable set — so the count reflects exactly what the caller
+			// can see and never leaks the existence of an unreadable post.
+			$args['posts_per_page'] = -1;
+			$args['paged']          = 1;
+			$args['fields']         = 'ids';
+			$args['no_found_rows']  = true;
+
+			$id_query = new \WP_Query( $args );
+			$ids      = array_map( 'intval', (array) $id_query->posts );
+			if ( ! empty( $ids ) ) {
+				_prime_post_caches( $ids, false, false );
+			}
+
+			$readable = array();
+			foreach ( $ids as $id ) {
+				$p = get_post( $id );
+				if ( $p instanceof \WP_Post && \GravityKit\BlockMCP\Block_CRUD::is_post_readable( $p ) ) {
+					$readable[] = $p;
 				}
+			}
+
+			$total       = count( $readable );
+			$total_pages = $per_page > 0 ? (int) ceil( $total / (int) $per_page ) : 0;
+			$offset      = ( max( 1, (int) $page ) - 1 ) * (int) $per_page;
+
+			$out = array();
+			foreach ( array_slice( $readable, $offset, (int) $per_page ) as $p ) {
 				$out[] = array(
 					'post_id'     => (int) $p->ID,
 					'title'       => $p->post_title,
@@ -1491,20 +1529,11 @@ class REST_Controller {
 				);
 			}
 
-			// $query->found_posts reflects the SQL `perm:'readable'` filter but
-			// NOT the post-loop password gate above — so reporting it as `total`
-			// can leak the existence of password-protected publish posts the
-			// caller cannot see. Derive both `total` and `total_pages` from the
-			// visible `$out` instead so the metadata mirrors what the caller
-			// actually receives.
-			$visible_total = count( $out );
-			$total_pages   = $per_page > 0 ? (int) ceil( $visible_total / max( 1, (int) $per_page ) ) : 0;
-
 			return new \WP_REST_Response(
 				array(
 					'posts'       => $out,
-					'count'       => $visible_total,
-					'total'       => $visible_total,
+					'count'       => count( $out ),
+					'total'       => $total,
 					'total_pages' => $total_pages,
 					'page'        => (int) $page,
 					'per_page'    => (int) $per_page,
@@ -1538,7 +1567,7 @@ class REST_Controller {
 			if ( $post_id > 0 ) {
 				$post = get_post( $post_id );
 			} elseif ( ! empty( $url ) ) {
-				$path     = false !== strpos( $url, '://' ) ? wp_parse_url( $url, PHP_URL_PATH ) : $url;
+				$path     = $this->url_to_resolvable_path( $url );
 				$resolved = url_to_postid( home_url( $path ) );
 				if ( $resolved ) {
 					$post = get_post( $resolved );
@@ -2434,7 +2463,13 @@ class REST_Controller {
 	 */
 	private function with_post_edit_context( \WP_REST_Request $request, callable $operation, $status = 200 ) {
 		try {
-			$post_id    = (int) $request->get_param( 'id' );
+			$post_id = (int) $request->get_param( 'id' );
+
+			// Freshen before the permission check so authorization is evaluated
+			// against the same current post (author/status) the mutation will
+			// write to, not a stale cached copy.
+			$this->freshen_post_cache( $post_id );
+
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
@@ -2455,6 +2490,26 @@ class REST_Controller {
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Evict this request's cached post object before a read-modify-write.
+	 *
+	 * Every write resolves refs and parses blocks from `get_post()`, which is
+	 * served from the object cache. If a prior request or another worker has
+	 * already changed `post_content` but this request still holds the old post
+	 * in cache, the read-modify-write would serialize the stale tree back and
+	 * silently undo that change (a lost update — e.g. a delete that reappears
+	 * after the next edit). Dropping the `posts` cache entry forces the
+	 * subsequent reads in this request to re-read current state from the
+	 * database; `get_post()` re-primes the cache on the miss.
+	 *
+	 * @param int $post_id Post being written.
+	 *
+	 * @return void
+	 */
+	private function freshen_post_cache( $post_id ) {
+		wp_cache_delete( $post_id, 'posts' );
 	}
 
 	/**

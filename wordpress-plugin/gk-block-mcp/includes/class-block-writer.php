@@ -92,46 +92,72 @@ class Block_Writer {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Check rate limits for a post.
+	 * Atomically reserve a rate-limit slot for a post, or reject when the limit is
+	 * reached or the reserve can't be serialized.
+	 *
+	 * Check and reserve are ONE atomic step guarded by a per-post MySQL advisory
+	 * lock, so a parallel burst can't all pass the check before any of them
+	 * reserve (the race that let the per-post write limiter be bypassed). The slot
+	 * is consumed on the ATTEMPT, not on success, so a write later rejected for
+	 * another reason still counts against the budget.
+	 *
+	 * On MySQL a failed lock acquisition means the post is under concurrent write
+	 * pressure; this fails CLOSED (429) rather than reserving unlocked, which
+	 * would reopen the race precisely under the load the limiter exists to stop.
+	 * The SQLite test harness and any non-MySQL store have no lock and reserve
+	 * unlocked, which is correct there because those paths are single-threaded.
+	 *
+	 * The lock assumes one MySQL connection per request (stock wpdb); a
+	 * connection-pooling drop-in that routes the lock statements to different
+	 * servers weakens the guarantee. A fatal/exit inside the critical section
+	 * skips the release, but the server frees the lock when the connection closes.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Rate type: 'write' or 'put'.
 	 *
-	 * @return true|\WP_Error True if within limits, WP_Error if exceeded.
+	 * @return true|\WP_Error True when a slot was reserved, WP_Error (429) when
+	 *                        over the limit or when the reserve can't be serialized.
 	 */
 	public function check_rate_limit( $post_id, $type = 'write' ) {
-		$transient_key = 'gk_block_api_rate_' . $post_id;
-		$data          = get_transient( $transient_key );
+		global $wpdb;
 
-		if ( false === $data ) {
-			return true;
+		$needs_lock = ! empty( $wpdb->is_mysql );
+		$locked     = false;
+		if ( $needs_lock ) {
+			$locked = $this->rate_lock_acquire( $post_id );
+			if ( ! $locked ) {
+				return new \WP_Error(
+					'rate_limit_locked',
+					__( 'This post is busy with concurrent writes. Retry in a moment.', 'gk-block-mcp' ),
+					array( 'status' => 429 )
+				);
+			}
 		}
 
-		$now          = time();
-		$window_start = $now - 60;
+		try {
+			$transient_key = 'gk_block_api_rate_' . $post_id;
+			$data          = get_transient( $transient_key );
+			if ( false === $data || ! is_array( $data ) ) {
+				$data = array(
+					'writes' => array(),
+					'puts'   => array(),
+				);
+			}
 
-		// Clean old entries.
-		if ( isset( $data['writes'] ) ) {
-			$data['writes'] = array_filter(
-				$data['writes'],
-				function ( $ts ) use ( $window_start ) {
-					return $ts >= $window_start;
-				}
-			);
-		}
+			$now          = time();
+			$window_start = $now - 60;
+			$prune        = static function ( $ts ) use ( $window_start ) {
+				return $ts >= $window_start;
+			};
 
-		if ( isset( $data['puts'] ) ) {
-			$data['puts'] = array_filter(
-				$data['puts'],
-				function ( $ts ) use ( $window_start ) {
-					return $ts >= $window_start;
-				}
-			);
-		}
+			$data['writes'] = isset( $data['writes'] ) && is_array( $data['writes'] )
+				? array_values( array_filter( $data['writes'], $prune ) )
+				: array();
+			$data['puts']   = isset( $data['puts'] ) && is_array( $data['puts'] )
+				? array_values( array_filter( $data['puts'], $prune ) )
+				: array();
 
-		if ( 'put' === $type ) {
-			$put_count = isset( $data['puts'] ) ? count( $data['puts'] ) : 0;
-			if ( $put_count >= Block_CRUD::RATE_LIMIT_PUT ) {
+			if ( 'put' === $type && count( $data['puts'] ) >= Block_CRUD::RATE_LIMIT_PUT ) {
 				return new \WP_Error(
 					'rate_limit_exceeded',
 					sprintf(
@@ -142,51 +168,100 @@ class Block_Writer {
 					array( 'status' => 429 )
 				);
 			}
-		}
 
-		$write_count = isset( $data['writes'] ) ? count( $data['writes'] ) : 0;
-		if ( $write_count >= Block_CRUD::RATE_LIMIT_WRITES ) {
-			return new \WP_Error(
-				'rate_limit_exceeded',
-				sprintf(
-					/* translators: %d: maximum number of writes per minute */
-					__( 'Write rate limit exceeded. Max %d per minute per post.', 'gk-block-mcp' ),
-					Block_CRUD::RATE_LIMIT_WRITES
-				),
-				array( 'status' => 429 )
-			);
-		}
+			if ( count( $data['writes'] ) >= Block_CRUD::RATE_LIMIT_WRITES ) {
+				return new \WP_Error(
+					'rate_limit_exceeded',
+					sprintf(
+						/* translators: %d: maximum number of writes per minute */
+						__( 'Write rate limit exceeded. Max %d per minute per post.', 'gk-block-mcp' ),
+						Block_CRUD::RATE_LIMIT_WRITES
+					),
+					array( 'status' => 429 )
+				);
+			}
 
-		return true;
+			// Within the limit — reserve the slot now, atomically with the check.
+			$data['writes'][] = $now;
+			if ( 'put' === $type ) {
+				$data['puts'][] = $now;
+			}
+			set_transient( $transient_key, $data, 120 );
+
+			return true;
+		} finally {
+			if ( $locked ) {
+				$this->rate_lock_release( $post_id );
+			}
+		}
 	}
 
 	/**
-	 * Record a write operation for rate limiting.
+	 * No-op: the rate-limit slot is now reserved atomically inside
+	 * check_rate_limit() at the start of the operation (check and record collapsed
+	 * into one critical section). Retained so existing call sites don't change.
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Rate type: 'write' or 'put'.
+	 * @return void
 	 */
 	public function record_rate_limit( $post_id, $type = 'write' ) {
-		$transient_key = 'gk_block_api_rate_' . $post_id;
-		$data          = get_transient( $transient_key );
+		unset( $post_id, $type );
+	}
 
-		if ( false === $data ) {
-			$data = array(
-				'writes' => array(),
-				'puts'   => array(),
-			);
+	/**
+	 * Name of the per-post MySQL advisory lock guarding the rate-limit reserve.
+	 *
+	 * GET_LOCK names are server-global, so the scope must encode the install:
+	 * DB_NAME separates two installs on one MySQL server, and the table prefix
+	 * separates multisite sub-sites (which share DB_NAME but not the prefix) so
+	 * the same post id on different sites doesn't needlessly contend. Hashed to
+	 * stay within MySQL's 64-char lock-name limit.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	private function rate_lock_name( $post_id ) {
+		global $wpdb;
+		$db     = defined( 'DB_NAME' ) ? DB_NAME : '';
+		$prefix = isset( $wpdb->prefix ) ? $wpdb->prefix : '';
+		return 'gkbmrate_' . md5( $db . ':' . $prefix . ':' . (int) $post_id );
+	}
+
+	/**
+	 * Acquire the per-post rate-limit advisory lock on MySQL.
+	 *
+	 * Only called when $wpdb->is_mysql (the caller owns that gate), so a false
+	 * return here unambiguously means the lock wasn't granted within the wait, or
+	 * GET_LOCK errored (it returns NULL then). Waits at most 1 second so a slow
+	 * lock becomes a fail-closed 429 at the caller, never a hung request.
+	 *
+	 * The reserve never nests a second GET_LOCK on the same connection, so the
+	 * pre-5.7.5 rule (a session holds one advisory lock, and acquiring another
+	 * releases the first) can't make this code drop its own lock.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool True when a lock is held (and must be released).
+	 */
+	private function rate_lock_acquire( $post_id ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- server-side advisory lock; not cacheable.
+		return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $this->rate_lock_name( $post_id ), 1 ) );
+	}
+
+	/**
+	 * Release the per-post rate-limit advisory lock.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private function rate_lock_release( $post_id ) {
+		global $wpdb;
+		if ( empty( $wpdb->is_mysql ) ) {
+			return;
 		}
-
-		$now = time();
-
-		$data['writes'][] = $now;
-
-		if ( 'put' === $type ) {
-			$data['puts'][] = $now;
-		}
-
-		// Store with 2-minute TTL (covers the 1-minute rolling window).
-		set_transient( $transient_key, $data, 120 );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releasing the advisory lock; not cacheable.
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $this->rate_lock_name( $post_id ) ) );
 	}
 
 	// -------------------------------------------------------------------------
@@ -283,27 +358,143 @@ class Block_Writer {
 	 * the depth guard, so always prefer this entry point for any block-
 	 * shape input.
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree in WP-internal shape.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree in WP-internal shape.
+	 * @param string|null $expected Stored post_content the tree was built from,
+	 *                              for the optimistic-concurrency guard in
+	 *                              save_post_content(). Null disables it.
 	 *
-	 * @return array|\WP_Error
+	 * @return array|\WP_Error Save result. The `blocks` key carries the tree as
+	 *                         persisted (post-normalization) — response snapshots
+	 *                         built before this call must be rebuilt from it, or
+	 *                         they echo markup that differs from post_content.
 	 */
-	public function save_blocks( $post_id, array $blocks ) {
+	public function save_blocks( $post_id, array $blocks, $expected = null ) {
 		$depth_check = Block_CRUD::validate_tree_depth( $blocks );
 		if ( is_wp_error( $depth_check ) ) {
 			return $depth_check;
 		}
-		return $this->save_post_content( $post_id, serialize_blocks( $blocks ) );
+		$blocks = Block_Normalizer::normalize_tree( $blocks );
+		$result = $this->save_post_content( $post_id, serialize_blocks( $blocks ), $expected );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$result['blocks'] = $blocks;
+		return $result;
+	}
+
+	/**
+	 * Sanitize a block's innerHTML.
+	 *
+	 * Runs wp_kses_post (stripping scripts and disallowed markup) and then
+	 * removes any block-comment delimiters. A block's structure lives in its
+	 * innerBlocks/innerContent, never in its raw innerHTML, so a stray
+	 * `<!-- wp:… -->` / `<!-- /wp:… -->` inside innerHTML can only be an attempt
+	 * to break out of the block and inject phantom sibling blocks on the next
+	 * parse. Stripping the delimiters neutralizes that without touching any
+	 * legitimate content — displayed block markup is entity-encoded, not a live
+	 * comment.
+	 *
+	 * @param string $html Raw innerHTML.
+	 * @return string Sanitized innerHTML.
+	 */
+	public static function sanitize_inner_html( $html ) {
+		$html = wp_kses_post( (string) $html );
+		return (string) preg_replace( '#<!--\s*/?\s*wp:.*?-->#is', '', $html );
+	}
+
+	/**
+	 * Whether a compare-and-swap UPDATE's affected-row count signals a lost race.
+	 *
+	 * The swap writes only while post_content still equals the snapshot, so 0
+	 * affected rows looks like a conflict — but an idempotent save (new content
+	 * equal to the snapshot) changes nothing and reports 0 affected on engines
+	 * that count changed rows (MySQL), even though the row matched. So 0 is a
+	 * conflict only when the content genuinely differs.
+	 *
+	 * @param int    $affected Affected-row count from the swap.
+	 * @param string $written  Content the swap wrote.
+	 * @param string $expected Snapshot the swap matched on.
+	 * @return bool
+	 */
+	private static function swap_is_conflict( $affected, $written, $expected ) {
+		return 0 === (int) $affected && (string) $written !== (string) $expected;
 	}
 
 	/**
 	 * Save serialized block content to a post, tracking before/after revision IDs.
 	 *
-	 * @param int    $post_id     Post ID.
-	 * @param string $new_content Serialized block markup to save.
+	 * @param int         $post_id     Post ID.
+	 * @param string      $new_content Serialized block markup to save.
+	 * @param string|null $expected    The exact stored post_content the caller's
+	 *                                 mutation was based on. When provided, the
+	 *                                 save fails closed (409) if the database no
+	 *                                 longer holds that snapshot. Null disables
+	 *                                 the check (back-compat for direct callers).
 	 * @return array|\WP_Error
 	 */
-	public function save_post_content( $post_id, $new_content ) {
+	public function save_post_content( $post_id, $new_content, $expected = null ) {
+		// Optimistic-concurrency guard: when the caller passes the snapshot its
+		// mutation was based on, persist via a portable compare-and-swap so a
+		// concurrent edit is never silently clobbered.
+		$did_cas_swap = false;
+		if ( null !== $expected ) {
+			global $wpdb;
+			// A write routes the verify + swap below to the primary, off any
+			// replica still lagging behind the snapshot.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+
+			// Byte-exact: the swap's collation WHERE would treat a case/accent-only
+			// concurrent change as identical and overwrite it.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( (string) $current !== (string) $expected ) {
+				return new \WP_Error(
+					'edit_conflict',
+					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),
+					array( 'status' => 409 )
+				);
+			}
+
+			// Prime the cache with the pre-write post; the raw swap below does not
+			// invalidate it, so wp_update_post's hooks keep the correct $before.
+			get_post( $post_id );
+
+			// Write only while the row still holds the snapshot: a simultaneous
+			// writer that already moved it matches 0 rows. wp_update_post then
+			// re-saves the same content for the revision + save_post hooks.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$swapped = $wpdb->query(
+				$wpdb->prepare(
+					"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+					$new_content,
+					$post_id,
+					$expected
+				)
+			);
+			if ( false === $swapped ) {
+				// A DB error is not a conflict — surface it rather than telling the
+				// caller their snapshot is stale.
+				return new \WP_Error(
+					'db_write_failed',
+					__( 'The post could not be saved due to a database error. Try again.', 'gk-block-mcp' ),
+					array( 'status' => 500 )
+				);
+			}
+			if ( self::swap_is_conflict( (int) $swapped, (string) $new_content, (string) $expected ) ) {
+				return new \WP_Error(
+					'edit_conflict',
+					__( 'The post content changed since it was read. Re-fetch the page and retry.', 'gk-block-mcp' ),
+					array( 'status' => 409 )
+				);
+			}
+
+			// The swap wrote $new_content. If the wp_update_post re-save below
+			// fails, this bytes-already-changed state must be rolled back.
+			$did_cas_swap = true;
+		}
+
 		// Block content is encoded by serialize_blocks() / wp_json_encode(), which
 		// correctly escapes newlines as \n in block comment JSON. Some
 		// content_save_pre filters (notably WPCom_Markdown::preserve_code_blocks)
@@ -342,6 +533,25 @@ class Block_Writer {
 		}
 
 		if ( is_wp_error( $result ) ) {
+			if ( $did_cas_swap ) {
+				// The raw swap already wrote $new_content, but wp_update_post
+				// rejected the save (e.g. WP core refuses to empty a title-less
+				// post). Restore the pre-swap content so a failed save never
+				// destroys the post, and drop the primed cache so readers do not
+				// serve the rolled-back value. The WHERE pins our own bytes so a
+				// writer that already moved the row on is not clobbered.
+				global $wpdb;
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->query(
+					$wpdb->prepare(
+						"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+						$expected,
+						$post_id,
+						$new_content
+					)
+				);
+				clean_post_cache( $post_id );
+			}
 			return $result;
 		}
 
@@ -380,7 +590,7 @@ class Block_Writer {
 			'block_name' => $block_name,
 			'attributes' => isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : array(),
 			'inner_html' => isset( $block['innerHTML'] ) ? (string) $block['innerHTML'] : '',
-			'is_dynamic' => $block_name ? $this->safety->is_dynamic_block( $block_name ) : false,
+			'is_dynamic' => $block_name ? $this->crud->is_block_dynamic( $block_name ) : false,
 		);
 
 		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
@@ -401,9 +611,10 @@ class Block_Writer {
 	 * @param array       &$block      Block array to mutate in place.
 	 * @param array       $attributes  Partial attributes to merge (may be empty).
 	 * @param string|null $inner_html  Replacement innerHTML, or null to skip.
+	 * @param array|null  &$warnings   Optional. Collects static-block safety warnings when an array is passed; the single and batch update paths pass none and stay silent.
 	 * @return void
 	 */
-	public function apply_block_update_in_place( &$block, $attributes, $inner_html ) {
+	public function apply_block_update_in_place( &$block, $attributes, $inner_html, &$warnings = null ) {
 		$block_name = isset( $block['blockName'] ) ? (string) $block['blockName'] : '';
 
 		if ( ! empty( $attributes ) ) {
@@ -446,15 +657,18 @@ class Block_Writer {
 					$block['innerContent'] = array( $auto_transformed );
 				}
 			} else {
-				// No auto-transform — surface the safety check for completeness.
-				// Result is currently silent (matches single-update behavior); a
-				// future revision can plumb safety_warnings into the response.
-				$this->safety->check_mutation( $block_name, array_keys( $attributes ), false );
+				// No auto-transform available. The mutate path passes $warnings to
+				// surface the static-block safety check in its response; the single
+				// and batch update paths pass none and stay silent.
+				$safety_warnings = $this->safety->check_mutation( $block_name, array_keys( $attributes ), false );
+				if ( is_array( $warnings ) && ! empty( $safety_warnings ) ) {
+					$warnings = array_merge( $warnings, $safety_warnings );
+				}
 			}
 		}
 
 		if ( null !== $inner_html ) {
-			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( wp_kses_post( $inner_html ) );
+			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( self::sanitize_inner_html( $inner_html ) );
 			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
 				$block['innerContent'] = $this->transformer->rebuild_inner_content(
 					$block['innerContent'],
@@ -484,7 +698,7 @@ class Block_Writer {
 		$warnings = array_merge( $warnings, $validation['warnings'] );
 
 		$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-		$inner_html = isset( $block_def['innerHTML'] ) ? wp_kses_post( $block_def['innerHTML'] ) : '';
+		$inner_html = isset( $block_def['innerHTML'] ) ? self::sanitize_inner_html( $block_def['innerHTML'] ) : '';
 		$inner_html = $this->transformer->strip_empty_class_attributes( $inner_html );
 		$children   = array();
 
@@ -509,27 +723,11 @@ class Block_Writer {
 		}
 
 		if ( ! empty( $children ) ) {
-			$n = count( $children );
-			if ( ! empty( $inner_html ) ) {
-				// Split wrapper HTML into opening/closing halves and interleave nulls.
-				$first_close = strpos( $inner_html, '>' );
-				if ( false !== $first_close ) {
-					$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
-					for ( $i = 0; $i < $n; $i++ ) {
-						$inner_content[] = null;
-					}
-					$inner_content[] = substr( $inner_html, $first_close + 1 );
-				} else {
-					$inner_content = array_fill( 0, $n, null );
-				}
-			} else {
-				$inner_content = array_fill( 0, $n, null );
-			}
 			return array(
 				'blockName'    => $name,
 				'attrs'        => $attrs,
 				'innerHTML'    => '',
-				'innerContent' => $inner_content,
+				'innerContent' => self::wrapper_inner_content( $inner_html, count( $children ) ),
 				'innerBlocks'  => $children,
 			);
 		}
@@ -538,9 +736,42 @@ class Block_Writer {
 			'blockName'    => $name,
 			'attrs'        => $attrs,
 			'innerHTML'    => $inner_html,
-			'innerContent' => ! empty( $inner_html ) ? array( $inner_html ) : array(),
+			// Explicit empty-string test: a leaf whose content is "0" must keep
+			// it; empty('0') would collapse innerContent and drop the "0".
+			'innerContent' => '' !== (string) $inner_html ? array( $inner_html ) : array(),
 			'innerBlocks'  => array(),
 		);
+	}
+
+	/**
+	 * Build a container block's innerContent: the wrapper HTML split at its first
+	 * `>` with one null placeholder per child interleaved between the halves.
+	 *
+	 * This is the innerContent null-placeholder invariant (one null per child)
+	 * shared by build_block_from_def() and Post_Manager's insert normalizer.
+	 * Wrapper HTML with no parseable tag, or empty wrapper HTML, degrades to all
+	 * nulls so serialize_blocks() still emits each child.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $inner_html  Wrapper innerHTML (may be empty).
+	 * @param int    $child_count Number of child blocks.
+	 *
+	 * @return array<int, string|null> innerContent for serialize_blocks().
+	 */
+	public static function wrapper_inner_content( $inner_html, $child_count ) {
+		$first_close = '' === (string) $inner_html ? false : strpos( $inner_html, '>' );
+		if ( false === $first_close ) {
+			return array_fill( 0, $child_count, null );
+		}
+
+		$inner_content = array( substr( $inner_html, 0, $first_close + 1 ) );
+		for ( $i = 0; $i < $child_count; $i++ ) {
+			$inner_content[] = null;
+		}
+		$inner_content[] = substr( $inner_html, $first_close + 1 );
+
+		return $inner_content;
 	}
 
 	/**
@@ -781,60 +1012,45 @@ class Block_Writer {
 		$path  = $flat[ $index ]['path'];
 		$block = &$this->crud->get_block_by_path( $blocks, $path );
 
-		// BLOCK-14: refuse innerHTML-only updates on dual-storage blocks.
-		// Sending innerHTML alone on yoast/faq-block et al. silently desyncs
-		// the structured attributes (questions[], etc.) — see BLOCK-3.
+		// An innerHTML-only update on a dual-storage block would desync its
+		// structured attributes. When the content is re-derivable from the new
+		// markup, recompute those attributes and apply both together; reject
+		// only when it can't be re-synced (e.g. delimiter-only questions[]).
 		if (
 			null !== $inner_html
 			&& empty( $attributes )
 			&& isset( $block['blockName'] )
 			&& $this->crud->is_block_dual_storage( $block['blockName'] )
 		) {
-			return $this->crud->dual_storage_error( $block['blockName'] );
+			$derived = $this->crud->auto_derive_dual_attributes(
+				$block['blockName'],
+				isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				$inner_html
+			);
+			if ( null === $derived ) {
+				return $this->crud->dual_storage_error( $block['blockName'] );
+			}
+			$attributes = $derived;
 		}
 
-		// WP 6.5+ Block Bindings guard: reject writes that attempt to overwrite
-		// a dynamically-bound attribute unless the caller explicitly opts in with
-		// allow_bound_writes:true. This prevents agents from silently clobbering
-		// a value that is resolved at render time from post-meta or another source.
+		// WP 6.5+ Block Bindings guard, applied here so the derived attributes
+		// above are checked too: an auto-derived `content` must not clobber a
+		// `content` binding any more than a caller-supplied one.
 		$allow_bound_writes = ! empty( $options['allow_bound_writes'] );
-		if ( ! $allow_bound_writes && ! empty( $attributes ) ) {
-			$bindings = isset( $block['attrs']['metadata']['bindings'] ) && is_array( $block['attrs']['metadata']['bindings'] )
-				? $block['attrs']['metadata']['bindings']
-				: array();
-
-			if ( ! empty( $bindings ) ) {
-				$blocked = array();
-				foreach ( array_keys( (array) $attributes ) as $attr_key ) {
-					// 'metadata' writes are structural; only individual attribute
-					// keys within bindings are protected. A write to 'metadata'
-					// itself (e.g. updating metadata.name) is always allowed.
-					if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
-						$blocked[] = $attr_key;
-					}
-				}
-				if ( ! empty( $blocked ) ) {
-					return new \WP_Error(
-						'bound_attribute',
-						sprintf(
-							/* translators: 1: comma-separated list of bound attribute names */
-							__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
-							implode( ', ', $blocked )
-						),
-						array(
-							'status'           => 400,
-							'bound_attributes' => $blocked,
-						)
-					);
-				}
-			}
+		$bound_error        = $this->crud->reject_bound_write(
+			(array) $attributes,
+			isset( $block['attrs'] ) ? $block['attrs'] : array(),
+			$allow_bound_writes
+		);
+		if ( null !== $bound_error ) {
+			return $bound_error;
 		}
 
 		// Apply attribute merge + auto-transform + innerHTML replacement.
 		$this->apply_block_update_in_place( $block, (array) $attributes, $inner_html );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $blocks );
+		$result = $this->save_blocks( $post_id, $blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -842,29 +1058,38 @@ class Block_Writer {
 
 		$this->record_rate_limit( $post_id, 'write' );
 
+		// Build the response from the persisted (normalized) node in
+		// $result['blocks'], not the local $block, so `block` and `saved` are the
+		// canonical post-save snapshot the response promises even when a
+		// gk/block-mcp/block/normalize filter changed the block. This mirrors the
+		// deliberate rebuild in update_blocks_batch instead of relying on the
+		// fragile reference aliasing between $block and the saved tree.
+		$persisted      = isset( $result['blocks'] ) ? $this->crud->get_block_by_path( $result['blocks'], $path ) : null;
+		$response_block = is_array( $persisted ) ? $persisted : $block;
+
 		// Applies the gk/block-mcp/block/format filter (documented in class-block-reader.php).
 		$block_data = apply_filters(
 			'gk/block-mcp/block/format',
 			array(
 				'index'      => $index,
-				'name'       => $block['blockName'],
-				'attributes' => isset( $block['attrs'] ) ? $block['attrs'] : array(),
+				'name'       => isset( $response_block['blockName'] ) ? $response_block['blockName'] : '',
+				'attributes' => isset( $response_block['attrs'] ) ? $response_block['attrs'] : array(),
 			),
-			$block['blockName']
+			isset( $response_block['blockName'] ) ? $response_block['blockName'] : ''
 		);
 
 		// Surface the stable ref so callers can chain mutations against the
 		// same block without re-reading. The TS outputSchema declares this
 		// field; without it agents that try to capture ref from update_block
 		// for follow-up edits would see undefined.
-		if ( isset( $block['attrs']['metadata']['gk_ref'] ) ) {
-			$block_data['ref'] = (string) $block['attrs']['metadata']['gk_ref'];
+		if ( isset( $response_block['attrs']['metadata']['gk_ref'] ) ) {
+			$block_data['ref'] = (string) $response_block['attrs']['metadata']['gk_ref'];
 		}
 
 		return array(
 			'success'            => true,
 			'block'              => $block_data,
-			'saved'              => $this->format_saved_block( $block, $index ),
+			'saved'              => $this->format_saved_block( $response_block, $index ),
 			'before_revision_id' => $result['before_revision_id'],
 			'revision_id'        => $result['revision_id'],
 		);
@@ -1026,8 +1251,9 @@ class Block_Writer {
 			}
 			$seen_paths[ $path_key ] = $i;
 
-			// Dual-storage check: innerHTML-only on dual-storage blocks is
-			// rejected, matching single update_block semantics.
+			// Dual-storage check, matching single update_block semantics: an
+			// innerHTML-only item is auto-synced when the block's content is
+			// re-derivable from the new markup, else it fails the batch.
 			$target_block = $this->crud->get_block_by_path( $blocks, $path );
 			if (
 				null === $target_block
@@ -1040,23 +1266,70 @@ class Block_Writer {
 				);
 				continue;
 			}
+
+			// Caller-supplied attributes get the same Block Bindings guard as the
+			// single-block path. The dual-storage branch below guards only its
+			// DERIVED attributes, so a direct-attributes item would otherwise skip
+			// the check and clobber a bound attribute.
+			if ( ! empty( $attributes ) ) {
+				$bound_error = $this->crud->reject_bound_write(
+					$attributes,
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					! empty( $item['allow_bound_writes'] )
+				);
+				if ( null !== $bound_error ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $bound_error->get_error_code(),
+						'message' => $bound_error->get_error_message(),
+						'block'   => isset( $target_block['blockName'] ) ? (string) $target_block['blockName'] : '',
+					);
+					continue;
+				}
+			}
+
 			if (
 				null !== $inner_html
 				&& empty( $attributes )
 				&& isset( $target_block['blockName'] )
 				&& $this->crud->is_block_dual_storage( $target_block['blockName'] )
 			) {
-				$errors[] = array(
-					'index'   => $i,
-					'code'    => 'dual_storage_requires_both',
-					'message' => sprintf(
-						/* translators: %s: block name (e.g., yoast/faq-block) */
-						__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
-						$target_block['blockName']
-					),
-					'block'   => (string) $target_block['blockName'],
+				$derived = $this->crud->auto_derive_dual_attributes(
+					$target_block['blockName'],
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					$inner_html
 				);
-				continue;
+				if ( null === $derived ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => 'dual_storage_requires_both',
+						'message' => sprintf(
+							/* translators: %s: block name (e.g., yoast/faq-block) */
+							__( 'Block "%s" is dual-storage and requires both attributes and innerHTML.', 'gk-block-mcp' ),
+							$target_block['blockName']
+						),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				// Derived attrs go through the same bound-write guard as
+				// update_block, honoring the item's allow_bound_writes opt-in so
+				// the batch keeps parity with the single-block path.
+				$bound_error = $this->crud->reject_bound_write(
+					$derived,
+					isset( $target_block['attrs'] ) ? $target_block['attrs'] : array(),
+					! empty( $item['allow_bound_writes'] )
+				);
+				if ( null !== $bound_error ) {
+					$errors[] = array(
+						'index'   => $i,
+						'code'    => $bound_error->get_error_code(),
+						'message' => $bound_error->get_error_message(),
+						'block'   => (string) $target_block['blockName'],
+					);
+					continue;
+				}
+				$attributes = $derived;
 			}
 
 			$resolved[] = array(
@@ -1115,12 +1388,24 @@ class Block_Writer {
 		}
 
 		// Phase 3: serialize and save. ONE wp_update_post call → ONE revision.
-		$save_result = $this->save_blocks( $post_id, $blocks );
+		$save_result = $this->save_blocks( $post_id, $blocks, $post->post_content );
 		if ( is_wp_error( $save_result ) ) {
 			return $save_result;
 		}
 
 		$this->record_rate_limit( $post_id, 'write' );
+
+		// Rebuild the `saved` snapshots from the persisted (normalized) tree so
+		// they match post_content. $resolved and $results are index-aligned:
+		// phase 2 appends exactly one result per resolved item.
+		if ( $verbose && isset( $save_result['blocks'] ) ) {
+			foreach ( $resolved as $ri => $r ) {
+				$persisted_block = $this->crud->get_block_by_path( $save_result['blocks'], $r['path'] );
+				if ( is_array( $persisted_block ) ) {
+					$results[ $ri ]['saved'] = $this->format_saved_block( $persisted_block, $r['flat_index'] );
+				}
+			}
+		}
 
 		return array(
 			'success'            => true,
@@ -1201,6 +1486,13 @@ class Block_Writer {
 			$visible_insert = 0;
 		} elseif ( is_numeric( $position ) ) {
 			$pos = (int) $position;
+			if ( $pos < -1 ) {
+				return new \WP_Error(
+					'invalid_position',
+					__( 'Insert position cannot be negative (pass -1 or omit to append).', 'gk-block-mcp' ),
+					array( 'status' => 400 )
+				);
+			}
 			if ( -1 === $pos ) {
 				$visible_insert = $visible_count;
 			} else {
@@ -1221,7 +1513,7 @@ class Block_Writer {
 		array_splice( $all_existing_blocks, $raw_insert, 0, $new_blocks );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $all_existing_blocks );
+		$result = $this->save_blocks( $post_id, $all_existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1365,7 +1657,7 @@ class Block_Writer {
 		}
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $all_blocks );
+		$result = $this->save_blocks( $post_id, $all_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1516,7 +1808,7 @@ class Block_Writer {
 		// Atomic splice — one operation, one save, one revision.
 		array_splice( $all_existing_blocks, $raw_splice_start, $raw_splice_count, $new_blocks );
 
-		$result = $this->save_blocks( $post_id, $all_existing_blocks );
+		$result = $this->save_blocks( $post_id, $all_existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1612,7 +1904,7 @@ class Block_Writer {
 		$this->crud->assign_missing_refs_recursive( $new_blocks );
 
 		// Serialize and save (depth-checked).
-		$result = $this->save_blocks( $post_id, $new_blocks );
+		$result = $this->save_blocks( $post_id, $new_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1750,6 +2042,13 @@ class Block_Writer {
 			$visible_insert = 0;
 		} elseif ( is_numeric( $position ) ) {
 			$pos = (int) $position;
+			if ( $pos < -1 ) {
+				return new \WP_Error(
+					'invalid_position',
+					__( 'Insert position cannot be negative (pass -1 or omit to append).', 'gk-block-mcp' ),
+					array( 'status' => 400 )
+				);
+			}
 			if ( -1 === $pos ) {
 				$visible_insert = $visible_count;
 			} else {
@@ -1778,7 +2077,7 @@ class Block_Writer {
 
 			array_splice( $existing_blocks, $insert_at, 0, array( $ref_block ) );
 
-			$result = $this->save_blocks( $post_id, $existing_blocks );
+			$result = $this->save_blocks( $post_id, $existing_blocks, $post->post_content );
 
 			if ( is_wp_error( $result ) ) {
 				return $result;
@@ -1846,7 +2145,7 @@ class Block_Writer {
 
 		array_splice( $existing_blocks, $insert_at, 0, $pattern_blocks );
 
-		$result = $this->save_blocks( $post_id, $existing_blocks );
+		$result = $this->save_blocks( $post_id, $existing_blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -1913,7 +2212,7 @@ class Block_Writer {
 			return new \WP_Error( 'revision_mismatch', __( 'Revision does not belong to this post.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
 
-		$result = $this->save_post_content( $post_id, $revision->post_content );
+		$result = $this->save_post_content( $post_id, $revision->post_content, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;

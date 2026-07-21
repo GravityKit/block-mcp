@@ -88,9 +88,10 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 	// ── innerHTML containing comment-syntax ───────────────────────
 
 	/**
-	 * `-->` inside innerHTML — `wp_kses_post` strips HTML comments
-	 * entirely from post content, so the substring is removed before it
-	 * can reach `serialize_blocks()`.
+	 * A block-comment delimiter inside innerHTML must not survive into saved
+	 * content. Block_Writer::sanitize_inner_html() strips `<!-- wp:… -->` /
+	 * `<!-- /wp:… -->` after wp_kses_post (which keeps HTML comments), so the
+	 * substring is removed before it can reach serialize_blocks().
 	 */
 	public function test_innerhtml_with_close_comment_is_sanitized() {
 		$result = $this->crud->insert_blocks( $this->post_id, null, array(
@@ -105,13 +106,69 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 		$visible = array_values( array_filter( $saved, static fn( $b ) => null !== $b['blockName'] ) );
 		$names   = array_column( $visible, 'blockName' );
 
-		// We started with one paragraph. wp_kses_post strips the comment-
-		// delimiter substrings before they reach serialize_block(), so the
-		// hostile <!-- wp:heading --> cannot materialize as a real block
-		// on the page.
+		// We started with one paragraph. sanitize_inner_html() strips the
+		// block-comment delimiters (wp_kses_post keeps HTML comments) before
+		// they reach serialize_block(), so the hostile <!-- wp:heading -->
+		// cannot materialize as a real block on the page.
 		$this->assertCount( 1, $visible, 'phantom <!-- wp:heading --> must not appear in parsed output' );
 		$this->assertSame( 'core/paragraph', $visible[0]['blockName'] );
 		$this->assertNotContains( 'core/heading', $names );
+	}
+
+	/**
+	 * create_post's block builder must strip block-comment delimiters from a
+	 * block's innerHTML, the same as every other block-def write path.
+	 *
+	 * An unstripped `<!-- wp:… -->` delimiter in a block's innerHTML serializes a
+	 * live comment that parse_blocks reads as a phantom sibling block, injecting
+	 * content the caller never authored. Stripping on every write path is the
+	 * contract that prevents it.
+	 */
+	public function test_create_post_blocks_innerhtml_strips_comment_delimiters() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		$pm     = new \GravityKit\BlockMCP\Post_Manager( $this->crud );
+		$result = $pm->create_post(
+			array(
+				'title'  => 'Injection probe',
+				'blocks' => array(
+					array(
+						'name'      => 'core/paragraph',
+						'innerHTML' => '<p>before</p>--><!-- wp:heading {"level":1} --><h1>INJECT</h1><!-- /wp:heading -->',
+					),
+				),
+			)
+		);
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'create_post with hostile innerHTML must still succeed' );
+
+		$content = (string) get_post_field( 'post_content', (int) $result['id'] );
+
+		// The strip is the contract: a heading delimiter must never survive into
+		// saved content, where it parses as a phantom block nested inside the
+		// paragraph. Assert on the raw content and walk the full tree, not just
+		// top-level blocks, so a nested phantom cannot slip past.
+		$this->assertStringNotContainsString(
+			'<!-- wp:heading',
+			$content,
+			'the injected heading delimiter must be stripped, not saved as a live block comment'
+		);
+
+		$flatten   = static function ( array $blocks, callable $self ): array {
+			$names = array();
+			foreach ( $blocks as $b ) {
+				if ( null !== $b['blockName'] ) {
+					$names[] = $b['blockName'];
+				}
+				if ( ! empty( $b['innerBlocks'] ) ) {
+					$names = array_merge( $names, $self( $b['innerBlocks'], $self ) );
+				}
+			}
+			return $names;
+		};
+		$all_names = $flatten( parse_blocks( $content ), $flatten );
+
+		$this->assertNotContains( 'core/heading', $all_names, 'no phantom heading block may materialize at any depth' );
+		$this->assertContains( 'core/paragraph', $all_names );
 	}
 
 	// ── round-trip stability under hostile attrs ──────────────────
@@ -191,5 +248,55 @@ class BlockCommentInjectionTest extends BlockApiTestCase {
 		$saved   = parse_blocks( (string) get_post_field( 'post_content', $this->post_id ) );
 		$visible = array_values( array_filter( $saved, static fn( $b ) => null !== $b['blockName'] ) );
 		$this->assertSame( $payload, $visible[0]['attrs']['title'] );
+	}
+
+	// ── block-delimiter breakout on update / mutate ───────────────
+
+	/**
+	 * Block-comment delimiters in innerHTML on the UPDATE path must be stripped.
+	 *
+	 * The insert path already neutralized injected delimiters, but updating a
+	 * block's innerHTML with `<!-- /wp:x --><!-- wp:x -->` let it break out of
+	 * the block and materialize a phantom sibling on the next parse (kses strips
+	 * scripts, not block delimiters). `Block_Writer::sanitize_inner_html` now
+	 * strips the delimiters on every write path; this pins the update path.
+	 */
+	public function test_update_block_innerhtml_strips_injected_delimiters() {
+		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
+
+		$result = $this->crud->update_block( $post_id, 0, array(), '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' );
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'update must succeed before the delimiter assertion is meaningful' );
+
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ), 'update must not inject a phantom block delimiter' );
+	}
+
+	/**
+	 * The same guard covers edit_block_tree's `update-html` mutate op.
+	 */
+	public function test_mutate_update_html_strips_injected_delimiters() {
+		$post_id = $this->make_block_post( array( $this->paragraph_block( '<p>safe</p>' ) ) );
+
+		$result = $this->mutator->mutate( $post_id, 'update-html', array( 0 ), array( 'innerHTML' => '<p>x</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>injected</p>' ) );
+		$this->assertNotInstanceOf( \WP_Error::class, $result, 'mutate must succeed before the delimiter assertion is meaningful' );
+
+		$content = (string) get_post_field( 'post_content', $post_id );
+		$this->assertSame( 1, substr_count( $content, '<!-- wp:paragraph' ) );
+	}
+
+	/**
+	 * Build a flat core/paragraph block in WP-internal shape.
+	 *
+	 * @param string $html Paragraph innerHTML.
+	 * @return array<string, mixed>
+	 */
+	private function paragraph_block( string $html ): array {
+		return array(
+			'blockName'    => 'core/paragraph',
+			'attrs'        => array(),
+			'innerHTML'    => $html,
+			'innerContent' => array( $html ),
+			'innerBlocks'  => array(),
+		);
 	}
 }

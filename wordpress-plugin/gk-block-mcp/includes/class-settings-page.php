@@ -37,6 +37,27 @@ class Settings_Page {
 	const DUAL_MANUAL_OPTION = 'gk_block_api_dual_storage_blocks_manual';
 
 	/**
+	 * Option holding the block-preference scores + replacement map.
+	 *
+	 * @var string
+	 */
+	const PREFERENCES_OPTION = 'gk_block_api_preferences';
+
+	/**
+	 * Option holding the one-time preferences-model upgrade notice flag.
+	 *
+	 * @var string
+	 */
+	const PREFERENCES_NOTICE_OPTION = 'gk_block_api_preferences_notice';
+
+	/**
+	 * Option holding the create_post content-type allow-list.
+	 *
+	 * @var string
+	 */
+	const POST_TYPES_ALLOWLIST_OPTION = 'gk_block_api_post_types_allowlist';
+
+	/**
 	 * Block inventory instance.
 	 *
 	 * @var Block_Inventory
@@ -63,6 +84,7 @@ class Settings_Page {
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_post_gk_block_api_scan_storage_modes', array( $this, 'handle_scan' ) );
 		add_action( 'admin_post_gk_block_api_reset_defaults', array( $this, 'handle_reset' ) );
+		add_action( 'admin_post_gk_block_api_dismiss_prefs_notice', array( $this, 'handle_dismiss_prefs_notice' ) );
 		add_action( 'in_admin_header', array( $this, 'suppress_foreign_admin_notices' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
@@ -123,7 +145,7 @@ class Settings_Page {
 		// associative array; we sanitize sub-keys in the callback.
 		register_setting(
 			self::OPTION_GROUP,
-			'gk_block_api_preferences',
+			self::PREFERENCES_OPTION,
 			array(
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_preferences' ),
@@ -134,7 +156,7 @@ class Settings_Page {
 		// 2. Post-type allow-list for create_post (BLOCK-12 / v1.2).
 		register_setting(
 			self::OPTION_GROUP,
-			'gk_block_api_post_types_allowlist',
+			self::POST_TYPES_ALLOWLIST_OPTION,
 			array(
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_post_type_allowlist' ),
@@ -194,6 +216,21 @@ class Settings_Page {
 				'default'           => '0',
 			)
 		);
+
+		// 7. "Expose operations as WordPress Abilities" toggle. Same '0'/'1'
+		// string storage as above. Default '0' (off, opt-in): registering
+		// exposes the operations to the Abilities REST API and to AI agents via
+		// an MCP consumer — capability-gated, but a network-reachable surface the
+		// owner opts into rather than one that turns on during a core update.
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
+				'default'           => '0',
+			)
+		);
 	}
 
 	// ──────────────────────────────────────────────────────────────────
@@ -223,12 +260,97 @@ class Settings_Page {
 	}
 
 	/**
-	 * Sanitize the indexed-row form input back into the canonical
-	 * `namespace_scores` + `replacement_map` shape Preferences expects.
+	 * The score a namespace resolves to with no override, mirroring
+	 * Preferences::get_block_score(): the shipped default (`core` => 90) or the
+	 * neutral fallback (50) for everything else. Used to keep stored scores
+	 * overrides-only; a row that merely echoes this value is not persisted.
 	 *
-	 * Form input is row-indexed so we can rename namespaces/blocks safely
-	 * and so a new row's values are correlated. Rows flagged with `delete:1`
-	 * are dropped.
+	 * @param string $ns Block-family namespace (e.g. "core").
+	 * @return int
+	 */
+	private function resolved_default_score( $ns ) {
+		$defaults = Preferences::get_defaults();
+		return isset( $defaults['namespace_scores'][ $ns ] )
+			? (int) $defaults['namespace_scores'][ $ns ]
+			: 50;
+	}
+
+	/**
+	 * Block-family namespaces present in published content, read from the
+	 * inventory's cached scan only.
+	 *
+	 * Reads the inventory transient directly rather than calling
+	 * Block_Inventory::get_stats(), which would force a full-site walk on a cold
+	 * cache during a settings page render. When the cache is cold this returns an
+	 * empty list; the in-content leg of the score-table row universe is additive,
+	 * so the table degrades to registered ∪ overridden until the next scan warms
+	 * the cache.
+	 *
+	 * @return string[] Namespaces found in content (may be empty).
+	 */
+	private function content_namespaces() {
+		$cached = get_transient( Block_Inventory::CACHE_KEY );
+		if ( ! is_array( $cached ) || empty( $cached['namespace_totals'] ) || ! is_array( $cached['namespace_totals'] ) ) {
+			return array();
+		}
+		return array_keys( $cached['namespace_totals'] );
+	}
+
+	/**
+	 * Render the third-column control for a namespace score row.
+	 *
+	 * Overridden rows get a Reset control that restores the family's default
+	 * score (the overrides-only save then drops it from storage); rows already at
+	 * their default get a muted "default" marker, since there is nothing to reset.
+	 *
+	 * @param string $ns          Block-family namespace.
+	 * @param bool   $is_override Whether this row currently holds a stored override.
+	 * @return void
+	 */
+	private function render_namespace_action_cell( $ns, $is_override ) {
+		if ( $is_override ) {
+			?>
+			<button type="button" class="components-button is-link gk-block-mcp-reset-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: block family name */ __( 'Reset %s to its default score', 'gk-block-mcp' ), $ns ) ); ?>"><?php esc_html_e( 'Reset', 'gk-block-mcp' ); ?></button>
+			<?php
+			return;
+		}
+		?>
+		<span class="gk-block-mcp-row-default description"><?php esc_html_e( 'default', 'gk-block-mcp' ); ?></span>
+		<?php
+	}
+
+	/**
+	 * Plain-language tier label for a 0–100 block-family score, mirroring the
+	 * thresholds the engine enforces (>=80 preferred, >=50 acceptable, >=10
+	 * discouraged, otherwise blocked). Shown beside the numeric score so a
+	 * non-technical admin reads "Preferred" rather than decoding "90".
+	 *
+	 * @param int $score Numeric score, 0–100.
+	 * @return string
+	 */
+	private function score_tier_label( $score ) {
+		$score = (int) $score;
+		if ( $score >= 80 ) {
+			return __( 'Preferred', 'gk-block-mcp' );
+		}
+		if ( $score >= 50 ) {
+			return __( 'Fine', 'gk-block-mcp' );
+		}
+		if ( $score >= 10 ) {
+			return __( 'Discouraged', 'gk-block-mcp' );
+		}
+		return __( 'Blocked', 'gk-block-mcp' );
+	}
+
+	/**
+	 * Sanitize the indexed-row form input into the stored `namespace_scores` +
+	 * `replacement_map` shape.
+	 *
+	 * Form input is row-indexed so namespaces/blocks can be renamed safely and a
+	 * new row's values stay correlated. Rows flagged with `delete:1` are dropped.
+	 * `namespace_scores` is stored overrides-only (scores equal to the resolved
+	 * default are skipped); `replacement_map` is the admin's authoritative list,
+	 * stored verbatim with no shipped defaults merged in.
 	 *
 	 * @param mixed $input Raw POST value.
 	 * @return array
@@ -238,25 +360,53 @@ class Settings_Page {
 			return array();
 		}
 
-		$out = array();
+		$out            = array();
+		$dropped_scored = 0;
 
-		// Namespace tier scores — indexed rows: [{name, score, delete?}, ...].
+		// Namespace tier scores arrive as indexed rows, each carrying a name, a
+		// score, and an optional delete flag.
 		if ( isset( $input['namespace_rows'] ) && is_array( $input['namespace_rows'] ) ) {
 			$out['namespace_scores'] = array();
 			foreach ( $input['namespace_rows'] as $row ) {
 				if ( ! is_array( $row ) || ! empty( $row['delete'] ) ) {
 					continue;
 				}
-				$ns = isset( $row['name'] ) ? sanitize_key( $row['name'] ) : '';
+				$ns    = isset( $row['name'] ) ? sanitize_key( $row['name'] ) : '';
+				$score = isset( $row['score'] ) ? (int) $row['score'] : 0;
 				if ( '' === $ns ) {
+					// A score with no usable name is a half-finished edit, not the
+					// blank trailing row. Drop it (it can't key the map) but count
+					// it so the save screen warns rather than losing it silently.
+					if ( $score > 0 ) {
+						++$dropped_scored;
+					}
 					continue;
 				}
-				$score                          = isset( $row['score'] ) ? (int) $row['score'] : 0;
-				$out['namespace_scores'][ $ns ] = max( 0, min( 100, $score ) );
+				$score = max( 0, min( 100, $score ) );
+				if ( $score !== $this->resolved_default_score( $ns ) ) {
+					// Overrides-only: a score that merely echoes the resolved
+					// default leaves no trace, so storage never accumulates the
+					// neutral defaults and Remove genuinely reverts to default.
+					$out['namespace_scores'][ $ns ] = $score;
+				}
+			}
+		} elseif ( isset( $input['namespace_scores'] ) && is_array( $input['namespace_scores'] ) ) {
+			// Already-canonical shape. Core double-sanitizes an option on its first
+			// write (update_option() → add_option()), so the second pass receives
+			// this method's own {ns => score} output rather than form rows. Re-clean
+			// it (and re-apply overrides-only) so a second pass is idempotent.
+			$out['namespace_scores'] = array();
+			foreach ( $input['namespace_scores'] as $ns => $score ) {
+				$ns    = sanitize_key( $ns );
+				$score = max( 0, min( 100, (int) $score ) );
+				if ( '' !== $ns && $score !== $this->resolved_default_score( $ns ) ) {
+					$out['namespace_scores'][ $ns ] = $score;
+				}
 			}
 		}
 
-		// Replacement map — indexed rows: [{from, to, delete?}, ...].
+		// Replacement map arrives as indexed rows, each carrying a from, a to, and
+		// an optional delete flag.
 		if ( isset( $input['replacement_rows'] ) && is_array( $input['replacement_rows'] ) ) {
 			$out['replacement_map'] = array();
 			foreach ( $input['replacement_rows'] as $row ) {
@@ -269,10 +419,38 @@ class Settings_Page {
 					$out['replacement_map'][ $from ] = $to;
 				}
 			}
+		} elseif ( isset( $input['replacement_map'] ) && is_array( $input['replacement_map'] ) ) {
+			// Already-canonical shape (see the namespace branch above); re-clean
+			// the {from => to} map so a second sanitize pass is idempotent.
+			$out['replacement_map'] = array();
+			foreach ( $input['replacement_map'] as $from => $to ) {
+				$from = $this->sanitize_block_name( $from );
+				$to   = $this->sanitize_block_name( $to );
+				if ( '' !== $from && '' !== $to ) {
+					$out['replacement_map'][ $from ] = $to;
+				}
+			}
+		}
+
+		// No defaults are layered in: `namespace_scores` holds only the admin's
+		// overrides (defaults resolve at read time) and `replacement_map` is the
+		// admin's authoritative list (taken verbatim, so a removed mapping stays
+		// removed). pattern_scoring and any forwards-compat keys ride along via the
+		// array_merge below.
+
+		// Warn rather than silently swallow a score the admin entered without a
+		// block-family name; otherwise the edit vanishes with no trace on save.
+		if ( $dropped_scored > 0 ) {
+			add_settings_error(
+				Preferences::OPTION_KEY,
+				'gk_block_api_namespace_row_dropped',
+				__( 'A block-family score was entered without a name and was skipped. Type a block family (for example, "core") next to the score and save again to keep it.', 'gk-block-mcp' ),
+				'warning'
+			);
 		}
 
 		// Preserve any other top-level keys the runtime may add (forwards-compat).
-		$existing = (array) get_option( 'gk_block_api_preferences', array() );
+		$existing = (array) get_option( self::PREFERENCES_OPTION, array() );
 		return array_merge( $existing, $out );
 	}
 
@@ -336,6 +514,31 @@ class Settings_Page {
 		return $name;
 	}
 
+	/**
+	 * Canonical post-save return URL for the settings form.
+	 *
+	 * WordPress's options.php redirects here after saving. Pinned to this plugin
+	 * page (active tab preserved) so a missing or host-mismatched browser referer
+	 * cannot bounce the save to bare WP General Settings.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string Admin URL for the Block MCP settings page.
+	 */
+	private function settings_return_url() {
+		// The only options.php form lives in the policy panel, so a save always
+		// returns to that tab. Reading $_GET['tab'] at render time returned the
+		// admin to whatever tab the page first loaded on, which is the wrong tab
+		// after a client-side tab switch.
+		return add_query_arg(
+			array(
+				'page' => self::PAGE_SLUG,
+				'tab'  => 'policy',
+			),
+			admin_url( 'options-general.php' )
+		);
+	}
+
 	// ──────────────────────────────────────────────────────────────────
 	// Action handlers (admin-post.php).
 	// ──────────────────────────────────────────────────────────────────
@@ -366,6 +569,37 @@ class Settings_Page {
 	}
 
 	/**
+	 * The UI-managed option keys the Settings screen owns.
+	 *
+	 * The single source of truth for a full settings reset (handle_reset), so no
+	 * delete_option() can be silently dropped. Includes the storage-scan results
+	 * and both throttle stamps: clearing the results but keeping a recent stamp
+	 * leaves the next scan/refresh throttled against wiped data. Excludes
+	 * lifecycle state (schema version, connection meta, sealed credentials, the
+	 * agent account); uninstall.php removes those as a superset of this list.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string[]
+	 */
+	public static function ui_managed_options() {
+		return array(
+			self::PREFERENCES_OPTION,
+			self::PREFERENCES_NOTICE_OPTION,
+			self::POST_TYPES_ALLOWLIST_OPTION,
+			self::DUAL_MANUAL_OPTION,
+			Media_Manager::UPLOADS_OPTION,
+			Post_Manager::ALLOW_TRASH_OPTION,
+			Block_Abilities::ENABLED_OPTION,
+			Block_Inventory::STORAGE_MODES_OPTION,
+			Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION,
+			Block_Inventory::REFRESH_LAST_RUN_OPTION,
+			Instructions::OPTION_KEY,
+			Instructions::UPDATED_AT_OPTION,
+		);
+	}
+
+	/**
 	 * "Reset to defaults" button handler. Deletes all UI-managed options
 	 * AND the inventory transients + per-post rate-limit transients so
 	 * the next read starts from a true clean slate.
@@ -376,13 +610,9 @@ class Settings_Page {
 		}
 		check_admin_referer( 'gk_block_api_reset_defaults' );
 
-		delete_option( 'gk_block_api_preferences' );
-		delete_option( 'gk_block_api_post_types_allowlist' );
-		delete_option( self::DUAL_MANUAL_OPTION );
-		delete_option( Media_Manager::UPLOADS_OPTION );
-		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
-		delete_option( Instructions::OPTION_KEY );
-		delete_option( Instructions::UPDATED_AT_OPTION );
+		foreach ( self::ui_managed_options() as $option ) {
+			delete_option( $option );
+		}
 		delete_transient( Block_Inventory::CACHE_KEY );
 
 		// Per-post rate-limit transients accumulate per write activity. Sweep
@@ -408,9 +638,71 @@ class Settings_Page {
 		exit;
 	}
 
+	/**
+	 * "Dismiss" handler for the post-upgrade preferences notice. Clears the
+	 * one-time flag the 1.5.0 migration sets, then returns to the settings page.
+	 */
+	public function handle_dismiss_prefs_notice() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-mcp' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( 'gk_block_api_dismiss_prefs_notice' );
+
+		delete_option( self::PREFERENCES_NOTICE_OPTION );
+
+		nocache_headers();
+		$args = array(
+			'page' => self::PAGE_SLUG,
+			'tab'  => 'policy',
+		);
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
 	// ──────────────────────────────────────────────────────────────────
 	// Render.
 	// ──────────────────────────────────────────────────────────────────
+
+	/**
+	 * Render the one-time post-upgrade preferences notice.
+	 *
+	 * Shown while the 1.5.0 migration flag is set (a site that had saved
+	 * preferences before the site-aware model). The notice explains that saved
+	 * settings were preserved and links to review them; Dismiss clears the flag,
+	 * as does "Reset to defaults". Rendered inline (not via admin_notices), which
+	 * the plugin's own screens suppress.
+	 *
+	 * @return void
+	 */
+	private function render_preferences_upgrade_notice() {
+		$show = '1' === (string) get_option( self::PREFERENCES_NOTICE_OPTION, '' );
+		if ( ! $show ) {
+			return;
+		}
+
+		$review_url  = add_query_arg(
+			array(
+				'page' => self::PAGE_SLUG,
+				'tab'  => 'policy',
+			),
+			admin_url( 'options-general.php' )
+		);
+		$dismiss_url = wp_nonce_url(
+			admin_url( 'admin-post.php?action=gk_block_api_dismiss_prefs_notice' ),
+			'gk_block_api_dismiss_prefs_notice'
+		);
+		?>
+		<div class="notice notice-info gk-block-mcp-prefs-upgrade-notice">
+			<p>
+				<?php esc_html_e( 'Block preferences are now site-aware. The table shows the block families registered on your site or used in your content, and nothing is treated as legacy unless you score it down. Your previously saved preferences were kept exactly as they were.', 'gk-block-mcp' ); ?>
+			</p>
+			<p>
+				<a href="<?php echo esc_url( $review_url ); ?>" class="button button-secondary"><?php esc_html_e( 'Review block preferences', 'gk-block-mcp' ); ?></a>
+				<a href="<?php echo esc_url( $dismiss_url ); ?>" class="button-link" style="margin-left: 8px;"><?php esc_html_e( 'Dismiss', 'gk-block-mcp' ); ?></a>
+			</p>
+		</div>
+		<?php
+	}
 
 	/**
 	 * Render the settings page.
@@ -434,23 +726,24 @@ class Settings_Page {
 			return;
 		}
 
-		$defaults         = Preferences::get_defaults();
-		$prefs            = (array) get_option( 'gk_block_api_preferences', array() );
-		$namespace_scores = isset( $prefs['namespace_scores'] ) && is_array( $prefs['namespace_scores'] )
-			? $prefs['namespace_scores']
-			: $defaults['namespace_scores'];
-		$replacement_map  = isset( $prefs['replacement_map'] ) && is_array( $prefs['replacement_map'] )
-			? $prefs['replacement_map']
-			: $defaults['replacement_map'];
-		$post_type_allow  = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
-		$manual_dual      = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
-		$scan_results     = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
-		$uploads_enabled  = \GravityKit\BlockMCP\Media_Manager::uploads_enabled();
-		$uploads_option   = \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION;
-		$trash_enabled    = \GravityKit\BlockMCP\Post_Manager::trashing_enabled();
-		$trash_option     = \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION;
-		$instructions_val = Instructions::get_addendum();
-		$instructions_max = Instructions::MAX_LENGTH;
+		// Site-aware, overrides-only view: `namespace_scores` holds only the admin's
+		// overrides (everything else resolves to its default at read time), and
+		// `replacement_map` is the admin's authoritative list. The score table's
+		// rows are built below from registered ∪ overridden ∪ in-content families.
+		$stored_prefs      = (array) get_option( Preferences::OPTION_KEY, array() );
+		$overrides_ns      = isset( $stored_prefs['namespace_scores'] ) && is_array( $stored_prefs['namespace_scores'] ) ? $stored_prefs['namespace_scores'] : array();
+		$replacement_map   = isset( $stored_prefs['replacement_map'] ) && is_array( $stored_prefs['replacement_map'] ) ? $stored_prefs['replacement_map'] : array();
+		$post_type_allow   = (array) get_option( self::POST_TYPES_ALLOWLIST_OPTION, array() );
+		$manual_dual       = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
+		$scan_results      = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
+		$uploads_enabled   = \GravityKit\BlockMCP\Media_Manager::uploads_enabled();
+		$uploads_option    = \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION;
+		$trash_enabled     = \GravityKit\BlockMCP\Post_Manager::trashing_enabled();
+		$trash_option      = \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION;
+		$abilities_enabled = \GravityKit\BlockMCP\Block_Abilities::is_enabled();
+		$abilities_option  = \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION;
+		$instructions_val  = Instructions::get_addendum();
+		$instructions_max  = Instructions::MAX_LENGTH;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -480,6 +773,16 @@ class Settings_Page {
 		}
 		$block_families = array_keys( $block_families );
 		sort( $block_families, SORT_NATURAL | SORT_FLAG_CASE );
+
+		// The score table is site-aware: one row per block family that is
+		// registered here, OR the admin has scored, OR appears in published
+		// content. Each row resolves to its override or its default score; a
+		// family in content whose plugin isn't registered is flagged orphaned.
+		$content_namespaces = $this->content_namespaces();
+		$registered_lookup  = array_flip( $block_families );
+		$content_lookup     = array_flip( $content_namespaces );
+		$row_namespaces     = array_values( array_unique( array_merge( $block_families, array_keys( $overrides_ns ), $content_namespaces ) ) );
+		sort( $row_namespaces, SORT_NATURAL | SORT_FLAG_CASE );
 
 		// Notices from action handlers. All inputs unslashed and clamped via
 		// absint before composition; the message itself never contains user data.
@@ -573,8 +876,10 @@ class Settings_Page {
 			</style>
 			<h1><?php esc_html_e( 'Block MCP Settings', 'gk-block-mcp' ); ?></h1>
 			<p class="description gk-block-mcp-subtitle" style="margin:4px 0 12px; max-width:800px;">
-				<?php esc_html_e( 'Connect AI assistants like Claude to edit your site — no code required. (MCP stands for Model Context Protocol, the technology that lets AI apps connect to your site.)', 'gk-block-mcp' ); ?>
+				<?php esc_html_e( 'Connect AI assistants like Claude to edit your site, no code required. (MCP stands for Model Context Protocol, the technology that lets AI apps connect to your site.)', 'gk-block-mcp' ); ?>
 			</p>
+
+			<?php $this->render_preferences_upgrade_notice(); ?>
 
 			<h2 class="nav-tab-wrapper">
 				<a href="
@@ -602,7 +907,7 @@ class Settings_Page {
 					)
 				);
 				?>
-							" data-tab="policy" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Settings', 'gk-block-mcp' ); ?></a>
+							" data-tab="policy" class="nav-tab<?php echo 'policy' === $tab ? ' nav-tab-active' : ''; ?>"><?php esc_html_e( 'Permissions & Blocks', 'gk-block-mcp' ); ?></a>
 			</h2>
 
 			<div class="gk-tab-panel" data-tab-panel="connect"<?php echo 'connect' === $tab ? '' : ' hidden'; ?>>
@@ -683,21 +988,30 @@ class Settings_Page {
 			</datalist>
 
 			<form method="post" action="options.php">
-				<?php settings_fields( self::OPTION_GROUP ); ?>
+				<?php
+				// Settings API fields with an explicit canonical _wp_http_referer,
+				// not settings_fields()' REQUEST_URI one. When the browser referer
+				// is absent or host-mismatched (proxy, www/non-www), options.php
+				// falls back to bare options-general.php (WP General Settings); the
+				// pin keeps the post-save redirect on this page.
+				printf( '<input type="hidden" name="option_page" value="%s" />', esc_attr( self::OPTION_GROUP ) );
+				echo '<input type="hidden" name="action" value="update" />';
+				wp_nonce_field( self::OPTION_GROUP . '-options', '_wpnonce', false );
+				printf( '<input type="hidden" name="_wp_http_referer" value="%s" />', esc_attr( $this->settings_return_url() ) );
+				?>
 
 
 				<h2><?php esc_html_e( 'What AI assistants can create', 'gk-block-mcp' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Choose which kinds of content AI assistants are allowed to create. Check the types you want to allow.', 'gk-block-mcp' ); ?></p>
-				<?php
-				$gk_allow_all_msg  = __( 'All public content types are currently allowed (the default).', 'gk-block-mcp' );
-				$gk_restricted_msg = __( 'Only the checked content types are allowed.', 'gk-block-mcp' );
-				?>
-				<p class="description gk-block-mcp-allow-all-note" aria-live="polite">
-					<span class="dashicons dashicons-info-outline" aria-hidden="true"></span>
-					<span class="gk-block-mcp-allow-all-text"><?php echo esc_html( empty( $post_type_allow ) ? $gk_allow_all_msg : $gk_restricted_msg ); ?></span>
+				<p class="description"><?php esc_html_e( 'Choose which kinds of content AI assistants are allowed to create.', 'gk-block-mcp' ); ?></p>
+				<?php $gk_allow_all_types = empty( $post_type_allow ); ?>
+				<p>
+					<label class="gk-block-mcp-allow-all-toggle">
+						<input type="checkbox" class="gk-block-mcp-allow-all" <?php checked( $gk_allow_all_types ); ?> aria-controls="gk-block-mcp-type-list" />
+						<strong><?php esc_html_e( 'Allow all content types', 'gk-block-mcp' ); ?></strong>
+					</label>
 				</p>
-				<fieldset class="gk-block-mcp-allowlist">
-					<legend class="screen-reader-text"><?php esc_html_e( 'Content types AI assistants are allowed to create', 'gk-block-mcp' ); ?></legend>
+				<fieldset class="gk-block-mcp-allowlist" id="gk-block-mcp-type-list"<?php echo $gk_allow_all_types ? ' hidden' : ''; ?>>
+					<legend><?php esc_html_e( 'Allow only these types — uncheck one to block it:', 'gk-block-mcp' ); ?></legend>
 					<?php
 					$pt_slugs = array_keys( $registered_post_types );
 					$pt_count = count( $pt_slugs );
@@ -711,6 +1025,13 @@ class Settings_Page {
 						</label>
 					<?php endfor; ?>
 				</fieldset>
+				<noscript>
+					<style>
+						/* Without JS the master toggle can neither reveal nor enable the list; show it and hide the dead toggle so a no-JS admin can still restrict types. */
+						#gk-block-mcp-type-list { display: block; }
+						.gk-block-mcp-allow-all-toggle { display: none; }
+					</style>
+				</noscript>
 				<style>
 					.gk-block-mcp-allowlist {
 						display: grid;
@@ -748,32 +1069,57 @@ class Settings_Page {
 				</style>
 				<script>
 					( function () {
-						var fieldset = document.querySelector( '.gk-block-mcp-allowlist' );
-						var note     = document.querySelector( '.gk-block-mcp-allow-all-note' );
-						if ( ! fieldset || ! note ) {
+						var allowAll = document.querySelector( '.gk-block-mcp-allow-all' );
+						var list     = document.getElementById( 'gk-block-mcp-type-list' );
+						if ( ! allowAll || ! list ) {
 							return;
 						}
-						var textEl        = note.querySelector( '.gk-block-mcp-allow-all-text' );
-						var allowAllMsg   = <?php echo wp_json_encode( $gk_allow_all_msg ); ?>;
-						var restrictedMsg = <?php echo wp_json_encode( $gk_restricted_msg ); ?>;
-						var boxes = fieldset.querySelectorAll( 'input[type="checkbox"]' );
-						function update() {
+						var boxes = list.querySelectorAll( 'input[type="checkbox"]' );
+						function sync() {
+							var on = allowAll.checked;
+							list.hidden = on;
+							Array.prototype.forEach.call( boxes, function ( box ) {
+								box.disabled = on;
+							} );
+							// Revealing the list with nothing checked would submit an empty
+							// allow-list, which means "all" again. Start from all-checked so
+							// "checked = allowed" always holds; the admin unchecks to block.
+							if ( ! on ) {
+								var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
+									return box.checked;
+								} );
+								if ( ! anyChecked ) {
+									Array.prototype.forEach.call( boxes, function ( box ) {
+										box.checked = true;
+									} );
+								}
+							}
+						}
+						// If the admin unchecks every type, the allow-list is empty, which
+						// the engine treats as "all". Reflect that honestly by re-enabling
+						// "Allow all" rather than silently allowing everything from a
+						// "restricted to nothing" state.
+						list.addEventListener( 'change', function () {
+							if ( allowAll.checked ) {
+								return;
+							}
 							var anyChecked = Array.prototype.some.call( boxes, function ( box ) {
 								return box.checked;
 							} );
-							if ( textEl ) {
-								textEl.textContent = anyChecked ? restrictedMsg : allowAllMsg;
+							if ( ! anyChecked ) {
+								allowAll.checked = true;
+								sync();
 							}
-						}
-						fieldset.addEventListener( 'change', update );
-						update();
+						} );
+						allowAll.addEventListener( 'change', sync );
+						sync();
 					} )();
 				</script>
 
 
 				<h2><?php esc_html_e( 'Media uploads', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Turn this off to stop AI assistants from adding files to your Media Library. They can still edit blocks — they just won\'t be able to upload images or other files.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this off to stop AI assistants from adding files to your Media Library. They can still edit blocks; they just won\'t be able to upload images or other files.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -819,7 +1165,7 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Trash', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Turn this on to let AI assistants move posts and pages to the trash. It\'s off by default. Even when on, they can\'t permanently delete anything — trashed items stay in your Trash until you empty it, and you can restore them.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Turn this on to let AI assistants move posts and pages to the trash. It\'s off by default. Even when on, they can\'t permanently delete anything. Trashed items stay in your Trash until you empty it, and you can restore them.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -853,6 +1199,76 @@ class Settings_Page {
 							/* translators: %s: filter name */
 							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
 							'<code>gk/block-mcp/post/allow-trash</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
+
+				<h2><?php esc_html_e( 'WordPress MCP Adapter', 'gk-block-mcp' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Turn this on to make Block MCP\'s editing tools available to AI agents through the WordPress MCP Adapter. Each agent still has to sign in and have permission to edit, the same as the apps on the Connect tab.', 'gk-block-mcp' ); ?>
+				</p>
+				<?php
+				$abilities_available = \GravityKit\BlockMCP\Block_Abilities::is_available();
+				$adapter_available   = \GravityKit\BlockMCP\Block_Abilities::adapter_available();
+				if ( ! $abilities_available ) :
+					?>
+					<p class="description"><em><?php esc_html_e( 'This needs WordPress 6.9 or newer, and your site is not there yet, so it does nothing for now. Your choice is saved and takes effect once you update.', 'gk-block-mcp' ); ?></em></p>
+					<?php
+				elseif ( ! $adapter_available ) :
+					?>
+					<p class="description"><em>
+						<?php
+						echo wp_kses(
+							sprintf(
+								/* translators: %s: link labeled "download the latest release" pointing to the WordPress MCP Adapter GitHub releases page */
+								__( 'To let AI agents connect, install and activate the WordPress MCP Adapter plugin. It is a separate plugin on GitHub, not in the WordPress plugin directory: %s, then upload it under Plugins → Add New → Upload Plugin. Until it is active, your choice is saved but there is no endpoint for agents to connect to.', 'gk-block-mcp' ),
+								'<a href="https://github.com/WordPress/mcp-adapter/releases/latest" target="_blank" rel="noopener noreferrer">' . esc_html__( 'download the latest release', 'gk-block-mcp' ) . '</a>'
+							),
+							array(
+								'a' => array(
+									'href'   => array(),
+									'target' => array(),
+									'rel'    => array(),
+								),
+							)
+						);
+						?>
+					</em></p>
+					<?php
+				endif;
+				?>
+				<p class="description gk-block-mcp-tech-details">
+					<strong><?php esc_html_e( 'Technical details:', 'gk-block-mcp' ); ?></strong>
+					<?php esc_html_e( 'Registers Block MCP\'s operations as WordPress Abilities. The WordPress MCP Adapter exposes them to AI agents as MCP tools, and any Abilities consumer can discover and run them. Every operation stays capability-gated, identical to the REST API.', 'gk-block-mcp' ); ?>
+				</p>
+				<input type="hidden" name="<?php echo esc_attr( $abilities_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $abilities_option ); ?>"
+						value="1"
+						<?php checked( $abilities_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Let AI agents edit my pages and posts through the WordPress MCP Adapter', 'gk-block-mcp' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so the box reflects the value the API actually honors.
+				$abilities_raw    = get_option( $abilities_option, '0' );
+				$abilities_stored = '0' !== (string) $abilities_raw;
+				// Applies the gk/block-mcp/abilities/enabled filter (documented in class-block-abilities.php).
+				$abilities_filtered = (bool) apply_filters( 'gk/block-mcp/abilities/enabled', $abilities_stored );
+				if ( $abilities_stored !== $abilities_filtered ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
+							'<code>gk/block-mcp/abilities/enabled</code>'
 						);
 						?>
 					</p>
@@ -917,7 +1333,7 @@ class Settings_Page {
 				<summary>
 					<span class="gk-block-mcp-advanced__text">
 						<span class="gk-block-mcp-advanced__label"><?php esc_html_e( 'Advanced', 'gk-block-mcp' ); ?></span>
-						<span class="gk-block-mcp-advanced__desc"><?php esc_html_e( 'Custom instructions, block preferences, replacements, and blocks that store data in two places — most sites won\'t need these.', 'gk-block-mcp' ); ?></span>
+						<span class="gk-block-mcp-advanced__desc"><?php esc_html_e( 'Custom instructions, block preferences, replacements, and blocks that store data in two places. Most sites won\'t need these.', 'gk-block-mcp' ); ?></span>
 					</span>
 				</summary>
 				<h2><?php esc_html_e( 'Custom instructions for AI assistants', 'gk-block-mcp' ); ?></h2>
@@ -926,8 +1342,8 @@ class Settings_Page {
 					echo wp_kses(
 						sprintf(
 							/* translators: 1: link to MCP spec, 2: max length */
-							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site — which callout styles to use, your preferred code-block look, how documents should be structured — so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-mcp' ),
-							'https://modelcontextprotocol.io/specification',
+							__( 'Notes that every connected AI assistant reads the moment it connects. Use them to set conventions for your site (which callout styles to use, your preferred code-block look, how documents should be structured) so you don\'t have to repeat yourself each time. Plain text, up to %2$d characters. <a href="%1$s" target="_blank" rel="noopener noreferrer">Learn more</a>.', 'gk-block-mcp' ),
+							'https://www.gravitykit.com/wordpress-block-mcp/',
 							(int) $instructions_max
 						),
 						array(
@@ -962,7 +1378,7 @@ class Settings_Page {
 					rows="8"
 					data-max-codepoints="<?php echo esc_attr( (string) $instructions_max ); ?>"
 					class="large-text code"
-					placeholder="<?php esc_attr_e( "Callouts: use core/group with is-style-callout-info|warning|danger|success|note.\nCode blocks: use kevinbatdorf/code-block-pro with theme=gravitykit-dark, language=auto.\nFirst H2 of every doc should be 'Overview'.", 'gk-block-mcp' ); ?>"
+					placeholder="<?php esc_attr_e( "Example:\nAlways start a document with an 'Overview' heading.\nUse the gray callout style for notes and the yellow one for warnings.", 'gk-block-mcp' ); ?>"
 				><?php echo esc_textarea( $instructions_val ); ?></textarea>
 				<p class="description">
 					<span id="gk-block-mcp-instructions-count"><?php echo esc_html( (string) mb_strlen( $instructions_val, 'UTF-8' ) ); ?></span>
@@ -970,7 +1386,7 @@ class Settings_Page {
 					echo esc_html(
 						sprintf(
 							/* translators: %d: max length */
-							__( '/ %d characters used. Keep it short — a few clear bullet points work better than long paragraphs.', 'gk-block-mcp' ),
+							__( '/ %d characters used. Keep it short. A few clear bullet points work better than long paragraphs.', 'gk-block-mcp' ),
 							(int) $instructions_max
 						)
 					);
@@ -1001,55 +1417,62 @@ class Settings_Page {
 
 
 				<h2><?php esc_html_e( 'Which blocks AI should prefer', 'gk-block-mcp' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Give each block family a score from 0 to 100 to tell AI assistants which blocks to favor. 80 or higher = preferred, 50 or higher = fine to use, 10 or higher = discouraged (the assistant is warned), below 10 = blocked.', 'gk-block-mcp' ); ?></p>
+				<p class="description"><?php esc_html_e( 'A "block family" is a group of blocks from one source — for example, WordPress core, or a page-builder plugin. The score sets how much AI assistants favor that family, shown as a plain label next to each one: Preferred, Fine, Discouraged, or Blocked. Most sites never need to change this — the defaults are sensible.', 'gk-block-mcp' ); ?></p>
 				<table class="widefat striped gk-block-mcp-growable" data-row-prefix="gk_block_api_preferences[namespace_rows]" style="max-width: 820px;">
 					<thead>
 						<tr>
 							<th scope="col"><?php esc_html_e( 'Block family', 'gk-block-mcp' ); ?></th>
 							<th scope="col" style="width: 90px;"><?php esc_html_e( 'Score', 'gk-block-mcp' ); ?></th>
-							<th scope="col" style="width: 100px;"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></th>
+							<th scope="col" style="width: 100px;"><span class="screen-reader-text"><?php esc_html_e( 'Reset to default', 'gk-block-mcp' ); ?></span></th>
 						</tr>
 					</thead>
 					<tbody>
 						<?php
-						$ns_keys  = array_keys( $namespace_scores );
-						$ns_count = count( $ns_keys );
+						$ns_count = count( $row_namespaces );
 						for ( $ns_index = 0; $ns_index < $ns_count; $ns_index++ ) :
-							$ns    = $ns_keys[ $ns_index ];
-							$score = $namespace_scores[ $ns ];
+							$ns          = $row_namespaces[ $ns_index ];
+							$is_override = isset( $overrides_ns[ $ns ] );
+							$score       = $is_override ? (int) $overrides_ns[ $ns ] : $this->resolved_default_score( $ns );
+							$is_orphaned = isset( $content_lookup[ $ns ] ) && ! isset( $registered_lookup[ $ns ] );
 							?>
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Block family', 'gk-block-mcp' ); ?></label>
-									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
+									<input type="text" id="gk-ns-name-<?php echo esc_attr( (string) $ns_index ); ?>" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" value="<?php echo esc_attr( (string) $ns ); ?>" class="large-text" readonly="readonly"
+									<?php
+									if ( $is_orphaned ) :
+										?>
+										aria-describedby="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>"<?php endif; ?> />
+									<?php if ( $is_orphaned ) : ?>
+										<span class="gk-block-mcp-row-orphaned description" title="<?php esc_attr_e( 'This block family appears in your content but its plugin is not active on this site.', 'gk-block-mcp' ); ?>"><?php esc_html_e( 'not active on this site', 'gk-block-mcp' ); ?></span>
+										<span id="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>" class="screen-reader-text"><?php esc_html_e( 'This block family appears in your content but its plugin is not active on this site.', 'gk-block-mcp' ); ?></span>
+									<?php endif; ?>
 								</td>
 								<td>
-									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php esc_html_e( 'Score', 'gk-block-mcp' ); ?></label>
-									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) (int) $score ); ?>" class="small-text" />
+									<label class="screen-reader-text" for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php echo esc_html( sprintf( /* translators: %s: block family name */ __( 'Score for %s', 'gk-block-mcp' ), $ns ) ); ?></label>
+									<input type="number" id="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" value="<?php echo esc_attr( (string) $score ); ?>" class="small-text" data-default-score="<?php echo esc_attr( (string) $this->resolved_default_score( $ns ) ); ?>"
+									<?php
+									if ( $is_orphaned ) :
+										?>
+										aria-describedby="gk-ns-orphaned-<?php echo esc_attr( (string) $ns_index ); ?>"<?php endif; ?> />
+										<span class="gk-block-mcp-tier" data-tier-for="gk-ns-score-<?php echo esc_attr( (string) $ns_index ); ?>"><?php echo esc_html( $this->score_tier_label( $score ) ); ?></span>
 								</td>
 								<td>
-									<button type="button" class="components-button is-link is-destructive gk-block-mcp-remove-row" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: block family name */ __( 'Remove %s', 'gk-block-mcp' ), (string) $ns ) ); ?>"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></button>
+									<?php $this->render_namespace_action_cell( (string) $ns, $is_override ); ?>
 								</td>
 							</tr>
 						<?php endfor; ?>
-						<?php $ns_index = $ns_count; ?>
-						<tr>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-name-new"><?php esc_html_e( 'New block family', 'gk-block-mcp' ); ?></label>
-								<input type="text" id="gk-ns-name-new" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][name]" placeholder="<?php esc_attr_e( 'new-namespace', 'gk-block-mcp' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-families" autocomplete="off" />
-							</td>
-							<td>
-								<label class="screen-reader-text" for="gk-ns-score-new"><?php esc_html_e( 'New score', 'gk-block-mcp' ); ?></label>
-								<input type="number" id="gk-ns-score-new" min="0" max="100" name="gk_block_api_preferences[namespace_rows][<?php echo esc_attr( (string) $ns_index ); ?>][score]" placeholder="0" class="small-text" />
-							</td>
-							<td></td>
-						</tr>
 					</tbody>
 				</table>
+				<p class="description gk-block-mcp-namespace-help">
+					<?php esc_html_e( 'These are the block families WordPress sees on this site: every one registered by an active plugin or theme, plus any found in your content. Adjust a score to override its default; use Reset to restore it.', 'gk-block-mcp' ); ?>
+				</p>
 
 
 				<h2><?php esc_html_e( 'Replacement map', 'gk-block-mcp' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'When an AI assistant is blocked from using an older block, it suggests the replacement you set here. Start typing in the Replacement column to search the blocks available on your site, or type any block name.', 'gk-block-mcp' ); ?></p>
+				<?php // Always-present marker so an emptied table still submits replacement_rows; the sanitizer then clears the stored map instead of merging the old one forward. ?>
+				<input type="hidden" name="gk_block_api_preferences[replacement_rows][__present]" value="1" />
 				<table class="widefat striped gk-block-mcp-growable" data-row-prefix="gk_block_api_preferences[replacement_rows]" style="max-width: 820px;">
 					<thead>
 						<tr>
@@ -1069,7 +1492,7 @@ class Settings_Page {
 							<tr>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Legacy block', 'gk-block-mcp' ); ?></label>
-									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+									<input type="text" id="gk-rm-from-<?php echo esc_attr( (string) $rm_index ); ?>" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" value="<?php echo esc_attr( (string) $from ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 								</td>
 								<td>
 									<label class="screen-reader-text" for="gk-rm-to-<?php echo esc_attr( (string) $rm_index ); ?>"><?php esc_html_e( 'Replacement block', 'gk-block-mcp' ); ?></label>
@@ -1084,21 +1507,28 @@ class Settings_Page {
 						<tr>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-from-new"><?php esc_html_e( 'New legacy block', 'gk-block-mcp' ); ?></label>
-								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-mcp' ); ?>" class="large-text" data-row-trigger="1" list="gk-block-names" autocomplete="off" />
+								<input type="text" id="gk-rm-from-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][from]" placeholder="<?php esc_attr_e( 'legacy/block-name', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 							</td>
 							<td>
 								<label class="screen-reader-text" for="gk-rm-to-new"><?php esc_html_e( 'New replacement', 'gk-block-mcp' ); ?></label>
 								<input type="text" id="gk-rm-to-new" name="gk_block_api_preferences[replacement_rows][<?php echo esc_attr( (string) $rm_index ); ?>][to]" placeholder="<?php esc_attr_e( 'core/block-name', 'gk-block-mcp' ); ?>" class="large-text" list="gk-block-names" autocomplete="off" />
 							</td>
-							<td></td>
+							<td>
+								<button type="button" class="components-button is-link is-destructive gk-block-mcp-remove-row" aria-label="<?php esc_attr_e( 'Remove this row', 'gk-block-mcp' ); ?>"><?php esc_html_e( 'Remove', 'gk-block-mcp' ); ?></button>
+							</td>
 						</tr>
 					</tbody>
 				</table>
+				<p class="gk-block-mcp-add-row-wrap">
+					<button type="button" class="components-button is-secondary gk-block-mcp-add-row" data-target-table="replacement">
+						<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span><?php esc_html_e( 'Add row', 'gk-block-mcp' ); ?>
+					</button>
+				</p>
 
 
 				<h2><?php esc_html_e( 'Blocks that store data in two places', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Most blocks keep their content in one place. A few keep the same content in two places at once — and if an AI assistant updates only one of them, the block quietly breaks.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Most blocks keep their content in one place. A few keep the same content in two places at once, and if an AI assistant updates only one of them, the block quietly breaks.', 'gk-block-mcp' ); ?>
 				</p>
 				<p class="description">
 					<?php
@@ -1109,10 +1539,10 @@ class Settings_Page {
 					?>
 				</p>
 				<p class="description">
-					<?php esc_html_e( 'Block MCP finds most of these automatically when it scans your site. Add any others here, one per line — assistants will then be required to update both copies together, so nothing breaks.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Block MCP finds most of these automatically when it scans your site. Add any others here, one per line. Assistants will then be required to update both copies together, so nothing breaks.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php $dual_placeholder = "yoast/faq-block\nnamespace/block-name"; ?>
-				<label class="screen-reader-text" for="gk-block-mcp-dual-manual"><?php esc_html_e( 'Blocks that keep the same content in two places — one block name per line', 'gk-block-mcp' ); ?></label>
+				<label class="screen-reader-text" for="gk-block-mcp-dual-manual"><?php esc_html_e( 'Blocks that keep the same content in two places, one block name per line', 'gk-block-mcp' ); ?></label>
 				<textarea id="gk-block-mcp-dual-manual" name="<?php echo esc_attr( self::DUAL_MANUAL_OPTION ); ?>" rows="5" class="large-text code" placeholder="<?php echo esc_attr( $dual_placeholder ); ?>"><?php echo esc_textarea( implode( "\n", $manual_dual ) ); ?></textarea>
 				</details>
 
@@ -1152,15 +1582,19 @@ class Settings_Page {
 			</form>
 
 			<script>
-			/* Auto-grow tables marked .gk-block-mcp-growable. When the user types
-			 * into the last row's "trigger" input (data-row-trigger="1"), clone
-			 * that row, blank out its values, and increment the [N] index in
-			 * every input's name attribute so the form posts as a fresh entry.
-			 * Announces the new row via the polite live region for screen readers. */
+			/* Growable tables marked .gk-block-mcp-growable. Each table is paired
+			 * with an explicit "Add row" button (its next sibling); clicking it
+			 * clones the last row, blanks its values, and reindexes the [N] in
+			 * every input's name so the new entry posts on its own. An explicit
+			 * button is deterministic — the rows it adds are in the form DOM the
+			 * instant they appear, so none can be lost on save. New and removed
+			 * rows are announced via the polite live region for screen readers. */
 			(function () {
 				var live = document.getElementById('gk-block-mcp-live');
 				var announcement = <?php echo wp_json_encode( __( 'New row added. You can keep adding entries.', 'gk-block-mcp' ) ); ?>;
 				var removedMsg   = <?php echo wp_json_encode( __( 'Row removed. Save changes to apply.', 'gk-block-mcp' ) ); ?>;
+				var resetMsg     = <?php echo wp_json_encode( __( 'Score reset to its default. Save changes to apply.', 'gk-block-mcp' ) ); ?>;
+				var defaultLabel = <?php echo wp_json_encode( __( 'default', 'gk-block-mcp' ) ); ?>;
 
 				function announce(msg) {
 					if (!live) return;
@@ -1176,17 +1610,14 @@ class Settings_Page {
 						if (!tbody) return;
 
 						var nextIdx = tbody.querySelectorAll('tr').length;
+						// Capture a row template up front so Add row still works after every
+						// row (now individually removable) has been deleted.
+						var rowTemplate = tbody.lastElementChild ? tbody.lastElementChild.cloneNode( true ) : null;
 
-						tbody.addEventListener('input', function (e) {
-							var trigger = e.target.closest('[data-row-trigger]');
-							if (!trigger) return;
-							var lastRow = tbody.lastElementChild;
-							if (!lastRow || !lastRow.contains(trigger)) return;
-							if (trigger.value === '') return;
-
-							trigger.removeAttribute('data-row-trigger');
-
-							var clone = lastRow.cloneNode(true);
+						function addRow() {
+							var template = tbody.lastElementChild || rowTemplate;
+							if (!template) return;
+							var clone = template.cloneNode(true);
 							var idx = nextIdx++;
 							var inputs = clone.querySelectorAll('input');
 							for (var i = 0, ilen = inputs.length; i < ilen; i++) {
@@ -1205,19 +1636,20 @@ class Settings_Page {
 									input.name = input.name.replace(/\[(\d+)\]/, '[' + idx + ']');
 								}
 							}
-
-							var triggerCell = trigger.closest('td');
-							if (triggerCell) {
-								var cellIndex = Array.prototype.indexOf.call(triggerCell.parentNode.children, triggerCell);
-								var newCell = clone.children[cellIndex];
-								if (newCell) {
-									var newTrigger = newCell.querySelector('input');
-									if (newTrigger) newTrigger.setAttribute('data-row-trigger', '1');
-								}
-							}
 							tbody.appendChild(clone);
 							announce(announcement);
-						});
+							var firstField = clone.querySelector('input:not([type="hidden"])');
+							if (firstField) { firstField.focus(); }
+						}
+
+						var addWrap = table.nextElementSibling;
+						var addBtn = addWrap ? addWrap.querySelector('.gk-block-mcp-add-row') : null;
+						if (addBtn) {
+							addBtn.addEventListener('click', function (e) {
+								e.preventDefault();
+								addRow();
+							});
+						}
 
 						tbody.addEventListener('click', function (e) {
 							var btn = e.target.closest('.gk-block-mcp-remove-row');
@@ -1235,9 +1667,73 @@ class Settings_Page {
 							if (focusTarget) { focusTarget.focus(); }
 							announce(removedMsg);
 						});
+
+						tbody.addEventListener('click', function (e) {
+							var reset = e.target.closest('.gk-block-mcp-reset-row');
+							if (!reset || !tbody.contains(reset)) return;
+							e.preventDefault();
+							var row = reset.closest('tr');
+							if (!row) return;
+							var score = row.querySelector('input[type="number"]');
+							if (score) {
+								var def = score.getAttribute('data-default-score');
+								score.value = (def === null ? '' : def);
+								// A programmatic value change fires no input event, so notify the
+								// live tier badge (and any other input listeners) explicitly.
+								score.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+							}
+							// Row now matches its default; swap the control for the muted marker.
+							var cell = reset.parentNode;
+							reset.parentNode.removeChild(reset);
+							if (cell) {
+								var marker = document.createElement('span');
+								marker.className = 'gk-block-mcp-row-default description';
+								marker.textContent = defaultLabel;
+								cell.appendChild(marker);
+							}
+							// Removing the focused Reset button drops focus to <body>; move it
+							// to the score field this control acted on so keyboard users stay put.
+							if (score) { score.focus(); }
+							announce(resetMsg);
+						});
 					})(tables[t]);
 				}
 			})();
+			</script>
+
+			<script>
+			( function () {
+				// Live tier label: as the admin types a score, update the plain
+				// badge beside it so the number never reads as a bare value.
+				function tierLabel( v ) {
+					v = parseInt( v, 10 );
+					if ( isNaN( v ) ) { return ''; }
+					if ( v >= 80 ) { return <?php echo wp_json_encode( __( 'Preferred', 'gk-block-mcp' ) ); ?>; }
+					if ( v >= 50 ) { return <?php echo wp_json_encode( __( 'Fine', 'gk-block-mcp' ) ); ?>; }
+					if ( v >= 10 ) { return <?php echo wp_json_encode( __( 'Discouraged', 'gk-block-mcp' ) ); ?>; }
+					return <?php echo wp_json_encode( __( 'Blocked', 'gk-block-mcp' ) ); ?>;
+				}
+				document.addEventListener( 'input', function ( e ) {
+					var input = e.target;
+					if ( ! input || input.type !== 'number' || ! /^gk-ns-score-/.test( input.id || '' ) ) { return; }
+					var badge = document.querySelector( '.gk-block-mcp-tier[data-tier-for="' + input.id + '"]' );
+					var label = tierLabel( input.value );
+					if ( badge && label ) { badge.textContent = label; }
+				} );
+
+				// Keep the Advanced panel open across a save, so the setting you just
+				// changed is still visible after the page reloads.
+				var adv = document.querySelector( 'details.gk-block-mcp-advanced' );
+				if ( adv ) {
+					var KEY = 'gkBlockMcpAdvancedOpen';
+					try {
+						if ( window.sessionStorage.getItem( KEY ) === '1' ) { adv.open = true; }
+						adv.addEventListener( 'toggle', function () {
+							window.sessionStorage.setItem( KEY, adv.open ? '1' : '0' );
+						} );
+					} catch ( err ) {}
+				}
+			} )();
 			</script>
 
 

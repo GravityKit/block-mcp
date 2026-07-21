@@ -58,6 +58,18 @@ class Agent_Provisioner {
 	const META_FLAG = '_gk_block_api_agent';
 
 	/**
+	 * Option that persists the provisioned agent user ID.
+	 *
+	 * Stored blog-scoped and non-autoloaded; survives credential revokes so the
+	 * same service account is reused. Read by Connect_Page and torn down by
+	 * purge() / uninstall.
+	 *
+	 * @since 2.1.0
+	 * @var string
+	 */
+	const USER_ID_OPTION = 'gk_block_api_agent_user_id';
+
+	/**
 	 * Register the minimal block_mcp_agent role idempotently.
 	 *
 	 * The capability set is passed through the `gk/block-mcp/agent/caps`
@@ -134,10 +146,44 @@ class Agent_Provisioner {
 						$existing->add_cap( $cap );
 					}
 				}
+				// Remediate a role provisioned by an earlier version: strip any
+				// forbidden site-administration cap it may carry (e.g.
+				// edit_theme_options copied from an FSE post type). register_role()
+				// runs on `init`, so an upgraded site self-heals on the next request
+				// without needing to re-provision. Only the fixed denylist is
+				// removed — operator-added caps are left intact.
+				foreach ( array_keys( self::forbidden_capabilities() ) as $forbidden ) {
+					if ( $existing->has_cap( $forbidden ) ) {
+						$existing->remove_cap( $forbidden );
+					}
+				}
 			}
 		}
 
 		return $role;
+	}
+
+	/**
+	 * Capabilities the agent role must never hold, keyed by name.
+	 *
+	 * Core's FSE post types (wp_template, wp_template_part, wp_global_styles,
+	 * wp_navigation) are show_in_rest and map every content primitive to a
+	 * site-administration meta cap — chiefly edit_theme_options, which also
+	 * gates the customizer, menus, and widgets. These are skipped when deriving
+	 * the role's caps AND stripped from any existing role on re-assert, so a
+	 * role provisioned by an earlier version can't retain a site-wide grant.
+	 *
+	 * @return array<string,bool> Capability name => true.
+	 */
+	private static function forbidden_capabilities(): array {
+		return array(
+			'edit_theme_options' => true,
+			'manage_options'     => true,
+			'manage_categories'  => true,
+			'unfiltered_html'    => true,
+			'switch_themes'      => true,
+			'activate_plugins'   => true,
+		);
 	}
 
 	/**
@@ -171,15 +217,22 @@ class Agent_Provisioner {
 
 		$primitives = array( 'edit_posts', 'edit_others_posts', 'edit_published_posts', 'publish_posts' );
 
+		$forbidden_caps = self::forbidden_capabilities();
+
 		foreach ( $types as $type ) {
 			$object = get_post_type_object( $type );
 			if ( ! $object ) {
 				continue;
 			}
 			foreach ( $primitives as $primitive ) {
-				if ( isset( $object->cap->$primitive ) ) {
-					$caps[ $object->cap->$primitive ] = true;
+				if ( ! isset( $object->cap->$primitive ) ) {
+					continue;
 				}
+				$mapped = $object->cap->$primitive;
+				if ( isset( $forbidden_caps[ $mapped ] ) ) {
+					continue;
+				}
+				$caps[ $mapped ] = true;
 			}
 		}
 
@@ -260,7 +313,7 @@ class Agent_Provisioner {
 
 		update_user_meta( $user_id, self::META_FLAG, '1' );
 		$this->ensure_role_on_current_blog( $user_id, $role );
-		update_option( 'gk_block_api_agent_user_id', $user_id, false );
+		update_option( self::USER_ID_OPTION, $user_id, false );
 
 		return $user_id;
 	}
@@ -314,7 +367,7 @@ class Agent_Provisioner {
 		// created on, so REST writes 403 on every other blog of a network.
 		$this->ensure_role_on_current_blog( $existing->ID, $role );
 
-		update_option( 'gk_block_api_agent_user_id', $existing->ID, false );
+		update_option( self::USER_ID_OPTION, $existing->ID, false );
 		return $existing->ID;
 	}
 
@@ -407,7 +460,7 @@ class Agent_Provisioner {
 			return;
 		}
 
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id' );
+		$agent_id = (int) get_option( self::USER_ID_OPTION );
 
 		if ( $agent_id > 0 && '1' === get_user_meta( $agent_id, self::META_FLAG, true ) ) {
 			// Revoke all Application Passwords before the user account is deleted
@@ -471,7 +524,7 @@ class Agent_Provisioner {
 			}
 		}
 
-		delete_option( 'gk_block_api_agent_user_id' );
+		delete_option( self::USER_ID_OPTION );
 		remove_role( self::ROLE );
 	}
 

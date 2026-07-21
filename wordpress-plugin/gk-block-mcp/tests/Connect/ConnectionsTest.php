@@ -199,6 +199,32 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A connection's meta must survive a concurrent writer flushing a stale copy
+	 * of the aggregate option.
+	 *
+	 * record_meta/forget_meta used to read-modify-write a single shared array, so
+	 * two connections minted at once could clobber each other — the loser's row
+	 * vanished and its self-hosted credential stayed unrevoked at uninstall. Each
+	 * connection now lives in its own option row, so a stale aggregate overwrite
+	 * cannot drop it.
+	 */
+	public function test_record_meta_survives_a_stale_aggregate_overwrite() {
+		Connections::record_meta( 'uuid-A', array( 'user_id' => 11, 'created_by' => 1 ) );
+		// A concurrent writer read the aggregate before B was recorded.
+		$stale = get_network_option( null, Connections::META_OPTION, array() );
+
+		Connections::record_meta( 'uuid-B', array( 'user_id' => 22, 'created_by' => 1 ) );
+
+		// That writer now flushes its stale aggregate view, dropping B under the
+		// old single-array storage.
+		update_network_option( null, Connections::META_OPTION, $stale );
+
+		$b = Connections::get_meta( 'uuid-B' );
+		$this->assertIsArray( $b, "B's meta must survive a stale aggregate overwrite" );
+		$this->assertSame( 22, (int) $b['user_id'] );
+	}
+
+	/**
 	 * forget_meta() removes the entry for a UUID and leaves siblings intact.
 	 */
 	public function test_forget_meta_removes_entry() {
@@ -209,6 +235,35 @@ class ConnectionsTest extends WP_UnitTestCase {
 
 		$this->assertNull( Connections::get_meta( 'uuid-1' ) );
 		$this->assertSame( 9, Connections::get_meta( 'uuid-2' )['created_by'] );
+	}
+
+	/**
+	 * forget_meta() drops a legacy (pre-2.1.0) aggregate entry and leaves a
+	 * sibling legacy entry intact.
+	 *
+	 * Pre-2.1.0 connections live as keys in the shared META_OPTION array, not as
+	 * per-UUID rows, so removing one is a read-modify-write of that shared option.
+	 * The cleanup must drop only the target key; a concurrent forget_meta() for a
+	 * different legacy uuid must not re-introduce it. The advisory lock serializes
+	 * that on MySQL; the single-threaded harness degrades to an unlocked but
+	 * still-correct sequential path, which this exercises.
+	 */
+	public function test_forget_meta_removes_legacy_aggregate_entry_only() {
+		update_network_option(
+			null,
+			Connections::META_OPTION,
+			array(
+				'legacy-A' => array( 'user_id' => 11, 'created_by' => 1 ),
+				'legacy-B' => array( 'user_id' => 22, 'created_by' => 2 ),
+			)
+		);
+
+		Connections::forget_meta( 'legacy-A' );
+
+		$this->assertNull( Connections::get_meta( 'legacy-A' ), 'the forgotten legacy entry is gone' );
+		$survivor = Connections::get_meta( 'legacy-B' );
+		$this->assertIsArray( $survivor, 'the sibling legacy entry survives' );
+		$this->assertSame( 22, (int) $survivor['user_id'] );
 	}
 
 	/**

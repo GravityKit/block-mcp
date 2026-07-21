@@ -39,32 +39,14 @@ class Block_Mutator {
 	private $preferences;
 
 	/**
-	 * Block safety checker.
-	 *
-	 * @var Block_Safety
-	 */
-	private $safety;
-
-	/**
-	 * HTML transformer.
-	 *
-	 * @var HTML_Transformer
-	 */
-	private $transformer;
-
-	/**
 	 * Constructor.
 	 *
-	 * @param Block_CRUD       $crud        Block CRUD instance.
-	 * @param Preferences      $preferences Preferences instance.
-	 * @param Block_Safety     $safety      Block safety checker.
-	 * @param HTML_Transformer $transformer HTML transformer.
+	 * @param Block_CRUD  $crud        Block CRUD instance.
+	 * @param Preferences $preferences Preferences instance.
 	 */
-	public function __construct( Block_CRUD $crud, Preferences $preferences, Block_Safety $safety, HTML_Transformer $transformer ) {
+	public function __construct( Block_CRUD $crud, Preferences $preferences ) {
 		$this->crud        = $crud;
 		$this->preferences = $preferences;
-		$this->safety      = $safety;
-		$this->transformer = $transformer;
 	}
 
 	/**
@@ -190,95 +172,26 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_attributes', __( 'update-attrs requires an "attributes" object.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 				}
 
-				// Block Bindings write-guard. Block_Writer::update_block enforces
-				// this for the per-block PATCH route, but the mutate endpoint had
-				// no such check — an agent could bypass the guard by switching
-				// from update_block to edit_block_tree's update-attrs. Mirror
-				// the contract here so the protection is uniform across write
-				// paths. Caller opts in to the bypass via allow_bound_writes:true.
-				$allow_bound_writes = ! empty( $params['allow_bound_writes'] );
-				if ( ! $allow_bound_writes ) {
-					$bindings = isset( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
-						&& is_array( $parent[ $target_index ]['attrs']['metadata']['bindings'] )
-							? $parent[ $target_index ]['attrs']['metadata']['bindings']
-							: array();
-					if ( ! empty( $bindings ) ) {
-						$blocked = array();
-						foreach ( array_keys( $attributes ) as $attr_key ) {
-							// `metadata` writes are structural; only individual bound attrs are protected.
-							if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
-								$blocked[] = $attr_key;
-							}
-						}
-						if ( ! empty( $blocked ) ) {
-							return new \WP_Error(
-								'bound_attribute',
-								sprintf(
-									/* translators: 1: comma-separated bound attribute names */
-									__( 'Cannot overwrite bound attribute(s): %s. Pass allow_bound_writes:true to force.', 'gk-block-mcp' ),
-									implode( ', ', $blocked )
-								),
-								array(
-									'status'           => 400,
-									'bound_attributes' => $blocked,
-								)
-							);
-						}
-					}
-				}
-
-				// Top-level merge is shallow; `metadata` itself is deep-merged
-				// so a partial metadata payload (e.g. {name: 'Hero'}) keeps
-				// existing keys like gk_ref (ref stability) and bindings
-				// (write-guard inputs) intact.
+				// Block Bindings write-guard, uniform with the per-block update_block
+				// path so an agent can't bypass it via edit_block_tree. Opt out with
+				// allow_bound_writes:true.
 				$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) && is_array( $parent[ $target_index ]['attrs'] )
 					? $parent[ $target_index ]['attrs']
 					: array();
-				if ( isset( $attributes['metadata'] ) && is_array( $attributes['metadata'] ) ) {
-					$existing_meta          = isset( $existing_attrs['metadata'] ) && is_array( $existing_attrs['metadata'] )
-						? $existing_attrs['metadata']
-						: array();
-					$attributes['metadata'] = array_merge( $existing_meta, $attributes['metadata'] );
-				}
-				$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $attributes );
-
-				// Auto-transform innerHTML for known attribute-to-HTML mappings.
-				$auto_transformed = $this->transformer->auto_transform_html(
-					$parent[ $target_index ]['blockName'],
+				$bound_error    = $this->crud->reject_bound_write(
 					$attributes,
-					isset( $parent[ $target_index ]['innerHTML'] ) ? $parent[ $target_index ]['innerHTML'] : ''
+					$existing_attrs,
+					! empty( $params['allow_bound_writes'] )
 				);
-
-				if ( null !== $auto_transformed ) {
-					$block_type_name                      = $parent[ $target_index ]['blockName'];
-					$parent[ $target_index ]['innerHTML'] = $auto_transformed;
-
-					// Update innerContent: apply the same transform to each string
-					// element while preserving null positions (innerBlock placeholders).
-					if ( ! empty( $parent[ $target_index ]['innerContent'] ) ) {
-						$transformer                             = $this->transformer;
-						$parent[ $target_index ]['innerContent'] = array_map(
-							function ( $piece ) use ( $transformer, $block_type_name, $attributes ) {
-								if ( null === $piece ) {
-									return null; // Preserve innerBlock placeholder.
-								}
-								$result = $transformer->auto_transform_html( $block_type_name, $attributes, $piece );
-								return null !== $result ? $result : $piece;
-							},
-							$parent[ $target_index ]['innerContent']
-						);
-					} else {
-						$parent[ $target_index ]['innerContent'] = array( $auto_transformed );
-					}
-				} else {
-					// No auto-transform available — check static block safety.
-					$safety_warnings = $this->safety->check_mutation(
-						$parent[ $target_index ]['blockName'],
-						array_keys( $attributes ),
-						false
-					);
-					$warnings        = array_merge( $warnings, $safety_warnings );
+				if ( null !== $bound_error ) {
+					return $bound_error;
 				}
+
+				// Merge → auto-transform → innerContent reconciliation via the shared
+				// pipeline (metadata deep-merged, other attrs shallow-merged, null
+				// placeholders preserved). Passing $warnings surfaces the static-block
+				// safety check the mutate response reports.
+				$this->crud->apply_block_update_in_place( $parent[ $target_index ], $attributes, null, $warnings );
 
 				$result_block = array(
 					'name'       => $parent[ $target_index ]['blockName'],
@@ -292,27 +205,40 @@ class Block_Mutator {
 					return new \WP_Error( 'missing_html', __( 'update-html requires an "innerHTML" string.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 				}
 
-				// BLOCK-14: refuse update-html on dual-storage blocks. There is
-				// no `attributes` companion field on this op — the only safe
-				// path for dual blocks is `update-attrs` (with both fields)
-				// or `replace-block` (with both fields).
+				// update-html carries no `attributes` companion, so a dual-storage
+				// block can only stay in sync if its content is re-derivable from
+				// the new markup — derive and merge those attributes when it is,
+				// otherwise reject (use update-attrs or replace-block with both).
 				if (
 					isset( $parent[ $target_index ]['blockName'] )
 					&& $this->crud->is_block_dual_storage( $parent[ $target_index ]['blockName'] )
 				) {
-					return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
+					$existing_attrs = isset( $parent[ $target_index ]['attrs'] ) ? $parent[ $target_index ]['attrs'] : array();
+					$derived        = $this->crud->auto_derive_dual_attributes(
+						$parent[ $target_index ]['blockName'],
+						$existing_attrs,
+						$inner_html
+					);
+					if ( null === $derived ) {
+						return $this->crud->dual_storage_error( $parent[ $target_index ]['blockName'] );
+					}
+					// Same bound-write guard update_block applies to derived attrs.
+					$bound_error = $this->crud->reject_bound_write(
+						$derived,
+						$existing_attrs,
+						! empty( $params['allow_bound_writes'] )
+					);
+					if ( null !== $bound_error ) {
+						return $bound_error;
+					}
+					$parent[ $target_index ]['attrs'] = array_merge( $existing_attrs, $derived );
 				}
 
-				$parent[ $target_index ]['innerHTML'] = wp_kses_post( $inner_html );
-				// Preserve innerBlock placeholders (null) in innerContent for container blocks.
-				if ( ! empty( $parent[ $target_index ]['innerBlocks'] ) && ! empty( $parent[ $target_index ]['innerContent'] ) ) {
-					$parent[ $target_index ]['innerContent'] = $this->transformer->rebuild_inner_content(
-						$parent[ $target_index ]['innerContent'],
-						$parent[ $target_index ]['innerHTML']
-					);
-				} else {
-					$parent[ $target_index ]['innerContent'] = array( $parent[ $target_index ]['innerHTML'] );
-				}
+				// innerHTML replacement via the shared pipeline, so /mutate applies
+				// the same sanitize + strip_empty_class_attributes + innerContent
+				// reconciliation as the per-block update_block path, and both persist
+				// identical markup for the same edit. Dual-storage attrs merged above.
+				$this->crud->apply_block_update_in_place( $parent[ $target_index ], array(), $inner_html );
 
 				$result_block = array(
 					'name'       => $parent[ $target_index ]['blockName'],
@@ -448,7 +374,7 @@ class Block_Mutator {
 				// (the wrapper HTML is built by string concatenation, not
 				// wp_kses_post, since it's never user-facing markup until
 				// serialize_blocks() round-trips it).
-				$allowed_wrapper_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$allowed_wrapper_tags = HTML_Transformer::CONTAINER_TAGS;
 				$wrapper_tag          = 'div';
 				if ( isset( $wrapper_attrs['tagName'] ) ) {
 					$candidate = sanitize_key( $wrapper_attrs['tagName'] );
@@ -580,91 +506,19 @@ class Block_Mutator {
 				}
 
 				// Insert a null placeholder for the new child in innerContent.
-				$ic = &$parent[ $target_index ]['innerContent'];
-
-				// Normalise self-closing wrappers before splicing. A container
-				// created by insert_blocks with innerHTML="<div…></div>" and
-				// no innerBlocks parses back with innerContent stored as a
-				// single, unsplit string. Without a separable opening/closing
-				// pair, the splice logic below lands the new null adjacent to
-				// that string and serialize_blocks() emits children OUTSIDE
-				// the wrapper. Splitting the wrapper at the first `>` here
-				// turns ['<div></div>'] into ['<div>', '</div>'] so the new
-				// null falls between them, preserving the contract that
-				// children are interleaved INSIDE the wrapper.
-				$has_null = false;
-				foreach ( $ic as $piece ) {
-					if ( null === $piece ) {
-						$has_null = true;
-						break;
-					}
-				}
-				if ( ! $has_null ) {
-					foreach ( $ic as $piece_idx => $piece ) {
-						if ( ! is_string( $piece ) ) {
-							continue;
-						}
-						$open_end = strpos( $piece, '>' );
-						if ( false === $open_end || ( strlen( $piece ) - 1 ) === $open_end ) {
-							continue;
-						}
-						$opening = substr( $piece, 0, $open_end + 1 );
-						$closing = substr( $piece, $open_end + 1 );
-						if ( '' === $closing ) {
-							continue;
-						}
-						array_splice( $ic, $piece_idx, 1, array( $opening, $closing ) );
-						break;
-					}
-				}
-
 				if ( 'start' === $position ) {
-					// Insert after the first string entry (opening tag).
-					$insert_at = 0;
-					foreach ( $ic as $ic_idx => $ic_val ) {
-						if ( is_string( $ic_val ) ) {
-							$insert_at = $ic_idx + 1;
-							break;
-						}
-					}
-					array_splice( $ic, $insert_at, 0, array( null ) );
+					$child_position = 0;
 				} elseif ( 'end' === $position ) {
-					// Insert before the last string entry (closing tag).
-					$insert_at = count( $ic );
-					for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
-						if ( is_string( $ic[ $ri ] ) ) {
-							$insert_at = $ri;
-							break;
-						}
-					}
-					array_splice( $ic, $insert_at, 0, array( null ) );
+					$child_position = count( $parent[ $target_index ]['innerBlocks'] ) - 1;
 				} else {
-					// Numeric position: find the Nth null and insert before it.
-					// If no such null exists (pos >= null count, i.e. numeric append),
-					// fall back to the same backward-scan used by 'end' so the new
-					// null lands before the closing-tag string, not after it.
-					$null_count    = 0;
-					$insert_pos_ic = null;
-					foreach ( $ic as $ic_idx => $ic_val ) {
-						if ( null === $ic_val ) {
-							if ( $null_count === $pos ) {
-								$insert_pos_ic = $ic_idx;
-								break;
-							}
-							++$null_count;
-						}
-					}
-					if ( null === $insert_pos_ic ) {
-						$insert_pos_ic = count( $ic );
-						for ( $ri = count( $ic ) - 1; $ri >= 0; $ri-- ) {
-							if ( is_string( $ic[ $ri ] ) ) {
-								$insert_pos_ic = $ri;
-								break;
-							}
-						}
-					}
-					array_splice( $ic, $insert_pos_ic, 0, array( null ) );
+					$child_position = $pos;
 				}
+
+				$existing_ic = isset( $parent[ $target_index ]['innerContent'] ) && is_array( $parent[ $target_index ]['innerContent'] )
+					? $parent[ $target_index ]['innerContent']
+					: array();
+
+				$parent[ $target_index ]['innerContent'] = $this->insert_child_placeholders( $existing_ic, $child_position );
 
 				$result_block = array(
 					'name'       => $name,
@@ -762,18 +616,24 @@ class Block_Mutator {
 					}
 				}
 
-				// Reject moving a block into itself or its own descendants.
+				$count = isset( $params['count'] ) ? max( 1, (int) $params['count'] ) : 1;
+
+				// Reject moving a block into itself or its own descendants. For a
+				// range move (count > 1) the moved blocks occupy
+				// [target_index, target_index + count - 1] under the source parent,
+				// so a destination descending into ANY of them is invalid, not just
+				// the first block at $path. Guard the whole range up front rather
+				// than relying on downstream path resolution to reject it.
 				$dest_len = count( $destination );
 				$path_len = count( $path );
 				if ( $dest_len > $path_len ) {
-					$is_descendant = true;
-					for ( $ci = 0; $ci < $path_len; $ci++ ) {
-						if ( $path[ $ci ] !== $destination[ $ci ] ) {
-							$is_descendant = false;
-							break;
-						}
-					}
-					if ( $is_descendant ) {
+					$src_parent_segs  = array_slice( $path, 0, $path_len - 1 );
+					$dest_prefix_segs = array_slice( $destination, 0, $path_len - 1 );
+					$dest_seg_at_src  = (int) $destination[ $path_len - 1 ];
+					$into_moved_range = $src_parent_segs === $dest_prefix_segs
+						&& $dest_seg_at_src >= $target_index
+						&& $dest_seg_at_src <= $target_index + $count - 1;
+					if ( $into_moved_range ) {
 						return new \WP_Error(
 							'invalid_destination',
 							__( 'Cannot move a block into itself or its own descendants.', 'gk-block-mcp' ),
@@ -781,8 +641,6 @@ class Block_Mutator {
 						);
 					}
 				}
-
-				$count = isset( $params['count'] ) ? max( 1, (int) $params['count'] ) : 1;
 
 				// Validate count doesn't exceed available blocks.
 				if ( $target_index + $count > count( $parent ) ) {
@@ -887,20 +745,12 @@ class Block_Mutator {
 					for ( $di = 0; $di < $dest_parent_len - 1; $di++ ) {
 						$dest_gp = &$dest_gp[ $dest_parent_path[ $di ] ]['innerBlocks'];
 					}
-					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
-						$null_seen = 0;
-						$ic_insert = count( $dest_gp[ $dest_container_idx ]['innerContent'] );
-						foreach ( $dest_gp[ $dest_container_idx ]['innerContent'] as $ic_idx => $ic_val ) {
-							if ( null === $ic_val ) {
-								if ( $null_seen === $dest_index ) {
-									$ic_insert = $ic_idx;
-									break;
-								}
-								++$null_seen;
-							}
-						}
-						$nulls = array_fill( 0, $count, null );
-						array_splice( $dest_gp[ $dest_container_idx ]['innerContent'], $ic_insert, 0, $nulls );
+					if ( isset( $dest_gp[ $dest_container_idx ]['innerContent'] ) && is_array( $dest_gp[ $dest_container_idx ]['innerContent'] ) ) {
+						$dest_gp[ $dest_container_idx ]['innerContent'] = $this->insert_child_placeholders(
+							$dest_gp[ $dest_container_idx ]['innerContent'],
+							$dest_index,
+							$count
+						);
 					}
 				}
 
@@ -939,8 +789,9 @@ class Block_Mutator {
 			return $response;
 		}
 
-		// Serialize and save (depth-checked).
-		$result = $this->crud->save_blocks( $post_id, $blocks );
+		// Serialize and save (depth-checked) with the pre-mutation snapshot for
+		// the optimistic-concurrency guard.
+		$result = $this->crud->save_blocks( $post_id, $blocks, $post->post_content );
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
@@ -960,5 +811,73 @@ class Block_Mutator {
 		$response['block'] = $result_block;
 
 		return $response;
+	}
+
+	/**
+	 * Insert null placeholder(s) into a container's innerContent at a child position.
+	 *
+	 * Serialization interleaves innerContent — strings are emitted verbatim
+	 * and each null is replaced by the next innerBlock — so a placeholder must
+	 * land between the wrapper's opening and closing strings or the child is
+	 * serialized OUTSIDE the wrapper markup. Two shapes defeat a naive
+	 * Nth-null scan: a childless container parses back with a single unsplit
+	 * wrapper string (['<div></div>']), and an insertion at the end position
+	 * (child position == existing child count) has no Nth null to find. This
+	 * helper first splits an unsplit wrapper at the first '>' into
+	 * [opening, closing], then scans for the Nth null, and falls back to
+	 * inserting before the last string piece (the closing tag).
+	 *
+	 * @param array $inner_content  The container's innerContent array.
+	 * @param int   $child_position Index in innerBlocks the placeholder(s) represent.
+	 * @param int   $count          Number of placeholders to insert.
+	 *
+	 * @return array The updated innerContent.
+	 */
+	private function insert_child_placeholders( array $inner_content, $child_position, $count = 1 ) {
+		$has_null = in_array( null, $inner_content, true );
+		if ( ! $has_null ) {
+			foreach ( $inner_content as $piece_idx => $piece ) {
+				if ( ! is_string( $piece ) ) {
+					continue;
+				}
+				$open_end = strpos( $piece, '>' );
+				if ( false === $open_end || ( strlen( $piece ) - 1 ) === $open_end ) {
+					continue;
+				}
+				$opening = substr( $piece, 0, $open_end + 1 );
+				$closing = substr( $piece, $open_end + 1 );
+				if ( '' === $closing ) {
+					continue;
+				}
+				array_splice( $inner_content, $piece_idx, 1, array( $opening, $closing ) );
+				break;
+			}
+		}
+
+		$null_seen = 0;
+		$insert_at = null;
+		foreach ( $inner_content as $ic_idx => $ic_val ) {
+			if ( null === $ic_val ) {
+				if ( $null_seen === $child_position ) {
+					$insert_at = $ic_idx;
+					break;
+				}
+				++$null_seen;
+			}
+		}
+
+		if ( null === $insert_at ) {
+			$insert_at = count( $inner_content );
+			for ( $ri = count( $inner_content ) - 1; $ri >= 0; $ri-- ) {
+				if ( is_string( $inner_content[ $ri ] ) ) {
+					$insert_at = $ri;
+					break;
+				}
+			}
+		}
+
+		array_splice( $inner_content, $insert_at, 0, array_fill( 0, $count, null ) );
+
+		return $inner_content;
 	}
 }

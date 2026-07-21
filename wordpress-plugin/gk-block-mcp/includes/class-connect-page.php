@@ -694,7 +694,7 @@ class Connect_Page {
 	 * @return bool
 	 */
 	private function agent_exists() {
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 
 		return $agent_id > 0 && false !== get_user_by( 'id', $agent_id );
 	}
@@ -704,14 +704,26 @@ class Connect_Page {
 	 *
 	 * @since  2.0.0
 	 *
-	 * @return string 'needs_https' | 'connected' | 'ready'
+	 * @return string 'needs_https' | 'app_passwords_disabled' | 'connected' | 'ready'
 	 */
 	public function connection_state() {
 		if ( ! wp_is_application_passwords_available() ) {
+			// Core reports Application Passwords unavailable either because the
+			// site lacks HTTPS or because HTTPS is fine but a plugin/filter
+			// switched the feature off; the two states carry different
+			// remediation copy. Gated on is_ssl() directly, not
+			// wp_is_application_passwords_supported() — that also returns true
+			// on a local-environment install without HTTPS.
+			$has_ssl = is_ssl();
+
+			if ( $has_ssl ) {
+				return 'app_passwords_disabled';
+			}
+
 			return 'needs_https';
 		}
 
-		$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id    = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 		$connections = $this->all_connections( $agent_id );
 		if ( ! empty( $connections ) ) {
 			return 'connected';
@@ -731,6 +743,13 @@ class Connect_Page {
 	public function register() {
 		add_action( 'admin_post_' . self::ACTION_CONNECT, array( $this, 'handle_connect' ) );
 		add_action( 'admin_post_' . self::ACTION_AUTHORIZE, array( $this, 'handle_authorize' ) );
+
+		// A lapsed session turns the Approve submit into a logged-out POST, which
+		// admin-post.php answers with a blank page unless a nopriv handler exists.
+		// handle_authorize() self-gates on login + manage_options, so wiring it here
+		// yields a clear session-expired error instead of the blank page.
+		add_action( 'admin_post_nopriv_' . self::ACTION_AUTHORIZE, array( $this, 'handle_authorize' ) );
+
 		add_action( 'admin_post_' . self::ACTION_REVOKE, array( $this, 'handle_revoke' ) );
 
 		// The connector exchanges its single-use code for the credential. It is an
@@ -887,13 +906,42 @@ class Connect_Page {
 	 * @since 2.0.0
 	 */
 	public function handle_authorize() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You do not have permission to do this.', 'gk-block-mcp' ), '', array( 'response' => 403 ) );
+		// Fail closed with a reason the caller can surface. A lapsed session
+		// arrives here as a logged-out POST (via the nopriv hook); an
+		// under-privileged user reaches it too. Neither may fall through to a
+		// blank page or an opaque wp_die the fetch handler cannot read.
+		if ( ! is_user_logged_in() ) {
+			$this->fail_authorize(
+				__( 'Your WordPress session has expired. Sign in again, then restart the connection from your AI app.', 'gk-block-mcp' ),
+				403,
+				'session_expired'
+			);
+			return;
 		}
 
-		check_admin_referer( self::ACTION_AUTHORIZE );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			$this->fail_authorize(
+				__( 'You do not have permission to approve connections. An administrator must complete this step.', 'gk-block-mcp' ),
+				403,
+				'forbidden'
+			);
+			return;
+		}
 
-		// phpcs:disable WordPress.Security.NonceVerification.Missing -- nonce checked above via check_admin_referer.
+		// Verify the nonce directly rather than via check_admin_referer(): an
+		// expired nonce must surface as a readable error, not core's wp_nonce_ays()
+		// HTML page, which the fetch handler can only read as an opaque non-2xx.
+		$nonce = isset( $_POST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ) : '';
+		if ( ! wp_verify_nonce( $nonce, self::ACTION_AUTHORIZE ) ) {
+			$this->fail_authorize(
+				__( 'This authorization link has expired. Return to your AI app and start the connection again.', 'gk-block-mcp' ),
+				403,
+				'expired'
+			);
+			return;
+		}
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- nonce verified above.
 		$callback = isset( $_POST['callback'] ) ? sanitize_text_field( wp_unslash( $_POST['callback'] ) ) : '';
 		$state    = isset( $_POST['state'] ) ? sanitize_text_field( wp_unslash( $_POST['state'] ) ) : '';
 		$client   = isset( $_POST['client'] ) ? sanitize_text_field( wp_unslash( $_POST['client'] ) ) : 'block-mcp';
@@ -903,16 +951,18 @@ class Connect_Page {
 		// Callback must resolve to a loopback address — credential must never leave
 		// the local machine via an attacker-controlled redirect target.
 		if ( ! $this->is_loopback_callback( $callback ) ) {
-			wp_die(
-				esc_html__( 'Invalid callback URL. Only loopback addresses (127.0.0.1, localhost) are accepted.', 'gk-block-mcp' ),
-				esc_html__( 'Authorization failed', 'gk-block-mcp' ),
-				array( 'response' => 400 )
+			$this->fail_authorize(
+				__( 'Invalid callback URL. Only loopback addresses (127.0.0.1, localhost) are accepted.', 'gk-block-mcp' ),
+				400,
+				'bad_callback'
 			);
+			return;
 		}
 
 		$creds = $this->provision_credentials( $client, $identity );
 		if ( is_wp_error( $creds ) ) {
-			wp_die( esc_html( $creds->get_error_message() ) );
+			$this->fail_authorize( $creds->get_error_message(), 400, (string) $creds->get_error_code() );
+			return;
 		}
 
 		// Deliver the credential out-of-band: store it under a single-use,
@@ -970,6 +1020,39 @@ class Connect_Page {
 	 */
 	protected function halt() {
 		exit;
+	}
+
+	/**
+	 * End a failed authorize request with a reason the caller can act on.
+	 *
+	 * The in-page fetch handler can only read a JSON body, so an XHR request gets
+	 * a { success:false, data:{ message, code } } envelope; a classic form submit
+	 * gets a titled wp_die() page. Either way the reason is visible rather than an
+	 * opaque failure the connector reports as "it just bombed".
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $message Human-readable reason.
+	 * @param int    $status  HTTP status code for the response.
+	 * @param string $code    Machine-readable error code for the JSON envelope.
+	 * @return void
+	 */
+	private function fail_authorize( $message, $status, $code ) {
+		if ( $this->is_xhr_authorize() ) {
+			wp_send_json_error(
+				array(
+					'message' => $message,
+					'code'    => $code,
+				),
+				(int) $status
+			);
+		}
+
+		wp_die(
+			esc_html( $message ),
+			esc_html__( 'Connection failed', 'gk-block-mcp' ),
+			array( 'response' => (int) $status )
+		);
 	}
 
 	/**
@@ -1037,14 +1120,15 @@ class Connect_Page {
 	 * needs the no-JS server redirect). The fetch handler marks its request with
 	 * the gk_xhr field; the X-Requested-With header is a secondary signal.
 	 *
-	 * The caller verifies the nonce before reaching this.
+	 * Read before the nonce is verified on the failure paths; it only selects the
+	 * response format, so it carries no security weight.
 	 *
 	 * @since 2.0.1
 	 *
 	 * @return bool
 	 */
 	private function is_xhr_authorize() {
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified by the caller via check_admin_referer().
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- response-format routing hint, not a security decision; no nonce needed.
 		if ( isset( $_POST['gk_xhr'] ) && '1' === $_POST['gk_xhr'] ) {
 			return true;
 		}
@@ -1467,7 +1551,7 @@ class Connect_Page {
 		// Resolve which account holds the credential from the meta store — it may
 		// be the agent OR the approving user (own-account connections). Falls back
 		// to the agent for older connections recorded before host tracking.
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 
 		return ( new Connections() )->revoke_by_uuid( $uuid, $agent_id );
 	}
@@ -1519,11 +1603,13 @@ class Connect_Page {
 	 *
 	 * @since 2.0.1
 	 *
-	 * @param string $state Current connection_state(): skips when 'needs_https'.
+	 * @param string $state Current connection_state(): skips when the connect
+	 *                      flow can't proceed ('needs_https' or
+	 *                      'app_passwords_disabled').
 	 * @return void
 	 */
 	private function pre_provision_agent( $state ) {
-		if ( 'needs_https' === $state ) {
+		if ( 'needs_https' === $state || 'app_passwords_disabled' === $state ) {
 			return;
 		}
 
@@ -1618,7 +1704,7 @@ class Connect_Page {
 		// own-account hosts.
 		$connections = array();
 		if ( 'connected' === $state ) {
-			$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+			$agent_id    = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 			$connections = $this->all_connections( $agent_id );
 		}
 
@@ -1688,6 +1774,20 @@ class Connect_Page {
 					</p>
 					<p>
 						<?php esc_html_e( 'Your site needs a secure connection (HTTPS) first. Most hosts can enable this for free — ask them to turn on HTTPS/SSL, then come back.', 'gk-block-mcp' ); ?>
+					</p>
+				</div>
+
+			<?php elseif ( 'app_passwords_disabled' === $state ) : ?>
+
+				<div class="notice notice-warning inline">
+					<p>
+						<strong><?php esc_html_e( 'Application Passwords are turned off', 'gk-block-mcp' ); ?></strong>
+					</p>
+					<p>
+						<?php esc_html_e( 'Your site is secure (HTTPS is on), but WordPress Application Passwords are disabled. The AI assistant connects using an Application Password, so the feature needs to be turned back on.', 'gk-block-mcp' ); ?>
+					</p>
+					<p>
+						<?php esc_html_e( 'This is usually done by a security plugin (for example, Solid Security or Wordfence) or a hardening setting. Look for an "Application Passwords" option there and re-enable it, or ask your host whether they disabled the feature. Then reload this page.', 'gk-block-mcp' ); ?>
 					</p>
 				</div>
 
@@ -2157,6 +2257,9 @@ class Connect_Page {
 					</label>
 				</div>
 				<?php endif; ?>
+				<div id="gk-block-mcp-authorize-error" class="notice notice-error inline" role="alert" hidden>
+					<p></p>
+				</div>
 				<div class="gk-block-mcp-connect__actions">
 					<?php submit_button( __( 'Approve', 'gk-block-mcp' ), 'primary', 'submit', false ); ?>
 					<a href="<?php echo esc_url( admin_url( 'options-general.php?page=' . Settings_Page::PAGE_SLUG . '&tab=connect' ) ); ?>" class="button button-link-delete">
@@ -2190,9 +2293,10 @@ class Connect_Page {
 				/* Approve via fetch() so the server returns the exchange code as
 					JSON and the browser navigates to the loopback callback from
 					here — a server-issued redirect to 127.0.0.1 reads as SSRF to
-					origin WAFs and gets blocked. Falls back to a native submit
-					(handled by the no-JS branch in handle_authorize()) if fetch is
-					unavailable or fails. */
+					origin WAFs and gets blocked. A server-reported failure
+					(success:false) is shown in place; only fetch itself failing
+					(no network, fetch unavailable) falls back to the no-JS native
+					submit so the server can render its own error page. */
 				( function () {
 					var script = document.currentScript;
 					var form   = script ? script.closest( 'form' ) : null;
@@ -2204,9 +2308,24 @@ class Connect_Page {
 					// via getAttribute(); submit via the prototype method.
 					var actionUrl    = form.getAttribute( 'action' );
 					var nativeSubmit = function () { HTMLFormElement.prototype.submit.call( form ); };
+					var errorBox     = form.querySelector( '#gk-block-mcp-authorize-error' );
+					var submitBtn    = form.querySelector( '#submit' );
+					var defaultError = <?php echo wp_json_encode( __( 'The connection could not be completed. Please try again.', 'gk-block-mcp' ) ); ?>;
+
+					function showError( message ) {
+						if ( ! errorBox ) { nativeSubmit(); return; }
+						var p = errorBox.querySelector( 'p' );
+						if ( p ) { p.textContent = message; }
+						errorBox.hidden = false;
+						if ( submitBtn ) {
+							submitBtn.disabled = false;
+							submitBtn.setAttribute( 'aria-disabled', 'false' );
+						}
+					}
 
 					form.addEventListener( 'submit', function ( e ) {
 						e.preventDefault();
+						if ( errorBox ) { errorBox.hidden = true; }
 
 						var data = new FormData( form );
 						data.append( 'gk_xhr', '1' );
@@ -2217,19 +2336,27 @@ class Connect_Page {
 							credentials: 'same-origin',
 							headers:     { 'X-Requested-With': 'XMLHttpRequest' }
 						} ).then( function ( res ) {
-							return res.ok ? res.json() : null;
-						} ).then( function ( json ) {
-							if ( ! json || ! json.success || ! json.data || ! json.data.code ) {
-								throw new Error( 'bad response' );
+							// Read the body regardless of status: a failure carries a
+							// JSON { success:false, data:{ message } } we must show.
+							return res.json().then( function ( json ) {
+								return { ok: res.ok, json: json };
+							} ).catch( function () {
+								return { ok: res.ok, json: null };
+							} );
+						} ).then( function ( result ) {
+							var json = result.json;
+							if ( result.ok && json && json.success && json.data && json.data.code ) {
+								var cb = form.querySelector( 'input[name="callback"]' ).value;
+								var st = form.querySelector( 'input[name="state"]' );
+								var url = new URL( cb );
+								url.searchParams.set( 'code', json.data.code );
+								url.searchParams.set( 'state', json.data.state || ( st ? st.value : '' ) );
+								window.location.assign( url.toString() );
+								return;
 							}
-							var cb = form.querySelector( 'input[name="callback"]' ).value;
-							var st = form.querySelector( 'input[name="state"]' );
-							var url = new URL( cb );
-							url.searchParams.set( 'code', json.data.code );
-							url.searchParams.set( 'state', json.data.state || ( st ? st.value : '' ) );
-							window.location.assign( url.toString() );
+							showError( ( json && json.data && json.data.message ) ? json.data.message : defaultError );
 						} ).catch( function () {
-							nativeSubmit(); // native submit bypasses this handler.
+							nativeSubmit(); // fetch itself rejected; let the server render its error.
 						} );
 					} );
 				} )();
@@ -2598,6 +2725,21 @@ class Connect_Page {
 				} );
 
 				updateState();
+
+				// Confirm the download + account creation, which otherwise gives no
+				// on-page feedback (the installer streams as an attachment, so the page
+				// never navigates and nothing renders).
+				var form       = btn ? btn.closest( 'form' ) : null;
+				var postSubmit = document.querySelector( '.gk-block-mcp-connect__post-submit' );
+				if ( form && postSubmit ) {
+					form.addEventListener( 'submit', function () {
+						postSubmit.hidden = false;
+						postSubmit.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+						// Reload shortly so the new connection appears under Active
+						// connections; the in-flight attachment download is unaffected.
+						window.setTimeout( function () { window.location.reload(); }, 2500 );
+					} );
+				}
 				}
 				if ( 'loading' === document.readyState ) {
 					document.addEventListener( 'DOMContentLoaded', init );
@@ -2608,6 +2750,12 @@ class Connect_Page {
 			</script>
 
 			<?php submit_button( $desktop_button_label, 'primary', 'submit', true ); ?>
+			<div class="gk-block-mcp-connect__post-submit notice notice-success inline" hidden>
+				<p>
+					<strong><?php esc_html_e( 'Setting up your connection…', 'gk-block-mcp' ); ?></strong>
+					<?php esc_html_e( 'Your installer is downloading and your "Block MCP" account is being created. It will appear under Active connections in a moment.', 'gk-block-mcp' ); ?>
+				</p>
+			</div>
 		</form>
 		<?php
 	}

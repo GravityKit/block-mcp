@@ -61,6 +61,20 @@ describe('update_post — request shape', () => {
     const body = client.updatePost.mock.calls[0]![1] as Record<string, unknown>;
     expect(body).not.toHaveProperty('post_id');
   });
+
+  // Some MCP clients / untyped JSON send numeric IDs as strings. get_post_info
+  // already coerces them; update_post must accept the same, or the same post is
+  // editable via one tool and rejected by another in one session.
+  it('coerces a numeric-string post_id to a number', async () => {
+    await handlePostTool('update_post', { post_id: '42', status: 'draft' }, client as any);
+    expect(client.updatePost).toHaveBeenCalledWith(42, { status: 'draft' });
+  });
+
+  it('rejects a non-numeric post_id string', async () => {
+    await expect(handlePostTool('update_post', { post_id: 'abc', status: 'draft' }, client as any))
+      .rejects.toThrow('post_id must be a positive integer');
+    expect(client.updatePost).not.toHaveBeenCalled();
+  });
 });
 
 describe('update_post — response shape', () => {

@@ -78,6 +78,57 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The agent role must never gain `edit_theme_options`.
+	 *
+	 * derive_capabilities() copies each `show_in_rest` post type's mapped
+	 * edit/publish primitives into the role. Core's FSE post types
+	 * (wp_template, wp_template_part, wp_global_styles, wp_navigation) are
+	 * show_in_rest and map those very primitives to `edit_theme_options`, so an
+	 * unfiltered copy silently grants the agent site-wide theme/menu/widget/
+	 * customizer control — defeating the least-privilege contract. The agent
+	 * must be able to edit ordinary content, but never theme options.
+	 */
+	public function test_agent_role_never_grants_edit_theme_options() {
+		$id = ( new Agent_Provisioner() )->ensure();
+		$this->assertIsInt( $id );
+
+		$this->assertFalse( user_can( $id, 'edit_theme_options' ), 'agent must not gain edit_theme_options via FSE post types' );
+		$this->assertTrue( user_can( $id, 'edit_others_posts' ), 'ordinary content editing must remain intact' );
+	}
+
+	/**
+	 * register_role() must strip a forbidden capability from an EXISTING role.
+	 *
+	 * A role provisioned by an earlier (vulnerable) version keeps its stored
+	 * capabilities across an update — the additive re-assert never removed them,
+	 * so an already-over-granted `edit_theme_options` survived the fix. Because
+	 * register_role() runs on `init`, stripping the forbidden caps there lets an
+	 * upgraded site self-heal on the next request without re-provisioning.
+	 * Operator-added, non-forbidden caps must be left untouched.
+	 */
+	public function test_register_role_strips_forbidden_caps_from_existing_role() {
+		// Simulate a stale role carrying the over-grant plus a legitimate cap.
+		add_role(
+			Agent_Provisioner::ROLE,
+			'Block MCP Agent',
+			array(
+				'read'                  => true,
+				'edit_others_posts'     => true,
+				'edit_theme_options'    => true,
+				'a_custom_operator_cap' => true,
+			)
+		);
+
+		Agent_Provisioner::register_role();
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse( $role->has_cap( 'edit_theme_options' ), 'forbidden cap must be stripped from the existing role' );
+		$this->assertTrue( $role->has_cap( 'edit_others_posts' ), 'content-editing cap must survive' );
+		$this->assertTrue( $role->has_cap( 'a_custom_operator_cap' ), 'operator-added caps must not be stripped' );
+	}
+
+	/**
 	 * Calling ensure() twice must return the same user ID and not create a
 	 * second user with the same login. The resolved ID must be persisted in
 	 * the gk_block_api_agent_user_id option.

@@ -39,6 +39,7 @@ class Media_Manager {
 	const SSRF_BLOCKED_IPV4_RANGES = array(
 		array( '0.0.0.0', '0.255.255.255' ),       // "This network."
 		array( '10.0.0.0', '10.255.255.255' ),      // RFC1918.
+		array( '100.64.0.0', '100.127.255.255' ),   // RFC6598 carrier-grade NAT.
 		array( '127.0.0.0', '127.255.255.255' ),    // Loopback.
 		array( '169.254.0.0', '169.254.255.255' ),  // Link-local (AWS/GCP/Azure metadata).
 		array( '172.16.0.0', '172.31.255.255' ),    // RFC1918.
@@ -276,14 +277,49 @@ class Media_Manager {
 		// SSRF defense: resolve host and reject reserved/private/link-local IPs.
 		// `wp_http_validate_url()` only catches loopback/0.0.0.0; cloud metadata
 		// endpoints (169.254.169.254) and RFC1918 private ranges sail past it.
-		$ssrf_check = $this->guard_ssrf( $url );
-		if ( is_wp_error( $ssrf_check ) ) {
-			return $ssrf_check;
+		$vetted = $this->guard_ssrf( $url );
+		if ( is_wp_error( $vetted ) ) {
+			return $vetted;
+		}
+
+		// Disable HTTP redirects for the fetch. guard_ssrf() validates only the
+		// URL the caller gave; download_url() would otherwise follow up to 5
+		// redirects, and a 302 to 169.254.169.254 (cloud metadata) or a private
+		// host would be fetched WITHOUT re-validation — wp_http_validate_url,
+		// which core applies on redirects, does not block the metadata range.
+		// Refusing redirects closes that bypass; a redirecting source returns a
+		// fetch error, and the caller can pass the already-resolved URL.
+		$no_redirects = static function ( $args ) {
+			$args['redirection'] = 0;
+			return $args;
+		};
+		add_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
+
+		// Pin the fetch to the exact IP(s) guard_ssrf just vetted via
+		// CURLOPT_RESOLVE, so download_url()'s independent second resolution of the
+		// host cannot be rebound to a private IP (a DNS-rebinding TOCTOU bypass of
+		// the guard). Only the cURL transport exposes a handle; the redirect block
+		// above still applies on the streams transport.
+		$resolve = $this->curl_resolve_entries( $url, $vetted );
+		$pin_ip  = static function ( $handle ) use ( $resolve ) {
+			$is_curl = ( $handle instanceof \CurlHandle ) || is_resource( $handle );
+			if ( ! empty( $resolve ) && $is_curl ) {
+				curl_setopt( $handle, CURLOPT_RESOLVE, $resolve ); // phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt
+			}
+		};
+		if ( ! empty( $resolve ) ) {
+			add_action( 'http_api_curl', $pin_ip, PHP_INT_MAX );
 		}
 
 		// Use a tighter timeout than core's 300s default. Slow-source amplification
 		// drops to ~10s of resource hold per request.
 		$tmp = download_url( $url, 10 );
+
+		if ( ! empty( $resolve ) ) {
+			remove_action( 'http_api_curl', $pin_ip, PHP_INT_MAX );
+		}
+		remove_filter( 'http_request_args', $no_redirects, PHP_INT_MAX );
+
 		if ( is_wp_error( $tmp ) ) {
 			return new \WP_Error( 'url_fetch_failed', $tmp->get_error_message(), array( 'status' => 502 ) );
 		}
@@ -329,11 +365,24 @@ class Media_Manager {
 			return new \WP_Error( 'invalid_filename', __( '"filename" is required for base64 uploads.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
 
+		// Accept a full data: URI (e.g. "data:image/png;base64,iVBORw0K…"). Strict
+		// base64_decode() rejects the `data:<mediatype>;base64,` prefix (its `:`
+		// `/` `;` are outside the base64 alphabet), so without this the upload
+		// fails as invalid_base64. Strip up to the first comma; a bare base64
+		// string has no `data:` prefix and is unaffected.
+		$payload = (string) $args['data_base64'];
+		if ( 0 === stripos( $payload, 'data:' ) ) {
+			$comma = strpos( $payload, ',' );
+			if ( false !== $comma ) {
+				$payload = substr( $payload, $comma + 1 );
+			}
+		}
+
 		// Bound the encoded payload BEFORE decoding to limit memory consumption.
 		// Base64 expands 3 bytes → 4 bytes, so the encoded length cap matches the
 		// decoded size cap (URL_DOWNLOAD_MAX_BYTES, 25 MB).
 		$encoded_max = (int) ceil( self::URL_DOWNLOAD_MAX_BYTES * 4 / 3 );
-		if ( strlen( (string) $args['data_base64'] ) > $encoded_max ) {
+		if ( strlen( $payload ) > $encoded_max ) {
 			return new \WP_Error(
 				'file_too_large',
 				__( 'data_base64 exceeds size cap before decoding.', 'gk-block-mcp' ),
@@ -341,7 +390,7 @@ class Media_Manager {
 			);
 		}
 
-		$decoded = base64_decode( $args['data_base64'], true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
+		$decoded = base64_decode( $payload, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- Caller-supplied base64 payload from REST request body.
 		if ( false === $decoded || '' === $decoded ) {
 			return new \WP_Error( 'invalid_base64', __( 'data_base64 is not valid base64.', 'gk-block-mcp' ), array( 'status' => 400 ) );
 		}
@@ -490,7 +539,7 @@ class Media_Manager {
 	 * `[start, end]` pairs in IPv4 dotted notation).
 	 *
 	 * @param string $url URL to validate against reserved IP ranges.
-	 * @return true|\WP_Error
+	 * @return array{host:string,ipv4:string[],ipv6:string[]}|\WP_Error The vetted IPs on success (for pinning), or WP_Error.
 	 */
 	private function guard_ssrf( $url ) {
 		$host = wp_parse_url( $url, PHP_URL_HOST );
@@ -682,7 +731,43 @@ class Media_Manager {
 				}
 			}
 		}
-		return true;
+
+		// Return the vetted IP(s) so the caller can pin the fetch to exactly these
+		// addresses (see handle_url), closing the DNS-rebinding TOCTOU where
+		// download_url() would otherwise re-resolve the host to a private IP.
+		return array(
+			'host' => (string) $host,
+			'ipv4' => array_values( array_unique( $ipv4 ) ),
+			'ipv6' => array_values( array_unique( $ipv6 ) ),
+		);
+	}
+
+	/**
+	 * Build CURLOPT_RESOLVE entries pinning the URL's host+port to the vetted IPs.
+	 *
+	 * @param string              $url    The sideload URL.
+	 * @param array<string,mixed> $vetted guard_ssrf() result (host + ipv4/ipv6 lists).
+	 * @return string[] One "host:port:ip[,ip...]" entry, or empty when nothing to pin.
+	 */
+	private function curl_resolve_entries( $url, array $vetted ) {
+		$host = isset( $vetted['host'] ) && '' !== $vetted['host']
+			? (string) $vetted['host']
+			: (string) wp_parse_url( $url, PHP_URL_HOST );
+		$ips  = array_merge(
+			isset( $vetted['ipv4'] ) && is_array( $vetted['ipv4'] ) ? $vetted['ipv4'] : array(),
+			isset( $vetted['ipv6'] ) && is_array( $vetted['ipv6'] ) ? $vetted['ipv6'] : array()
+		);
+		if ( '' === $host || empty( $ips ) ) {
+			return array();
+		}
+
+		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
+		$port   = wp_parse_url( $url, PHP_URL_PORT );
+		if ( ! $port ) {
+			$port = ( 'https' === $scheme ) ? 443 : 80;
+		}
+
+		return array( sprintf( '%s:%d:%s', $host, (int) $port, implode( ',', $ips ) ) );
 	}
 
 	/**

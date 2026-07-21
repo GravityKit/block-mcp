@@ -284,6 +284,25 @@ class HtmlTransformerTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'Old text', $result );
 	}
 
+	/**
+	 * core/code stores `content` as source:html, selector:code — its markup is
+	 * two-level (`<pre class="wp-block-code"><code>…</code></pre>`). The generic
+	 * content transform replaces everything between the first opening tag and the
+	 * last closing tag, which for core/code spans the whole `<code>…</code>`
+	 * element and discards the `<code>` wrapper — the editor then can't find the
+	 * content via the `code` selector and flags the block invalid. The new
+	 * content must land inside `<code>`, leaving the `<pre>`/`<code>` structure
+	 * intact.
+	 */
+	public function test_code_content_change_preserves_code_wrapper() {
+		$t      = $this->get_transformer();
+		$html   = '<pre class="wp-block-code"><code>old()</code></pre>';
+		$result = $t->auto_transform_html( 'core/code', array( 'content' => 'new()' ), $html );
+		$this->assertStringContainsString( '<code>new()</code>', $result, 'content must stay inside the <code> wrapper' );
+		$this->assertStringContainsString( 'wp-block-code', $result, 'the <pre> wrapper and its class must be preserved' );
+		$this->assertStringNotContainsString( 'old()', $result );
+	}
+
 	public function test_button_text_change() {
 		$t = $this->get_transformer();
 		$html = '<div class="wp-block-button"><a class="wp-block-button__link" href="/buy">Old Label</a></div>';
@@ -434,5 +453,64 @@ class HtmlTransformerTest extends WP_UnitTestCase {
 		// esc_html encodes ' as &#039; — assert the dollar sign and variable name appear literally.
 		$this->assertStringContainsString( '$var', $result );
 		$this->assertStringNotContainsString( 'old', $result );
+	}
+
+	/**
+	 * A genuine empty `class=""` on a real tag is removed.
+	 *
+	 * useBlockProps.save() omits the class attribute when there are no
+	 * classes; a stored `class=""` creates a save-output mismatch and the
+	 * "Block contains unexpected or invalid content" warning. Stripping is
+	 * information-preserving. The whitespace artifact WP_HTML_Tag_Processor
+	 * leaves (`<p >`) is insignificant to the block validator, so the
+	 * contract is "the class attribute is gone", not a byte-exact string.
+	 */
+	public function test_strip_empty_class_removes_real_attribute() {
+		$out = $this->get_transformer()->strip_empty_class_attributes( '<p class="">hi</p>' );
+		$this->assertStringNotContainsString( 'class', $out );
+		$this->assertStringContainsString( 'hi', $out );
+	}
+
+	/** Whitespace-only class values (`class="  "`) are treated as empty. */
+	public function test_strip_empty_class_removes_whitespace_only_value() {
+		$out = $this->get_transformer()->strip_empty_class_attributes( '<span class="   ">x</span>' );
+		$this->assertStringNotContainsString( 'class', $out );
+		$this->assertStringContainsString( 'x', $out );
+	}
+
+	/** A non-empty class survives untouched. */
+	public function test_strip_empty_class_keeps_populated_class() {
+		$in  = '<p class="wp-block">hi</p>';
+		$out = $this->get_transformer()->strip_empty_class_attributes( $in );
+		$this->assertSame( $in, $out );
+	}
+
+	/**
+	 * `class=""` that appears as TEXT — an escaped code sample — must survive.
+	 *
+	 * strip_empty_class_attributes ran a tag-blind regex (`/\s+class=""/`)
+	 * that matched the literal string anywhere, including inside an escaped
+	 * code block (`&lt;div class=""&gt;`). Because the method runs on every
+	 * insert (build_block_from_def) and every update-html, editing a code
+	 * sample silently deleted the `class=""` from the displayed source. The
+	 * WP_HTML_Tag_Processor rewrite only touches real tag attributes.
+	 */
+	public function test_strip_empty_class_preserves_escaped_code_sample() {
+		$in  = '<pre class="wp-block-code"><code>&lt;div class=""&gt;x&lt;/div&gt;</code></pre>';
+		$out = $this->get_transformer()->strip_empty_class_attributes( $in );
+		$this->assertStringContainsString( 'div class=""', $out );
+	}
+
+	/**
+	 * `class=""` in visible prose must survive.
+	 *
+	 * A paragraph literally discussing `class=""` had the substring deleted
+	 * by the tag-blind regex, mangling the sentence ("Use class="" to reset"
+	 * → "Use to reset"). Same root cause as the code-sample case.
+	 */
+	public function test_strip_empty_class_preserves_visible_text() {
+		$in  = '<p>Use class="" to reset styling</p>';
+		$out = $this->get_transformer()->strip_empty_class_attributes( $in );
+		$this->assertStringContainsString( 'class=""', $out );
 	}
 }

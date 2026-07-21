@@ -54,7 +54,7 @@ class App_Password_Issuer {
 		if ( ! $user || ! wp_is_application_passwords_available_for_user( $user ) ) {
 			return new \WP_Error(
 				'app_passwords_unavailable',
-				__( 'Application Passwords are unavailable. Your site likely needs HTTPS.', 'gk-block-mcp' )
+				__( 'Application Passwords are unavailable on this site. If your site already uses HTTPS, a security plugin or hardening setting has likely disabled the feature — re-enable Application Passwords and try again.', 'gk-block-mcp' )
 			);
 		}
 

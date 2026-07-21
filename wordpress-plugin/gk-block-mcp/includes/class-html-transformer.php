@@ -25,6 +25,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 class HTML_Transformer {
 
 	/**
+	 * Container (non-void) tags a core/group wrapper may use.
+	 *
+	 * The single allowlist shared by the group tagName auto-transform (here) and
+	 * Block_Mutator's wrap-in-group builder, so a wrapper the mutator creates is
+	 * always one this transform can retag.
+	 *
+	 * @var string[]
+	 */
+	const CONTAINER_TAGS = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+
+	/**
 	 * Auto-transform innerHTML when attribute changes imply HTML structure changes.
 	 *
 	 * Uses WP_HTML_Tag_Processor for safe attribute manipulation (no regex for
@@ -76,16 +87,17 @@ class HTML_Transformer {
 			// container (non-void) tags. We rewrite both opening and closing
 			// tags so the block stays a well-formed container.
 			if ( 'core/group' === $block_name && array_key_exists( 'tagName', $changed_attrs ) ) {
-				$container_tags = array( 'div', 'section', 'aside', 'main', 'header', 'footer', 'article' );
+				$container_tags = self::CONTAINER_TAGS;
 				$new_tag        = sanitize_key( $changed_attrs['tagName'] );
 				if ( in_array( $new_tag, $container_tags, true ) ) {
-					$html = preg_replace(
-						'/^(\s*)<(div|section|aside|main|header|footer|article)(\s|>)/i',
+					$alternation = implode( '|', $container_tags );
+					$html        = preg_replace(
+						'/^(\s*)<(' . $alternation . ')(\s|>)/i',
 						'$1<' . $new_tag . '$3',
 						$html
 					);
-					$html = preg_replace(
-						'/<\/(div|section|aside|main|header|footer|article)>(\s*)$/i',
+					$html        = preg_replace(
+						'/<\/(' . $alternation . ')>(\s*)$/i',
 						'</' . $new_tag . '>$2',
 						$html
 					);
@@ -258,14 +270,31 @@ class HTML_Transformer {
 			&& array_key_exists( 'content', $changed_attrs )
 			) {
 				$new_content = wp_kses_post( $changed_attrs['content'] );
-				// Replace inner text between the first opening tag and last closing tag.
-				$html = preg_replace_callback(
-					'/^(\s*<[^>]+>)(.*?)(<\/[^>]+>\s*)$/is',
-					function ( $matches ) use ( $new_content ) {
-						return $matches[1] . $new_content . $matches[3];
-					},
-					$html
-				);
+
+				// core/code is two-level: <pre class="wp-block-code"><code>…</code></pre>,
+				// and its `content` attribute is source:html against the INNER <code>.
+				// Targeting the outermost tags would strip the <code> wrapper and leave
+				// the editor unable to resolve the content, so replace the <code> inner
+				// text specifically and leave the <pre> shell intact.
+				if ( 'core/code' === $block_name && preg_match( '/<code[^>]*>.*?<\/code>/is', $html ) ) {
+					$html = preg_replace_callback(
+						'/(<code[^>]*>).*?(<\/code>)/is',
+						function ( $matches ) use ( $new_content ) {
+							return $matches[1] . $new_content . $matches[2];
+						},
+						$html
+					);
+				} else {
+					// Single-level blocks: replace inner text between the first opening
+					// tag and the last closing tag.
+					$html = preg_replace_callback(
+						'/^(\s*<[^>]+>)(.*?)(<\/[^>]+>\s*)$/is',
+						function ( $matches ) use ( $new_content ) {
+							return $matches[1] . $new_content . $matches[3];
+						},
+						$html
+					);
+				}
 			}
 
 			// core/button: `text` attr replaces the <a> inner text.
@@ -371,10 +400,13 @@ class HTML_Transformer {
 	 * invalid content" on next edit. Stripping is information-preserving —
 	 * `class=""` and no class attribute are semantically identical in HTML.
 	 *
-	 * The regex only matches the attribute when it's preceded by whitespace
-	 * inside a tag (so we never touch text that happens to contain the
-	 * literal string `class=""`). The closing whitespace is normalised so
-	 * the resulting tag stays well-formed.
+	 * Only a real start-tag attribute is matched. The `[^<>]` guards on both
+	 * sides of the `class` capture keep the match inside a single `<…>` tag,
+	 * so an empty `class=""` that appears in *text* — an escaped code sample
+	 * (`&lt;div class=""&gt;`) or prose that mentions the literal string — is
+	 * never reached (there is no real `<`/`>` around it to anchor the match).
+	 * The surrounding attributes are preserved verbatim, so the tag stays
+	 * byte-clean (no leftover whitespace).
 	 *
 	 * @param string $html innerHTML to normalise.
 	 *
@@ -384,9 +416,15 @@ class HTML_Transformer {
 		if ( ! is_string( $html ) || '' === $html ) {
 			return $html;
 		}
-		// Match: whitespace, class=, quote, optional whitespace-only value,
-		// matching quote. Captures both single- and double-quoted forms.
-		return preg_replace( '/\s+class=(["\'])\s*\1/', '', $html );
+		// $1 = `<tag` + any attributes before class (no `<`/`>` crossing);
+		// the class value is empty or whitespace-only; $3 = the remaining
+		// attributes through the closing `>`. Dropping the class splices
+		// $1 and $3 with no residual space.
+		return preg_replace(
+			'/(<[a-zA-Z][a-zA-Z0-9:-]*[^<>]*?)\s+class\s*=\s*(["\'])\s*\2([^<>]*>)/',
+			'$1$3',
+			$html
+		);
 	}
 
 	/**

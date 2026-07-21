@@ -216,6 +216,109 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The settings form must pin its post-save return URL to the Block MCP page.
+	 *
+	 * The form posts to options.php, which redirects after saving to
+	 * wp_get_referer(). When that referer is absent or host-mismatched (a reverse
+	 * proxy, a www/non-www split), core falls back to bare options-general.php,
+	 * dumping the admin on WP General Settings with no notice. Emitting an explicit
+	 * canonical _wp_http_referer for the plugin page keeps the save on the Block
+	 * MCP screen regardless of the browser's referer. Relying on the REQUEST_URI
+	 * referer alone carries no page slug here, so this goes red without the pin.
+	 */
+	public function test_settings_form_pins_return_url_to_plugin_page() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertMatchesRegularExpression(
+			'/name="_wp_http_referer"\s+value="[^"]*page=gk-block-mcp-settings/',
+			$html,
+			'the settings form must carry a canonical _wp_http_referer targeting the Block MCP page so a save never lands on General Settings'
+		);
+	}
+
+	/**
+	 * The content-type allow-list must be submittable without JavaScript.
+	 *
+	 * The master "Allow all content types" toggle is JS-only (it has no name), and
+	 * it both hides the type fieldset and disables its checkboxes. A disabled input
+	 * is never submitted, so with JS off an admin could not move from allow-all to
+	 * a restricted set. The checkboxes must not be server-side disabled, and a
+	 * <noscript> rule must reveal the list so a no-JS admin can restrict types.
+	 */
+	public function test_content_type_allowlist_is_submittable_without_js() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertDoesNotMatchRegularExpression(
+			'/name="gk_block_api_post_types_allowlist\[\]"[^>]*\bdisabled\b/',
+			$html,
+			'type checkboxes must not be server-side disabled, or a no-JS admin cannot submit a restricted set'
+		);
+		$this->assertMatchesRegularExpression(
+			'/<noscript>.*#gk-block-mcp-type-list\s*\{\s*display:\s*block/s',
+			$html,
+			'a no-JS reveal must show the type list when JavaScript is unavailable'
+		);
+	}
+
+	/**
+	 * The replacement-map table must submit an always-present marker so emptying
+	 * every row clears the stored map instead of resurrecting it.
+	 *
+	 * When the admin removed all rows the form sent no replacement_rows at all, so
+	 * the sanitizer never set replacement_map and array_merge() carried the old
+	 * map forward. A hidden replacement_rows[__present] marker keeps the key
+	 * present so the sanitizer clears it.
+	 */
+	public function test_replacement_map_form_emits_present_marker() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString(
+			'name="gk_block_api_preferences[replacement_rows][__present]"',
+			$html,
+			'the replacement-map form must emit an always-present marker so an emptied table clears the stored map'
+		);
+	}
+
+	/**
+	 * The settings save must return to the policy tab, where the only options.php
+	 * form lives, regardless of the tab the page first loaded on.
+	 *
+	 * settings_return_url read $_GET['tab'] at render time, so after a client-side
+	 * tab switch a save returned the admin to the wrong tab.
+	 */
+	public function test_settings_form_return_url_targets_policy_tab() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$_GET['tab'] = 'connect'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = ob_get_clean();
+		unset( $_GET['tab'] );
+
+		$this->assertMatchesRegularExpression(
+			'/name="_wp_http_referer"\s+value="[^"]*tab=policy/',
+			$html,
+			'the save must return to the policy tab, not the render-time tab'
+		);
+	}
+
+	/**
 	 * The admin submenu uses the "Block MCP" brand label.
 	 */
 	public function test_register_menu_uses_block_mcp_label() {
@@ -237,5 +340,89 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 
 		$this->assertNotNull( $found, 'the settings submenu entry must be registered' );
 		$this->assertSame( 'Block MCP', $found[0], 'menu title must be the "Block MCP" brand label' );
+	}
+
+	// ── Settings cross-cutting contracts (regression guards) ──────────
+
+	/**
+	 * Reset to defaults clears every UI-managed option, including the abilities
+	 * toggle and the one-time preferences upgrade notice. Pins that no
+	 * delete_option() can be silently dropped from handle_reset(), which would
+	 * leave a setting stuck after a reset.
+	 *
+	 * Includes the storage-scan results AND their throttle stamps: deleting the
+	 * results but keeping a recent last-run stamp left "Run scan now" throttled
+	 * for up to an hour against wiped data.
+	 */
+	public function test_reset_clears_all_ui_managed_options() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		$options = array(
+			\GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION,
+			'gk_block_api_preferences_notice',
+			'gk_block_api_preferences',
+			'gk_block_api_post_types_allowlist',
+			\GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION,
+			// The trash grant is a security-relevant permission; a reset must
+			// return it to the OFF default, not leave it enabled.
+			\GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION,
+			// Storage-scan results and both throttle stamps: a reset must clear
+			// the stamps too, or the next scan/refresh throttles against the
+			// wiped results.
+			\GravityKit\BlockMCP\Block_Inventory::STORAGE_MODES_OPTION,
+			\GravityKit\BlockMCP\Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION,
+			\GravityKit\BlockMCP\Block_Inventory::REFRESH_LAST_RUN_OPTION,
+		);
+		foreach ( $options as $opt ) {
+			update_option( $opt, 'sentinel' );
+		}
+
+		$nonce                = wp_create_nonce( 'gk_block_api_reset_defaults' );
+		$_POST['_wpnonce']    = $nonce;
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		$page = new Settings_Page( new Block_Inventory() );
+		$this->capture_redirect(
+			static function () use ( $page ) {
+				$page->handle_reset();
+			}
+		);
+
+		foreach ( $options as $opt ) {
+			$this->assertNotSame( 'sentinel', get_option( $opt ), "handle_reset() must delete {$opt}" );
+		}
+	}
+
+	/**
+	 * register_settings() wires every checkbox toggle into the settings group so
+	 * the form persists it: media uploads, trash, and the abilities toggle. Pins
+	 * that the abilities setting registration is not lost.
+	 */
+	public function test_register_settings_registers_the_toggle_options() {
+		$page = new Settings_Page( new Block_Inventory() );
+		$page->register_settings();
+
+		global $wp_registered_settings;
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION, $wp_registered_settings, 'media uploads toggle must be registered' );
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION, $wp_registered_settings, 'trash toggle must be registered' );
+		$this->assertArrayHasKey( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, $wp_registered_settings, 'abilities toggle must be registered' );
+	}
+
+	/**
+	 * The policy tab renders the abilities toggle (its option name + heading), so
+	 * a render_page() rework can't silently drop the Abilities section.
+	 */
+	public function test_policy_tab_renders_abilities_toggle() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		$_GET['tab'] = 'policy';
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, $html, 'the abilities toggle input must render' );
+		$this->assertStringContainsString( 'AI agents', $html, 'the AI agents section heading must render' );
 	}
 }

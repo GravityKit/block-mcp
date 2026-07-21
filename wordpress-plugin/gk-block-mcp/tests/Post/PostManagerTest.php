@@ -37,6 +37,23 @@ class PostManagerTest extends WP_UnitTestCase {
 			}
 		}
 
+		// Legacy/avoid tiers are admin-configured now (opinion-free defaults); seed
+		// the namespace this create_post legacy-rejection test exercises.
+		update_option(
+			Preferences::OPTION_KEY,
+			array(
+				'namespace_scores' => array(
+					'ugb'       => 0,
+					'jetpack'   => 0,
+					'stackable' => 10,
+				),
+				'replacement_map'  => array(
+					'ugb/text'          => 'core/paragraph',
+					'stackable/heading' => 'core/heading',
+				),
+			)
+		);
+
 		$preferences = new Preferences();
 		$block_crud  = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
 		$this->pm    = new Post_Manager( $block_crud );
@@ -72,6 +89,25 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertNotEmpty( $result['permalink'] );
 		$this->assertNotEmpty( $result['edit_link'] );
 		$this->assertSame( array(), $result['warnings'] );
+	}
+
+	/**
+	 * create_post must enforce MAX_BLOCK_DEPTH like every other write path.
+	 *
+	 * create_post validated block names/tiers but never called
+	 * validate_tree_depth, so a pathologically deep tree persisted and every
+	 * later parse/serialize had to walk it. insert/replace/rewrite all reject a
+	 * tree deeper than MAX_BLOCK_DEPTH.
+	 */
+	public function test_create_post_rejects_over_deep_block_tree() {
+		$block = array( 'name' => 'core/paragraph', 'innerHTML' => '<p>deep</p>' );
+		for ( $i = 0; $i < 40; $i++ ) {
+			$block = array( 'name' => 'core/group', 'innerBlocks' => array( $block ) );
+		}
+
+		$result = $this->pm->create_post( array( 'title' => 'Deep', 'blocks' => array( $block ) ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'block_depth_exceeded', $result->get_error_code() );
 	}
 
 	// ── create_post: post type allow-list ────────────────────────────
@@ -165,6 +201,48 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertSame( '<p>Hello world</p>', $blocks[0]['innerHTML'] );
 		$this->assertSame( array( '<p>Hello world</p>' ), $blocks[0]['innerContent'] );
 		$this->assertSame( array(), $blocks[0]['innerBlocks'] );
+	}
+
+	/**
+	 * A childless block that supplies explicit innerContent nulls must not
+	 * corrupt the saved content.
+	 *
+	 * innerContent is part of the public block-input shape. A null there is a
+	 * child placeholder; serialize_block() dereferences innerBlocks[$index] for
+	 * each null. When the caller passes nulls but no innerBlocks,
+	 * normalize_block_def_for_insert() passed them straight through, so
+	 * serialize_blocks() read past the empty innerBlocks array and emitted
+	 * corrupt content (an "Undefined array key" as the block index ran off the
+	 * end). The fix drops orphaned nulls; this pins that the stored content
+	 * round-trips cleanly with the wrapper string intact.
+	 */
+	public function test_create_post_orphan_inner_content_nulls_do_not_corrupt() {
+		$result = $this->pm->create_post( array(
+			'title'  => 'Orphan nulls',
+			'blocks' => array(
+				array(
+					'name'         => 'core/group',
+					'innerContent' => array( '<div class="wp-block-group">', null, null, '</div>' ),
+				),
+			),
+		) );
+		$this->assertIsArray( $result );
+
+		$content = (string) get_post_field( 'post_content', $result['id'] );
+		$this->assertStringContainsString( '<div class="wp-block-group">', $content );
+
+		// The stored tree must satisfy the null-placeholder invariant: no null
+		// in innerContent without a matching child, so serialize→parse is clean.
+		$blocks = $this->stored_blocks( $result['id'] );
+		$this->assertCount( 1, $blocks );
+		$nulls = count( array_filter( $blocks[0]['innerContent'], static function ( $p ) {
+			return null === $p;
+		} ) );
+		$this->assertSame( count( $blocks[0]['innerBlocks'] ), $nulls );
+		$this->assertSame( 0, $nulls );
+
+		// Idempotent round-trip (would warn/differ under the bug).
+		$this->assertSame( $content, serialize_blocks( $blocks ) );
 	}
 
 	/**
@@ -546,6 +624,19 @@ class PostManagerTest extends WP_UnitTestCase {
 		$this->assertSame( 'New', get_post( $id )->post_title );
 	}
 
+	/**
+	 * A non-string date is rejected with invalid_date, not a PHP "Array to string
+	 * conversion" warning or a fatal on a non-stringable object. update_post
+	 * passes `date` to normalize_date_arg() without its own type guard, so the
+	 * guard lives in normalize_date_arg().
+	 */
+	public function test_update_post_rejects_non_string_date() {
+		$id     = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'X', 'post_status' => 'draft' ) );
+		$result = $this->pm->update_post( $id, array( 'date' => new \stdClass() ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'invalid_date', $result->get_error_code() );
+	}
+
 	public function test_update_post_publish_transitions() {
 		$id = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'draft', 'post_title' => 'X' ) );
 		$result = $this->pm->update_post( $id, array( 'status' => 'publish' ) );
@@ -568,6 +659,37 @@ class PostManagerTest extends WP_UnitTestCase {
 			$result->get_error_code(),
 			array( 'rest_cannot_publish', 'rest_cannot_edit' )
 		);
+	}
+
+	/**
+	 * 'private' is a publish-equivalent status and must require the publish cap on
+	 * create, the same as 'publish' — matching WP core's handle_status_param().
+	 *
+	 * The gate only checked `'publish' === $status`, so a draft-only agent (or any
+	 * edit_posts-but-not-publish_posts caller) could create private posts.
+	 */
+	public function test_create_post_private_status_requires_publish_cap() {
+		// Contributor: edit_posts yes, publish_posts no.
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'contributor' ) ) );
+		$result = $this->pm->create_post( array( 'title' => 'Secret', 'status' => 'private' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_publish', $result->get_error_code() );
+	}
+
+	/**
+	 * 'future' is a publish-equivalent status (WP-Cron auto-publishes it) and must
+	 * require the publish cap on update, the same as 'publish'.
+	 *
+	 * The contributor authors the draft so the edit check passes and the only
+	 * remaining gate is the publish cap.
+	 */
+	public function test_update_post_future_status_requires_publish_cap() {
+		$cid = self::factory()->user->create( array( 'role' => 'contributor' ) );
+		$id  = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'draft', 'post_title' => 'Scheduled', 'post_author' => $cid ) );
+		wp_set_current_user( $cid );
+		$result = $this->pm->update_post( $id, array( 'status' => 'future', 'date' => '2099-01-01 00:00:00' ) );
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rest_cannot_publish', $result->get_error_code() );
 	}
 
 	/**

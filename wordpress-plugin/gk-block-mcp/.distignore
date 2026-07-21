@@ -32,6 +32,10 @@ package-lock.json
 README.md
 CHANGELOG.md
 *.dist
+# PHPStan bootstrap (placeholder constants for static analysis) — dev-only.
+# Unlike phpstan.neon.dist / phpcs.xml.dist it ends in .php, so *.dist misses
+# it; list it explicitly so it never ships in the plugin zip.
+phpstan-bootstrap.php
 *.lock
 .DS_Store
 Thumbs.db

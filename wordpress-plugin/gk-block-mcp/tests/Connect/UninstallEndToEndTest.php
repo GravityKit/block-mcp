@@ -108,6 +108,8 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		// and the gk_block_inventory transient).
 		update_option( 'gk_block_api_preferences', array( 'namespace_scores' => array( 'core' => 90 ) ) );
 		update_option( 'gk_block_api_post_types_allowlist', array( 'post', 'page' ) );
+		update_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, '0' );
+		update_option( 'gk_block_api_stats_refresh_last', time(), false );
 		set_transient( 'gk_block_inventory', array( 'seeded' => true ), HOUR_IN_SECONDS );
 
 		// [LC1] Plant a single-use exchange-code transient — it holds a live
@@ -163,6 +165,14 @@ class UninstallEndToEndTest extends WP_UnitTestCase {
 		$this->assertFalse(
 			get_transient( 'gk_block_inventory' ),
 			'gk_block_inventory transient must be deleted after uninstall.php'
+		);
+		$this->assertFalse(
+			get_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, false ),
+			'gk_block_api_abilities_enabled option must be deleted after uninstall.php'
+		);
+		$this->assertFalse(
+			get_option( 'gk_block_api_stats_refresh_last', false ),
+			'gk_block_api_stats_refresh_last option must be deleted after uninstall.php'
 		);
 	}
 

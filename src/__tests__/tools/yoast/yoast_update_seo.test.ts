@@ -26,6 +26,22 @@ describe('yoast_update_seo — schema', () => {
     const tool = YOAST_TOOLS.find((t) => t.name === 'yoast_update_seo')!;
     expect(tool.inputSchema.required).toContain('post_id');
   });
+
+  // Regression: some AI clients (e.g. Google Gemini) reject a "null" member in a
+  // JSON Schema `type` array and 400 the entire tools/list request, taking down
+  // every tool on the server. noindex must advertise a single scalar type; the
+  // handler still accepts an explicit null (see "noindex tri-state" tests below).
+  it('advertises noindex as a single boolean type, never a ["boolean","null"] array', () => {
+    const tool = YOAST_TOOLS.find((t) => t.name === 'yoast_update_seo')!;
+    const props = tool.inputSchema.properties as unknown as Record<string, { type?: unknown }>;
+    expect(props.noindex.type).toBe('boolean');
+    // Guard the whole shared field set: no property may use a type array containing "null".
+    for (const [name, schema] of Object.entries(props)) {
+      if (Array.isArray(schema.type)) {
+        expect(schema.type, `${name} uses a type array containing "null"`).not.toContain('null');
+      }
+    }
+  });
 });
 
 describe('yoast_update_seo — validation', () => {

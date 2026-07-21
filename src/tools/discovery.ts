@@ -8,6 +8,7 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import { enrichBlockTypes, enrichPatternList } from '../preferences.js';
+import { coercePostId } from '../coerce.js';
 
 const READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
@@ -166,12 +167,14 @@ export async function handleDiscoveryTool(
     case 'list_patterns': {
       const limit  = (args.limit as number | undefined) ?? 20;
       const offset = (args.offset as number | undefined) ?? 0;
+      // Fetch the full set (no server-side limit) and paginate locally, matching
+      // list_block_types. Passing limit: offset+limit truncated `total` to the
+      // fetched window and made next_offset always null on a full page — the
+      // agent then never saw that more patterns existed.
       const response = await client.getPatterns({
         q: args.search as string | undefined,
         synced: args.synced as boolean | undefined,
         min_score: args.min_score as number | undefined,
-        // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit,
         refresh: args.refresh as boolean | undefined,
       });
       const enriched = enrichPatternList(response.patterns);
@@ -225,18 +228,11 @@ export async function handleDiscoveryTool(
       ) {
         throw new Error('get_post_info requires one of: post_id, url, or slug');
       }
-      // Coerce well-formed integer strings (some MCP clients and untyped
-      // JSON send numeric IDs as strings) but reject everything else with
-      // the same "post_id must be a positive integer" error the schema
-      // documents. Floats are rejected because the contract is integer.
-      let normalizedPostId: number | undefined;
-      if (typeof postId === 'number' && Number.isInteger(postId) && postId > 0) {
-        normalizedPostId = postId;
-      } else if (typeof postId === 'string' && /^[0-9]+$/.test(postId)) {
-        normalizedPostId = parseInt(postId, 10);
-      } else if (postId !== undefined && postId !== null) {
-        throw new Error('get_post_info: post_id must be a positive integer');
-      }
+      // Coerce well-formed integer strings (some MCP clients and untyped JSON
+      // send numeric IDs as strings); undefined is allowed here because url/slug
+      // are alternate selectors. Shared with update_post / yoast_* so the whole
+      // tool surface accepts a post_id identically.
+      const normalizedPostId = coercePostId(postId, 'get_post_info');
       return await client.getPostInfo({
         post_id:   normalizedPostId,
         url:       typeof url === 'string' ? url : undefined,

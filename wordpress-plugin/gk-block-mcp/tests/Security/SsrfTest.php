@@ -70,6 +70,26 @@ class SsrfTest extends WP_UnitTestCase {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://10.0.0.1/admin' ) ), '10.0.0.1' );
 	}
 
+	public function test_blocks_cgn_100_64() {
+		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://100.64.0.1/' ) ), '100.64.0.1 carrier-grade NAT (RFC6598)' );
+	}
+
+	/**
+	 * The fetch is pinned to the exact IP(s) guard_ssrf vetted via CURLOPT_RESOLVE,
+	 * so download_url()'s independent second DNS lookup can't be rebound to a
+	 * private IP. This pins the resolve-entry construction (host:port:ips).
+	 */
+	public function test_curl_resolve_entries_pin_vetted_ips_to_host_and_port() {
+		$ref = new \ReflectionMethod( \GravityKit\BlockMCP\Media_Manager::class, 'curl_resolve_entries' );
+		$ref->setAccessible( true );
+
+		$https = $ref->invoke( $this->mm, 'https://cdn.example/img.png', array( 'host' => 'cdn.example', 'ipv4' => array( '93.184.216.34' ), 'ipv6' => array() ) );
+		$this->assertSame( array( 'cdn.example:443:93.184.216.34' ), $https, 'https pins to port 443 and the vetted IPv4' );
+
+		$http = $ref->invoke( $this->mm, 'http://cdn.example/img.png', array( 'host' => 'cdn.example', 'ipv4' => array( '1.2.3.4' ), 'ipv6' => array( '2001:db8::1' ) ) );
+		$this->assertSame( array( 'cdn.example:80:1.2.3.4,2001:db8::1' ), $http, 'http pins to port 80 and all vetted IPs' );
+	}
+
 	public function test_blocks_rfc1918_172_16() {
 		$this->assertRejected( $this->mm->upload( array( 'url' => 'http://172.16.42.7/' ) ), '172.16.42.7' );
 	}
@@ -207,6 +227,41 @@ class SsrfTest extends WP_UnitTestCase {
 			$this->mm->upload( array( 'url' => 'http://this-host-definitely-does-not-exist.invalid.gk-block-mcp-test/' ) ),
 			'unresolvable host'
 		);
+	}
+
+	/**
+	 * The URL sideload fetch must run with HTTP redirects DISABLED.
+	 *
+	 * guard_ssrf() validates only the caller's URL. download_url() otherwise
+	 * follows up to 5 redirects, and a 302 to 169.254.169.254 or a private host
+	 * is fetched without re-validation (core's wp_http_validate_url does not
+	 * block the cloud-metadata range on redirects). This asserts the transport
+	 * receives redirection=0 for the fetch — teeth: without the redirect-
+	 * disabling filter the value is core's default 5 and this fails.
+	 */
+	public function test_url_fetch_disables_http_redirects() {
+		$seen_redirection = null;
+		add_filter(
+			'pre_http_request',
+			static function ( $preempt, $args ) use ( &$seen_redirection ) {
+				unset( $preempt );
+				$seen_redirection = $args['redirection'];
+				// Short-circuit with a benign non-image so the fetch ends here.
+				return array(
+					'headers'  => array(),
+					'body'     => 'x',
+					'response' => array( 'code' => 200, 'message' => 'OK' ),
+					'cookies'  => array(),
+					'filename' => $args['filename'] ?? null,
+				);
+			},
+			10,
+			3
+		);
+
+		$this->mm->upload( array( 'url' => 'https://203.0.113.5/logo.png' ) );
+
+		$this->assertSame( 0, $seen_redirection, 'the sideload fetch must disable HTTP redirects (redirection=0)' );
 	}
 
 	// ── Filter-extensibility ──────────────────────────────────────

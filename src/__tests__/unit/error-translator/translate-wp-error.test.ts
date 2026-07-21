@@ -37,6 +37,17 @@ describe('translateWpError — null contract', () => {
       expect(typeof result, `Expected string translation for "${code}"`).toBe('string');
     }
   });
+
+  it('returns null for codes the plugin never emits (no phantom translations)', () => {
+    // These names look plausible but the PHP plugin does not construct them —
+    // the real codes are post_not_found, invalid_ref, invalid_path. A
+    // translation here would confidently mislead an agent pattern-matching
+    // on `wpCode`.
+    expect(translateWpError('invalid_post_id', { post_id: 7 })).toBeNull();
+    expect(translateWpError('gk_block_api_invalid_ref', { ref: 'blk_x' })).toBeNull();
+    expect(translateWpError('path_not_found', { path: [0] })).toBeNull();
+    expect(translateWpError('path_out_of_bounds', { path: [0] })).toBeNull();
+  });
 });
 
 // ── 2. Per-group describe blocks ─────────────────────────────────────────────
@@ -90,10 +101,10 @@ describe('translateWpError — post lookup', () => {
     expect(msg).toBe('Post not found. List pages with `list_posts` to find the right ID.');
   });
 
-  it('invalid_post_id is an alias of rest_post_invalid_id', () => {
-    const withData = translateWpError('invalid_post_id', { post_id: 7 })!;
+  it('post_not_found — the code the plugin actually emits — embeds post_id', () => {
+    const withData = translateWpError('post_not_found', { post_id: 7 })!;
     expect(withData).toMatch(/Post 7 not found/);
-    const bare = translateWpError('invalid_post_id', null)!;
+    const bare = translateWpError('post_not_found', null)!;
     expect(bare).toMatch(/Post not found/);
   });
 
@@ -107,8 +118,14 @@ describe('translateWpError — post lookup', () => {
 });
 
 describe('translateWpError — block ref / path resolution', () => {
-  it('gk_block_api_invalid_ref embeds ref and post_id', () => {
-    const msg = translateWpError('gk_block_api_invalid_ref', {
+  it('invalid_ref explains the malformed-ref case (empty/non-string ref)', () => {
+    const msg = translateWpError('invalid_ref', null)!;
+    expect(msg).toMatch(/non-empty string/);
+    expect(msg).toMatch(/get_page_blocks/);
+  });
+
+  it('ref_stale embeds ref and post_id and points at get_page_blocks', () => {
+    const msg = translateWpError('ref_stale', {
       ref: 'blk_abc123',
       post_id: 42,
     })!;
@@ -117,40 +134,35 @@ describe('translateWpError — block ref / path resolution', () => {
     expect(msg).toMatch(/get_page_blocks/);
   });
 
-  it('gk_block_api_invalid_ref uses ? placeholders when data is null', () => {
-    const msg = translateWpError('gk_block_api_invalid_ref', null)!;
+  it('ref_stale uses ? placeholder and drops the post clause when data is null', () => {
+    const msg = translateWpError('ref_stale', null)!;
     expect(msg).toMatch(/Block ref `\?`/);
-    expect(msg).toMatch(/post \?/);
+    expect(msg).not.toMatch(/ in post/);
   });
 
-  it('invalid_ref is an alias', () => {
-    const msg = translateWpError('invalid_ref', { ref: 'blk_xyz', post_id: 5 })!;
-    expect(msg).toContain('blk_xyz');
-  });
-
-  it('path_not_found formats path array correctly', () => {
-    const msg = translateWpError('path_not_found', { path: [0, 2, 1] })!;
+  it('invalid_path formats the path array and mentions re-fetching', () => {
+    const msg = translateWpError('invalid_path', { path: [0, 2, 1] })!;
     expect(msg).toMatch(/\[0, 2, 1\]/);
     expect(msg).toMatch(/Re-fetch the post/);
   });
 
-  it('path_not_found uses ? when path is absent', () => {
-    expect(translateWpError('path_not_found', null)).toMatch(/path \? doesn't address/);
+  it('invalid_path uses ? when path is absent', () => {
+    expect(translateWpError('invalid_path', null)).toMatch(/path \? doesn't address/);
   });
 
-  it('invalid_path is an alias', () => {
-    const msg = translateWpError('invalid_path', { path: [1] })!;
-    expect(msg).toMatch(/\[1\]/);
-  });
-
-  it('path_out_of_bounds mentions re-fetching', () => {
-    const msg = translateWpError('path_out_of_bounds', { path: [99] })!;
-    expect(msg).toMatch(/out of bounds/);
+  it('invalid_index embeds flat_index and mentions re-fetching', () => {
+    const msg = translateWpError('invalid_index', { flat_index: 12 })!;
+    expect(msg).toMatch(/Block index 12 out of range/);
     expect(msg).toMatch(/get_page_blocks/);
+  });
+
+  it('invalid_index survives a missing flat_index hint', () => {
+    const msg = translateWpError('invalid_index', null)!;
+    expect(msg).toMatch(/^Block index out of range/);
   });
 });
 
-describe('translateWpError — preference enforcement', () => {
+describe('translateWpError — preference / storage enforcement', () => {
   it('legacy_block embeds block name and replacement', () => {
     const msg = translateWpError('legacy_block', {
       block: 'example/heading',
@@ -207,6 +219,47 @@ describe('translateWpError — preference enforcement', () => {
     expect(msg).toMatch(/innerHTML/);
     expect(msg).toMatch(/static block/);
   });
+
+  it('dual_storage_requires_both names the block and tells the agent to send both fields', () => {
+    const msg = translateWpError('dual_storage_requires_both', { block_name: 'yoast/faq-block' })!;
+    expect(msg).toMatch(/yoast\/faq-block is dual-storage/);
+    expect(msg).toMatch(/attributes.*innerHTML.*together/);
+  });
+
+  it('dual_storage_requires_both falls back gracefully without a block name', () => {
+    const msg = translateWpError('dual_storage_requires_both', null)!;
+    expect(msg).toMatch(/This block is dual-storage/);
+  });
+
+  it('block_depth_exceeded embeds max/actual depth when present', () => {
+    const msg = translateWpError('block_depth_exceeded', { max_depth: 32, actual_depth: 33 })!;
+    expect(msg).toMatch(/max 32, got 33/);
+    expect(msg).toMatch(/nesting depth/);
+  });
+
+  it('block_depth_exceeded survives missing depth hints', () => {
+    const msg = translateWpError('block_depth_exceeded', null)!;
+    expect(msg).toMatch(/^Block tree exceeds the maximum nesting depth/);
+  });
+});
+
+describe('translateWpError — concurrency / staleness', () => {
+  it('edit_conflict tells the agent to re-fetch and retry', () => {
+    const msg = translateWpError('edit_conflict', null)!;
+    expect(msg).toMatch(/changed since it was read/);
+    expect(msg).toMatch(/get_page_blocks/);
+  });
+
+  it('stale_revision embeds the current revision when present', () => {
+    const msg = translateWpError('stale_revision', { current_revision: 88 })!;
+    expect(msg).toMatch(/current revision: 88/);
+    expect(msg).toMatch(/get_page_blocks/);
+  });
+
+  it('stale_revision survives a missing current_revision hint', () => {
+    const msg = translateWpError('stale_revision', null)!;
+    expect(msg).toMatch(/^The post has changed since you fetched it\. Re-fetch/);
+  });
 });
 
 describe('translateWpError — rate limiting', () => {
@@ -219,6 +272,18 @@ describe('translateWpError — rate limiting', () => {
   it('rate_limit_exceeded drops post_id clause when absent', () => {
     const msg = translateWpError('rate_limit_exceeded', null)!;
     expect(msg).toMatch(/^Too many writes in the last minute/);
+    expect(msg).not.toMatch(/on post/);
+  });
+
+  it('rate_limit_locked advises a brief retry and embeds post_id', () => {
+    const msg = translateWpError('rate_limit_locked', { post_id: 7 })!;
+    expect(msg).toMatch(/on post 7/);
+    expect(msg).toMatch(/Retry in a moment/);
+  });
+
+  it('rate_limit_locked drops post_id clause when absent', () => {
+    const msg = translateWpError('rate_limit_locked', null)!;
+    expect(msg).toMatch(/^Another write is in progress/);
     expect(msg).not.toMatch(/on post/);
   });
 });
@@ -238,6 +303,12 @@ describe('translateWpError — v1.2 post lifecycle', () => {
   it('invalid_status lists valid values', () => {
     const msg = translateWpError('invalid_status', null)!;
     expect(msg).toMatch(/draft/);
+  });
+
+  it('trash_disabled points at the site setting', () => {
+    const msg = translateWpError('trash_disabled', null)!;
+    expect(msg).toMatch(/trash is turned off/);
+    expect(msg).toMatch(/Settings/);
   });
 });
 
@@ -286,19 +357,19 @@ describe('translateWpError — full error-code coverage matrix', () => {
 describe('translateWpError — data extraction edge cases', () => {
   it('ignores non-object data payload', () => {
     // String data: should not throw, fall back to ? placeholders
-    expect(() => translateWpError('gk_block_api_invalid_ref', 'oops')).not.toThrow();
+    expect(() => translateWpError('ref_stale', 'oops')).not.toThrow();
   });
 
   it('ignores array data payload', () => {
-    expect(() => translateWpError('gk_block_api_invalid_ref', [1, 2, 3])).not.toThrow();
+    expect(() => translateWpError('ref_stale', [1, 2, 3])).not.toThrow();
   });
 
   it('handles path array with non-integer values — does not throw', () => {
     // extractHints validates each element is a finite number; non-integers
     // are filtered out, so the path hint falls back to ? placeholder.
     // The translator must not throw regardless of payload shape.
-    expect(() => translateWpError('path_not_found', { path: ['a', 'b'] })).not.toThrow();
-    const msg = translateWpError('path_not_found', { path: ['a', 'b'] });
+    expect(() => translateWpError('invalid_path', { path: ['a', 'b'] })).not.toThrow();
+    const msg = translateWpError('invalid_path', { path: ['a', 'b'] });
     expect(msg).not.toBeNull();
   });
 

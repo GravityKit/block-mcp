@@ -83,8 +83,8 @@ export interface BlockType {
 export interface PatternPreference {
   /** Computed preference score */
   score: number;
-  /** Human-readable tier */
-  tier: 'recommended' | 'acceptable' | 'avoid' | 'legacy';
+  /** Human-readable tier (matches the server: preferred/acceptable/avoid/legacy) */
+  tier: 'preferred' | 'acceptable' | 'avoid' | 'legacy';
   /** Reasons contributing to the score */
   reasons: string[];
 }
@@ -799,17 +799,27 @@ export interface UploadMediaResponse {
 // Routes only register when Yoast SEO is active on the target site.
 // ============================================
 
-export type YoastSchemaPageType =
-  | 'WebPage' | 'ItemPage' | 'AboutPage' | 'FAQPage' | 'QAPage'
-  | 'ProfilePage' | 'ContactPage' | 'MedicalWebPage' | 'CollectionPage'
-  | 'CheckoutPage' | 'RealEstateListing' | 'SearchResultsPage';
+/**
+ * Single source of truth for the Yoast schema-page-type enum — the const
+ * array backs both the runtime value (JSON Schema `enum`, narrowing filters
+ * in src/tools/yoast.ts) and the TS union type below, so the two can't drift.
+ */
+export const YOAST_SCHEMA_PAGE_TYPES = [
+  'WebPage', 'ItemPage', 'AboutPage', 'FAQPage', 'QAPage',
+  'ProfilePage', 'ContactPage', 'MedicalWebPage', 'CollectionPage',
+  'CheckoutPage', 'RealEstateListing', 'SearchResultsPage',
+] as const;
+export type YoastSchemaPageType = typeof YOAST_SCHEMA_PAGE_TYPES[number];
 
-export type YoastSchemaArticleType =
-  | 'Article' | 'BlogPosting' | 'SocialMediaPosting' | 'NewsArticle'
-  | 'AdvertiserContentArticle' | 'SatiricalArticle' | 'ScholarlyArticle'
-  | 'TechArticle' | 'Report' | 'None';
+export const YOAST_SCHEMA_ARTICLE_TYPES = [
+  'Article', 'BlogPosting', 'SocialMediaPosting', 'NewsArticle',
+  'AdvertiserContentArticle', 'SatiricalArticle', 'ScholarlyArticle',
+  'TechArticle', 'Report', 'None',
+] as const;
+export type YoastSchemaArticleType = typeof YOAST_SCHEMA_ARTICLE_TYPES[number];
 
-export type YoastRobotsAdvanced = 'noimageindex' | 'noarchive' | 'nosnippet';
+export const YOAST_ROBOTS_ADVANCED = ['noimageindex', 'noarchive', 'nosnippet'] as const;
+export type YoastRobotsAdvanced = typeof YOAST_ROBOTS_ADVANCED[number];
 
 /**
  * Writable Yoast SEO fields. All optional in update payloads — only the

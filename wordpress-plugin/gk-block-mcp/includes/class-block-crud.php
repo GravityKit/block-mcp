@@ -294,13 +294,16 @@ class Block_CRUD {
 	 * Delegates to Block_Writer, then invalidates the reader parse-cache so the
 	 * next read in the same request sees the freshly-saved content.
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree in WP-internal shape.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree in WP-internal shape.
+	 * @param string|null $expected Stored post_content the tree was built from,
+	 *                              for the optimistic-concurrency guard. Null
+	 *                              disables it.
 	 *
 	 * @return array|\WP_Error
 	 */
-	public function save_blocks( $post_id, array $blocks ) {
-		$result = $this->writer->save_blocks( $post_id, $blocks );
+	public function save_blocks( $post_id, array $blocks, $expected = null ) {
+		$result = $this->writer->save_blocks( $post_id, $blocks, $expected );
 		if ( ! is_wp_error( $result ) ) {
 			$this->reader->invalidate( (int) $post_id );
 		}
@@ -392,11 +395,12 @@ class Block_CRUD {
 	 * @param array       &$block      Block array to mutate in place.
 	 * @param array       $attributes  Partial attributes to merge (may be empty).
 	 * @param string|null $inner_html  Replacement innerHTML, or null to skip.
+	 * @param array|null  &$warnings   Optional. Collects static-block safety warnings when an array is passed.
 	 *
 	 * @return void
 	 */
-	public function apply_block_update_in_place( &$block, $attributes, $inner_html ) {
-		$this->writer->apply_block_update_in_place( $block, $attributes, $inner_html );
+	public function apply_block_update_in_place( &$block, $attributes, $inner_html, &$warnings = null ) {
+		$this->writer->apply_block_update_in_place( $block, $attributes, $inner_html, $warnings );
 	}
 
 	/**
@@ -977,22 +981,53 @@ class Block_CRUD {
 	 * wp_update_post to avoid creating revisions for what is effectively
 	 * metadata bookkeeping (gk_ref is editor-only — see Block_Safety).
 	 *
-	 * @param int   $post_id Post ID.
-	 * @param array $blocks  Block tree with refs assigned.
+	 * @param int         $post_id  Post ID.
+	 * @param array       $blocks   Block tree with refs assigned.
+	 * @param string|null $expected Stored post_content the ref walk parsed.
+	 *                              When set, the write compare-and-swaps on it
+	 *                              so a concurrent content edit is not clobbered
+	 *                              by this wp_update_post-bypassing write. Null
+	 *                              keeps the unconditional legacy behavior.
 	 *
-	 * @return bool True on success.
+	 * @return bool True on success; false on a CAS miss or DB error.
 	 */
-	public function persist_ref_assignments( $post_id, $blocks ) {
+	public function persist_ref_assignments( $post_id, $blocks, $expected = null ) {
 		global $wpdb;
-		$content = serialize_blocks( $blocks );
-		$result  = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$content      = serialize_blocks( $blocks );
+		$where        = array( 'ID' => (int) $post_id );
+		$where_format = array( '%d' );
+		if ( null !== $expected ) {
+			// Byte-exact compare-and-swap. The case-insensitive WHERE below would
+			// treat a case/accent-only concurrent edit as unchanged and clobber
+			// it, so verify byte for byte first; the no-op touch pins the read to
+			// the primary. The WHERE snapshot stays as an atomic backstop for the
+			// verify-to-update window.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			if ( (string) $current !== (string) $expected ) {
+				clean_post_cache( (int) $post_id );
+				return false;
+			}
+			$where['post_content'] = $expected;
+			$where_format[]        = '%s';
+		}
+		$result = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->posts,
 			array( 'post_content' => $content ),
-			array( 'ID' => (int) $post_id ),
+			$where,
 			array( '%s' ),
-			array( '%d' )
+			$where_format
 		);
 		clean_post_cache( (int) $post_id );
+
+		// A 0-row result under a snapshot means a concurrent writer moved the
+		// row: skip the refs-persisted side effects and report no-op so the
+		// next read re-resolves against current content.
+		if ( null !== $expected && 0 === $result ) {
+			return false;
+		}
 
 		/**
 		 * React when block reference IDs are written straight to a post.
@@ -1035,6 +1070,25 @@ class Block_CRUD {
 	}
 
 	/**
+	 * Whether a block is server-rendered (dynamic).
+	 *
+	 * The single authority for the API `dynamic` / `is_dynamic` fields, so the
+	 * read (get_page_blocks) and write (update_block's `saved`) paths agree.
+	 * Delegates to Block_Inventory, which classifies an unregistered block as
+	 * static. This differs from Block_Safety::is_dynamic_block, a separate
+	 * warning-suppression concern that treats an unknown block as dynamic.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name Fully-qualified block name.
+	 *
+	 * @return bool
+	 */
+	public function is_block_dynamic( $block_name ) {
+		return $this->inventory->is_block_dynamic( $block_name );
+	}
+
+	/**
 	 * Build the BLOCK-14 dual-storage rejection error.
 	 *
 	 * @param string $block_name The dual-storage block being mutated.
@@ -1054,6 +1108,102 @@ class Block_CRUD {
 				'block'           => $block_name,
 				'storage_mode'    => Block_Inventory::STORAGE_MODE_DUAL,
 				'policy_resource' => 'block-mcp://agent-guide',
+			)
+		);
+	}
+
+	/**
+	 * Attempt to make an innerHTML-only edit to a dual-storage block safe by
+	 * re-deriving its sourced attributes from the new markup.
+	 *
+	 * Write paths call this before rejecting an innerHTML-only update on a
+	 * dual-storage block. When the block is simple enough that its structured
+	 * content can be recomputed from innerHTML (see
+	 * Block_Inventory::is_innerhtml_rederivable), this returns the derived
+	 * attributes so the caller can apply them alongside the new innerHTML,
+	 * keeping both halves in sync. Returns null when the block cannot be safely
+	 * re-synced (unregistered, delimiter-only structured data like
+	 * yoast/faq-block's questions[], or nothing derivable from the markup), in
+	 * which case the caller keeps the original dual-storage rejection.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param string $block_name    Fully-qualified block type name.
+	 * @param mixed  $current_attrs The block's current attributes (non-array
+	 *                              delimiter JSON is treated as unsafe → null).
+	 * @param mixed  $inner_html    The new innerHTML being written.
+	 *
+	 * @return array<string, mixed>|null Derived attributes to apply, or null.
+	 */
+	public function auto_derive_dual_attributes( $block_name, $current_attrs, $inner_html ) {
+		if ( ! is_array( $current_attrs ) ) {
+			return null;
+		}
+
+		$rederivable = $this->inventory->is_innerhtml_rederivable( $block_name, $current_attrs );
+		if ( ! $rederivable ) {
+			return null;
+		}
+
+		$derived = $this->reader->derive_sourced_attributes( $block_name, $inner_html );
+		if ( empty( $derived ) ) {
+			return null;
+		}
+
+		return $derived;
+	}
+
+	/**
+	 * Reject an attribute write that would overwrite a Block Bindings value.
+	 *
+	 * WP 6.5+ resolves a bound attribute at render time from a binding source
+	 * (post-meta, etc.), so writing it directly silently clobbers a value the
+	 * author never controls here. Every write path that applies attributes runs
+	 * this, including the dual-storage auto-derive paths whose derived `content`
+	 * could collide with a `content` binding. A write to `metadata` itself is
+	 * structural and always allowed.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @param array<string, mixed> $attributes         Attributes about to be written.
+	 * @param mixed                $block_attrs         The target block's current attributes
+	 *                                                 (non-array = no bindings to protect).
+	 * @param bool                 $allow_bound_writes  Caller opt-in to overwrite bound attrs.
+	 *
+	 * @return \WP_Error|null WP_Error('bound_attribute') when blocked, else null.
+	 */
+	public function reject_bound_write( array $attributes, $block_attrs, $allow_bound_writes ) {
+		if ( $allow_bound_writes || empty( $attributes ) || ! is_array( $block_attrs ) ) {
+			return null;
+		}
+
+		$bindings = isset( $block_attrs['metadata']['bindings'] ) && is_array( $block_attrs['metadata']['bindings'] )
+			? $block_attrs['metadata']['bindings']
+			: array();
+		if ( empty( $bindings ) ) {
+			return null;
+		}
+
+		$blocked = array();
+		foreach ( array_keys( $attributes ) as $attr_key ) {
+			if ( 'metadata' !== $attr_key && isset( $bindings[ $attr_key ] ) ) {
+				$blocked[] = $attr_key;
+			}
+		}
+		if ( empty( $blocked ) ) {
+			return null;
+		}
+
+		return new \WP_Error(
+			'bound_attribute',
+			sprintf(
+				/* translators: 1: comma-separated list of bound attribute names */
+				__( 'Cannot overwrite bound attribute(s): %s. These are resolved dynamically from a binding source. Pass allow_bound_writes:true to force the update.', 'gk-block-mcp' ),
+				implode( ', ', $blocked )
+			),
+			array(
+				'status'           => 400,
+				'bound_attributes' => $blocked,
 			)
 		);
 	}

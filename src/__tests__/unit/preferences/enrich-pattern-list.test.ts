@@ -17,7 +17,7 @@ function makePattern(overrides: Partial<Pattern> & { id: number; name: string })
     created: '2026-01-01',
     modified: '2026-01-01',
     reference_count: 0,
-    preference: { score: 80, tier: 'recommended', reasons: [] },
+    preference: { score: 80, tier: 'preferred', reasons: [] },
     contains_blocks: [],
     has_legacy_blocks: false,
     ...overrides,
@@ -49,12 +49,28 @@ describe('enrichPatternList — empty input', () => {
   });
 });
 
+describe('enrichPatternList — tier buckets match the tiers the server emits', () => {
+  it('lists preferred and acceptable patterns instead of reporting none', () => {
+    // The server emits preferred/acceptable/avoid/legacy — never "recommended".
+    // Filtering the usable bucket on a non-existent tier hid every pattern.
+    const patterns = [
+      makePattern({ id: 1, name: 'Hero', preference: { score: 90, tier: 'preferred', reasons: [] } }),
+      makePattern({ id: 2, name: 'Card', preference: { score: 60, tier: 'acceptable', reasons: [] } }),
+    ];
+    const { summary } = enrichPatternList(patterns);
+    expect(summary).toContain('RECOMMENDED patterns');
+    expect(summary).toContain('Hero');
+    expect(summary).toContain('Card');
+    expect(summary).not.toMatch(/No patterns found/);
+  });
+});
+
 describe('enrichPatternList — sorting', () => {
   it('sorts by score descending', () => {
     const patterns = [
       makePattern({ id: 1, name: 'Low',  preference: { score: 10, tier: 'avoid',       reasons: [] } }),
-      makePattern({ id: 2, name: 'High', preference: { score: 95, tier: 'recommended', reasons: [] } }),
-      makePattern({ id: 3, name: 'Mid',  preference: { score: 50, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 2, name: 'High', preference: { score: 95, tier: 'preferred', reasons: [] } }),
+      makePattern({ id: 3, name: 'Mid',  preference: { score: 50, tier: 'preferred', reasons: [] } }),
     ];
     const result = enrichPatternList(patterns);
     expect(result.patterns[0].name).toBe('High');
@@ -64,8 +80,8 @@ describe('enrichPatternList — sorting', () => {
 
   it('preserves equal-score order (stable sort is not required, just non-crash)', () => {
     const patterns = [
-      makePattern({ id: 1, name: 'A', preference: { score: 80, tier: 'recommended', reasons: [] } }),
-      makePattern({ id: 2, name: 'B', preference: { score: 80, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 1, name: 'A', preference: { score: 80, tier: 'preferred', reasons: [] } }),
+      makePattern({ id: 2, name: 'B', preference: { score: 80, tier: 'preferred', reasons: [] } }),
     ];
     const result = enrichPatternList(patterns);
     expect(result.patterns).toHaveLength(2);
@@ -74,7 +90,7 @@ describe('enrichPatternList — sorting', () => {
   it('does not mutate the input array', () => {
     const patterns = [
       makePattern({ id: 1, name: 'A', preference: { score: 10, tier: 'avoid',       reasons: [] } }),
-      makePattern({ id: 2, name: 'B', preference: { score: 95, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 2, name: 'B', preference: { score: 95, tier: 'preferred', reasons: [] } }),
     ];
     const original = [...patterns];
     enrichPatternList(patterns);
@@ -85,7 +101,7 @@ describe('enrichPatternList — sorting', () => {
 describe('enrichPatternList — summary generation', () => {
   it('includes RECOMMENDED label for recommended patterns', () => {
     const patterns = [
-      makePattern({ id: 1, name: 'Hero', preference: { score: 85, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 1, name: 'Hero', preference: { score: 85, tier: 'preferred', reasons: [] } }),
     ];
     const result = enrichPatternList(patterns);
     expect(result.summary).toMatch(/RECOMMENDED/);
@@ -121,14 +137,14 @@ describe('enrichPatternList — summary generation', () => {
 
   it('does not include AVOID label when all patterns are recommended', () => {
     const patterns = [
-      makePattern({ id: 1, name: 'Good', preference: { score: 80, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 1, name: 'Good', preference: { score: 80, tier: 'preferred', reasons: [] } }),
     ];
     expect(enrichPatternList(patterns).summary).not.toMatch(/AVOID/);
   });
 
   it('shows both sections when mixed tiers', () => {
     const patterns = [
-      makePattern({ id: 1, name: 'Good',  preference: { score: 80, tier: 'recommended', reasons: [] } }),
+      makePattern({ id: 1, name: 'Good',  preference: { score: 80, tier: 'preferred', reasons: [] } }),
       makePattern({ id: 2, name: 'Bad',   preference: { score: 0,  tier: 'legacy',      reasons: [] }, has_legacy_blocks: true }),
     ];
     const { summary } = enrichPatternList(patterns);
@@ -140,7 +156,7 @@ describe('enrichPatternList — summary generation', () => {
     const patterns = [
       makePattern({
         id: 1, name: 'Hero',
-        preference: { score: 80, tier: 'recommended', reasons: [] },
+        preference: { score: 80, tier: 'preferred', reasons: [] },
         contains_blocks: ['core/heading', 'core/paragraph', 'core/image'],
       }),
     ];

@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.0.2
+Stable tag: 2.1.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,11 +120,74 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= develop =
+= 2.1.0 on July 20, 2026 =
+
+This release exposes Block MCP's operations as native WordPress Abilities for the official MCP Adapter, makes block preferences site-aware, and hardens reliability and security across editing, media uploads, and the assistant account.
+
+#### 🚀 Added
+
+* Block MCP's editing operations can now be registered as native WordPress Abilities, so the WordPress MCP Adapter (or any other Abilities consumer) can offer them to AI agents as tools: read a page, update, insert, or delete a block, create a post, list block types, and read your theme's style presets so an assistant matches your theme. Every ability requires the same sign-in and editing permission as the REST API and runs through the same engine, so it behaves identically either way. This is off by default; turn it on at **Settings → Block MCP**. It requires WordPress 6.9 or newer and the WordPress MCP Adapter plugin, which you install separately (it is not part of WordPress). Until both are in place, your choice is saved and takes effect once they are.
+
+#### ✨ Improved
+
+* Block preferences are now site-aware. The score table lists the block families registered by your active plugins and themes, plus any found in your published content, instead of a fixed built-in list. You score the blocks your site actually uses.
+* No block is treated as legacy out of the box. Only WordPress core blocks are preferred by default, and every other block family is fine to use until you score it down. The built-in opinions about which third-party blocks to avoid have been removed.
+* The replacement map is now entirely your own list. No built-in replacement suggestions ship anymore, so the mappings shown are the ones you added, and a mapping you remove stays removed.
+* Blocks whose plugin or theme is no longer active are flagged as "not active on this site" in the score table and in AI assistant responses, so you and your assistant can spot content that references a missing block.
+* Your previously saved block preferences are kept exactly as they were when you upgrade. A one-time notice on Settings → Block MCP explains the new model and offers a one-click reset to the new defaults.
+* An assistant can now update a block that keeps its text in two forms (such as a heading) by sending just the new text, instead of the change being refused unless both forms were sent together. The plugin rebuilds the second form from the new text and keeps them in sync. Blocks whose second form cannot be rebuilt from the text, such as an FAQ block's list of questions, are left unchanged.
+
+#### 🔒 Security
+
+* Tightened the permissions of the dedicated AI assistant account so it stays limited to creating and editing content (posts and pages) and is never granted access to site-wide design or administrative settings. This holds on every theme, including full site editing themes.
+* Strengthened how block content is saved so that text placed inside a block can't alter the structure of the surrounding page. This protection now applies on every editing path.
+* Hardened URL-based media uploads so a supplied link only downloads from the address you provide. If an image source relies on a redirect, provide the final image URL directly.
+* "Reset to defaults" now also returns the "allow the assistant to move posts to the trash" permission to off, so a reset fully restores the safe default settings.
+* Creating a scheduled (future-dated) or private post through the assistant now requires the account's publish permission, matching WordPress's own rules for those statuses.
+
+#### 🐛 Fixed
+
+* Fixes a block edit sometimes undoing a change made moments earlier, such as a block you just deleted reappearing after your next edit. Each edit now reads the page's current saved content before changing it.
+* When two edits reach the same page at nearly the same time, the second save now stops and reports a conflict instead of replacing the first edit's changes. Your revision history is preserved.
+* Fixes URL lookups returning the site's front page when given a query-string permalink such as `?p=123` or `?post_type=docs&p=123`. The query string is now preserved, so the lookup resolves to the intended post. Pretty permalinks were unaffected.
+* Fixes the Connect screen showing "HTTPS required" on sites that already use HTTPS but have WordPress Application Passwords disabled (commonly by a security plugin or hardening setting). The screen now correctly reports that Application Passwords are turned off and explains how to re-enable them, instead of sending you to fix an HTTPS problem you don't have.
+* Connecting an AI assistant now explains what went wrong when approval fails, instead of the Approve screen appearing to stall with nothing shown in your AI app. An expired approval link, a lapsed sign-in, or a rejected request each show a clear message on the screen, and approving after your WordPress sign-in has lapsed asks you to sign in and try again rather than returning a blank page.
+* Saving Block MCP settings now reliably returns you to the Block MCP page. On sites reached at a different address than their configured site URL (for example behind a reverse proxy), a save could land on the WordPress General Settings screen; the settings form now carries its own return address so the save stays on the Block MCP page.
+* Fixes the "what AI assistants can create" content-type list on **Settings → Block MCP** not saving when the browser has JavaScript turned off.
+* Images saved through the assistant no longer show "This block contains unexpected or invalid content" when you open the page in the editor. When an image's width was set only in its inline style, WordPress couldn't tell the block was resized; the size is now recorded the way the editor expects, so the block stays valid. This runs automatically on every write path.
+* Moving a block into an empty container (or to the last position inside a container) no longer places it outside the container's markup. Previously the block appeared to move, but the page's saved content put it after the container's closing tag, and the editor flagged the container as invalid content.
+* Editing a Code block's text through the assistant no longer strips the block's inner markup and leaves it showing "This block contains unexpected or invalid content" in the editor. The new text is now placed inside the code element the block expects, so the block stays valid.
+* A post can now be created with the title "0". It was previously rejected as having no title.
+* Editing a Code block whose text contains dollar-sign sequences (such as `$1` or a price like `$5`) through the assistant no longer garbles that text.
+* Connecting an AI assistant now works on sites that don't use pretty permalinks; the connection reaches the REST API through its query-string address instead of a permalink path.
+* The per-page edit-rate limit is now counted reliably when several edits reach the same page at the same moment, so simultaneous edits can't slip past it.
+
+#### 💻 Developer Updates
+
+* The `update_block` and `update_blocks` tools now declare `destructiveHint: true`, since they overwrite a block's existing content rather than adding to it, so MCP clients that honor the hint can ask you to confirm before an assistant overwrites a block.
+* Block read responses now include `preference.orphaned` set to `true` for any block whose namespace has no registered provider on the site, so an integration can detect orphaned blocks in a page.
+* The `list_posts` tool (REST route `GET /find-posts`) now reports the true `total` and `total_pages` for the whole readable result set instead of only the current page, so a paginating integration gets accurate counts.
+* `list_patterns` now reports the true total for its result set, so pattern listings paginate correctly.
+* Write endpoints add a `rate_limit_locked` response (HTTP 429) for when simultaneous writes to the same post can't be rate-limited atomically. It clears within about a second, so retry shortly rather than backing off for a full minute.
+
+= 2.0.3 on June 17, 2026 =
+
+This release adds an Add row button to the block-preference tables, fixes those tables losing your changes on the first save, corrects block deletion on pages with nested blocks, restores Yoast tools in Gemini-based assistants, and patches bundled dependency security advisories.
+
+#### ✨ Improved
+
+* Adds an **Add row** button to the block-score and replacement tables, so new entries are added reliably.
 
 #### 🐛 Fixed
 
 * Fixes deleting a block by its reference removing the wrong block on a page that contains nested blocks (such as Groups or Columns). The reference now resolves to the correct top-level block, and a reference that points to a nested block is safely refused rather than deleting an unrelated one.
+* Fixes the Yoast SEO tools failing to load in AI assistants built on Google Gemini. The `noindex` field advertised a schema type that Gemini's tool format rejects, which took the assistant's entire tool list offline on those clients. The Yoast tools now connect across Claude, ChatGPT, and Gemini alike. Thank you to [Dallin Chase](https://github.com/dallinchase) for catching this and sending the fix — his first contribution to Block MCP! 🎉
+* Fixes the block-score and replacement tables on **Settings → Block MCP** losing your changes — and the built-in entries — the first time you saved them. Saved scores and replacements now persist, and the built-in entries always stay visible in the tables instead of disappearing once you add a custom one.
+* Fixes a block-family score entered without a name being silently discarded when you save — you're now warned instead.
+
+#### 🔧 Updated
+
+* Updates the bundled MCP server's dependencies to resolve reported security advisories.
 
 = 2.0.2 on June 15, 2026 =
 

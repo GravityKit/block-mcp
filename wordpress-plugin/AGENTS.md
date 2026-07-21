@@ -16,7 +16,7 @@
 gk-block-mcp/
 ├── gk-block-mcp.php              # Bootstrap: autoloader, rest_api_init + admin wiring, CLI
 ├── uninstall.php                 # Full data + agent teardown (multisite-aware)
-├── readme.txt                    # Canonical changelog + Upgrade Notice
+├── readme.txt                    # Canonical changelog
 ├── phpcs.xml.dist / phpstan.neon.dist / phpstan-bootstrap.php   # Static-analysis config
 └── includes/                     # (line counts approximate)
     ── Block engine (the CRUD facade + its parts) ─────────────────────────
@@ -209,9 +209,11 @@ All routes under `gk-block-api/v1`.
 - **Pattern reference counting uses `LIKE`** on `post_content` — accurate but unindexed; rely on the cache on large sites.
 - **`wp_kses_post()` strips scripts/handlers** from innerHTML — intentional, but surprises agents inserting embeds.
 - **Block inventory scan is expensive** (`posts_per_page => -1`); the 1-hour transient matters — use `refresh: true` sparingly.
+- **Invoking a REST handler directly (hand-built `WP_REST_Request`) is not dispatch.** Route `permission_callback`s and per-arg `sanitize_callback`/`validate_callback` run only in server dispatch — a direct handler call skips them, so the calling layer must re-check caps and validate input itself. Set route params with `set_url_params()`, never `set_param()`: on a fresh request `set_param()` writes into the POST bucket, which a later `set_body_params()` replaces wholesale — the post id silently resolves to `0` and every body-bearing call fails with a generic permission error.
+- **An ability without `meta.mcp.public === true` is invisible over MCP.** The MCP Adapter's default server filters on that meta flag (`McpAbilityHelperTrait::check_ability_mcp_exposure()`, defaulting to false); `show_in_rest` only affects the Abilities REST API, not MCP. Every `wp_register_ability()` call must declare `'mcp' => array( 'public' => true )` alongside `annotations`, or adapter-connected agents never see the tool.
 
 ## Related Resources
 
 - `../AGENTS.md` — repo-root architecture + connect overview (+ MCP server side).
 - `gk-block-mcp/tests/AGENTS.md` — PHPUnit conventions and regression-test discipline.
-- `gk-block-mcp/readme.txt` — canonical changelog + Upgrade Notice.
+- `gk-block-mcp/readme.txt` — canonical changelog.

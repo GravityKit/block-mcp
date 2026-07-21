@@ -7,7 +7,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all4) => {
   for (var name in all4)
@@ -16854,6 +16858,9 @@ var require_form_data = __commonJS({
     var setToStringTag = require_es_set_tostringtag();
     var hasOwn = require_hasown();
     var populate = require_populate();
+    function escapeHeaderParam(str) {
+      return String(str).replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/"/g, "%22");
+    }
     function FormData3(options) {
       if (!(this instanceof FormData3)) {
         return new FormData3(options);
@@ -16943,7 +16950,7 @@ var require_form_data = __commonJS({
       var contents = "";
       var headers = {
         // add custom disposition as third element or keep it two elements if not
-        "Content-Disposition": ["form-data", 'name="' + field + '"'].concat(contentDisposition || []),
+        "Content-Disposition": ["form-data", 'name="' + escapeHeaderParam(field) + '"'].concat(contentDisposition || []),
         // if no content type. allow it to be empty array
         "Content-Type": [].concat(contentType || [])
       };
@@ -16977,7 +16984,7 @@ var require_form_data = __commonJS({
         filename = path2.basename(value.client._httpMessage.path || "");
       }
       if (filename) {
-        return 'filename="' + filename + '"';
+        return 'filename="' + escapeHeaderParam(filename) + '"';
       }
     };
     FormData3.prototype._getContentType = function(value, options) {
@@ -35208,7 +35215,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.0.1",
+  version: "2.1.0",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
@@ -35225,6 +35232,7 @@ var package_default = {
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:docs": "playwright test --config tests/docs/playwright.config.ts",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     eval: "tsx tests/evals/lib/runner.ts",
     "eval:fixture-refresh": "tsx tests/evals/scripts/fetch-fixture.ts",
     prepare: "npm run build",
@@ -35250,7 +35258,7 @@ var package_default = {
   },
   dependencies: {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    axios: "^1.7.9",
+    axios: "^1.16.0",
     "form-data": "^4.0.1"
   },
   devDependencies: {
@@ -35259,12 +35267,12 @@ var package_default = {
     "@shikijs/engine-javascript": "^4.0.2",
     "@shikijs/langs": "^4.0.2",
     "@types/node": "^22.0.0",
-    esbuild: "^0.27.3",
+    esbuild: "^0.28.1",
     sharp: "^0.33.5",
     shiki: "^4.0.2",
     tsx: "^4.21.0",
     typescript: "^5.7.0",
-    vitest: "^3.2.4"
+    vitest: "^3.2.6"
   },
   engines: {
     node: ">=20.0.0"
@@ -35278,6 +35286,9 @@ var package_default = {
   ],
   publishConfig: {
     access: "public"
+  },
+  overrides: {
+    esbuild: "$esbuild"
   }
 };
 
@@ -39920,6 +39931,11 @@ function extractHints(data) {
   if (typeof d2.block_name === "string") hints.block_name = d2.block_name;
   if (typeof d2.suggested_replacement === "string") hints.suggested_replacement = d2.suggested_replacement;
   if (typeof d2.status === "number") hints.status = d2.status;
+  if (typeof d2.flat_index === "number") hints.flat_index = d2.flat_index;
+  if (typeof d2.expected_revision === "number") hints.expected_revision = d2.expected_revision;
+  if (typeof d2.current_revision === "number") hints.current_revision = d2.current_revision;
+  if (typeof d2.max_depth === "number") hints.max_depth = d2.max_depth;
+  if (typeof d2.actual_depth === "number") hints.actual_depth = d2.actual_depth;
   return hints;
 }
 function translateWpError(code, data) {
@@ -39938,23 +39954,30 @@ function translateWpError(code, data) {
     case "rest_authentication_required":
       return "Authentication failed. Confirm WORDPRESS_USER and WORDPRESS_APP_PASSWORD are set to a valid Application Password (not a regular login password).";
     // ── Post lookup ────────────────────────────────────────────────
+    // `post_not_found` is the code the plugin actually emits;
+    // `rest_post_invalid_id` is WordPress core's equivalent, kept as an
+    // alias in case a core route ever surfaces it.
     case "rest_post_invalid_id":
-    case "invalid_post_id": {
+    case "post_not_found": {
       const target = hints.post_id !== void 0 ? `Post ${hints.post_id}` : "Post";
       return `${target} not found. List pages with \`list_posts\` to find the right ID.`;
     }
     case "not_found":
       return hints.post_id ? `Post ${hints.post_id} not found. It may have been deleted, or the ID is wrong.` : "Resource not found. It may have been deleted, or the ID is wrong.";
     // ── Block ref / path resolution ────────────────────────────────
-    case "gk_block_api_invalid_ref":
     case "invalid_ref":
-      return `Block ref \`${hints.ref ?? "?"}\` not found in post ${hints.post_id ?? "?"}. The post may have been edited since you last fetched it \u2014 call \`get_page_blocks\` again to get the current refs.`;
-    case "path_not_found":
+      return "Ref must be a non-empty string. Use the `ref` value returned by `get_page_blocks` \u2014 not a made-up ID.";
+    case "ref_stale": {
+      const where = hints.post_id !== void 0 ? ` in post ${hints.post_id}` : "";
+      return `Block ref \`${hints.ref ?? "?"}\`${where} no longer resolves to a block. It may have been deleted, or the ref is from an older snapshot \u2014 call \`get_page_blocks\` again to get current refs.`;
+    }
     case "invalid_path":
-      return `Block path ${formatPath(hints.path)} doesn't address an existing block. Re-fetch the post with \`get_page_blocks\` to get current paths \u2014 paths shift when blocks are added or removed.`;
-    case "path_out_of_bounds":
-      return `Block path ${formatPath(hints.path)} is out of bounds. The post has fewer blocks than expected \u2014 re-fetch with \`get_page_blocks\` for current state.`;
-    // ── Block tier / preference enforcement ────────────────────────
+      return `Block path ${formatPath(hints.path)} doesn't address an existing block (or isn't a valid array of non-negative integers). Re-fetch the post with \`get_page_blocks\` to get current paths \u2014 paths shift when blocks are added or removed.`;
+    case "invalid_index": {
+      const idx = typeof hints.flat_index === "number" ? ` ${hints.flat_index}` : "";
+      return `Block index${idx} out of range. Re-fetch the post with \`get_page_blocks\` to get current indices \u2014 they shift when blocks are added or removed.`;
+    }
+    // ── Block tier / preference / storage enforcement ───────────────
     case "legacy_block":
       return blockName ? `${blockName} is in a namespace this site has configured as legacy. Use ${hints.suggested_replacement ?? "a core block instead"}.` : "Legacy block rejected. Use a core block (or a higher-tier alternative) instead.";
     case "inner_html_required": {
@@ -39963,10 +39986,27 @@ function translateWpError(code, data) {
     }
     case "static_markup_stale_risk":
       return "Updating attributes on a static block without new innerHTML may leave its rendered markup stale. Pass `innerHTML` alongside `attributes`, or use a dynamic block.";
+    case "dual_storage_requires_both":
+      return blockName ? `${blockName} is dual-storage: \`attributes\` and \`innerHTML\` carry the same data and must be sent together \u2014 sending only one silently desyncs the other. Pass both fields in the same call.` : "This block is dual-storage: `attributes` and `innerHTML` carry the same data and must be sent together \u2014 sending only one silently desyncs the other. Pass both fields in the same call.";
+    case "block_depth_exceeded": {
+      const depth = typeof hints.max_depth === "number" && typeof hints.actual_depth === "number" ? ` (max ${hints.max_depth}, got ${hints.actual_depth})` : "";
+      return `Block tree exceeds the maximum nesting depth${depth}. Flatten the structure \u2014 split deeply nested groups into separate top-level blocks.`;
+    }
+    // ── Concurrency / staleness ──────────────────────────────────────
+    case "edit_conflict":
+      return "The post content changed since it was read (a concurrent write raced this one). Re-fetch the page with `get_page_blocks` and retry your edit against the current content.";
+    case "stale_revision": {
+      const rev = typeof hints.current_revision === "number" ? ` (current revision: ${hints.current_revision})` : "";
+      return `The post has changed since you fetched it${rev}. Re-fetch with \`get_page_blocks\` and retry.`;
+    }
     // ── Rate limiting ──────────────────────────────────────────────
     case "rate_limit_exceeded": {
       const where = hints.post_id !== void 0 ? `on post ${hints.post_id} ` : "";
       return `Too many writes ${where}in the last minute. Wait ~60s before retrying, or batch your edits into a single \`edit_block_tree\` call.`;
+    }
+    case "rate_limit_locked": {
+      const where = hints.post_id !== void 0 ? ` on post ${hints.post_id}` : "";
+      return `Another write${where} is in progress. Retry in a moment; the lock clears within a second. To avoid contention, batch edits into a single \`edit_block_tree\` call.`;
     }
     // ── v1.2 post lifecycle ────────────────────────────────────────
     case "mixed_trash_payload":
@@ -39975,6 +40015,8 @@ function translateWpError(code, data) {
       return "Post type not allowed by this site's gk_block_api_post_types_allowlist option. Ask the site admin to add it, or pick a supported type.";
     case "invalid_status":
       return 'Post status not allowed. Valid values: draft, pending, publish, future, private. To trash, call update_post with status:"trash" (on its own, not combined with other fields).';
+    case "trash_disabled":
+      return "Moving posts to trash is turned off for this site. A site administrator can enable it under Block MCP \u2192 Settings, or use update_post with a different status.";
     // ── Media uploads ──────────────────────────────────────────────
     case "invalid_url":
       return "URL rejected by SSRF guard. Hostnames pointing at private/loopback/cloud-metadata IPs are blocked. Use a publicly reachable URL.";
@@ -39987,6 +40029,29 @@ function translateWpError(code, data) {
 function formatPath(path2) {
   if (!path2 || path2.length === 0) return "?";
   return `[${path2.join(", ")}]`;
+}
+
+// src/rest-url.ts
+function restRouteUrl(siteUrl, routeSuffix = "") {
+  const trimmed = siteUrl.replace(/\/+$/, "");
+  return `${trimmed}/?rest_route=/gk-block-api/v1${routeSuffix}`;
+}
+
+// src/coerce.ts
+function coercePostId(value, label) {
+  if (value === void 0 || value === null) {
+    return void 0;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    const parsed = parseInt(value, 10);
+    if (parsed > 0 && Number.isSafeInteger(parsed)) {
+      return parsed;
+    }
+  }
+  throw new Error(`${label}: post_id must be a positive integer`);
 }
 
 // src/client.ts
@@ -40053,8 +40118,7 @@ var WordPressBlockClient = class {
     const credentials = Buffer.from(
       `${auth.username}:${auth.application_password}`
     ).toString("base64");
-    const trimmed = wordpress_url.replace(/\/+$/, "");
-    const baseURL = `${trimmed}/wp-json/gk-block-api/v1`;
+    const baseURL = restRouteUrl(wordpress_url);
     this.client = axios_default.create({
       baseURL,
       headers: {
@@ -40252,9 +40316,11 @@ var WordPressBlockClient = class {
    * @returns Array of parsed blocks
    */
   async getPageBlocks(postId, params) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "get_page_blocks");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const queryParams = {};
     if (params?.fields) queryParams.fields = params.fields;
     if (params?.render) queryParams.render = "true";
@@ -40321,7 +40387,9 @@ var WordPressBlockClient = class {
    * @returns Updated block details with revision ID
    */
   async updateBlock(postId, index, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (index < 0) throw new Error("Block index must be non-negative");
     if (!data.attributes && !data.innerHTML) {
       throw new Error("At least one of attributes or innerHTML must be provided");
@@ -40342,7 +40410,9 @@ var WordPressBlockClient = class {
    * @returns 404 ref_stale if the ref no longer matches any block.
    */
   async updateBlockByRef(postId, ref, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!ref || typeof ref !== "string") throw new Error("Ref is required");
     if (!data.attributes && !data.innerHTML) {
       throw new Error("At least one of attributes or innerHTML must be provided");
@@ -40370,7 +40440,9 @@ var WordPressBlockClient = class {
    * @returns       Per-item results plus the single revision ID.
    */
   async updateBlocksBatch(postId, updates, options = {}) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "update_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error("updates must be a non-empty array");
     }
@@ -40396,7 +40468,9 @@ var WordPressBlockClient = class {
    * @returns       { success, saved } where `saved` mirrors update_block's saved.
    */
   async getBlock(postId, target) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "get_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     const hasRef = typeof target.ref === "string" && target.ref !== "";
     const hasIdx = typeof target.flatIndex === "number";
     if (hasRef === hasIdx) {
@@ -40416,7 +40490,9 @@ var WordPressBlockClient = class {
    * @returns Inserted blocks with new indices, warnings, and revision ID
    */
   async insertBlocks(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "insert_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!data.blocks || data.blocks.length === 0) {
       throw new Error("At least one block is required");
     }
@@ -40435,7 +40511,9 @@ var WordPressBlockClient = class {
    * @returns Deletion confirmation with revision ID
    */
   async deleteBlock(postId, index, count) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "delete_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (index < 0) throw new Error("Block index must be non-negative");
     const params = {};
     if (count && count > 1) params.count = String(count);
@@ -40453,7 +40531,9 @@ var WordPressBlockClient = class {
    * @param count  - Consecutive blocks to remove (default 1)
    */
   async deleteBlockByRef(postId, ref, count) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "delete_block");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!ref || typeof ref !== "string") throw new Error("Ref is required");
     const params = {};
     if (count && count > 1) params.count = String(count);
@@ -40473,7 +40553,9 @@ var WordPressBlockClient = class {
    * @returns Result with `removed`, `inserted[]`, warnings, revision IDs
    */
   async replaceBlocksRange(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "replace_block_range");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (typeof data.start !== "number" || data.start < 0) {
       throw new Error("start must be a non-negative integer");
     }
@@ -40500,7 +40582,9 @@ var WordPressBlockClient = class {
    * @returns Written blocks with revision ID
    */
   async replaceAllBlocks(postId, blocks) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "rewrite_post_blocks");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (!blocks || blocks.length === 0) {
       throw new Error("At least one block is required for a full rewrite");
     }
@@ -40521,9 +40605,11 @@ var WordPressBlockClient = class {
    * @returns Mutation result with revision IDs and optional warnings
    */
   async mutateBlockTree(postId, data) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "edit_block_tree");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const response = await this.client.post(
       `/posts/${postId}/mutate`,
       data
@@ -40541,9 +40627,11 @@ var WordPressBlockClient = class {
    * @returns Revert result with revision IDs
    */
   async revertToRevision(postId, revisionId) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "revert_to_revision");
+    if (coercedPostId === void 0) {
       throw new Error("Post ID is required");
     }
+    postId = coercedPostId;
     const response = await this.client.post(`/posts/${postId}/revert`, { revision_id: revisionId });
     return response.data;
   }
@@ -40558,7 +40646,9 @@ var WordPressBlockClient = class {
    * @returns Inserted pattern details with revision ID
    */
   async insertPattern(postId, data) {
-    if (postId === void 0 || postId === null) throw new Error("Post ID is required");
+    const coercedPostId = coercePostId(postId, "insert_pattern");
+    if (coercedPostId === void 0) throw new Error("Post ID is required");
+    postId = coercedPostId;
     if (data.pattern_id === void 0 || data.pattern_id === null) throw new Error("Pattern ID is required");
     const response = await this.client.post(
       `/posts/${postId}/insert-pattern`,
@@ -40593,9 +40683,11 @@ var WordPressBlockClient = class {
    * Use `status: trash` to trash; any non-trash status untrashes a trashed post.
    */
   async updatePost(postId, data) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "update_post");
+    if (coercedPostId === void 0) {
       throw new Error("update_post: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.patch(`/posts/${postId}`, data);
     return response.data;
   }
@@ -40655,17 +40747,21 @@ var WordPressBlockClient = class {
   // ──────────────────────────────────────────────────────────
   /** Read all Yoast SEO metadata for a post. */
   async getYoastSEO(postId) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "yoast_get_seo");
+    if (coercedPostId === void 0) {
       throw new Error("yoast_get_seo: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.get(`/yoast/${postId}`);
     return response.data;
   }
   /** Partial update of Yoast SEO fields on a single post. */
   async updateYoastSEO(postId, fields) {
-    if (postId === void 0 || postId === null) {
+    const coercedPostId = coercePostId(postId, "yoast_update_seo");
+    if (coercedPostId === void 0) {
       throw new Error("yoast_update_seo: post_id is required");
     }
+    postId = coercedPostId;
     const response = await this.client.patch(`/yoast/${postId}`, fields);
     return response.data;
   }
@@ -40678,6 +40774,51 @@ var WordPressBlockClient = class {
     return response.data;
   }
 };
+
+// src/config.ts
+function readEnv(env, primary, legacy) {
+  const fromPrimary = env[primary];
+  if (fromPrimary && fromPrimary.trim() !== "") {
+    return fromPrimary;
+  }
+  const fromLegacy = env[legacy];
+  if (fromLegacy && fromLegacy.trim() !== "") {
+    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
+    return fromLegacy;
+  }
+  return void 0;
+}
+function resolveWordPressConfig(env) {
+  const url3 = readEnv(env, "WORDPRESS_URL", "GK_SITE_URL");
+  const user = readEnv(env, "WORDPRESS_USER", "GK_BLOCK_API_USER");
+  const password = readEnv(env, "WORDPRESS_APP_PASSWORD", "GK_BLOCK_API_APP_PASSWORD");
+  const missing = [];
+  if (!url3) {
+    missing.push("WORDPRESS_URL");
+  }
+  if (!user) {
+    missing.push("WORDPRESS_USER");
+  }
+  if (!password) {
+    missing.push("WORDPRESS_APP_PASSWORD");
+  }
+  if (missing.length > 0) {
+    const message = `Block MCP is not configured: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Set them in the "env" block of the block-mcp server entry in your MCP client config. Your site's Settings \u2192 Block MCP \u2192 Connect generates a ready-made config for you.`;
+    return { ok: false, missing, message };
+  }
+  return { ok: true, config: { url: url3, user, password } };
+}
+function buildNotConfiguredResult(message) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ error: true, code: "not_configured", message }, null, 2)
+      }
+    ],
+    isError: true
+  };
+}
 
 // src/instructions.ts
 var BASELINE = `Block-level WordPress CRUD. URL \u2192 post_id is resolved server-side \u2014 pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
@@ -40717,8 +40858,7 @@ async function fetchAddendum(wordpressUrl) {
   if (process.env[OFF_ENV_VAR] === "1") {
     return "";
   }
-  const base = wordpressUrl.replace(/\/+$/, "");
-  const url3 = `${base}/wp-json/gk-block-api/v1/instructions`;
+  const url3 = restRouteUrl(wordpressUrl, "/instructions");
   try {
     const response = await axios_default.get(url3, {
       timeout: FETCH_TIMEOUT_MS,
@@ -40819,7 +40959,9 @@ function enrichPatternList(patterns) {
   const sorted = [...patterns].sort(
     (a2, b3) => b3.preference.score - a2.preference.score
   );
-  const recommended = sorted.filter((p2) => p2.preference.tier === "recommended");
+  const recommended = sorted.filter(
+    (p2) => p2.preference.tier === "preferred" || p2.preference.tier === "acceptable"
+  );
   const avoid = sorted.filter((p2) => p2.preference.tier === "avoid" || p2.preference.tier === "legacy");
   const lines = [];
   if (recommended.length > 0) {
@@ -40867,50 +41009,38 @@ function enrichBlockTypes(types) {
     }
   }
   const lines = [];
-  if (preferred.length > 0) {
-    const grouped = groupByNamespace(preferred);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(", ");
-      lines.push(`PREFERRED (${ns}/): ${names}`);
-    }
-  }
-  if (acceptable.length > 0) {
-    const grouped = groupByNamespace(acceptable);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const names = blocks.map((t) => getShortName(t.name)).join(", ");
-      lines.push(`ACCEPTABLE (${ns}/): ${names}`);
-    }
-  }
-  if (avoid.length > 0) {
-    const grouped = groupByNamespace(avoid);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`AVOID (${ns}/): ${mappings.join(", ")}`);
-    }
-  }
-  if (legacy.length > 0) {
-    const grouped = groupByNamespace(legacy);
-    for (const [ns, blocks] of Object.entries(grouped)) {
-      const mappings = blocks.map((t) => {
-        const replacement = t.preference.replacement;
-        const shortName = getShortName(t.name);
-        return replacement ? `${shortName} -> use ${replacement}` : shortName;
-      });
-      lines.push(`LEGACY \u2014 DO NOT USE (${ns}/): ${mappings.join(", ")}`);
-    }
-  }
+  pushTierLines(lines, preferred, "PREFERRED", false);
+  pushTierLines(lines, acceptable, "ACCEPTABLE", false);
+  pushTierLines(lines, avoid, "AVOID", true);
+  pushTierLines(lines, legacy, "LEGACY \u2014 DO NOT USE", true);
   const guidance = lines.join("\n");
   return { block_types: types, guidance };
+}
+function pushTierLines(lines, bucket, label, withReplacement) {
+  if (bucket.length === 0) return;
+  const grouped = groupByNamespace(bucket);
+  for (const [ns, blocks] of Object.entries(grouped)) {
+    const names = blocks.map((t) => {
+      const shortName = getShortName(t.name);
+      if (!withReplacement) return shortName;
+      const replacement = t.preference.replacement;
+      return replacement ? `${shortName} -> use ${replacement}` : shortName;
+    });
+    lines.push(`${label} (${ns}/): ${names.join(", ")}`);
+  }
 }
 function formatPreferenceWarning(warning) {
   if (warning.suggested_replacement) {
     return `WARNING: ${warning.block} is non-preferred. Use ${warning.suggested_replacement} instead.`;
   }
   return `WARNING: ${warning.message}`;
+}
+function withFormattedWarnings(result, formatWarning) {
+  if (result.warnings && result.warnings.length > 0) {
+    const warnings = result.warnings;
+    return { ...result, formatted_warnings: warnings.map(formatWarning) };
+  }
+  return result;
 }
 function groupByNamespace(types) {
   const groups = {};
@@ -41075,8 +41205,6 @@ async function handleDiscoveryTool(toolName, args, client) {
         q: args.search,
         synced: args.synced,
         min_score: args.min_score,
-        // Fetch enough to honor offset+limit. Server caps respond too.
-        limit: offset + limit,
         refresh: args.refresh
       });
       const enriched = enrichPatternList(response.patterns);
@@ -41120,14 +41248,7 @@ async function handleDiscoveryTool(toolName, args, client) {
       if ((postId === void 0 || postId === null) && (typeof url3 !== "string" || url3.length === 0) && (typeof slug !== "string" || slug.length === 0)) {
         throw new Error("get_post_info requires one of: post_id, url, or slug");
       }
-      let normalizedPostId;
-      if (typeof postId === "number" && Number.isInteger(postId) && postId > 0) {
-        normalizedPostId = postId;
-      } else if (typeof postId === "string" && /^[0-9]+$/.test(postId)) {
-        normalizedPostId = parseInt(postId, 10);
-      } else if (postId !== void 0 && postId !== null) {
-        throw new Error("get_post_info: post_id must be a positive integer");
-      }
+      const normalizedPostId = coercePostId(postId, "get_post_info");
       return await client.getPostInfo({
         post_id: normalizedPostId,
         url: typeof url3 === "string" ? url3 : void 0,
@@ -41251,7 +41372,7 @@ var READ_TOOLS = [
 async function handleReadTool(toolName, args, client) {
   switch (toolName) {
     case "get_page_blocks": {
-      let postId = args.post_id;
+      let postId = coercePostId(args.post_id, "get_page_blocks");
       const url3 = args.url;
       const fields = args.fields;
       const render = args.render;
@@ -41263,10 +41384,10 @@ async function handleReadTool(toolName, args, client) {
       const persistRefs = args.persist_refs;
       const limit = args.limit;
       const cursor = args.cursor;
-      if ((postId === void 0 || postId === null) && !url3) {
+      if (postId === void 0 && !url3) {
         throw new Error("Either post_id or url is required");
       }
-      if (postId === void 0 || postId === null) {
+      if (postId === void 0) {
         const resolved = await client.resolveUrl(url3);
         postId = resolved.post_id;
       }
@@ -41300,10 +41421,10 @@ async function handleReadTool(toolName, args, client) {
       };
     }
     case "get_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "get_block");
       const ref = typeof args.ref === "string" && args.ref.length > 0 ? args.ref : void 0;
-      const flatIndex = typeof args.flat_index === "number" && Number.isFinite(args.flat_index) ? args.flat_index : void 0;
-      if (postId === void 0 || postId === null) {
+      const flatIndex = typeof args.flat_index === "number" && Number.isInteger(args.flat_index) && args.flat_index >= 0 ? args.flat_index : void 0;
+      if (postId === void 0) {
         throw new Error("post_id is required");
       }
       const hasRef = ref !== void 0;
@@ -52027,7 +52148,7 @@ async function shikiHighlight(code, language, themeName) {
   const lang29 = langs.has(language) ? language : "plaintext";
   let html5 = hl.codeToHtml(code, { lang: lang29, theme: "css-variables" }).replace(/var\(--shiki-foreground\)/g, "var(--shiki-color-text)").replace(/var\(--shiki-background\)/g, "var(--shiki-color-background)");
   if (themeName && themeName !== "css-variables") {
-    html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, `$1 ${themeName}$2`);
+    html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, (_m, p1, p2) => `${p1} ${themeName}${p2}`);
   }
   return html5;
 }
@@ -52089,7 +52210,7 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   if (incomingInnerHTML !== "") {
     updatedInnerHTML = incomingInnerHTML.replace(
       /<pre class="shiki[\s\S]*?<\/pre>/,
-      codeHTML
+      () => codeHTML
     );
     updatedInnerHTML = updatedInnerHTML.replace(
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
@@ -52164,7 +52285,9 @@ var WRITE_TOOLS = [
     // idempotentHint is false: every call creates a new revision, and
     // revision history is observable to other readers. Same-input/same-state
     // is true at the block level but not at the post level.
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Update one block" },
+    // destructiveHint is true: attributes/innerHTML overwrite the block's
+    // existing content rather than merging additively.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Update one block" },
     outputSchema: {
       type: "object",
       properties: {
@@ -52211,7 +52334,8 @@ var WRITE_TOOLS = [
   {
     name: "update_blocks",
     description: "Update N independent blocks atomically in ONE revision. Each item targets one block by `ref` (recommended) or `flat_index`, with `attributes` and/or `innerHTML`. Validation is all-or-nothing: any stale ref / out-of-range index / dual-storage rejection / duplicate target aborts the batch with itemized errors \u2014 no partial writes hit disk. Max 50 items per call. Counts as ONE write against the per-post rate limit. Use this instead of looping update_block when fixing multiple blocks on the same post \u2014 keeps revision history clean. Pass `verbose: true` to include `saved.inner_html` + `saved.attributes` per result for per-item verification without a re-read.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Batch-update blocks" },
+    // destructiveHint is true: same overwrite semantics as update_block, applied per item.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: "Batch-update blocks" },
     outputSchema: {
       type: "object",
       properties: {
@@ -52405,13 +52529,13 @@ var WRITE_TOOLS = [
 async function handleWriteTool(toolName, args, client) {
   switch (toolName) {
     case "update_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "update_block");
       const flatIndex = args.flat_index;
       const ref = args.ref;
       const blockName = args.block_name;
       let attributes = args.attributes;
       let innerHTML = args.innerHTML;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       const hasIndex = typeof flatIndex === "number" && Number.isFinite(flatIndex) && flatIndex >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasIndex && !hasRef) {
@@ -52435,9 +52559,9 @@ async function handleWriteTool(toolName, args, client) {
       return await client.updateBlock(postId, flatIndex, { attributes, innerHTML });
     }
     case "update_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "update_blocks");
       const updates = args.updates;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!Array.isArray(updates) || updates.length === 0) {
         throw new Error("updates must be a non-empty array");
       }
@@ -52481,13 +52605,13 @@ async function handleWriteTool(toolName, args, client) {
       return await client.updateBlocksBatch(postId, normalized);
     }
     case "insert_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "insert_blocks");
       const after = args.after_top_level;
       const before = args.before_top_level;
       const afterRef = args.after_ref;
       const beforeRef = args.before_ref;
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!blocks || blocks.length === 0) throw new Error("At least one block is required in the blocks array");
       const result = await client.insertBlocks(postId, {
         after,
@@ -52496,17 +52620,14 @@ async function handleWriteTool(toolName, args, client) {
         ...beforeRef ? { before_ref: beforeRef } : {},
         blocks: await enrichBlocks(blocks)
       });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "delete_block": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "delete_block");
       const topLevelCounter = args.top_level_counter;
       const ref = args.ref;
       const count = args.count;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       const hasCounter = typeof topLevelCounter === "number" && Number.isFinite(topLevelCounter) && topLevelCounter >= 0;
       const hasRef = typeof ref === "string" && ref.length > 0;
       if (!hasCounter && !hasRef) {
@@ -52526,35 +52647,29 @@ async function handleWriteTool(toolName, args, client) {
       return await client.deleteBlock(postId, topLevelCounter, count);
     }
     case "replace_block_range": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "replace_block_range");
       const start = args.start;
       const count = args.count;
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
-      if (typeof start !== "number" || start < 0) throw new Error("start must be a non-negative integer");
-      if (typeof count !== "number" || count < 0) throw new Error("count must be a non-negative integer");
+      if (postId === void 0) throw new Error("post_id is required");
+      if (!Number.isSafeInteger(start) || start < 0) throw new Error("start must be a non-negative integer");
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error("count must be a non-negative integer");
       if (!Array.isArray(blocks)) throw new Error("blocks must be an array (may be empty for a pure delete)");
       const result = await client.replaceBlocksRange(postId, { start, count, blocks: await enrichBlocks(blocks) });
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "rewrite_post_blocks": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "rewrite_post_blocks");
       const blocks = args.blocks;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (!blocks || blocks.length === 0) throw new Error("At least one block is required for a full page rewrite");
       const result = await client.replaceAllBlocks(postId, await enrichBlocks(blocks));
-      if (result.warnings && result.warnings.length > 0) {
-        return { ...result, formatted_warnings: result.warnings.map(formatPreferenceWarning) };
-      }
-      return result;
+      return withFormattedWarnings(result, formatPreferenceWarning);
     }
     case "revert_to_revision": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "revert_to_revision");
       const revisionId = args.revision_id;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (revisionId === void 0 || revisionId === null) throw new Error("revision_id is required");
       return await client.revertToRevision(postId, revisionId);
     }
@@ -52600,12 +52715,12 @@ var PATTERN_TOOLS = [
 async function handlePatternTool(toolName, args, client) {
   switch (toolName) {
     case "insert_pattern": {
-      const postId = args.post_id;
+      const postId = coercePostId(args.post_id, "insert_pattern");
       const patternId = args.pattern_id;
       const after = args.after_top_level;
       const before = args.before_top_level;
       const synced = args.synced;
-      if (postId === void 0 || postId === null) throw new Error("post_id is required");
+      if (postId === void 0) throw new Error("post_id is required");
       if (patternId === void 0 || patternId === null) throw new Error("pattern_id is required");
       const result = await client.insertPattern(postId, {
         pattern_id: patternId,
@@ -52711,11 +52826,11 @@ async function handleMutateTool(toolName, args, client) {
   if (toolName !== "edit_block_tree") {
     throw new Error(`Unknown mutate tool: ${toolName}`);
   }
-  const postId = args.post_id;
+  const postId = coercePostId(args.post_id, "edit_block_tree");
   const op = args.op;
   const path2 = args.path;
   const ref = args.ref;
-  if (postId === void 0 || postId === null) throw new Error("post_id is required");
+  if (postId === void 0) throw new Error("post_id is required");
   if (!op || !OPS.includes(op)) {
     throw new Error(`op must be one of: ${OPS.join(", ")}. Got: ${JSON.stringify(op)}`);
   }
@@ -52763,10 +52878,16 @@ async function handleMutateTool(toolName, args, client) {
       requestBody.block = block;
       if (op === "insert-child" && args.position !== void 0) {
         const position = args.position;
-        if (typeof position === "number" && Number.isInteger(position)) {
+        if (typeof position === "number" && Number.isInteger(position) && position >= -1) {
           requestBody.position = position;
         } else if (position === "start" || position === "end") {
           requestBody.position = position;
+        } else if (typeof position === "string" && /^-?\d+$/.test(position)) {
+          const parsedPosition = parseInt(position, 10);
+          if (parsedPosition < -1) {
+            throw new Error('position must be an integer >= -1, "start", or "end"');
+          }
+          requestBody.position = parsedPosition;
         } else {
           throw new Error('position must be an integer, "start", or "end"');
         }
@@ -52808,14 +52929,10 @@ async function handleMutateTool(toolName, args, client) {
     }
   }
   const result = await client.mutateBlockTree(postId, requestBody);
-  if (result.warnings && result.warnings.length > 0) {
-    const formattedWarnings = result.warnings.map((warning) => {
-      if (isStaticBlockWarning(warning)) return formatStaticBlockWarning(warning);
-      return formatPreferenceWarning(warning);
-    });
-    return { ...result, formatted_warnings: formattedWarnings };
-  }
-  return result;
+  return withFormattedWarnings(
+    result,
+    (warning) => isStaticBlockWarning(warning) ? formatStaticBlockWarning(warning) : formatPreferenceWarning(warning)
+  );
 }
 
 // src/tools/posts.ts
@@ -52921,10 +53038,12 @@ async function handlePostTool(toolName, args, client) {
       return client.createPost(create3);
     }
     case "update_post": {
-      if (typeof args.post_id !== "number") {
-        throw new Error('update_post: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "update_post");
+      if (postId === void 0) {
+        throw new Error('update_post: "post_id" is required');
       }
-      const { post_id: postId, ...rest } = args;
+      const { post_id: _omit, ...rest } = args;
+      void _omit;
       if (Object.keys(rest).length === 0) {
         throw new Error("update_post: provide at least one mutating field besides post_id");
       }
@@ -52935,12 +53054,8 @@ async function handlePostTool(toolName, args, client) {
       throw new Error(`Unknown post tool: ${toolName}`);
   }
 }
-function narrowCreatePost(input) {
-  const out = { title: input.title };
-  if (typeof input.post_type === "string") out.post_type = input.post_type;
-  if (typeof input.status === "string") out.status = input.status;
-  if (typeof input.content === "string") out.content = input.content;
-  if (Array.isArray(input.blocks)) out.blocks = input.blocks;
+function narrowCommonPostFields(input) {
+  const out = {};
   if (typeof input.slug === "string") out.slug = input.slug;
   if (typeof input.parent === "number") out.parent = input.parent;
   if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
@@ -52957,24 +53072,18 @@ function narrowCreatePost(input) {
   if (typeof input.author === "number") out.author = input.author;
   return out;
 }
+function narrowCreatePost(input) {
+  const out = { title: input.title, ...narrowCommonPostFields(input) };
+  if (typeof input.post_type === "string") out.post_type = input.post_type;
+  if (typeof input.status === "string") out.status = input.status;
+  if (typeof input.content === "string") out.content = input.content;
+  if (Array.isArray(input.blocks)) out.blocks = input.blocks;
+  return out;
+}
 function narrowUpdatePost(input) {
-  const out = {};
+  const out = narrowCommonPostFields(input);
   if (typeof input.title === "string") out.title = input.title;
   if (typeof input.status === "string") out.status = input.status;
-  if (typeof input.slug === "string") out.slug = input.slug;
-  if (typeof input.parent === "number") out.parent = input.parent;
-  if (typeof input.excerpt === "string") out.excerpt = input.excerpt;
-  if (typeof input.featured_media === "number") out.featured_media = input.featured_media;
-  if (Array.isArray(input.categories)) out.categories = input.categories.filter((n) => typeof n === "number");
-  if (Array.isArray(input.tags)) out.tags = input.tags.filter((n) => typeof n === "number");
-  if (input.terms && typeof input.terms === "object" && !Array.isArray(input.terms)) {
-    out.terms = narrowTermsMap(input.terms);
-  }
-  if (typeof input.date === "string") out.date = input.date;
-  if (typeof input.menu_order === "number") out.menu_order = input.menu_order;
-  if (input.comment_status === "open" || input.comment_status === "closed") out.comment_status = input.comment_status;
-  if (input.ping_status === "open" || input.ping_status === "closed") out.ping_status = input.ping_status;
-  if (typeof input.author === "number") out.author = input.author;
   return out;
 }
 function narrowTermsMap(input) {
@@ -53084,8 +53193,8 @@ async function handleMediaTool(toolName, args, client) {
   }
 }
 
-// src/tools/yoast.ts
-var SCHEMA_PAGE_TYPES = [
+// src/types.ts
+var YOAST_SCHEMA_PAGE_TYPES = [
   "WebPage",
   "ItemPage",
   "AboutPage",
@@ -53099,7 +53208,7 @@ var SCHEMA_PAGE_TYPES = [
   "RealEstateListing",
   "SearchResultsPage"
 ];
-var SCHEMA_ARTICLE_TYPES = [
+var YOAST_SCHEMA_ARTICLE_TYPES = [
   "Article",
   "BlogPosting",
   "SocialMediaPosting",
@@ -53111,15 +53220,20 @@ var SCHEMA_ARTICLE_TYPES = [
   "Report",
   "None"
 ];
-var ROBOTS_ADVANCED = ["noimageindex", "noarchive", "nosnippet"];
+var YOAST_ROBOTS_ADVANCED = ["noimageindex", "noarchive", "nosnippet"];
+
+// src/tools/yoast.ts
+var SCHEMA_PAGE_TYPES = YOAST_SCHEMA_PAGE_TYPES;
+var SCHEMA_ARTICLE_TYPES = YOAST_SCHEMA_ARTICLE_TYPES;
+var ROBOTS_ADVANCED = YOAST_ROBOTS_ADVANCED;
 var YOAST_FIELD_PROPERTIES = {
   title: { type: "string", description: "SEO title (supports Yoast variables like %%title%%)." },
   description: { type: "string", description: "Meta description." },
   canonical: { type: "string", description: "Canonical URL override." },
   focus_keyword: { type: "string", description: "Focus keyphrase." },
   noindex: {
-    type: ["boolean", "null"],
-    description: "Tri-state: true=noindex, false=explicit index, null=post-type default."
+    type: "boolean",
+    description: 'true=noindex, false=explicit index. Pass null to reset to the post-type default; omit to leave the current value unchanged. (Advertised as a single boolean type because some AI clients \u2014 e.g. Google Gemini \u2014 reject a "null" member in a type array; the handler still accepts an explicit null.)'
   },
   nofollow: { type: "boolean", description: "true=nofollow, false=follow." },
   robots_advanced: {
@@ -53203,16 +53317,16 @@ var YOAST_TOOLS = [
 async function handleYoastTool(toolName, args, client) {
   switch (toolName) {
     case "yoast_get_seo": {
-      const postId = args.post_id;
-      if (typeof postId !== "number") {
-        throw new Error('yoast_get_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "yoast_get_seo");
+      if (postId === void 0) {
+        throw new Error('yoast_get_seo: "post_id" is required');
       }
       return client.getYoastSEO(postId);
     }
     case "yoast_update_seo": {
-      const postId = args.post_id;
-      if (typeof postId !== "number") {
-        throw new Error('yoast_update_seo: "post_id" (number) is required');
+      const postId = coercePostId(args.post_id, "yoast_update_seo");
+      if (postId === void 0) {
+        throw new Error('yoast_update_seo: "post_id" is required');
       }
       const { post_id: _omit, ...rest } = args;
       void _omit;
@@ -53232,10 +53346,12 @@ async function handleYoastTool(toolName, args, client) {
           throw new Error("yoast_bulk_update_seo: each item in `posts` must be an object");
         }
         const obj = raw2;
-        if (typeof obj.post_id !== "number") {
-          throw new Error("yoast_bulk_update_seo: each item requires `post_id` (number)");
+        const id = coercePostId(obj.post_id, "yoast_bulk_update_seo");
+        if (id === void 0) {
+          throw new Error("yoast_bulk_update_seo: each item requires `post_id`");
         }
-        const { post_id: id, ...rest } = obj;
+        const { post_id: _omit, ...rest } = obj;
+        void _omit;
         items.push({ post_id: id, ...narrowYoastFields(rest) });
       }
       return client.bulkUpdateYoastSEO(items);
@@ -53609,7 +53725,6 @@ function describeExchangeFetchError(url3, err) {
   return `Exchange failed: could not reach ${url3} (${reason}).${hint}`;
 }
 async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS) {
-  const origin2 = new URL(site).origin;
   let url3 = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -53636,8 +53751,11 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
           `Exchange failed: the site redirected the request (HTTP ${res.status}); ensure --site is the canonical site URL.`
         );
       }
+      const current = new URL(url3);
       const next = new URL(location, url3);
-      if (next.origin !== origin2) {
+      const upgradesToStandardHttpsPort = next.port === "" || next.port === "443";
+      const sameHostHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && upgradesToStandardHttpsPort;
+      if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
         throw new Error(
           `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
         );
@@ -53962,16 +54080,6 @@ Fall back \u2014 add this to your Claude Code MCP config manually:`);
 }
 
 // src/index.ts
-function readEnv(primary, legacy) {
-  const fromPrimary = process.env[primary];
-  if (fromPrimary) return fromPrimary;
-  const fromLegacy = process.env[legacy];
-  if (fromLegacy) {
-    console.error(`[block-mcp] DEPRECATED: ${legacy} is deprecated; rename to ${primary} in your MCP client config.`);
-    return fromLegacy;
-  }
-  return void 0;
-}
 var ALL_TOOLS = [
   ...DISCOVERY_TOOLS,
   ...READ_TOOLS,
@@ -54002,13 +54110,16 @@ for (const { tools, handle: handle2 } of TOOL_GROUPS) {
 }
 var AGENT_GUIDE_RESOURCE_URI = "block-mcp://agent-guide";
 var LEGACY_PREFERENCES_RESOURCE_URI = "block-mcp://block-preferences";
-function registerHandlers(server, client) {
+function registerHandlers(server, client, notConfiguredMessage) {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: ALL_TOOLS };
   });
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     const toolArgs = args ?? {};
+    if (!client) {
+      return buildNotConfiguredResult(notConfiguredMessage ?? "Block MCP is not configured.");
+    }
     try {
       const handle2 = TOOL_DISPATCH.get(name);
       if (!handle2) {
@@ -54134,23 +54245,28 @@ async function main() {
     await runConnect(process.argv.slice(3));
     process.exit(0);
   }
-  const WORDPRESS_URL = readEnv("WORDPRESS_URL", "GK_SITE_URL");
-  const WORDPRESS_USER = readEnv("WORDPRESS_USER", "GK_BLOCK_API_USER");
-  const WORDPRESS_APP_PASSWORD = readEnv("WORDPRESS_APP_PASSWORD", "GK_BLOCK_API_APP_PASSWORD");
-  if (!WORDPRESS_URL || !WORDPRESS_USER || !WORDPRESS_APP_PASSWORD) {
-    console.error(
-      "Missing required environment variables: WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_APP_PASSWORD"
+  const cfg = resolveWordPressConfig(process.env);
+  if (!cfg.ok) {
+    console.error(`Block MCP: ${cfg.message}`);
+    const degraded = new McpServer(
+      { name: "block-mcp", version: package_default.version },
+      { capabilities: { tools: {}, resources: {}, prompts: {} } }
     );
-    process.exit(1);
+    registerHandlers(degraded, null, cfg.message);
+    await degraded.connect(new StdioServerTransport());
+    console.error(
+      "Block MCP Server running on stdio (unconfigured \u2014 tool calls return a configuration error)"
+    );
+    return;
   }
   const client = new WordPressBlockClient({
-    wordpress_url: WORDPRESS_URL,
+    wordpress_url: cfg.config.url,
     auth: {
-      username: WORDPRESS_USER,
-      application_password: WORDPRESS_APP_PASSWORD
+      username: cfg.config.user,
+      application_password: cfg.config.password
     }
   });
-  const instructions = await getInstructions(WORDPRESS_URL);
+  const instructions = await getInstructions(cfg.config.url);
   const server = new McpServer(
     {
       name: "block-mcp",
