@@ -37,6 +37,27 @@ class Settings_Page {
 	const DUAL_MANUAL_OPTION = 'gk_block_api_dual_storage_blocks_manual';
 
 	/**
+	 * Option holding the block-preference scores + replacement map.
+	 *
+	 * @var string
+	 */
+	const PREFERENCES_OPTION = 'gk_block_api_preferences';
+
+	/**
+	 * Option holding the one-time preferences-model upgrade notice flag.
+	 *
+	 * @var string
+	 */
+	const PREFERENCES_NOTICE_OPTION = 'gk_block_api_preferences_notice';
+
+	/**
+	 * Option holding the create_post content-type allow-list.
+	 *
+	 * @var string
+	 */
+	const POST_TYPES_ALLOWLIST_OPTION = 'gk_block_api_post_types_allowlist';
+
+	/**
 	 * Block inventory instance.
 	 *
 	 * @var Block_Inventory
@@ -124,7 +145,7 @@ class Settings_Page {
 		// associative array; we sanitize sub-keys in the callback.
 		register_setting(
 			self::OPTION_GROUP,
-			'gk_block_api_preferences',
+			self::PREFERENCES_OPTION,
 			array(
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_preferences' ),
@@ -135,7 +156,7 @@ class Settings_Page {
 		// 2. Post-type allow-list for create_post (BLOCK-12 / v1.2).
 		register_setting(
 			self::OPTION_GROUP,
-			'gk_block_api_post_types_allowlist',
+			self::POST_TYPES_ALLOWLIST_OPTION,
 			array(
 				'type'              => 'array',
 				'sanitize_callback' => array( $this, 'sanitize_post_type_allowlist' ),
@@ -429,7 +450,7 @@ class Settings_Page {
 		}
 
 		// Preserve any other top-level keys the runtime may add (forwards-compat).
-		$existing = (array) get_option( 'gk_block_api_preferences', array() );
+		$existing = (array) get_option( self::PREFERENCES_OPTION, array() );
 		return array_merge( $existing, $out );
 	}
 
@@ -548,6 +569,37 @@ class Settings_Page {
 	}
 
 	/**
+	 * The UI-managed option keys the Settings screen owns.
+	 *
+	 * The single source of truth for a full settings reset (handle_reset), so no
+	 * delete_option() can be silently dropped. Includes the storage-scan results
+	 * and both throttle stamps: clearing the results but keeping a recent stamp
+	 * leaves the next scan/refresh throttled against wiped data. Excludes
+	 * lifecycle state (schema version, connection meta, sealed credentials, the
+	 * agent account); uninstall.php removes those as a superset of this list.
+	 *
+	 * @since 2.1.0
+	 *
+	 * @return string[]
+	 */
+	public static function ui_managed_options() {
+		return array(
+			self::PREFERENCES_OPTION,
+			self::PREFERENCES_NOTICE_OPTION,
+			self::POST_TYPES_ALLOWLIST_OPTION,
+			self::DUAL_MANUAL_OPTION,
+			Media_Manager::UPLOADS_OPTION,
+			Post_Manager::ALLOW_TRASH_OPTION,
+			Block_Abilities::ENABLED_OPTION,
+			Block_Inventory::STORAGE_MODES_OPTION,
+			Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION,
+			Block_Inventory::REFRESH_LAST_RUN_OPTION,
+			Instructions::OPTION_KEY,
+			Instructions::UPDATED_AT_OPTION,
+		);
+	}
+
+	/**
 	 * "Reset to defaults" button handler. Deletes all UI-managed options
 	 * AND the inventory transients + per-post rate-limit transients so
 	 * the next read starts from a true clean slate.
@@ -558,21 +610,9 @@ class Settings_Page {
 		}
 		check_admin_referer( 'gk_block_api_reset_defaults' );
 
-		delete_option( 'gk_block_api_preferences' );
-		delete_option( 'gk_block_api_preferences_notice' );
-		delete_option( 'gk_block_api_post_types_allowlist' );
-		delete_option( self::DUAL_MANUAL_OPTION );
-		delete_option( Media_Manager::UPLOADS_OPTION );
-		delete_option( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION );
-		delete_option( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION );
-		delete_option( Block_Inventory::STORAGE_MODES_OPTION );
-		// Clear the scan/refresh throttle stamps too, or the next scan and
-		// site-usage refresh stay throttled for up to an hour against the
-		// results just wiped.
-		delete_option( Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION );
-		delete_option( Block_Inventory::REFRESH_LAST_RUN_OPTION );
-		delete_option( Instructions::OPTION_KEY );
-		delete_option( Instructions::UPDATED_AT_OPTION );
+		foreach ( self::ui_managed_options() as $option ) {
+			delete_option( $option );
+		}
 		delete_transient( Block_Inventory::CACHE_KEY );
 
 		// Per-post rate-limit transients accumulate per write activity. Sweep
@@ -608,7 +648,7 @@ class Settings_Page {
 		}
 		check_admin_referer( 'gk_block_api_dismiss_prefs_notice' );
 
-		delete_option( 'gk_block_api_preferences_notice' );
+		delete_option( self::PREFERENCES_NOTICE_OPTION );
 
 		nocache_headers();
 		$args = array(
@@ -635,7 +675,7 @@ class Settings_Page {
 	 * @return void
 	 */
 	private function render_preferences_upgrade_notice() {
-		$show = '1' === (string) get_option( 'gk_block_api_preferences_notice', '' );
+		$show = '1' === (string) get_option( self::PREFERENCES_NOTICE_OPTION, '' );
 		if ( ! $show ) {
 			return;
 		}
@@ -693,7 +733,7 @@ class Settings_Page {
 		$stored_prefs      = (array) get_option( Preferences::OPTION_KEY, array() );
 		$overrides_ns      = isset( $stored_prefs['namespace_scores'] ) && is_array( $stored_prefs['namespace_scores'] ) ? $stored_prefs['namespace_scores'] : array();
 		$replacement_map   = isset( $stored_prefs['replacement_map'] ) && is_array( $stored_prefs['replacement_map'] ) ? $stored_prefs['replacement_map'] : array();
-		$post_type_allow   = (array) get_option( 'gk_block_api_post_types_allowlist', array() );
+		$post_type_allow   = (array) get_option( self::POST_TYPES_ALLOWLIST_OPTION, array() );
 		$manual_dual       = (array) get_option( self::DUAL_MANUAL_OPTION, array() );
 		$scan_results      = (array) get_option( Block_Inventory::STORAGE_MODES_OPTION, array() );
 		$uploads_enabled   = \GravityKit\BlockMCP\Media_Manager::uploads_enabled();
