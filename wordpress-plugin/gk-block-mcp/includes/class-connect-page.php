@@ -694,7 +694,7 @@ class Connect_Page {
 	 * @return bool
 	 */
 	private function agent_exists() {
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 
 		return $agent_id > 0 && false !== get_user_by( 'id', $agent_id );
 	}
@@ -723,7 +723,7 @@ class Connect_Page {
 			return 'needs_https';
 		}
 
-		$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id    = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 		$connections = $this->all_connections( $agent_id );
 		if ( ! empty( $connections ) ) {
 			return 'connected';
@@ -1551,7 +1551,7 @@ class Connect_Page {
 		// Resolve which account holds the credential from the meta store — it may
 		// be the agent OR the approving user (own-account connections). Falls back
 		// to the agent for older connections recorded before host tracking.
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+		$agent_id = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 
 		return ( new Connections() )->revoke_by_uuid( $uuid, $agent_id );
 	}
@@ -1704,7 +1704,7 @@ class Connect_Page {
 		// own-account hosts.
 		$connections = array();
 		if ( 'connected' === $state ) {
-			$agent_id    = (int) get_option( 'gk_block_api_agent_user_id', 0 );
+			$agent_id    = (int) get_option( Agent_Provisioner::USER_ID_OPTION, 0 );
 			$connections = $this->all_connections( $agent_id );
 		}
 

@@ -58,6 +58,18 @@ class Agent_Provisioner {
 	const META_FLAG = '_gk_block_api_agent';
 
 	/**
+	 * Option that persists the provisioned agent user ID.
+	 *
+	 * Stored blog-scoped and non-autoloaded; survives credential revokes so the
+	 * same service account is reused. Read by Connect_Page and torn down by
+	 * purge() / uninstall.
+	 *
+	 * @since 2.1.0
+	 * @var string
+	 */
+	const USER_ID_OPTION = 'gk_block_api_agent_user_id';
+
+	/**
 	 * Register the minimal block_mcp_agent role idempotently.
 	 *
 	 * The capability set is passed through the `gk/block-mcp/agent/caps`
@@ -301,7 +313,7 @@ class Agent_Provisioner {
 
 		update_user_meta( $user_id, self::META_FLAG, '1' );
 		$this->ensure_role_on_current_blog( $user_id, $role );
-		update_option( 'gk_block_api_agent_user_id', $user_id, false );
+		update_option( self::USER_ID_OPTION, $user_id, false );
 
 		return $user_id;
 	}
@@ -355,7 +367,7 @@ class Agent_Provisioner {
 		// created on, so REST writes 403 on every other blog of a network.
 		$this->ensure_role_on_current_blog( $existing->ID, $role );
 
-		update_option( 'gk_block_api_agent_user_id', $existing->ID, false );
+		update_option( self::USER_ID_OPTION, $existing->ID, false );
 		return $existing->ID;
 	}
 
@@ -448,7 +460,7 @@ class Agent_Provisioner {
 			return;
 		}
 
-		$agent_id = (int) get_option( 'gk_block_api_agent_user_id' );
+		$agent_id = (int) get_option( self::USER_ID_OPTION );
 
 		if ( $agent_id > 0 && '1' === get_user_meta( $agent_id, self::META_FLAG, true ) ) {
 			// Revoke all Application Passwords before the user account is deleted
@@ -512,7 +524,7 @@ class Agent_Provisioner {
 			}
 		}
 
-		delete_option( 'gk_block_api_agent_user_id' );
+		delete_option( self::USER_ID_OPTION );
 		remove_role( self::ROLE );
 	}
 
