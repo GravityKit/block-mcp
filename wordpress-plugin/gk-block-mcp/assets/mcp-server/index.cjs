@@ -40306,6 +40306,18 @@ var WordPressBlockClient = class {
     const response = await this.client.get("/site-usage", { params });
     return response.data;
   }
+  /**
+   * Get registered block bindings sources (e.g. `core/post-meta`,
+   * `core/pattern-overrides`) — what a block's `metadata.bindings` attribute
+   * can reference to pull an attribute value dynamically.
+   *
+   * @returns `{sources, note?}` — `note` is present (and `sources` empty)
+   *          on WordPress below 6.5, which has no Block Bindings API.
+   */
+  async getBindingSources() {
+    const response = await this.client.get("/binding-sources");
+    return response.data;
+  }
   // ============================================
   // Page Block CRUD
   // ============================================
@@ -41189,6 +41201,12 @@ var DISCOVERY_TOOLS = [
     }
   },
   {
+    name: "list_binding_sources",
+    description: "Registered block bindings sources \u2014 what a block's `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.",
+    annotations: { ...READ_ANNOT, title: "List block bindings sources" },
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
     name: "get_site_usage",
     description: "Site-wide block + pattern inventory: usage counts, namespace totals, pattern reference counts, legacy patterns.",
     annotations: { ...READ_ANNOT, title: "Get site usage" },
@@ -41304,6 +41322,8 @@ async function handleDiscoveryTool(toolName, args, client) {
     }
     case "get_site_usage":
       return await client.getSiteUsage(args.refresh);
+    case "list_binding_sources":
+      return await client.getBindingSources();
     case "scan_storage_modes":
       return await client.scanStorageModes();
     case "resolve_url": {
@@ -53780,7 +53800,11 @@ How to behave:
 
 \`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only \u2014 the per-block write tools do not apply to template content.
 
-\`update_template\` and \`reset_template\` write to templates and are gated: if the site hasn't turned on "Let the assistant edit theme templates and template parts", every call 403s with \`template_edits_disabled\`. Don't retry silently \u2014 tell the user the toggle needs to be enabled under Settings \u2192 Block MCP. \`update_template\` replaces the whole template (like \`rewrite_post_blocks\`, not a per-block edit) and takes exactly one of \`content\` or \`blocks\`; if no override exists yet, one is created automatically and the response's \`override_created\` tells you so. \`reset_template\` deletes the override and reverts to the theme file. Once an override exists, its \`wp_id\` works with the normal per-block tools (\`update_block\`, \`get_page_blocks\`) like any other post.`;
+\`update_template\` and \`reset_template\` write to templates and are gated: if the site hasn't turned on "Let the assistant edit theme templates and template parts", every call 403s with \`template_edits_disabled\`. Don't retry silently \u2014 tell the user the toggle needs to be enabled under Settings \u2192 Block MCP. \`update_template\` replaces the whole template (like \`rewrite_post_blocks\`, not a per-block edit) and takes exactly one of \`content\` or \`blocks\`; if no override exists yet, one is created automatically and the response's \`override_created\` tells you so. \`reset_template\` deletes the override and reverts to the theme file. Once an override exists, its \`wp_id\` works with the normal per-block tools (\`update_block\`, \`get_page_blocks\`) like any other post.
+
+## Block bindings
+
+Before wiring a block's \`metadata.bindings\` attribute to a source (e.g. \`core/post-meta\`), call \`list_binding_sources\` to confirm the source name is actually registered on this site \u2014 an unregistered source silently fails to resolve at render time.`;
 
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
