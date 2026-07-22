@@ -1,10 +1,12 @@
 /**
- * Tool tests: list_templates, get_template
+ * Tool tests: list_templates, get_template, update_template, reset_template
  *
  * Covers:
- *   - Schema: both tools exposed with readOnlyHint annotations
+ *   - Schema: read tools are readOnlyHint; write tools are destructiveHint
  *   - Filter forwarding: list_templates (type, area, post_type, slug, source)
  *   - get_template: id required, type forwarded, response passthrough
+ *   - update_template: id required, content XOR blocks validated client-side, forwarding
+ *   - reset_template: id required, type forwarded
  *   - Unknown tool throws
  */
 
@@ -13,23 +15,39 @@ import { TEMPLATE_TOOLS, handleTemplateTool } from '../../../tools/templates.js'
 import { makeMockClient } from '../../helpers/mock-client.js';
 
 describe('template tools — schema', () => {
-  it('exposes list_templates and get_template', () => {
+  it('exposes list_templates, get_template, update_template, reset_template', () => {
     expect(TEMPLATE_TOOLS.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['list_templates', 'get_template'])
+      expect.arrayContaining(['list_templates', 'get_template', 'update_template', 'reset_template'])
     );
   });
 
-  it('both tools are read-only, non-destructive, idempotent', () => {
-    for (const tool of TEMPLATE_TOOLS) {
+  it('read tools (list_templates, get_template) are read-only, non-destructive, idempotent', () => {
+    for (const name of ['list_templates', 'get_template']) {
+      const tool = TEMPLATE_TOOLS.find((t) => t.name === name)!;
       expect(tool.annotations.readOnlyHint).toBe(true);
       expect(tool.annotations.destructiveHint).toBe(false);
       expect(tool.annotations.idempotentHint).toBe(true);
     }
   });
 
+  it('write tools (update_template, reset_template) are destructive, not read-only', () => {
+    for (const name of ['update_template', 'reset_template']) {
+      const tool = TEMPLATE_TOOLS.find((t) => t.name === name)!;
+      expect(tool.annotations.readOnlyHint).toBe(false);
+      expect(tool.annotations.destructiveHint).toBe(true);
+    }
+  });
+
   it('get_template requires id', () => {
     const tool = TEMPLATE_TOOLS.find((t) => t.name === 'get_template')!;
     expect(tool.inputSchema.required).toEqual(['id']);
+  });
+
+  it('update_template and reset_template require id', () => {
+    for (const name of ['update_template', 'reset_template']) {
+      const tool = TEMPLATE_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema.required).toEqual(['id']);
+    }
   });
 });
 
@@ -115,6 +133,81 @@ describe('get_template', () => {
     const result = await handleTemplateTool('get_template', { id: 't//index' }, client as any) as any;
     expect(result.content).toContain('Hi');
     expect(result.blocks).toHaveLength(1);
+  });
+});
+
+describe('update_template', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => { client = makeMockClient(); vi.clearAllMocks(); });
+
+  it('rejects a missing id before calling the client', async () => {
+    await expect(handleTemplateTool('update_template', { content: '<p>hi</p>' }, client as any)).rejects.toThrow(/id/i);
+    expect(client.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it('rejects when neither content nor blocks is provided', async () => {
+    await expect(handleTemplateTool('update_template', { id: 't//index' }, client as any)).rejects.toThrow(
+      /exactly one of "content" or "blocks"/
+    );
+  });
+
+  it('rejects when both content and blocks are provided', async () => {
+    await expect(
+      handleTemplateTool('update_template', { id: 't//index', content: '<p>hi</p>', blocks: [] }, client as any)
+    ).rejects.toThrow(/exactly one of "content" or "blocks"/);
+  });
+
+  it('forwards content-only input', async () => {
+    await handleTemplateTool('update_template', { id: 't//index', content: '<p>hi</p>' }, client as any);
+    expect(client.updateTemplate).toHaveBeenCalledWith('t//index', undefined, {
+      content: '<p>hi</p>',
+      blocks: undefined,
+    });
+  });
+
+  it('forwards blocks-only input and type', async () => {
+    const blocks = [{ name: 'core/paragraph', innerHTML: '<p>hi</p>' }];
+    await handleTemplateTool('update_template', { id: 't//header', type: 'wp_template_part', blocks }, client as any);
+    expect(client.updateTemplate).toHaveBeenCalledWith('t//header', 'wp_template_part', {
+      content: undefined,
+      blocks,
+    });
+  });
+
+  it('returns the client response verbatim', async () => {
+    client.updateTemplate.mockResolvedValue({
+      success: true, wp_id: 42, override_created: true,
+      revert_hint: 'Call reset_template...', warnings: [], before_revision_id: null, revision_id: 5,
+    });
+    const result = await handleTemplateTool('update_template', { id: 't//index', content: '<p>hi</p>' }, client as any) as any;
+    expect(result.wp_id).toBe(42);
+    expect(result.override_created).toBe(true);
+  });
+});
+
+describe('reset_template', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => { client = makeMockClient(); vi.clearAllMocks(); });
+
+  it('rejects a missing id before calling the client', async () => {
+    await expect(handleTemplateTool('reset_template', {}, client as any)).rejects.toThrow(/id/i);
+    expect(client.resetTemplate).not.toHaveBeenCalled();
+  });
+
+  it('forwards id and type to the client', async () => {
+    await handleTemplateTool('reset_template', { id: 't//archive', type: 'wp_template' }, client as any);
+    expect(client.resetTemplate).toHaveBeenCalledWith('t//archive', 'wp_template');
+  });
+
+  it('omits type when not provided', async () => {
+    await handleTemplateTool('reset_template', { id: 't//archive' }, client as any);
+    expect(client.resetTemplate).toHaveBeenCalledWith('t//archive', undefined);
+  });
+
+  it('returns the client response verbatim', async () => {
+    client.resetTemplate.mockResolvedValue({ success: true, id: 't//archive', wp_id: 42 });
+    const result = await handleTemplateTool('reset_template', { id: 't//archive' }, client as any) as any;
+    expect(result.wp_id).toBe(42);
   });
 });
 

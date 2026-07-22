@@ -125,6 +125,9 @@ import type {
   ListTemplatesResponse,
   TemplateDetail,
   TemplateType,
+  UpdateTemplateRequest,
+  UpdateTemplateResponse,
+  ResetTemplateResponse,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -1067,6 +1070,56 @@ export class WordPressBlockClient {
     if (type) params.type = type;
 
     const response = await this.client.get<TemplateDetail>('/template', { params });
+    return response.data;
+  }
+
+  /**
+   * Replace a template or template part's entire content. Whole-template
+   * replacement (like `replaceAllBlocks`), not a per-block edit. Gated by
+   * the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   * @param data Exactly one of `content` or `blocks`.
+   */
+  async updateTemplate(
+    id: string,
+    type: TemplateType | undefined,
+    data: UpdateTemplateRequest
+  ): Promise<UpdateTemplateResponse> {
+    if (!id) {
+      throw new Error('update_template: "id" is required');
+    }
+    const hasContent = typeof data.content === 'string';
+    const hasBlocks = Array.isArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('update_template: provide exactly one of "content" or "blocks"');
+    }
+
+    const body: { id: string; type?: TemplateType; content?: string; blocks?: UpdateTemplateRequest['blocks'] } = { id };
+    if (type) body.type = type;
+    if (hasContent) body.content = data.content;
+    if (hasBlocks) body.blocks = data.blocks;
+
+    const response = await this.client.post<UpdateTemplateResponse>('/template', body);
+    return response.data;
+  }
+
+  /**
+   * Delete a template's database override, reverting it to the theme file.
+   * Gated by the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   */
+  async resetTemplate(id: string, type?: TemplateType): Promise<ResetTemplateResponse> {
+    if (!id) {
+      throw new Error('reset_template: "id" is required');
+    }
+    const body: { id: string; type?: TemplateType } = { id };
+    if (type) body.type = type;
+
+    const response = await this.client.post<ResetTemplateResponse>('/template/reset', body);
     return response.data;
   }
 }

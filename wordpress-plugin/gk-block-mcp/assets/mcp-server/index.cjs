@@ -40805,6 +40805,47 @@ var WordPressBlockClient = class {
     const response = await this.client.get("/template", { params });
     return response.data;
   }
+  /**
+   * Replace a template or template part's entire content. Whole-template
+   * replacement (like `replaceAllBlocks`), not a per-block edit. Gated by
+   * the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   * @param data Exactly one of `content` or `blocks`.
+   */
+  async updateTemplate(id, type, data) {
+    if (!id) {
+      throw new Error('update_template: "id" is required');
+    }
+    const hasContent = typeof data.content === "string";
+    const hasBlocks = Array.isArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('update_template: provide exactly one of "content" or "blocks"');
+    }
+    const body3 = { id };
+    if (type) body3.type = type;
+    if (hasContent) body3.content = data.content;
+    if (hasBlocks) body3.blocks = data.blocks;
+    const response = await this.client.post("/template", body3);
+    return response.data;
+  }
+  /**
+   * Delete a template's database override, reverting it to the theme file.
+   * Gated by the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   */
+  async resetTemplate(id, type) {
+    if (!id) {
+      throw new Error('reset_template: "id" is required');
+    }
+    const body3 = { id };
+    if (type) body3.type = type;
+    const response = await this.client.post("/template/reset", body3);
+    return response.data;
+  }
 };
 
 // src/config.ts
@@ -53441,6 +53482,7 @@ function narrowYoastFields(input) {
 
 // src/tools/templates.ts
 var READ_ANNOT2 = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+var WRITE_ANNOT = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
 var TEMPLATE_TYPE_ENUM = ["wp_template", "wp_template_part"];
 var TEMPLATE_SOURCE_ENUM = ["theme", "plugin", "custom"];
 var TEMPLATE_TOOLS = [
@@ -53495,6 +53537,55 @@ var TEMPLATE_TOOLS = [
       },
       required: ["id"]
     }
+  },
+  {
+    name: "update_template",
+    description: "Replace a template or template part's entire content \u2014 whole-template replacement, like rewrite_post_blocks, not a per-block edit. Requires the site's \"Let the assistant edit theme templates\" toggle (off by default; returns a 403 with an actionable message when off). If the id currently resolves to the theme file (`wp_id: null`), a database override is created (`override_created: true`) and the theme file itself is never touched. `content` and `blocks` are mutually exclusive \u2014 `blocks` goes through the same registry/tier/dual-storage validation as any other structured-block write. Use reset_template to revert.",
+    annotations: { ...WRITE_ANNOT, title: "Update template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        },
+        content: {
+          type: "string",
+          description: "Raw block markup to replace the template with. Mutually exclusive with blocks."
+        },
+        blocks: {
+          type: "array",
+          description: "Structured blocks to replace the template with. Mutually exclusive with content.",
+          items: BLOCK_INPUT_SCHEMA
+        }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "reset_template",
+    description: `Delete a template's database override, reverting it to the theme file. Requires the site's "Let the assistant edit theme templates" toggle (off by default; returns a 403 with an actionable message when off). 404s when the id has no override to remove.`,
+    annotations: { ...WRITE_ANNOT, title: "Reset template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        }
+      },
+      required: ["id"]
+    }
   }
 ];
 async function handleTemplateTool(toolName, args, client) {
@@ -53513,6 +53604,28 @@ async function handleTemplateTool(toolName, args, client) {
         throw new Error('get_template: a non-empty "id" is required');
       }
       return await client.getTemplate(id, args.type);
+    }
+    case "update_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('update_template: a non-empty "id" is required');
+      }
+      const hasContent = typeof args.content === "string";
+      const hasBlocks = Array.isArray(args.blocks);
+      if (hasContent === hasBlocks) {
+        throw new Error('update_template: provide exactly one of "content" or "blocks"');
+      }
+      return await client.updateTemplate(id, args.type, {
+        content: hasContent ? args.content : void 0,
+        blocks: hasBlocks ? args.blocks : void 0
+      });
+    }
+    case "reset_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('reset_template: a non-empty "id" is required');
+      }
+      return await client.resetTemplate(id, args.type);
     }
     default:
       throw new Error(`Unknown template tool: ${toolName}`);
@@ -53665,7 +53778,9 @@ How to behave:
 
 ## Templates (block themes)
 
-\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only \u2014 the per-block write tools do not apply to template content.`;
+\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only \u2014 the per-block write tools do not apply to template content.
+
+\`update_template\` and \`reset_template\` write to templates and are gated: if the site hasn't turned on "Let the assistant edit theme templates and template parts", every call 403s with \`template_edits_disabled\`. Don't retry silently \u2014 tell the user the toggle needs to be enabled under Settings \u2192 Block MCP. \`update_template\` replaces the whole template (like \`rewrite_post_blocks\`, not a per-block edit) and takes exactly one of \`content\` or \`blocks\`; if no override exists yet, one is created automatically and the response's \`override_created\` tells you so. \`reset_template\` deletes the override and reverts to the theme file. Once an override exists, its \`wp_id\` works with the normal per-block tools (\`update_block\`, \`get_page_blocks\`) like any other post.`;
 
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
