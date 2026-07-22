@@ -40264,6 +40264,26 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Create a synced pattern (a `wp_block` post). Exactly one of
+   * `content`/`blocks` is required; structured `blocks` go through the same
+   * registry/tier/dual-storage validation as `create_post`.
+   *
+   * @param data - Pattern title plus exactly one of content/blocks, sync_status, slug, status
+   * @returns The created pattern's id, slug, sync_status, edit_url, and a ready-to-insert `reference` snippet
+   */
+  async createPattern(data) {
+    if (!data.title || data.title.trim() === "") {
+      throw new Error('create_pattern: a non-empty "title" is required');
+    }
+    const hasContent = typeof data.content === "string" && data.content !== "";
+    const hasBlocks = Array.isArray(data.blocks) && data.blocks.length > 0;
+    if (hasContent === hasBlocks) {
+      throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+    }
+    const response = await this.client.post("/patterns", data);
+    return response.data;
+  }
+  /**
    * Resolve a URL or path to a WordPress post ID.
    *
    * Accepts any URL on the site (full URL or path). Handles all post types,
@@ -52779,6 +52799,38 @@ async function handleWriteTool(toolName, args, client) {
 // src/tools/patterns.ts
 var PATTERN_TOOLS = [
   {
+    name: "create_pattern",
+    description: 'Extract repeated sections into a reusable pattern, then reference it. Creates a synced pattern (a wp_block post) from either structured `blocks` (validated the same way as create_post \u2014 legacy blocks rejected) or raw `content` \u2014 exactly one of the two. `sync_status:"synced"` (default) means edits to the pattern update every page that references it; `"unsynced"` creates an independent one-off starting point instead. Response includes a ready-to-insert `reference` snippet (`{blockName:"core/block", attrs:{ref}}`) for insert_blocks.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Create pattern" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Pattern title (required, non-empty)." },
+        blocks: {
+          type: "array",
+          description: "Structured blocks. Mutually exclusive with content \u2014 provide exactly one. Validated against block registry and preference tier \u2014 legacy blocks are rejected.",
+          items: BLOCK_INPUT_SCHEMA
+        },
+        content: {
+          type: "string",
+          description: "Raw post_content (HTML or block markup). Mutually exclusive with blocks \u2014 provide exactly one."
+        },
+        sync_status: {
+          type: "string",
+          enum: ["synced", "unsynced"],
+          description: '"synced" (default): edits propagate to every page referencing this pattern. "unsynced": an independent copy, no propagation.'
+        },
+        slug: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["publish", "draft"],
+          description: "Default publish."
+        }
+      },
+      required: ["title"]
+    }
+  },
+  {
     name: "insert_pattern",
     description: "Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits. NOTE: registered (non-numeric) patterns cannot be synced \u2014 server forces synced=false. Response includes `synced` (actual mode used) so you can detect the override.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert pattern" },
@@ -52812,6 +52864,24 @@ var PATTERN_TOOLS = [
 ];
 async function handlePatternTool(toolName, args, client) {
   switch (toolName) {
+    case "create_pattern": {
+      if (typeof args.title !== "string" || args.title.trim() === "") {
+        throw new Error('create_pattern: a non-empty "title" is required');
+      }
+      const hasBlocks = Array.isArray(args.blocks) && args.blocks.length > 0;
+      const hasContent = typeof args.content === "string" && args.content !== "";
+      if (hasBlocks === hasContent) {
+        throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+      }
+      return await client.createPattern({
+        title: args.title,
+        blocks: hasBlocks ? args.blocks : void 0,
+        content: hasContent ? args.content : void 0,
+        sync_status: args.sync_status ?? "synced",
+        slug: args.slug,
+        status: args.status ?? "publish"
+      });
+    }
     case "insert_pattern": {
       const postId = coercePostId(args.post_id, "insert_pattern");
       const patternId = args.pattern_id;
@@ -53792,7 +53862,7 @@ Before setting an \`is-style-*\` className, check \`list_block_types\` output's 
 How to behave:
 
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
+- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first. Notice a section repeated across pages? Extract it into a pattern with \`create_pattern\`, then reference it \u2014 a synced pattern keeps every instance in sync from one edit.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
 - When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
 
