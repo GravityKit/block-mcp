@@ -307,7 +307,7 @@ See the [Configuration](#configuration) section below for the full breakdown.
 
 | Tool | Purpose |
 |---|---|
-| `list_block_types` | Browse registered block types with preference tiers |
+| `list_block_types` | Browse registered block types with preference tiers, style variations, and nesting constraints (`parent`/`ancestor`/`allowed_blocks`) |
 | `list_patterns` / `get_pattern` | Search and inspect patterns with scoring |
 | `get_site_usage` | Block/pattern usage analytics |
 

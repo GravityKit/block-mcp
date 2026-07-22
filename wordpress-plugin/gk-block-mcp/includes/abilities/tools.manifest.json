@@ -6,7 +6,7 @@
       "name": "list_block_types",
       "ability": "gk-block-mcp/list-block-types",
       "label": "List block types",
-      "description": "Registered block types with per-block `preference` (tier + replacement), `storage_mode` (\"static\"|\"dynamic\"|\"dual\"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.",
+      "description": "Registered block types with per-block `preference` (tier + replacement), `storage_mode` (\"static\"|\"dynamic\"|\"dual\"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations — check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints — respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -48,6 +48,10 @@
           "usage_only": {
             "type": "boolean",
             "description": "Only blocks with usage.count > 0 on this site."
+          },
+          "include_supports": {
+            "type": "boolean",
+            "description": "Include each block's full `supports` object. Default false."
           },
           "limit": {
             "type": "number",

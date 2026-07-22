@@ -40210,6 +40210,7 @@ var WordPressBlockClient = class {
     if (params?.storage_mode) queryParams.storage_mode = params.storage_mode;
     if (params?.search) queryParams.search = params.search;
     if (params?.usage_only) queryParams.usage_only = "true";
+    if (params?.include_supports) queryParams.include_supports = "true";
     const response = await this.client.get("/block-types", {
       params: queryParams
     });
@@ -41057,7 +41058,7 @@ var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: 'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset \u2192 next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
+    description: 'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations \u2014 check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints \u2014 respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset \u2192 next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: "List block types" },
     outputSchema: {
       type: "object",
@@ -41080,6 +41081,7 @@ var DISCOVERY_TOOLS = [
         search: { type: "string", description: "Case-insensitive substring match against name + title." },
         preferred_only: { type: "boolean", description: "Shorthand for `tier in {preferred,acceptable}` (score \u2265 50)." },
         usage_only: { type: "boolean", description: "Only blocks with usage.count > 0 on this site." },
+        include_supports: { type: "boolean", description: "Include each block's full `supports` object. Default false." },
         limit: { type: "number", description: "Max results. Default 50." },
         offset: { type: "number", description: "Skip this many. Default 0." }
       }
@@ -41182,7 +41184,8 @@ async function handleDiscoveryTool(toolName, args, client) {
         tier: args.tier,
         storage_mode: args.storage_mode,
         search: args.search,
-        usage_only: args.usage_only
+        usage_only: args.usage_only,
+        include_supports: args.include_supports
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total = enriched.block_types.length;
@@ -53536,6 +53539,8 @@ How to discover the policy at runtime:
 1. \`list_block_types\` returns blocks grouped by tier (PREFERRED / ACCEPTABLE / AVOID / LEGACY) for the current site. Use this when you need the full picture.
 2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields \u2014 they reflect the live config.
 3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
+
+Before setting an \`is-style-*\` className, check \`list_block_types\` output's \`styles\` field for the valid variations on that block; respect \`parent\`/\`ancestor\`/\`allowed_blocks\` when nesting blocks so the insert doesn't land somewhere the editor would reject.
 
 How to behave:
 
