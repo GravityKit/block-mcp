@@ -312,6 +312,7 @@ See the [Configuration](#configuration) section below for the full breakdown.
 | `list_block_types` | Browse registered block types with preference tiers, style variations, and nesting constraints (`parent`/`ancestor`/`allowed_blocks`) |
 | `list_patterns` / `get_pattern` | Search and inspect patterns with scoring; filter by `category` and browse the registered category vocabulary |
 | `get_site_usage` | Block/pattern usage analytics |
+| `list_binding_sources` | Registered block bindings sources (e.g. `core/post-meta`, `core/pattern-overrides`) a block's `metadata.bindings` can reference |
 
 **SEO** (when [Yoast SEO](https://wordpress.org/plugins/wordpress-seo/) is active)
 

@@ -75,6 +75,12 @@ export const DISCOVERY_TOOLS = [
     },
   },
   {
+    name: 'list_binding_sources',
+    description: 'Registered block bindings sources — what a block\'s `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.',
+    annotations: { ...READ_ANNOT, title: 'List block bindings sources' },
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
     name: 'get_site_usage',
     description: 'Site-wide block + pattern inventory: usage counts, namespace totals, pattern reference counts, legacy patterns.',
     annotations: { ...READ_ANNOT, title: 'Get site usage' },
@@ -203,6 +209,9 @@ export async function handleDiscoveryTool(
 
     case 'get_site_usage':
       return await client.getSiteUsage(args.refresh as boolean | undefined);
+
+    case 'list_binding_sources':
+      return await client.getBindingSources();
 
     case 'scan_storage_modes':
       return await client.scanStorageModes();
