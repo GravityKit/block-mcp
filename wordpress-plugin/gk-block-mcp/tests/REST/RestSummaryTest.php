@@ -25,6 +25,7 @@ use GravityKit\BlockMCP\Block_Safety;
 use GravityKit\BlockMCP\HTML_Transformer;
 use GravityKit\BlockMCP\Block_Inventory;
 use GravityKit\BlockMCP\Post_Manager;
+use GravityKit\BlockMCP\Template_Manager;
 use GravityKit\BlockMCP\Term_Manager;
 use GravityKit\BlockMCP\Media_Manager;
 
@@ -71,7 +72,8 @@ class RestSummaryTest extends WP_UnitTestCase {
 			new Post_Manager( $crud ),
 			new Term_Manager(),
 			new Media_Manager(),
-			$preferences
+			$preferences,
+			new Template_Manager( $crud )
 		);
 	}
 

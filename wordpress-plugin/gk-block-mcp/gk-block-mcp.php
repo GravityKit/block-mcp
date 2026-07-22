@@ -197,6 +197,7 @@ function build_block_services() {
 	$post_manager     = new Post_Manager( $block_crud );
 	$term_manager     = new Term_Manager();
 	$media_manager    = new Media_Manager();
+	$template_manager = new Template_Manager( $block_crud );
 
 	$controller = new REST_Controller(
 		$block_registry,
@@ -207,7 +208,8 @@ function build_block_services() {
 		$post_manager,
 		$term_manager,
 		$media_manager,
-		$preferences
+		$preferences,
+		$template_manager
 	);
 
 	return array(

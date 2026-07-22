@@ -22,6 +22,7 @@ use GravityKit\BlockMCP\Pattern_Manager;
 use GravityKit\BlockMCP\Post_Manager;
 use GravityKit\BlockMCP\Preferences;
 use GravityKit\BlockMCP\REST_Controller;
+use GravityKit\BlockMCP\Template_Manager;
 use GravityKit\BlockMCP\Term_Manager;
 
 abstract class RestControllerTestCase extends BlockApiTestCase {
@@ -48,7 +49,8 @@ abstract class RestControllerTestCase extends BlockApiTestCase {
 			new Post_Manager( $this->crud ),
 			new Term_Manager(),
 			new Media_Manager(),
-			$preferences
+			$preferences,
+			new Template_Manager( $this->crud )
 		);
 	}
 

@@ -96,17 +96,26 @@ class REST_Controller {
 	private $preferences;
 
 	/**
+	 * Template manager instance (list/get FSE templates + template parts).
+	 *
+	 * @since 2.2.0
+	 * @var Template_Manager
+	 */
+	private $template_manager;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Block_Registry  $block_registry  Block registry.
-	 * @param Pattern_Manager $pattern_manager Pattern manager.
-	 * @param Block_CRUD      $block_crud      Block CRUD.
-	 * @param Block_Inventory $block_inventory Site-wide block inventory.
-	 * @param Block_Mutator   $block_mutator   Block mutator.
-	 * @param Post_Manager    $post_manager    Post manager.
-	 * @param Term_Manager    $term_manager    Term manager.
-	 * @param Media_Manager   $media_manager   Media manager.
-	 * @param Preferences     $preferences     Preferences (tier classification source).
+	 * @param Block_Registry   $block_registry   Block registry.
+	 * @param Pattern_Manager  $pattern_manager  Pattern manager.
+	 * @param Block_CRUD       $block_crud       Block CRUD.
+	 * @param Block_Inventory  $block_inventory  Site-wide block inventory.
+	 * @param Block_Mutator    $block_mutator    Block mutator.
+	 * @param Post_Manager     $post_manager     Post manager.
+	 * @param Term_Manager     $term_manager     Term manager.
+	 * @param Media_Manager    $media_manager    Media manager.
+	 * @param Preferences      $preferences      Preferences (tier classification source).
+	 * @param Template_Manager $template_manager Template manager.
 	 */
 	public function __construct(
 		Block_Registry $block_registry,
@@ -117,17 +126,19 @@ class REST_Controller {
 		Post_Manager $post_manager,
 		Term_Manager $term_manager,
 		Media_Manager $media_manager,
-		Preferences $preferences
+		Preferences $preferences,
+		Template_Manager $template_manager
 	) {
-		$this->block_registry  = $block_registry;
-		$this->pattern_manager = $pattern_manager;
-		$this->block_crud      = $block_crud;
-		$this->block_inventory = $block_inventory;
-		$this->block_mutator   = $block_mutator;
-		$this->post_manager    = $post_manager;
-		$this->term_manager    = $term_manager;
-		$this->media_manager   = $media_manager;
-		$this->preferences     = $preferences;
+		$this->block_registry   = $block_registry;
+		$this->pattern_manager  = $pattern_manager;
+		$this->block_crud       = $block_crud;
+		$this->block_inventory  = $block_inventory;
+		$this->block_mutator    = $block_mutator;
+		$this->post_manager     = $post_manager;
+		$this->term_manager     = $term_manager;
+		$this->media_manager    = $media_manager;
+		$this->preferences      = $preferences;
+		$this->template_manager = $template_manager;
 	}
 
 	/**
@@ -257,6 +268,67 @@ class REST_Controller {
 					'refresh' => array(
 						'type'    => 'boolean',
 						'default' => false,
+					),
+				),
+			)
+		);
+
+		// FSE templates + template parts (read-only).
+		register_rest_route(
+			self::NAMESPACE,
+			'/templates',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_templates' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'type'      => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+					'area'      => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+						'description'       => 'Template-part area (wp_template_part only, e.g. "header").',
+					),
+					'post_type' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+					),
+					'slug'      => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Comma-separated slugs to match exactly.',
+					),
+					'source'    => array(
+						'type' => 'string',
+						'enum' => array( 'theme', 'plugin', 'custom' ),
+					),
+				),
+			)
+		);
+
+		// Single FSE template or template part, with raw content + parsed blocks.
+		// Query args (not a path segment) because ids contain "//".
+		register_rest_route(
+			self::NAMESPACE,
+			'/template',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_template' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'id'   => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type' => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
 					),
 				),
 			)
@@ -1319,6 +1391,64 @@ class REST_Controller {
 			$stats   = $this->block_inventory->get_stats( $refresh );
 
 			return new \WP_REST_Response( $stats, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	// =========================================================================
+	// FSE Template Endpoints
+	// =========================================================================
+
+	/**
+	 * GET /templates
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_templates( $request ) {
+		try {
+			$args = array(
+				'type'      => $request->get_param( 'type' ),
+				'area'      => $request->get_param( 'area' ),
+				'post_type' => $request->get_param( 'post_type' ),
+				'slug'      => $request->get_param( 'slug' ),
+				'source'    => $request->get_param( 'source' ),
+			);
+
+			$result = $this->template_manager->get_templates( $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /template
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_template( $request ) {
+		try {
+			$id     = $request->get_param( 'id' );
+			$type   = $request->get_param( 'type' );
+			$result = $this->template_manager->get_template( $id, $type );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
