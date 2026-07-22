@@ -116,6 +116,14 @@ class Tool_Executor {
 				return $this->execute_yoast_update_seo( $input );
 			case 'yoast_bulk_update_seo':
 				return $this->execute_yoast_bulk_update_seo( $input );
+			case 'list_templates':
+				return $this->execute_list_templates( $input );
+			case 'get_template':
+				return $this->execute_get_template( $input );
+			case 'update_template':
+				return $this->execute_update_template( $input );
+			case 'reset_template':
+				return $this->execute_reset_template( $input );
 			default:
 				return new \WP_Error(
 					'unknown_tool',
@@ -969,6 +977,113 @@ class Tool_Executor {
 			array(),
 			array( 'posts' => $input['posts'] )
 		);
+	}
+
+	/**
+	 * List a block theme's templates/template parts via the templates REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_list_templates( array $input ) {
+		$params = array(
+			'type'      => isset( $input['type'] ) ? (string) $input['type'] : null,
+			'area'      => isset( $input['area'] ) ? (string) $input['area'] : null,
+			'post_type' => isset( $input['post_type'] ) ? (string) $input['post_type'] : null,
+			'slug'      => isset( $input['slug'] ) ? (string) $input['slug'] : null,
+			'source'    => isset( $input['source'] ) ? (string) $input['source'] : null,
+		);
+
+		return $this->call_controller(
+			array( $this->controller, 'get_templates' ),
+			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/templates' ),
+			$params
+		);
+	}
+
+	/**
+	 * Fetch a single template's metadata, raw content, and parsed blocks via
+	 * the template REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_get_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/template' );
+		return $this->call_controller( array( $this->controller, 'get_template' ), $request, $params );
+	}
+
+	/**
+	 * Replace a template's entire content via the gated template-update REST
+	 * handler. Permission (the gk_block_api_template_edits toggle plus
+	 * edit_posts/edit_theme_options) is enforced by
+	 * Abilities_Registry::check_tool_permission()'s 'template_edit' branch
+	 * before this method ever runs.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_update_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$body = array();
+		if ( isset( $input['content'] ) && is_string( $input['content'] ) ) {
+			$body['content'] = $input['content'];
+		}
+		if ( isset( $input['blocks'] ) && is_array( $input['blocks'] ) ) {
+			$body['blocks'] = $input['blocks'];
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/template' );
+		return $this->call_controller( array( $this->controller, 'update_template' ), $request, $params, $body );
+	}
+
+	/**
+	 * Delete a template's database override via the gated template-reset REST
+	 * handler. Gated the same way as execute_update_template().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_reset_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/template/reset' );
+		return $this->call_controller( array( $this->controller, 'reset_template' ), $request, $params );
 	}
 
 	/**

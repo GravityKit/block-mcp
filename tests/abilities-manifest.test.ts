@@ -33,4 +33,31 @@ describe('tools.manifest.json matches the current npm tool definitions', () => {
       'yoast_get_seo returns single-post SEO data; its REST twin (Yoast_Bridge::check_permissions) requires edit_post on the target post, not only the global read permission',
     ).toBe('edit_post');
   });
+
+  it('includes the templates tool group', () => {
+    const generated = buildManifest();
+    const names = generated.tools.map((t) => t.name);
+    expect(names).toEqual(
+      expect.arrayContaining(['list_templates', 'get_template', 'update_template', 'reset_template']),
+    );
+  });
+
+  it('scopes list_templates and get_template to the read permission', () => {
+    const generated = buildManifest();
+    for (const name of ['list_templates', 'get_template']) {
+      const tool = generated.tools.find((t) => t.name === name);
+      expect(tool?.permission, `${name} should use the blanket read permission`).toBe('read');
+    }
+  });
+
+  it('scopes update_template and reset_template to a gated template_edit permission, not plain edit_post', () => {
+    const generated = buildManifest();
+    for (const name of ['update_template', 'reset_template']) {
+      const tool = generated.tools.find((t) => t.name === name);
+      expect(
+        tool?.permission,
+        `${name}'s REST twin is gated by the gk_block_api_template_edits toggle (Template_Manager::edits_enabled()) in addition to a capability check — the manifest permission must route Abilities_Registry::check_tool_permission() to that gate, not the ungated default 'edit_post' branch`,
+      ).toBe('template_edit');
+    }
+  });
 });

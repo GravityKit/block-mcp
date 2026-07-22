@@ -2166,7 +2166,7 @@
       "output_schema": {
         "type": "object"
       },
-      "permission": "edit_post",
+      "permission": "template_edit",
       "annotations": {
         "readonly": false,
         "destructive": true,
@@ -2201,7 +2201,7 @@
       "output_schema": {
         "type": "object"
       },
-      "permission": "edit_post",
+      "permission": "template_edit",
       "annotations": {
         "readonly": false,
         "destructive": true,
