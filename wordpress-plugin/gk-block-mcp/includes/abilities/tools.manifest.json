@@ -175,6 +175,25 @@
       }
     },
     {
+      "name": "list_binding_sources",
+      "ability": "gk-block-mcp/list-binding-sources",
+      "label": "List block bindings sources",
+      "description": "Registered block bindings sources — what a block's `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
       "name": "get_site_usage",
       "ability": "gk-block-mcp/get-site-usage",
       "label": "Get site usage",
