@@ -334,6 +334,66 @@ class REST_Controller {
 			)
 		);
 
+		// Update a template/template part's whole content. Gated: the toggle
+		// must be on AND the actor needs edit_posts or edit_theme_options
+		// (check_template_edit_permissions). Same /template path as the GET
+		// route above, registered separately for the POST method.
+		register_rest_route(
+			self::NAMESPACE,
+			'/template',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'update_template' ),
+				'permission_callback' => array( $this, 'check_template_edit_permissions' ),
+				'args'                => array(
+					'id'      => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type'    => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+					'content' => array(
+						'type'        => 'string',
+						'description' => 'Raw block markup. Mutually exclusive with "blocks".',
+					),
+					'blocks'  => array(
+						'type'        => 'array',
+						'description' => 'Structured blocks. Mutually exclusive with "content".',
+					),
+				),
+			)
+		);
+
+		// Delete a template/template part's database override, reverting it
+		// to the theme file. Same gate as the update route.
+		register_rest_route(
+			self::NAMESPACE,
+			'/template/reset',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'reset_template' ),
+				'permission_callback' => array( $this, 'check_template_edit_permissions' ),
+				'args'                => array(
+					'id'   => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type' => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+				),
+			)
+		);
+
 		// Post blocks — GET.
 		register_rest_route(
 			self::NAMESPACE,
@@ -1054,6 +1114,43 @@ class REST_Controller {
 	}
 
 	/**
+	 * Permission callback for template write endpoints (POST /template,
+	 * POST /template/reset).
+	 *
+	 * Gated on the site toggle first, then a capability check. The
+	 * dedicated agent role never holds `edit_theme_options`
+	 * (`Agent_Provisioner::forbidden_capabilities()`), so `edit_posts` alone
+	 * is enough for it once an operator opts in via the toggle; a "self"
+	 * connection (a real admin's own Application Password) already carries
+	 * `edit_theme_options` and needs no toggle-adjacent capability grant.
+	 * The plugin performs the underlying post writes itself — `wp_insert_post()`
+	 * / `wp_update_post()` do not enforce capabilities — so core's own
+	 * `/wp/v2/templates`, the customizer, menus, and theme switching stay
+	 * closed to the agent regardless of this toggle.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool|\WP_Error
+	 */
+	public function check_template_edit_permissions() {
+		if ( ! Template_Manager::edits_enabled() ) {
+			return new \WP_Error(
+				'template_edits_disabled',
+				__( 'Editing theme templates is turned off for this site. A site administrator can enable it under Block MCP → Settings.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+		if ( ! current_user_can( 'edit_posts' ) && ! current_user_can( 'edit_theme_options' ) ) {
+			return new \WP_Error(
+				'rest_forbidden',
+				__( 'You do not have permission to edit templates.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+		return true;
+	}
+
+	/**
 	 * GET /instructions — serve the site's MCP serverInfo addendum.
 	 *
 	 * Public endpoint by design. The MCP server fetches this at startup
@@ -1480,6 +1577,65 @@ class REST_Controller {
 			$id     = $request->get_param( 'id' );
 			$type   = $request->get_param( 'type' );
 			$result = $this->template_manager->get_template( $id, $type );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /template — whole-template content replacement, gated by
+	 * check_template_edit_permissions().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function update_template( $request ) {
+		try {
+			$id   = $request->get_param( 'id' );
+			$type = $request->get_param( 'type' );
+
+			$args = array();
+			if ( $request->has_param( 'content' ) ) {
+				$args['content'] = $request->get_param( 'content' );
+			}
+			if ( $request->has_param( 'blocks' ) ) {
+				$args['blocks'] = $request->get_param( 'blocks' );
+			}
+
+			$result = $this->template_manager->update_template( $id, $type, $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /template/reset — delete a template's database override,
+	 * gated by check_template_edit_permissions().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function reset_template( $request ) {
+		try {
+			$id     = $request->get_param( 'id' );
+			$type   = $request->get_param( 'type' );
+			$result = $this->template_manager->reset_template( $id, $type );
 			if ( is_wp_error( $result ) ) {
 				return $result;
 			}

@@ -35,8 +35,17 @@ class Template_Manager {
 	const TEMPLATE_TYPES = array( 'wp_template', 'wp_template_part' );
 
 	/**
+	 * Option name for the "let the assistant edit theme templates" toggle.
+	 *
+	 * @since 2.2.0
+	 * @var string
+	 */
+	const ALLOW_TEMPLATE_EDITS_OPTION = 'gk_block_api_template_edits';
+
+	/**
 	 * Block CRUD service, used to format raw block markup the same way
-	 * get_page_blocks() formats a post's content.
+	 * get_page_blocks() formats a post's content, and to write it back
+	 * through the standard block-write validation/save pipeline.
 	 *
 	 * @since 2.2.0
 	 * @var Block_CRUD
@@ -52,6 +61,43 @@ class Template_Manager {
 	 */
 	public function __construct( Block_CRUD $block_crud ) {
 		$this->block_crud = $block_crud;
+	}
+
+	/**
+	 * Whether the assistant is allowed to edit theme templates and parts.
+	 *
+	 * Off by default. Unlike trashing, this has no matching capability gap to
+	 * close after the toggle: the agent's `edit_posts` is already enough to
+	 * write these post types, and the actual template-editing REST routes
+	 * additionally require this toggle (or `edit_theme_options`) via
+	 * `gk/block-mcp/templates/allow-edits`. Site-editable in Settings.
+	 *
+	 * @since 2.2.0
+	 * @return bool
+	 */
+	public static function edits_enabled() {
+		$enabled = (bool) get_option( self::ALLOW_TEMPLATE_EDITS_OPTION, false );
+
+		/**
+		 * Control whether the AI assistant may edit theme templates and
+		 * template parts.
+		 *
+		 * Off by default. A template edit creates a database override —
+		 * the theme file itself is never touched, and Appearance → Editor
+		 * (or reset_template) reverts it. Return true to permit editing,
+		 * false to forbid it regardless of the stored option.
+		 *
+		 * @since 2.2.0
+		 *
+		 * @example
+		 * // Let the assistant edit templates only on the staging site.
+		 * add_filter( 'gk/block-mcp/templates/allow-edits', function ( $enabled ) {
+		 *     return wp_get_environment_type() === 'staging' ? true : $enabled;
+		 * } );
+		 *
+		 * @param bool $enabled Whether editing is currently allowed by the stored option.
+		 */
+		return (bool) apply_filters( 'gk/block-mcp/templates/allow-edits', $enabled );
 	}
 
 	/**
@@ -165,6 +211,234 @@ class Template_Manager {
 	}
 
 	/**
+	 * Replace a template or template part's entire content — whole-template
+	 * replacement, the same semantics as rewrite_post_blocks, not a
+	 * per-block edit.
+	 *
+	 * When a database override already exists (`wp_id` set), its post is
+	 * updated in place. Otherwise an override is created the way the Site
+	 * Editor does: `wp_insert_post()` followed by the `wp_theme` taxonomy
+	 * term (mandatory — the override does not attach to the active theme
+	 * without it) and, for parts, the `wp_template_part_area` term. If
+	 * applying the new content then fails, a freshly-created override is
+	 * rolled back so a rejected write never leaves an empty shell behind.
+	 *
+	 * `blocks` input goes through the same registry/tier/dual-storage
+	 * validation as every other structured-block write (legacy-tier blocks
+	 * are rejected). `content` (raw markup) is sanitized with
+	 * `wp_kses_post()` — for a caller without `unfiltered_html`, WordPress's
+	 * own `content_save_pre` filter chain applies the same sanitization a
+	 * second time on save, so script/embed-heavy markup may come back
+	 * stripped even when this call reports success.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param string $id   Template ID (`theme_slug//template_slug`).
+	 * @param string $type 'wp_template' or 'wp_template_part'. Default 'wp_template'.
+	 * @param array  $args {
+	 *     Exactly one of `content` or `blocks`.
+	 *
+	 *     @type string $content Raw block markup to replace the template with.
+	 *     @type array  $blocks  Structured blocks to replace the template with.
+	 * }
+	 * @return array|\WP_Error
+	 */
+	public function update_template( $id, $type, array $args ) {
+		$gate_check = $this->check_edits_enabled();
+		if ( is_wp_error( $gate_check ) ) {
+			return $gate_check;
+		}
+
+		$type = $this->sanitize_type( $type );
+		if ( is_wp_error( $type ) ) {
+			return $type;
+		}
+
+		if ( ! wp_is_block_theme() ) {
+			return new \WP_Error(
+				'classic_theme',
+				__( 'Active theme is not a block theme; there are no block templates to edit.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$id = is_string( $id ) ? sanitize_text_field( $id ) : '';
+		if ( '' === $id ) {
+			return new \WP_Error(
+				'missing_id',
+				__( 'A template "id" is required (e.g. "twentytwentyfive//index").', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$has_content = isset( $args['content'] ) && is_string( $args['content'] );
+		$has_blocks  = isset( $args['blocks'] ) && is_array( $args['blocks'] );
+		if ( $has_content === $has_blocks ) {
+			return new \WP_Error(
+				'invalid_input',
+				__( 'Provide exactly one of "content" or "blocks".', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$template = get_block_template( $id, $type );
+		if ( ! $template ) {
+			return new \WP_Error(
+				'not_found',
+				sprintf( /* translators: %s: template id */ __( 'Template "%s" not found.', 'gk-block-mcp' ), $id ),
+				array( 'status' => 404 )
+			);
+		}
+
+		$post_id          = ! empty( $template->wp_id ) ? (int) $template->wp_id : 0;
+		$override_created = false;
+
+		if ( ! $post_id ) {
+			$insert = wp_insert_post(
+				array(
+					'post_type'    => $type,
+					'post_status'  => 'publish',
+					'post_name'    => $template->slug,
+					'post_title'   => $this->resolve_title( $template ),
+					'post_content' => '',
+				),
+				true
+			);
+			if ( is_wp_error( $insert ) ) {
+				return $insert;
+			}
+			$post_id          = (int) $insert;
+			$override_created = true;
+
+			// Mandatory: without the wp_theme term the override is orphaned
+			// and never shadows the theme file (get_block_templates() finds
+			// it only via a tax_query on this term for the active stylesheet).
+			wp_set_object_terms( $post_id, get_stylesheet(), 'wp_theme' );
+
+			if ( 'wp_template_part' === $type ) {
+				$area = ! empty( $template->area ) ? (string) $template->area : WP_TEMPLATE_PART_AREA_UNCATEGORIZED;
+				wp_set_object_terms( $post_id, _filter_block_template_part_area( $area ), 'wp_template_part_area' );
+			}
+		}
+
+		if ( $has_blocks ) {
+			$result = $this->block_crud->replace_all_blocks( $post_id, $args['blocks'] );
+		} else {
+			$result = $this->block_crud->save_post_content( $post_id, wp_kses_post( $args['content'] ) );
+		}
+
+		if ( is_wp_error( $result ) ) {
+			if ( $override_created ) {
+				wp_delete_post( $post_id, true );
+			}
+			return $result;
+		}
+
+		return array(
+			'success'            => true,
+			'wp_id'              => $post_id,
+			'override_created'   => $override_created,
+			'revert_hint'        => __( 'Call reset_template to remove this override and revert to the theme file, or use Appearance → Editor → Reset in wp-admin.', 'gk-block-mcp' ),
+			'warnings'           => isset( $result['warnings'] ) ? $result['warnings'] : array(),
+			'before_revision_id' => isset( $result['before_revision_id'] ) ? $result['before_revision_id'] : null,
+			'revision_id'        => isset( $result['revision_id'] ) ? $result['revision_id'] : null,
+		);
+	}
+
+	/**
+	 * Delete a template's database override, reverting it to the theme file.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param string $id   Template ID (`theme_slug//template_slug`).
+	 * @param string $type 'wp_template' or 'wp_template_part'. Default 'wp_template'.
+	 * @return array|\WP_Error
+	 */
+	public function reset_template( $id, $type = 'wp_template' ) {
+		$gate_check = $this->check_edits_enabled();
+		if ( is_wp_error( $gate_check ) ) {
+			return $gate_check;
+		}
+
+		$type = $this->sanitize_type( $type );
+		if ( is_wp_error( $type ) ) {
+			return $type;
+		}
+
+		if ( ! wp_is_block_theme() ) {
+			return new \WP_Error(
+				'classic_theme',
+				__( 'Active theme is not a block theme; there are no template overrides to reset.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$id = is_string( $id ) ? sanitize_text_field( $id ) : '';
+		if ( '' === $id ) {
+			return new \WP_Error(
+				'missing_id',
+				__( 'A template "id" is required (e.g. "twentytwentyfive//index").', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$template = get_block_template( $id, $type );
+		if ( ! $template ) {
+			return new \WP_Error(
+				'not_found',
+				sprintf( /* translators: %s: template id */ __( 'Template "%s" not found.', 'gk-block-mcp' ), $id ),
+				array( 'status' => 404 )
+			);
+		}
+
+		if ( empty( $template->wp_id ) ) {
+			return new \WP_Error(
+				'no_override',
+				__( 'This template has no database override to reset — it already resolves to the theme file.', 'gk-block-mcp' ),
+				array( 'status' => 404 )
+			);
+		}
+
+		$wp_id   = (int) $template->wp_id;
+		$deleted = wp_delete_post( $wp_id, true );
+		if ( ! $deleted ) {
+			return new \WP_Error(
+				'delete_failed',
+				__( 'The template override could not be removed.', 'gk-block-mcp' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		return array(
+			'success' => true,
+			'id'      => $id,
+			'wp_id'   => $wp_id,
+		);
+	}
+
+	/**
+	 * Gate check shared by update_template() and reset_template().
+	 *
+	 * Enforced here (not only in the REST permission callback) so a direct
+	 * caller of this class gets the same 403 a disabled REST route would —
+	 * matching Post_Manager::trashing_enabled()'s enforcement point.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return null|\WP_Error null when editing is allowed.
+	 */
+	private function check_edits_enabled() {
+		if ( self::edits_enabled() ) {
+			return null;
+		}
+		return new \WP_Error(
+			'template_edits_disabled',
+			__( 'Editing theme templates is turned off for this site. A site administrator can enable it under Block MCP → Settings.', 'gk-block-mcp' ),
+			array( 'status' => 403 )
+		);
+	}
+
+	/**
 	 * Normalize + validate a requested template type.
 	 *
 	 * @since 2.2.0
@@ -201,20 +475,12 @@ class Template_Manager {
 	 * @return array
 	 */
 	private function format_template_summary( $template ) {
-		// Defensive: WP_Block_Template::$title is documented as a plain
-		// string, but a filter (get_block_templates / get_block_template)
-		// could hand back a REST-shaped { raw, rendered } array instead.
-		$title = $template->title;
-		if ( is_array( $title ) ) {
-			$title = isset( $title['rendered'] ) ? $title['rendered'] : ( isset( $title['raw'] ) ? $title['raw'] : '' );
-		}
-
 		$data = array(
 			'id'             => (string) $template->id,
 			'slug'           => (string) $template->slug,
 			'theme'          => (string) $template->theme,
 			'type'           => (string) $template->type,
-			'title'          => (string) $title,
+			'title'          => $this->resolve_title( $template ),
 			'description'    => (string) $template->description,
 			'source'         => (string) $template->source,
 			'origin'         => isset( $template->origin ) ? (string) $template->origin : null,
@@ -231,5 +497,25 @@ class Template_Manager {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Resolve a template's title as a plain string.
+	 *
+	 * Defensive: WP_Block_Template::$title is documented as a plain string,
+	 * but a filter (get_block_templates / get_block_template) could hand
+	 * back a REST-shaped { raw, rendered } array instead.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_Block_Template $template Template object.
+	 * @return string
+	 */
+	private function resolve_title( $template ) {
+		$title = $template->title;
+		if ( is_array( $title ) ) {
+			$title = isset( $title['rendered'] ) ? $title['rendered'] : ( isset( $title['raw'] ) ? $title['raw'] : '' );
+		}
+		return (string) $title;
 	}
 }

@@ -231,6 +231,19 @@ class Settings_Page {
 				'default'           => '0',
 			)
 		);
+
+		// 8. "Let the assistant edit theme templates" toggle. Same '0'/'1'
+		// string storage as above. Default '0' (off): a template edit creates
+		// a database override until a site owner opts in.
+		register_setting(
+			self::OPTION_GROUP,
+			\GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( self::class, 'normalize_checkbox_option' ),
+				'default'           => '0',
+			)
+		);
 	}
 
 	// ──────────────────────────────────────────────────────────────────
@@ -591,6 +604,7 @@ class Settings_Page {
 			Media_Manager::UPLOADS_OPTION,
 			Post_Manager::ALLOW_TRASH_OPTION,
 			Block_Abilities::ENABLED_OPTION,
+			Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION,
 			Block_Inventory::STORAGE_MODES_OPTION,
 			Block_Inventory::STORAGE_SCAN_LAST_RUN_OPTION,
 			Block_Inventory::REFRESH_LAST_RUN_OPTION,
@@ -742,6 +756,8 @@ class Settings_Page {
 		$trash_option      = \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION;
 		$abilities_enabled = \GravityKit\BlockMCP\Block_Abilities::is_enabled();
 		$abilities_option  = \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION;
+		$templates_enabled = \GravityKit\BlockMCP\Template_Manager::edits_enabled();
+		$templates_option  = \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION;
 		$instructions_val  = Instructions::get_addendum();
 		$instructions_max  = Instructions::MAX_LENGTH;
 
@@ -1199,6 +1215,49 @@ class Settings_Page {
 							/* translators: %s: filter name */
 							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
 							'<code>gk/block-mcp/post/allow-trash</code>'
+						);
+						?>
+					</p>
+					<?php
+				endif;
+				?>
+
+				<h2><?php esc_html_e( 'Template editing', 'gk-block-mcp' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Let the assistant edit theme templates and template parts. Edits create database overrides; Appearance → Editor can revert them.', 'gk-block-mcp' ); ?>
+				</p>
+				<?php
+				// Belt-and-braces: emit '0' even when the box is unchecked so
+				// update_option() reliably stores false. PHP omits unchecked
+				// checkboxes entirely from $_POST, and the setting's
+				// sanitize_callback would then receive nothing.
+				?>
+				<input type="hidden" name="<?php echo esc_attr( $templates_option ); ?>" value="0" />
+				<label>
+					<input
+						type="checkbox"
+						name="<?php echo esc_attr( $templates_option ); ?>"
+						value="1"
+						<?php checked( $templates_enabled ); ?>
+					/>
+					<?php esc_html_e( 'Let the assistant edit theme templates and template parts', 'gk-block-mcp' ); ?>
+				</label>
+				<?php
+				// Surface filter-driven overrides so admins aren't confused
+				// by a box whose state the API doesn't actually honor.
+				$templates_raw    = get_option( $templates_option, '0' );
+				$templates_stored = ( '0' !== (string) $templates_raw && false !== $templates_raw );
+				// Applies the gk/block-mcp/templates/allow-edits filter (documented in class-template-manager.php).
+				$templates_filtered = (bool) apply_filters( 'gk/block-mcp/templates/allow-edits', $templates_stored );
+				if ( $templates_stored !== $templates_filtered ) :
+					?>
+					<p class="description" style="color:#b32d2e;">
+						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
+						<?php
+						printf(
+							/* translators: %s: filter name */
+							esc_html__( 'A %s filter is overriding the value of this option.', 'gk-block-mcp' ),
+							'<code>gk/block-mcp/templates/allow-edits</code>'
 						);
 						?>
 					</p>
