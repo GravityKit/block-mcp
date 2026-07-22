@@ -25,10 +25,12 @@ describe('list_block_types — filter forwarding', () => {
     await handleDiscoveryTool('list_block_types', {
       namespace: 'core', category: 'text', tier: 'preferred',
       storage_mode: 'static', search: 'para', preferred_only: true, usage_only: true,
+      include_supports: true,
     }, client as any);
     expect(client.getBlockTypes).toHaveBeenCalledWith({
       namespace: 'core', category: 'text', tier: 'preferred',
       storage_mode: 'static', search: 'para', preferred_only: true, usage_only: true,
+      include_supports: true,
     });
   });
 
@@ -37,7 +39,17 @@ describe('list_block_types — filter forwarding', () => {
     expect(client.getBlockTypes).toHaveBeenCalledWith({
       namespace: undefined, category: undefined, tier: undefined,
       storage_mode: undefined, search: undefined, preferred_only: undefined, usage_only: undefined,
+      include_supports: undefined,
     });
+  });
+});
+
+describe('list_block_types — include_supports schema', () => {
+  it('exposes include_supports in the inputSchema', async () => {
+    const { DISCOVERY_TOOLS } = await import('../../../tools/discovery.js');
+    const tool = DISCOVERY_TOOLS.find((t) => t.name === 'list_block_types')!;
+    expect(tool.inputSchema.properties).toHaveProperty('include_supports');
+    expect((tool.inputSchema.properties as any).include_supports.type).toBe('boolean');
   });
 });
 
