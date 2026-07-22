@@ -54,7 +54,7 @@ class WriteHandlerErrorEnvelopeTest extends BlockApiTestCase {
 		$crud            = new Block_CRUD( $preferences, $safety, $transformer, $block_inventory );
 		$mutator         = new Block_Mutator( $crud, $preferences );
 		$registry        = new Block_Registry( $preferences, $block_inventory );
-		$patterns        = new Pattern_Manager( $preferences );
+		$patterns        = new Pattern_Manager( $preferences, $crud );
 
 		$this->controller = new REST_Controller(
 			$registry,
