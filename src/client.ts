@@ -135,6 +135,13 @@ interface BlockTypesResponse {
   block_types: BlockType[];
 }
 
+/** Response wrapper for block bindings source listing. */
+interface BindingSourcesResponse {
+  sources: Array<{ name: string; label: string; uses_context?: string[] }>;
+  /** Present (with `sources` empty) on WordPress below 6.5. */
+  note?: string;
+}
+
 /** Response wrapper for pattern listing. */
 interface PatternsResponse {
   patterns: Pattern[];
@@ -430,6 +437,19 @@ export class WordPressBlockClient {
     if (refresh) params.refresh = 'true';
 
     const response = await this.client.get<SiteUsage>('/site-usage', { params });
+    return response.data;
+  }
+
+  /**
+   * Get registered block bindings sources (e.g. `core/post-meta`,
+   * `core/pattern-overrides`) — what a block's `metadata.bindings` attribute
+   * can reference to pull an attribute value dynamically.
+   *
+   * @returns `{sources, note?}` — `note` is present (and `sources` empty)
+   *          on WordPress below 6.5, which has no Block Bindings API.
+   */
+  async getBindingSources(): Promise<BindingSourcesResponse> {
+    const response = await this.client.get<BindingSourcesResponse>('/binding-sources');
     return response.data;
   }
 
