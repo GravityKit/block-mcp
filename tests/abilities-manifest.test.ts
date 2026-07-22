@@ -60,4 +60,19 @@ describe('tools.manifest.json matches the current npm tool definitions', () => {
       ).toBe('template_edit');
     }
   });
+
+  it('scopes list_binding_sources to the blanket read permission, matching the other discovery reads', () => {
+    const generated = buildManifest();
+    const tool = generated.tools.find((t) => t.name === 'list_binding_sources');
+    expect(tool?.permission).toBe('read');
+  });
+
+  it('scopes create_pattern to its own permission, not plain edit_post', () => {
+    const generated = buildManifest();
+    const tool = generated.tools.find((t) => t.name === 'create_pattern');
+    expect(
+      tool?.permission,
+      "create_pattern's REST twin (REST_Controller::check_create_pattern_permissions) checks edit_posts AND the wp_block post type's create_posts capability (which maps to publish_posts, not edit_posts) — a plain 'edit_post' mapping would let a Contributor (edit_posts, no publish_posts) through the ability even though the REST route denies them. The manifest permission must route Abilities_Registry::check_tool_permission() to a case that calls check_create_pattern_permissions() directly.",
+    ).toBe('create_pattern');
+  });
 });
