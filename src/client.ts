@@ -131,6 +131,8 @@ interface BlockTypesResponse {
 /** Response wrapper for pattern listing. */
 interface PatternsResponse {
   patterns: Pattern[];
+  /** Registered pattern-category vocabulary: `{name, label}`. */
+  categories?: Array<{ name: string; label: string }>;
 }
 
 /** Response wrapper for page blocks. */
