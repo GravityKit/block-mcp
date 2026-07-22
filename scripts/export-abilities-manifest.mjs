@@ -18,6 +18,7 @@ import { POST_TOOLS } from '../src/tools/posts.js';
 import { TERM_TOOLS } from '../src/tools/terms.js';
 import { MEDIA_TOOLS } from '../src/tools/media.js';
 import { YOAST_TOOLS } from '../src/tools/yoast.js';
+import { TEMPLATE_TOOLS } from '../src/tools/templates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -119,6 +120,7 @@ export function buildManifest() {
     ...TERM_TOOLS,
     ...MEDIA_TOOLS,
     ...YOAST_TOOLS,
+    ...TEMPLATE_TOOLS,
     ...EXTRA_TOOLS,
   ];
 
