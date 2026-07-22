@@ -105,6 +105,8 @@ import type {
   GetBlockResponse,
   StorageModeScanResult,
   PatternInsertResponse,
+  CreatePatternRequest,
+  CreatePatternResponse,
   MutationRequest,
   MutationResponse,
   ResolveUrlResponse,
@@ -389,6 +391,27 @@ export class WordPressBlockClient {
     const response = await this.client.get<PatternsResponse>('/patterns/search', {
       params: { q: query },
     });
+    return response.data;
+  }
+
+  /**
+   * Create a synced pattern (a `wp_block` post). Exactly one of
+   * `content`/`blocks` is required; structured `blocks` go through the same
+   * registry/tier/dual-storage validation as `create_post`.
+   *
+   * @param data - Pattern title plus exactly one of content/blocks, sync_status, slug, status
+   * @returns The created pattern's id, slug, sync_status, edit_url, and a ready-to-insert `reference` snippet
+   */
+  async createPattern(data: CreatePatternRequest): Promise<CreatePatternResponse> {
+    if (!data.title || data.title.trim() === '') {
+      throw new Error('create_pattern: a non-empty "title" is required');
+    }
+    const hasContent = typeof data.content === 'string' && data.content !== '';
+    const hasBlocks = Array.isArray(data.blocks) && data.blocks.length > 0;
+    if (hasContent === hasBlocks) {
+      throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+    }
+    const response = await this.client.post<CreatePatternResponse>('/patterns', data);
     return response.data;
   }
 

@@ -42,7 +42,7 @@ abstract class RestControllerTestCase extends BlockApiTestCase {
 
 		$this->controller = new REST_Controller(
 			new Block_Registry( $preferences, $inventory ),
-			new Pattern_Manager( $preferences ),
+			new Pattern_Manager( $preferences, $this->crud ),
 			$this->crud,
 			$inventory,
 			$this->mutator,

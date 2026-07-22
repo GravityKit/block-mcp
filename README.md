@@ -288,6 +288,7 @@ See the [Configuration](#configuration) section below for the full breakdown.
 | `rewrite_post_blocks` | Full page rewrite |
 | `edit_block_tree` | 9 path-or-ref-based structural ops |
 | `insert_pattern` | Insert a pattern, synced or inline |
+| `create_pattern` | Create a synced pattern from structured blocks or raw content, with sync-status control |
 | `revert_to_revision` | Roll back to a prior revision ID |
 
 **Posts & taxonomies**

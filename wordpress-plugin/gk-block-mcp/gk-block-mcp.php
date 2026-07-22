@@ -189,10 +189,10 @@ function build_block_services() {
 	$preferences      = new Preferences();
 	$block_inventory  = new Block_Inventory();
 	$block_registry   = new Block_Registry( $preferences, $block_inventory );
-	$pattern_manager  = new Pattern_Manager( $preferences );
 	$block_safety     = new Block_Safety();
 	$html_transformer = new HTML_Transformer();
 	$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer, $block_inventory );
+	$pattern_manager  = new Pattern_Manager( $preferences, $block_crud );
 	$block_mutator    = new Block_Mutator( $block_crud, $preferences );
 	$post_manager     = new Post_Manager( $block_crud );
 	$term_manager     = new Term_Manager();

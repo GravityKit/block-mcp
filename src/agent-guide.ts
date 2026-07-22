@@ -82,7 +82,7 @@ Before setting an \`is-style-*\` className, check \`list_block_types\` output's 
 How to behave:
 
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch — call \`list_patterns\` first.
+- Reuse existing patterns before building from scratch — call \`list_patterns\` first. Notice a section repeated across pages? Extract it into a pattern with \`create_pattern\`, then reference it — a synced pattern keeps every instance in sync from one edit.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
 - When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
 

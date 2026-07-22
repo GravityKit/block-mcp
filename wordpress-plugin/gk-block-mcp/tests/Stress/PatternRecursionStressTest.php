@@ -14,6 +14,10 @@
 
 declare( strict_types=1 );
 
+use GravityKit\BlockMCP\Block_CRUD;
+use GravityKit\BlockMCP\Block_Inventory;
+use GravityKit\BlockMCP\Block_Safety;
+use GravityKit\BlockMCP\HTML_Transformer;
 use GravityKit\BlockMCP\Pattern_Manager;
 use GravityKit\BlockMCP\Preferences;
 
@@ -24,7 +28,9 @@ class PatternRecursionStressTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->pm = new Pattern_Manager( new Preferences() );
+		$preferences = new Preferences();
+		$crud        = new Block_CRUD( $preferences, new Block_Safety(), new HTML_Transformer(), new Block_Inventory() );
+		$this->pm    = new Pattern_Manager( $preferences, $crud );
 	}
 
 	private function make_pattern( string $title, string $content ): int {

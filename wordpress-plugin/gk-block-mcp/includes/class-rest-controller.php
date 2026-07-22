@@ -207,10 +207,17 @@ class REST_Controller {
 			self::NAMESPACE,
 			'/patterns',
 			array(
-				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => array( $this, 'get_patterns' ),
-				'permission_callback' => array( $this, 'check_permissions' ),
-				'args'                => $this->get_pattern_query_args(),
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_patterns' ),
+					'permission_callback' => array( $this, 'check_permissions' ),
+					'args'                => $this->get_pattern_query_args(),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'create_pattern' ),
+					'permission_callback' => array( $this, 'check_create_pattern_permissions' ),
+				),
 			)
 		);
 
@@ -1126,6 +1133,39 @@ class REST_Controller {
 	}
 
 	/**
+	 * Permission callback for POST /patterns (create_pattern).
+	 *
+	 * A `wp_block` post's `create_posts` capability maps to `publish_posts`
+	 * (WordPress core's `register_post_type( 'wp_block', … )`), which the
+	 * dedicated agent role holds — see `Agent_Provisioner::default_caps()`.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool|\WP_Error
+	 */
+	public function check_create_pattern_permissions() {
+		$base_check = $this->check_permissions();
+		if ( is_wp_error( $base_check ) ) {
+			return $base_check;
+		}
+
+		$pattern_post_type = get_post_type_object( 'wp_block' );
+		$create_cap        = ( $pattern_post_type && isset( $pattern_post_type->cap->create_posts ) )
+			? $pattern_post_type->cap->create_posts
+			: 'edit_posts';
+
+		if ( ! current_user_can( $create_cap ) ) {
+			return new \WP_Error(
+				'rest_cannot_create',
+				__( 'Sorry, you are not allowed to create patterns.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+
+		return true;
+	}
+
+	/**
 	 * Permission callback for template write endpoints (POST /template,
 	 * POST /template/reset).
 	 *
@@ -1444,6 +1484,31 @@ class REST_Controller {
 				),
 				200
 			);
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /patterns — create a synced pattern (a `wp_block` post).
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function create_pattern( $request ) {
+		try {
+			$args = $request->get_json_params();
+			if ( ! is_array( $args ) ) {
+				$args = $request->get_params();
+			}
+
+			$result = $this->pattern_manager->create_pattern( (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return rest_ensure_response( $result );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}

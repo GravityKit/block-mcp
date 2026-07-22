@@ -143,6 +143,11 @@ export function makeMockClient() {
       before_revision_id: 1,
       revision_id: 2,
     }),
+    createPattern: vi.fn().mockResolvedValue({
+      pattern_id: 1, title: 'Test Pattern', slug: 'test-pattern', sync_status: 'synced',
+      edit_url: 'https://example.test/wp-admin/post.php?post=1&action=edit',
+      reference: { blockName: 'core/block', attrs: { ref: 1 } }, warnings: [],
+    }),
 
     // ── Post lifecycle ────────────────────────────────────────────────────
     createPost: vi.fn().mockResolvedValue({

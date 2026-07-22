@@ -32,7 +32,7 @@ class PatternReferenceCountsTest extends BlockApiTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->manager = new Pattern_Manager( new Preferences() );
+		$this->manager = new Pattern_Manager( new Preferences(), $this->crud );
 		// Ensure each test starts from a cold cache.
 		delete_transient( Pattern_Manager::REF_COUNT_CACHE_KEY );
 	}
