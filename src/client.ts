@@ -121,6 +121,10 @@ import type {
   YoastUpdateRequest,
   YoastBulkUpdateItem,
   YoastBulkUpdateResponse,
+  ListTemplatesParams,
+  ListTemplatesResponse,
+  TemplateDetail,
+  TemplateType,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -1027,6 +1031,42 @@ export class WordPressBlockClient {
       throw new Error('yoast_bulk_update_seo: non-empty `posts` array is required');
     }
     const response = await this.client.patch<YoastBulkUpdateResponse>('/yoast/bulk', { posts });
+    return response.data;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v2.2 — FSE templates (read-only)
+  // ──────────────────────────────────────────────────────────
+
+  /** List a block theme's templates or template parts. */
+  async getTemplates(params?: ListTemplatesParams): Promise<ListTemplatesResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params?.type) queryParams.type = params.type;
+    if (params?.area) queryParams.area = params.area;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.slug) queryParams.slug = params.slug;
+    if (params?.source) queryParams.source = params.source;
+
+    const response = await this.client.get<ListTemplatesResponse>('/templates', { params: queryParams });
+    return response.data;
+  }
+
+  /**
+   * Get a single template or template part, including raw content and
+   * parsed blocks.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index". Passed as a
+   *             query arg (not a path segment) because ids embed "//".
+   * @param type Defaults to "wp_template".
+   */
+  async getTemplate(id: string, type?: TemplateType): Promise<TemplateDetail> {
+    if (!id) {
+      throw new Error('get_template: "id" is required');
+    }
+    const params: Record<string, string> = { id };
+    if (type) params.type = type;
+
+    const response = await this.client.get<TemplateDetail>('/template', { params });
     return response.data;
   }
 }

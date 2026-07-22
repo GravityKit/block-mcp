@@ -149,6 +149,21 @@ class Block_CRUD {
 		return $this->reader->format_blocks( $blocks, $render );
 	}
 
+	/**
+	 * Parse and format a raw block-markup string that has no owning post.
+	 *
+	 * Delegates to Block_Reader. Preserved as a facade so existing callers
+	 * (tests, REST_Controller, Template_Manager) need no changes.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param string $content Raw block markup (post_content-style HTML comments).
+	 * @return array Formatted block data.
+	 */
+	public function format_content_blocks( $content ) {
+		return $this->reader->format_content_blocks( $content );
+	}
+
 	// =========================================================================
 	// WRITE FACADE — delegates to Block_Writer
 	// =========================================================================

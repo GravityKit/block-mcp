@@ -318,6 +318,21 @@ See the [Configuration](#configuration) section below for the full breakdown.
 | `yoast_get_seo` | Read SEO metadata: title, description, robots, OG, Twitter, schema, scores |
 | `yoast_update_seo` / `yoast_bulk_update_seo` | Update SEO fields on one or many posts |
 
+**Templates** (block themes only)
+
+| Tool | Purpose |
+|---|---|
+| `list_templates` | Browse a block theme's templates and template parts (filter by type, area, post_type, slug, source) |
+| `get_template` | A single template's metadata, raw content, and parsed blocks |
+
+## Templates
+
+`list_templates` / `get_template` are read-only tools for browsing a block theme's templates (page layouts like `single`, `archive`) and template parts (reusable regions like `header`, `footer`), the same content the Site Editor's template list shows.
+
+Each row's `wp_id` tells you whether a database override currently shadows the theme file: `null` means the id resolves to the theme file itself; a number means a customization exists and that post ID is the override. On a classic (non-block) theme, `list_templates` returns an empty list with a `note` explaining why, rather than an error.
+
+Templates are index-addressed only — `get_template`'s `blocks` field is formatted like `get_page_blocks`, but the per-block write tools (`update_block`, `edit_block_tree` by ref) do not apply to template content in this version.
+
 ## Stable Refs
 
 Every block in a `get_page_blocks` response includes a `ref` field:

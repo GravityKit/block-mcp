@@ -17,6 +17,7 @@
             <directory>Stress</directory>
             <directory>Connect</directory>
             <directory>Abilities</directory>
+            <directory>Templates</directory>
         </testsuite>
     </testsuites>
     <!--

@@ -40774,6 +40774,37 @@ var WordPressBlockClient = class {
     const response = await this.client.patch("/yoast/bulk", { posts });
     return response.data;
   }
+  // ──────────────────────────────────────────────────────────
+  // v2.2 — FSE templates (read-only)
+  // ──────────────────────────────────────────────────────────
+  /** List a block theme's templates or template parts. */
+  async getTemplates(params) {
+    const queryParams = {};
+    if (params?.type) queryParams.type = params.type;
+    if (params?.area) queryParams.area = params.area;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.slug) queryParams.slug = params.slug;
+    if (params?.source) queryParams.source = params.source;
+    const response = await this.client.get("/templates", { params: queryParams });
+    return response.data;
+  }
+  /**
+   * Get a single template or template part, including raw content and
+   * parsed blocks.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index". Passed as a
+   *             query arg (not a path segment) because ids embed "//".
+   * @param type Defaults to "wp_template".
+   */
+  async getTemplate(id, type) {
+    if (!id) {
+      throw new Error('get_template: "id" is required');
+    }
+    const params = { id };
+    if (type) params.type = type;
+    const response = await this.client.get("/template", { params });
+    return response.data;
+  }
 };
 
 // src/config.ts
@@ -53408,6 +53439,86 @@ function narrowYoastFields(input) {
   return out;
 }
 
+// src/tools/templates.ts
+var READ_ANNOT2 = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+var TEMPLATE_TYPE_ENUM = ["wp_template", "wp_template_part"];
+var TEMPLATE_SOURCE_ENUM = ["theme", "plugin", "custom"];
+var TEMPLATE_TOOLS = [
+  {
+    name: "list_templates",
+    description: 'List a block theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer"). Each row includes `wp_id` \u2014 non-null only when a database override shadows the theme file, which is what makes a template editable via update_template. On a classic (non-block) theme, returns an empty list with a `note` explaining why.',
+    annotations: { ...READ_ANNOT2, title: "List templates" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template (page layouts) or wp_template_part (reusable regions). Default wp_template."
+        },
+        area: {
+          type: "string",
+          description: 'Template-part area filter (e.g. "header", "footer"). wp_template_part only.'
+        },
+        post_type: {
+          type: "string",
+          description: "Scope wp_template results to templates usable by this post type."
+        },
+        slug: {
+          type: "string",
+          description: 'Comma-separated slugs to match exactly (e.g. "single,page").'
+        },
+        source: {
+          type: "string",
+          enum: [...TEMPLATE_SOURCE_ENUM],
+          description: '"theme" (theme file, unmodified), "custom" (database override), or "plugin" (plugin-registered).'
+        }
+      }
+    }
+  },
+  {
+    name: "get_template",
+    description: "A single template or template part's metadata, raw block markup (`content`), and parsed `blocks`. Use after list_templates. `wp_id` tells you whether a database override shadows the theme file \u2014 null means the id currently resolves to the theme file itself.",
+    annotations: { ...READ_ANNOT2, title: "Get template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        }
+      },
+      required: ["id"]
+    }
+  }
+];
+async function handleTemplateTool(toolName, args, client) {
+  switch (toolName) {
+    case "list_templates":
+      return await client.getTemplates({
+        type: args.type,
+        area: args.area,
+        post_type: args.post_type,
+        slug: args.slug,
+        source: args.source
+      });
+    case "get_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('get_template: a non-empty "id" is required');
+      }
+      return await client.getTemplate(id, args.type);
+    }
+    default:
+      throw new Error(`Unknown template tool: ${toolName}`);
+  }
+}
+
 // src/validate-args.ts
 function validateToolArgs(toolName, inputSchema, args) {
   const properties = inputSchema?.properties;
@@ -53550,7 +53661,11 @@ How to behave:
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
 - Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
+
+## Templates (block themes)
+
+\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only \u2014 the per-block write tools do not apply to template content.`;
 
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
@@ -54097,7 +54212,8 @@ var ALL_TOOLS = [
   ...POST_TOOLS,
   ...TERM_TOOLS,
   ...MEDIA_TOOLS,
-  ...YOAST_TOOLS
+  ...YOAST_TOOLS,
+  ...TEMPLATE_TOOLS
 ];
 var TOOL_GROUPS = [
   { tools: DISCOVERY_TOOLS, handle: handleDiscoveryTool },
@@ -54108,7 +54224,8 @@ var TOOL_GROUPS = [
   { tools: POST_TOOLS, handle: handlePostTool },
   { tools: TERM_TOOLS, handle: handleTermTool },
   { tools: MEDIA_TOOLS, handle: handleMediaTool },
-  { tools: YOAST_TOOLS, handle: handleYoastTool }
+  { tools: YOAST_TOOLS, handle: handleYoastTool },
+  { tools: TEMPLATE_TOOLS, handle: handleTemplateTool }
 ];
 var TOOL_DISPATCH = /* @__PURE__ */ new Map();
 for (const { tools, handle: handle2 } of TOOL_GROUPS) {
