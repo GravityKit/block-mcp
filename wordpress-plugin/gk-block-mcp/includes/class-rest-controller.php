@@ -143,31 +143,35 @@ class REST_Controller {
 				'callback'            => array( $this, 'get_block_types' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'namespace'      => array(
+					'namespace'        => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'category'       => array(
+					'category'         => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'preferred_only' => array(
+					'preferred_only'   => array(
 						'type'    => 'boolean',
 						'default' => false,
 					),
-					'tier'           => array(
+					'tier'             => array(
 						'type' => 'string',
 						'enum' => array( 'preferred', 'acceptable', 'avoid', 'legacy' ),
 					),
-					'storage_mode'   => array(
+					'storage_mode'     => array(
 						'type' => 'string',
 						'enum' => array( 'static', 'dynamic', 'dual' ),
 					),
-					'search'         => array(
+					'search'           => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'usage_only'     => array(
+					'usage_only'       => array(
+						'type'    => 'boolean',
+						'default' => false,
+					),
+					'include_supports' => array(
 						'type'    => 'boolean',
 						'default' => false,
 					),
@@ -1178,13 +1182,14 @@ class REST_Controller {
 	public function get_block_types( $request ) {
 		try {
 			$args = array(
-				'namespace'      => $request->get_param( 'namespace' ),
-				'category'       => $request->get_param( 'category' ),
-				'preferred_only' => (bool) $request->get_param( 'preferred_only' ),
-				'tier'           => $request->get_param( 'tier' ),
-				'storage_mode'   => $request->get_param( 'storage_mode' ),
-				'search'         => $request->get_param( 'search' ),
-				'usage_only'     => (bool) $request->get_param( 'usage_only' ),
+				'namespace'        => $request->get_param( 'namespace' ),
+				'category'         => $request->get_param( 'category' ),
+				'preferred_only'   => (bool) $request->get_param( 'preferred_only' ),
+				'tier'             => $request->get_param( 'tier' ),
+				'storage_mode'     => $request->get_param( 'storage_mode' ),
+				'search'           => $request->get_param( 'search' ),
+				'usage_only'       => (bool) $request->get_param( 'usage_only' ),
+				'include_supports' => (bool) $request->get_param( 'include_supports' ),
 			);
 
 			$block_types = $this->block_registry->get_block_types( $args );
