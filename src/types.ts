@@ -73,6 +73,19 @@ export interface BlockType {
   storage_mode?: 'static' | 'dynamic' | 'dual';
   /** Block names this block replaces (e.g. legacy equivalents) */
   replaces?: string[];
+  /**
+   * Valid `is-style-*` className variations — block.json `styles` merged
+   * with anything registered via `register_block_style()`, deduped by name.
+   */
+  styles?: Array<{ name: string; label: string; is_default: boolean }>;
+  /** Block names this block may only be inserted as a child of. */
+  parent?: string[];
+  /** Block names this block must be nested inside somewhere in the tree. */
+  ancestor?: string[];
+  /** Block names this block accepts as direct children. */
+  allowed_blocks?: string[];
+  /** Full block `supports` object. Present only when `include_supports:true` was requested. */
+  supports?: Record<string, unknown>;
 }
 
 // ============================================

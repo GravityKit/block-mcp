@@ -77,6 +77,8 @@ How to discover the policy at runtime:
 2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields — they reflect the live config.
 3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
 
+Before setting an \`is-style-*\` className, check \`list_block_types\` output's \`styles\` field for the valid variations on that block; respect \`parent\`/\`ancestor\`/\`allowed_blocks\` when nesting blocks so the insert doesn't land somewhere the editor would reject.
+
 How to behave:
 
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
