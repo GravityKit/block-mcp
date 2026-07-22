@@ -2020,6 +2020,90 @@
       }
     },
     {
+      "name": "list_templates",
+      "ability": "gk-block-mcp/list-templates",
+      "label": "List templates",
+      "description": "List a block theme's templates (page layouts like \"single\", \"archive\") or template parts (reusable regions like \"header\", \"footer\"). Each row includes `wp_id` — non-null only when a database override shadows the theme file, which is what makes a template editable via update_template. On a classic (non-block) theme, returns an empty list with a `note` explaining why.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template (page layouts) or wp_template_part (reusable regions). Default wp_template."
+          },
+          "area": {
+            "type": "string",
+            "description": "Template-part area filter (e.g. \"header\", \"footer\"). wp_template_part only."
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Scope wp_template results to templates usable by this post type."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Comma-separated slugs to match exactly (e.g. \"single,page\")."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "theme",
+              "plugin",
+              "custom"
+            ],
+            "description": "\"theme\" (theme file, unmodified), \"custom\" (database override), or \"plugin\" (plugin-registered)."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_template",
+      "ability": "gk-block-mcp/get-template",
+      "label": "Get template",
+      "description": "A single template or template part's metadata, raw block markup (`content`), and parsed `blocks`. Use after list_templates. `wp_id` tells you whether a database override shadows the theme file — null means the id currently resolves to the theme file itself.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Template id from list_templates, e.g. \"twentytwentyfive//index\"."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template or wp_template_part. Default wp_template."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
       "name": "site_editor_context",
       "ability": "gk-block-mcp/site-editor-context",
       "label": "Site editor context",
