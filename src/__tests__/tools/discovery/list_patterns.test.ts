@@ -25,18 +25,27 @@ describe('list_patterns — filter forwarding', () => {
 
   it('forwards search as q and other filters', async () => {
     await handleDiscoveryTool('list_patterns', {
-      search: 'hero', synced: true, min_score: 50,
+      search: 'hero', synced: true, min_score: 50, category: 'banner',
     }, client as any);
     expect(client.getPatterns).toHaveBeenCalledWith(expect.objectContaining({
-      q: 'hero', synced: true, min_score: 50,
+      q: 'hero', synced: true, min_score: 50, category: 'banner',
     }));
   });
 
   it('forwards no filters when none are provided', async () => {
     await handleDiscoveryTool('list_patterns', {}, client as any);
     expect(client.getPatterns).toHaveBeenCalledWith(expect.objectContaining({
-      q: undefined, synced: undefined, min_score: undefined,
+      q: undefined, synced: undefined, min_score: undefined, category: undefined,
     }));
+  });
+});
+
+describe('list_patterns — category schema', () => {
+  it('exposes category in the inputSchema', async () => {
+    const { DISCOVERY_TOOLS } = await import('../../../tools/discovery.js');
+    const tool = DISCOVERY_TOOLS.find((t) => t.name === 'list_patterns')!;
+    expect(tool.inputSchema.properties).toHaveProperty('category');
+    expect((tool.inputSchema.properties as any).category.type).toBe('string');
   });
 });
 
@@ -121,5 +130,14 @@ describe('list_patterns — response shape', () => {
     expect(typeof result.offset).toBe('number');
     // summary is created by enrichPatternList — may be a string or structured value
     expect(result.summary).toBeDefined();
+  });
+
+  it('passes through the categories vocabulary from the client response', async () => {
+    client.getPatterns.mockResolvedValueOnce({
+      ...patternsResponse,
+      categories: [{ name: 'banner', label: 'Banners' }],
+    } as any);
+    const result = await handleDiscoveryTool('list_patterns', {}, client as any) as Record<string, unknown>;
+    expect(result.categories).toEqual([{ name: 'banner', label: 'Banners' }]);
   });
 });
