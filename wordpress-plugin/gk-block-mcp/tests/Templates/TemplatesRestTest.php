@@ -1,11 +1,17 @@
 <?php
 /**
- * REST wiring for the FSE template read routes (GET /templates, GET /template).
+ * REST wiring for the FSE template routes: the read routes (GET /templates,
+ * GET /template) and the gated write routes (POST /template, POST /template/reset).
  *
  * @package GravityKit\BlockMCP\Tests
  */
 
+use GravityKit\BlockMCP\Template_Manager;
+
 class TemplatesRestTest extends RestControllerTestCase {
+
+	/** @var string Stylesheet slug of the active block theme for this test run. */
+	private $theme;
 
 	public function set_up(): void {
 		parent::set_up();
@@ -17,6 +23,7 @@ class TemplatesRestTest extends RestControllerTestCase {
 			$this->markTestSkipped( 'No block theme is available in this test environment.' );
 		}
 		switch_theme( $block_theme );
+		$this->theme = $block_theme;
 
 		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
 	}
@@ -133,5 +140,147 @@ class TemplatesRestTest extends RestControllerTestCase {
 		$this->assertSame( 200, $response->get_status() );
 		$slugs = wp_list_pluck( $response->get_data()['templates'], 'slug' );
 		$this->assertContains( 'small-header', $slugs );
+	}
+
+	// ── POST /template (gated write) ──────────────────────────────────
+
+	private function update_request( $id, $content ) {
+		$request = new \WP_REST_Request( 'POST', '/gk-block-api/v1/template' );
+		$request->set_param( 'id', $id );
+		$request->set_param( 'content', $content );
+		return $request;
+	}
+
+	/**
+	 * With the toggle off (the default), POST /template 403s with the
+	 * actionable "turned off for this site" message, even for an editor.
+	 */
+	public function test_update_template_route_403_when_toggle_off() {
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 403, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertSame( 'template_edits_disabled', $data['code'] );
+		$this->assertStringContainsString( 'turned off', $data['message'] );
+	}
+
+	/**
+	 * With the toggle on, an editor (edit_posts, no edit_theme_options)
+	 * can create an override — the whole point of the toggle over relying
+	 * on edit_theme_options alone.
+	 */
+	public function test_update_template_route_succeeds_for_editor_when_toggle_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>Via REST</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertTrue( $data['success'] );
+		$this->assertTrue( $data['override_created'] );
+		$this->assertGreaterThan( 0, $data['wp_id'] );
+	}
+
+	/**
+	 * With the toggle on, an actor holding NEITHER edit_posts NOR
+	 * edit_theme_options is still forbidden — the toggle widens what an
+	 * already-capable actor may do, it does not replace capability checks.
+	 */
+	public function test_update_template_route_403_for_subscriber_even_with_toggle_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 403, $response->get_status() );
+	}
+
+	/**
+	 * An actor with edit_theme_options but NOT edit_posts (the other half
+	 * of the "edit_posts OR edit_theme_options" gate) can also write —
+	 * this is the path a "self" (human admin) connection uses.
+	 */
+	public function test_update_template_route_succeeds_via_edit_theme_options_alone() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$role_name = 'gk_test_theme_options_only';
+		add_role( $role_name, 'Theme Options Only', array( 'read' => true, 'edit_theme_options' => true ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => $role_name ) ) );
+
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>Via theme options cap</p><!-- /wp:paragraph -->' ) );
+
+		remove_role( $role_name );
+
+		$this->assertSame( 200, $response->get_status() );
+	}
+
+	/**
+	 * A legacy-tier block in `blocks` is rejected on the controller's own
+	 * handler.
+	 *
+	 * Invoked directly on `$this->controller` rather than through
+	 * `rest_get_server()->dispatch()`: `rest_api_init` also wires a second,
+	 * production `REST_Controller` (the plugin's own bootstrap, per
+	 * `gk-block-mcp.php`) onto the global REST server the first time
+	 * anything touches it in this process, and that instance's `Preferences`
+	 * lazily caches its namespace scores on first read — so a per-test
+	 * `update_option( Preferences::OPTION_KEY, … )` seeded after that first
+	 * read never reaches it. `$this->controller` is this test's own
+	 * freshly-built instance and reads the option live. Permission and arg
+	 * sanitization aren't under test here (both are covered by the other
+	 * tests in this file that DO go through `dispatch()`), so calling the
+	 * handler directly is safe for this assertion.
+	 */
+	public function test_update_template_route_rejects_legacy_block() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		update_option(
+			\GravityKit\BlockMCP\Preferences::OPTION_KEY,
+			array( 'namespace_scores' => array( 'ugb' => 0 ) )
+		);
+		$registry = \WP_Block_Type_Registry::get_instance();
+		if ( ! $registry->is_registered( 'ugb/text' ) ) {
+			$registry->register( 'ugb/text' );
+		}
+
+		$request = new \WP_REST_Request( 'POST', '/gk-block-api/v1/template' );
+		$request->set_param( 'id', $this->theme . '//index' );
+		$request->set_param( 'blocks', array( array( 'name' => 'ugb/text', 'attributes' => array(), 'innerHTML' => '<div>legacy</div>' ) ) );
+
+		$response = $this->controller->update_template( $request );
+
+		$this->assertInstanceOf( \WP_Error::class, $response );
+		$this->assertSame( 'legacy_block', $response->get_error_code() );
+	}
+
+	// ── POST /template/reset (gated write) ────────────────────────────
+
+	/**
+	 * With the toggle off, POST /template/reset 403s the same as the
+	 * update route.
+	 */
+	public function test_reset_template_route_403_when_toggle_off() {
+		$request = new \WP_REST_Request( 'POST', '/gk-block-api/v1/template/reset' );
+		$request->set_param( 'id', $this->theme . '//index' );
+		$response = $this->dispatch( $request );
+
+		$this->assertSame( 403, $response->get_status() );
+	}
+
+	/**
+	 * With the toggle on, resetting an existing override through the full
+	 * REST path deletes the override post and reports its wp_id.
+	 */
+	public function test_reset_template_route_deletes_override() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		$created = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+		$wp_id   = $created->get_data()['wp_id'];
+
+		$request = new \WP_REST_Request( 'POST', '/gk-block-api/v1/template/reset' );
+		$request->set_param( 'id', $this->theme . '//index' );
+		$response = $this->dispatch( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( $wp_id, $response->get_data()['wp_id'] );
+		$this->assertNull( get_post( $wp_id ) );
 	}
 }
