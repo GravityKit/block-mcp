@@ -16,7 +16,7 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_block_types',
     description:
-      'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
+      'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations — check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints — respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: 'List block types' },
     outputSchema: {
       type: 'object',
@@ -37,10 +37,11 @@ export const DISCOVERY_TOOLS = [
         tier:           { type: 'string',  enum: ['preferred', 'acceptable', 'avoid', 'legacy'], description: 'Exact tier match. Use for migration audits.' },
         storage_mode:   { type: 'string',  enum: ['static', 'dynamic', 'dual'], description: 'Filter by storage mode. "dual" surfaces blocks needing both attrs+innerHTML on update.' },
         search:         { type: 'string',  description: 'Case-insensitive substring match against name + title.' },
-        preferred_only: { type: 'boolean', description: 'Shorthand for `tier in {preferred,acceptable}` (score ≥ 50).' },
-        usage_only:     { type: 'boolean', description: 'Only blocks with usage.count > 0 on this site.' },
-        limit:          { type: 'number',  description: 'Max results. Default 50.' },
-        offset:         { type: 'number',  description: 'Skip this many. Default 0.' },
+        preferred_only:   { type: 'boolean', description: 'Shorthand for `tier in {preferred,acceptable}` (score ≥ 50).' },
+        usage_only:       { type: 'boolean', description: 'Only blocks with usage.count > 0 on this site.' },
+        include_supports: { type: 'boolean', description: 'Include each block\'s full `supports` object. Default false.' },
+        limit:            { type: 'number',  description: 'Max results. Default 50.' },
+        offset:           { type: 'number',  description: 'Skip this many. Default 0.' },
       },
     },
   },
@@ -141,13 +142,14 @@ export async function handleDiscoveryTool(
   switch (toolName) {
     case 'list_block_types': {
       const response = await client.getBlockTypes({
-        namespace:      args.namespace as string | undefined,
-        category:       args.category as string | undefined,
-        preferred_only: args.preferred_only as boolean | undefined,
-        tier:           args.tier as 'preferred' | 'acceptable' | 'avoid' | 'legacy' | undefined,
-        storage_mode:   args.storage_mode as 'static' | 'dynamic' | 'dual' | undefined,
-        search:         args.search as string | undefined,
-        usage_only:     args.usage_only as boolean | undefined,
+        namespace:        args.namespace as string | undefined,
+        category:         args.category as string | undefined,
+        preferred_only:   args.preferred_only as boolean | undefined,
+        tier:             args.tier as 'preferred' | 'acceptable' | 'avoid' | 'legacy' | undefined,
+        storage_mode:     args.storage_mode as 'static' | 'dynamic' | 'dual' | undefined,
+        search:           args.search as string | undefined,
+        usage_only:       args.usage_only as boolean | undefined,
+        include_supports: args.include_supports as boolean | undefined,
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total  = enriched.block_types.length;

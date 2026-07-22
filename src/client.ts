@@ -298,15 +298,17 @@ export class WordPressBlockClient {
     storage_mode?: 'static' | 'dynamic' | 'dual';
     search?: string;
     usage_only?: boolean;
+    include_supports?: boolean;
   }): Promise<BlockTypesResponse> {
     const queryParams: Record<string, string> = {};
-    if (params?.namespace)      queryParams.namespace      = params.namespace;
-    if (params?.category)       queryParams.category       = params.category;
-    if (params?.preferred_only) queryParams.preferred_only = 'true';
-    if (params?.tier)           queryParams.tier           = params.tier;
-    if (params?.storage_mode)   queryParams.storage_mode   = params.storage_mode;
-    if (params?.search)         queryParams.search         = params.search;
-    if (params?.usage_only)     queryParams.usage_only     = 'true';
+    if (params?.namespace)        queryParams.namespace        = params.namespace;
+    if (params?.category)         queryParams.category         = params.category;
+    if (params?.preferred_only)   queryParams.preferred_only   = 'true';
+    if (params?.tier)             queryParams.tier             = params.tier;
+    if (params?.storage_mode)     queryParams.storage_mode     = params.storage_mode;
+    if (params?.search)           queryParams.search           = params.search;
+    if (params?.usage_only)       queryParams.usage_only       = 'true';
+    if (params?.include_supports) queryParams.include_supports = 'true';
 
     const response = await this.client.get<BlockTypesResponse>('/block-types', {
       params: queryParams,
