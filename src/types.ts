@@ -110,6 +110,8 @@ export interface Pattern {
   name: string;
   /** "synced" (wp_block post) or "registered" */
   type: 'synced' | 'registered';
+  /** Synced patterns only: 'synced' (default) or 'unsynced' (wp_pattern_sync_status meta). */
+  sync_status?: 'synced' | 'unsynced';
   /** Creation date (ISO date string) */
   created: string;
   /** Last modification date (ISO date string) */
@@ -466,6 +468,31 @@ export interface PatternInsertResponse {
   before_revision_id: number;
   /** WordPress revision ID of the post-edit state */
   revision_id: number;
+}
+
+/** Request body for POST /patterns (create_pattern). Exactly one of `content`/`blocks`. */
+export interface CreatePatternRequest {
+  title: string;
+  blocks?: BlockInput[];
+  content?: string;
+  sync_status?: 'synced' | 'unsynced';
+  slug?: string;
+  status?: 'publish' | 'draft';
+}
+
+/** Response from POST /patterns (create_pattern). */
+export interface CreatePatternResponse {
+  pattern_id: number;
+  title: string;
+  slug: string;
+  sync_status: 'synced' | 'unsynced';
+  edit_url: string;
+  /** Ready-to-insert core/block reference snippet for this new synced pattern. */
+  reference: {
+    blockName: 'core/block';
+    attrs: { ref: number };
+  };
+  warnings?: Array<Record<string, unknown>>;
 }
 
 // ============================================
