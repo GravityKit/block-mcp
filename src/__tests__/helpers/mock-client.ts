@@ -190,5 +190,11 @@ export function makeMockClient() {
       has_theme_file: true, is_custom: true, wp_id: null,
       content: '', blocks: [],
     }),
+    updateTemplate: vi.fn().mockResolvedValue({
+      success: true, wp_id: 1, override_created: true,
+      revert_hint: 'Call reset_template to remove this override and revert to the theme file.',
+      warnings: [], before_revision_id: null, revision_id: null,
+    }),
+    resetTemplate: vi.fn().mockResolvedValue({ success: true, id: 'test-theme//index', wp_id: 1 }),
   };
 }

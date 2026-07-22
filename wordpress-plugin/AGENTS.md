@@ -145,6 +145,7 @@ All routes under `gk-block-api/v1`.
 | POST | `/posts` · PATCH `/posts/{id}` | create / update (status, terms, explicit author arg) |
 | GET | `/terms` · POST `/media` | term listing · media upload (SSRF-guarded) |
 | POST | `/storage-modes/scan` | dual-storage classification scan (`manage_options`) |
+| POST | `/template` · POST `/template/reset` | whole-template write / override-delete (`check_template_edit_permissions`: toggle ON and `edit_posts` or `edit_theme_options`) |
 
 ### Integrations / connect
 
@@ -173,6 +174,8 @@ All routes under `gk-block-api/v1`.
 **`Term_Manager`** — `list_terms()` (cap `edit_posts`, per-page ≤200). **`Media_Manager`** — `upload_media()` (multipart / URL sideload / base64; SSRF guard rejecting reserved/private/link-local IPs before `download_url()`; MIME allow-list; size caps; `gk/block-mcp/media/sideload-blocked-ranges` filter).
 
 **`Template_Manager`** — `get_templates()` / `get_template()`, thin wrappers over core's `get_block_templates()` / `get_block_template()`. Read-only, `check_permissions` (cap `edit_posts`). `get_template()` reuses `Block_CRUD::format_content_blocks()` (a `Block_Reader` method that parses a raw markup string with no owning post) for the `blocks` field; it never assigns/persists `gk_ref`s, since there is no post to write them into. On a classic (non-block) theme, `get_templates()` returns an empty list with an explanatory `note` instead of an error.
+
+`update_template()` / `reset_template()` are the gated write pair — off by default (`ALLOW_TEMPLATE_EDITS_OPTION` / `edits_enabled()`, modeled on `Post_Manager::trashing_enabled()`, checked both in the REST permission callback and again inside the service methods). `update_template()` resolves the id via `get_block_template()`; a theme-file-only id gets an override created (`wp_insert_post()` + the mandatory `wp_theme` term, plus `wp_template_part_area` for parts, via `_filter_block_template_part_area()`), then the new content is applied through `Block_CRUD::replace_all_blocks()` (`blocks`, full registry/tier/dual-storage validation) or `Block_CRUD::save_post_content()` (`content`, `wp_kses_post()`-sanitized). A content-apply failure on a freshly-created override rolls it back (`wp_delete_post()`) rather than leaving an empty shell. `reset_template()` is `wp_delete_post( wp_id, true )`. Once an override exists, its `wp_id` is a normal post accessible to the rest of the per-block tool surface (`update_block` et al. — verified, not just assumed).
 
 **`REST_Controller`** — registers every route; `check_permissions` (read) / `check_edit_permissions` + `check_post_edit_permission` (write); `handle_error()` envelope; sparse-field selection; recursive search.
 

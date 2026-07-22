@@ -27,6 +27,8 @@
   * [3. Manual setup (advanced)](#3-manual-setup-advanced)
   * [4. (Optional) Tune the settings](#4-optional-tune-the-settings)
 * [MCP Tools](#mcp-tools)
+* [Templates](#templates)
+  * [Editing templates](#editing-templates)
 * [Stable Refs](#stable-refs)
 * [Configuration](#configuration)
   * [Namespace tier scores](#namespace-tier-scores)
@@ -324,6 +326,8 @@ See the [Configuration](#configuration) section below for the full breakdown.
 |---|---|
 | `list_templates` | Browse a block theme's templates and template parts (filter by type, area, post_type, slug, source) |
 | `get_template` | A single template's metadata, raw content, and parsed blocks |
+| `update_template` | Replace a template/part's entire content, gated by a site setting (off by default) |
+| `reset_template` | Delete a template's database override, reverting it to the theme file |
 
 ## Templates
 
@@ -331,7 +335,16 @@ See the [Configuration](#configuration) section below for the full breakdown.
 
 Each row's `wp_id` tells you whether a database override currently shadows the theme file: `null` means the id resolves to the theme file itself; a number means a customization exists and that post ID is the override. On a classic (non-block) theme, `list_templates` returns an empty list with a `note` explaining why, rather than an error.
 
-Templates are index-addressed only — `get_template`'s `blocks` field is formatted like `get_page_blocks`, but the per-block write tools (`update_block`, `edit_block_tree` by ref) do not apply to template content in this version.
+Templates are index-addressed only. `get_template`'s `blocks` field is formatted like `get_page_blocks`, but the per-block write tools (`update_block`, `edit_block_tree` by ref) do not apply to template content in this version.
+
+### Editing templates
+
+`update_template` / `reset_template` write to templates. Both are off by default. Enable **"Let the assistant edit theme templates and template parts"** under Settings → Block MCP first, or every call returns a 403 with an actionable message. Once enabled, editing needs only the same `edit_posts` capability the rest of this MCP uses; a human's own "self" connection (which already carries `edit_theme_options`) can use it too.
+
+- `update_template` replaces a template's entire content: whole-template replacement, like `rewrite_post_blocks`, not a per-block edit. Provide exactly one of `content` (raw markup) or `blocks` (structured; validated against the block registry and preference tiers, same as any other structured-block write). If the id currently resolves to the theme file, a database override is created automatically (`override_created: true`); the theme file itself is never touched. Writing again reuses the same override.
+- `reset_template` deletes the override, reverting the id back to the theme file. Appearance → Editor → Reset does the same thing from the WordPress admin.
+
+Once an override exists, its `wp_id` is a normal post ID — `update_block`, `get_page_blocks`, and the rest of the per-block tool surface work against it like any other post.
 
 ## Stable Refs
 

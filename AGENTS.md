@@ -140,11 +140,11 @@ Supporting: `HTML_Transformer` (auto-transform innerHTML on attr change via `WP_
 
 ### REST API
 
-All under `gk-block-api/v1`. Reads require `edit_posts`; per-block writes require `edit_post` on the post. Highlights: `/posts/{id}/blocks` (GET/POST/PUT/DELETE/PATCH + `/batch-update`, `/mutate`, `/insert-pattern`), `/posts` + `/posts/{id}` (create/update), `/block-types`, `/patterns(/search|/{id})`, `/site-usage`, `/resolve`, `/terms`, `/media`, `/templates` + `/template` (read-only FSE templates/parts, block themes only), and the unauthenticated **`POST /connect/exchange`** (single-use-code redemption — the only `__return_true` route, by design). See `wordpress-plugin/AGENTS.md` for the full route table.
+All under `gk-block-api/v1`. Reads require `edit_posts`; per-block writes require `edit_post` on the post. Highlights: `/posts/{id}/blocks` (GET/POST/PUT/DELETE/PATCH + `/batch-update`, `/mutate`, `/insert-pattern`), `/posts` + `/posts/{id}` (create/update), `/block-types`, `/patterns(/search|/{id})`, `/site-usage`, `/resolve`, `/terms`, `/media`, `/templates` + `/template` (read-only FSE templates/parts, block themes only), `POST /template` + `POST /template/reset` (gated template writes: option `gk_block_api_template_edits`, off by default, plus `edit_posts` or `edit_theme_options`), and the unauthenticated **`POST /connect/exchange`** (single-use-code redemption — the only `__return_true` route, by design). See `wordpress-plugin/AGENTS.md` for the full route table.
 
 ### MCP server tools
 
-`src/index.ts` aggregates `*_TOOLS` arrays from `src/tools/*.ts` and routes via `Set<string>` lookups: `discovery` (list/get block types, patterns, site usage), `read` (get_page_blocks), `write` (update/insert/delete/replace/rewrite/revert), `mutate` (edit_block_tree), `patterns` (insert_pattern), `posts` (create/update_post), `terms` (list_terms), `media` (upload_media), `yoast` (get/update/bulk_update SEO), `templates` (list_templates, get_template — read-only). Each handler validates args, calls a `WordPressBlockClient` method, enriches, and returns MCP text content.
+`src/index.ts` aggregates `*_TOOLS` arrays from `src/tools/*.ts` and routes via `Set<string>` lookups: `discovery` (list/get block types, patterns, site usage), `read` (get_page_blocks), `write` (update/insert/delete/replace/rewrite/revert), `mutate` (edit_block_tree), `patterns` (insert_pattern), `posts` (create/update_post), `terms` (list_terms), `media` (upload_media), `yoast` (get/update/bulk_update SEO), `templates` (list_templates, get_template — read-only; update_template, reset_template — gated writes). Each handler validates args, calls a `WordPressBlockClient` method, enriches, and returns MCP text content.
 
 ## Conventions
 

@@ -889,7 +889,7 @@ export type YoastBulkUpdateResponse = Array<
 >;
 
 // ============================================
-// v2.2 — FSE Templates (read-only)
+// v2.2 — FSE Templates
 // ============================================
 
 /** Either of the two block-template post types. */
@@ -950,4 +950,35 @@ export interface TemplateDetail extends TemplateSummary {
    * edit_block_tree by ref) do not apply to templates.
    */
   blocks: Block[];
+}
+
+/** Body of `POST /template`. Exactly one of `content` or `blocks`. */
+export interface UpdateTemplateRequest {
+  /** Raw block markup. Mutually exclusive with `blocks`. */
+  content?: string;
+  /** Structured blocks. Mutually exclusive with `content`. Validated like any other block write (registry, tier, dual-storage). */
+  blocks?: BlockInput[];
+}
+
+/** Response from `POST /template`. */
+export interface UpdateTemplateResponse {
+  success: boolean;
+  /** Post ID of the database override — pre-existing, or freshly created by this call. */
+  wp_id: number;
+  /** True when this call created the override (no `wp_id` existed beforehand). */
+  override_created: boolean;
+  /** Names reset_template and the Site Editor's Reset action as ways to revert. */
+  revert_hint: string;
+  warnings: PreferenceWarning[];
+  before_revision_id: number | null;
+  revision_id: number | null;
+}
+
+/** Response from `POST /template/reset`. */
+export interface ResetTemplateResponse {
+  success: boolean;
+  /** The template id that was reset. */
+  id: string;
+  /** Post ID of the override that was deleted. */
+  wp_id: number;
 }
