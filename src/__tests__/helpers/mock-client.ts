@@ -57,6 +57,7 @@ export function makeMockClient() {
       scanned_posts: 0, unique_blocks: 0, classification: {},
       dual_count: 0, dynamic_count: 0, static_count: 0,
     }),
+    getBindingSources: vi.fn().mockResolvedValue({ sources: [] }),
 
     // ── Read ─────────────────────────────────────────────────────────────
     getPageBlocks: vi.fn().mockResolvedValue(
