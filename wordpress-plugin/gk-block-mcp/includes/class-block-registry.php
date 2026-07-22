@@ -326,4 +326,39 @@ class Block_Registry {
 
 		return array_values( $merged );
 	}
+
+	/**
+	 * Registered block bindings sources (block metadata.bindings can
+	 * reference these to pull an attribute value from post meta, a
+	 * pattern override, etc).
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return array `{sources: array[]}` — each source is `{name, label, uses_context}`
+	 *               (`uses_context` omitted when the source declares none). On
+	 *               WordPress below 6.5, where the Block Bindings API doesn't
+	 *               exist, `sources` is empty and a `note` key explains why.
+	 */
+	public function get_binding_sources() {
+		if ( ! function_exists( 'get_all_registered_block_bindings_sources' ) ) {
+			return array(
+				'sources' => array(),
+				'note'    => __( 'Block bindings require WordPress 6.5+.', 'gk-block-mcp' ),
+			);
+		}
+
+		$sources = array();
+		foreach ( get_all_registered_block_bindings_sources() as $source ) {
+			$entry = array(
+				'name'  => $source->name,
+				'label' => $source->label,
+			);
+			if ( ! empty( $source->uses_context ) ) {
+				$entry['uses_context'] = $source->uses_context;
+			}
+			$sources[] = $entry;
+		}
+
+		return array( 'sources' => $sources );
+	}
 }

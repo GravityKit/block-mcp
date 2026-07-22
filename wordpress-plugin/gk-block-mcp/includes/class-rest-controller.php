@@ -190,6 +190,18 @@ class REST_Controller {
 			)
 		);
 
+		// Block bindings sources.
+		register_rest_route(
+			self::NAMESPACE,
+			'/binding-sources',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_binding_sources' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(),
+			)
+		);
+
 		// Patterns.
 		register_rest_route(
 			self::NAMESPACE,
@@ -1364,6 +1376,19 @@ class REST_Controller {
 			$block_types = $this->block_registry->get_block_types( $args );
 
 			return new \WP_REST_Response( array( 'block_types' => $block_types ), 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /binding-sources
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_binding_sources() {
+		try {
+			return new \WP_REST_Response( $this->block_registry->get_binding_sources(), 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
