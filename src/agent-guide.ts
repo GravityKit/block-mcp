@@ -84,4 +84,8 @@ How to behave:
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
 - Reuse existing patterns before building from scratch — call \`list_patterns\` first.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
+
+## Templates (block themes)
+
+\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only — the per-block write tools do not apply to template content.`;

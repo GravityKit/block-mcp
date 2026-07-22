@@ -887,3 +887,67 @@ export type YoastBulkUpdateResponse = Array<
   | YoastSEOMeta
   | { post_id?: number; error: string }
 >;
+
+// ============================================
+// v2.2 — FSE Templates (read-only)
+// ============================================
+
+/** Either of the two block-template post types. */
+export type TemplateType = 'wp_template' | 'wp_template_part';
+
+/** Where a template's content currently comes from. */
+export type TemplateSource = 'theme' | 'plugin' | 'custom';
+
+/**
+ * Summary shape shared by every row in `list_templates` and the metadata
+ * half of `get_template`. `wp_id` is the bridge to a write: present (and
+ * non-null) only when a database override row shadows the theme file.
+ */
+export interface TemplateSummary {
+  id: string;
+  slug: string;
+  theme: string;
+  type: TemplateType;
+  title: string;
+  description: string;
+  source: TemplateSource;
+  origin: string | null;
+  status: string;
+  has_theme_file: boolean;
+  is_custom: boolean;
+  /** Template-part area (e.g. "header"). Present only when type is wp_template_part. */
+  area?: string;
+  /** DB post ID of the customization override, when one exists; null otherwise. */
+  wp_id: number | null;
+}
+
+/** Response from `GET /templates`. */
+export interface ListTemplatesResponse {
+  templates: TemplateSummary[];
+  count: number;
+  /** Present only on a classic (non-block) theme, where no templates exist. */
+  note?: string;
+}
+
+/** Query params for `GET /templates`. */
+export interface ListTemplatesParams {
+  type?: TemplateType;
+  /** Template-part area filter. wp_template_part only. */
+  area?: string;
+  post_type?: string;
+  /** Comma-separated slugs to match exactly. */
+  slug?: string;
+  source?: TemplateSource;
+}
+
+/** Response from `GET /template` — a TemplateSummary plus raw content and parsed blocks. */
+export interface TemplateDetail extends TemplateSummary {
+  /** Raw block markup (post_content-style HTML comments). */
+  content: string;
+  /**
+   * Parsed blocks, formatted the same way get_page_blocks() formats a
+   * post's content. Index-addressed only — ref-based tools (update_block,
+   * edit_block_tree by ref) do not apply to templates.
+   */
+  blocks: Block[];
+}

@@ -49,6 +49,7 @@ import { POST_TOOLS, handlePostTool } from './tools/posts.js';
 import { TERM_TOOLS, handleTermTool } from './tools/terms.js';
 import { MEDIA_TOOLS, handleMediaTool } from './tools/media.js';
 import { YOAST_TOOLS, handleYoastTool } from './tools/yoast.js';
+import { TEMPLATE_TOOLS, handleTemplateTool } from './tools/templates.js';
 import { validateToolArgs } from './validate-args.js';
 import { AGENT_GUIDE_CONTENT } from './agent-guide.js';
 import { runConnect } from './connect.js';
@@ -76,6 +77,7 @@ const ALL_TOOLS = [
   ...TERM_TOOLS,
   ...MEDIA_TOOLS,
   ...YOAST_TOOLS,
+  ...TEMPLATE_TOOLS,
 ];
 
 /**
@@ -106,6 +108,7 @@ const TOOL_GROUPS: ReadonlyArray<{
   { tools: TERM_TOOLS,      handle: handleTermTool },
   { tools: MEDIA_TOOLS,     handle: handleMediaTool },
   { tools: YOAST_TOOLS,     handle: handleYoastTool },
+  { tools: TEMPLATE_TOOLS,  handle: handleTemplateTool },
 ];
 
 const TOOL_DISPATCH = new Map<string, ToolHandler>();
