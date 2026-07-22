@@ -100,7 +100,7 @@
       "name": "list_patterns",
       "ability": "gk-block-mcp/list-patterns",
       "label": "List patterns",
-      "description": "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild.",
+      "description": "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild. `category` filters differently by pattern kind: registered patterns are matched against their declared pattern categories, while synced patterns (no separate category taxonomy) are matched against the block categories actually used in their content. The response's top-level `categories` lists the registered pattern-category vocabulary.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -111,6 +111,10 @@
           "synced": {
             "type": "boolean",
             "description": "true = synced only, false = registered only, omit = all."
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by pattern category. Registered patterns match declared categories; synced patterns match block categories used in their content."
           },
           "min_score": {
             "type": "number",
