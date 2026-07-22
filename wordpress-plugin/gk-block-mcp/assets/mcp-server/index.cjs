@@ -41089,13 +41089,14 @@ var DISCOVERY_TOOLS = [
   },
   {
     name: "list_patterns",
-    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour \u2014 pass `refresh:true` to rebuild.",
+    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour \u2014 pass `refresh:true` to rebuild. `category` filters differently by pattern kind: registered patterns are matched against their declared pattern categories, while synced patterns (no separate category taxonomy) are matched against the block categories actually used in their content. The response's top-level `categories` lists the registered pattern-category vocabulary.",
     annotations: { ...READ_ANNOT, title: "List patterns" },
     inputSchema: {
       type: "object",
       properties: {
         search: { type: "string", description: "Search by name or keyword." },
         synced: { type: "boolean", description: "true = synced only, false = registered only, omit = all." },
+        category: { type: "string", description: "Filter by pattern category. Registered patterns match declared categories; synced patterns match block categories used in their content." },
         min_score: { type: "number", description: "Min preference score; 0 excludes legacy." },
         limit: { type: "number", description: "Max results. Default 20." },
         offset: { type: "number", description: "Skip this many results. Default 0." },
@@ -41207,6 +41208,7 @@ async function handleDiscoveryTool(toolName, args, client) {
       const response = await client.getPatterns({
         q: args.search,
         synced: args.synced,
+        category: args.category,
         min_score: args.min_score,
         refresh: args.refresh
       });
@@ -41219,7 +41221,8 @@ async function handleDiscoveryTool(toolName, args, client) {
         total,
         offset,
         next_offset: offset + page.length < total ? offset + page.length : null,
-        summary: enriched.summary
+        summary: enriched.summary,
+        categories: response.categories
       };
     }
     case "get_pattern": {
