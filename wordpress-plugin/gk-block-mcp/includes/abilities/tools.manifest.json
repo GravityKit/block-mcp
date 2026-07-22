@@ -1189,7 +1189,7 @@
       "output_schema": {
         "type": "object"
       },
-      "permission": "edit_post",
+      "permission": "create_pattern",
       "annotations": {
         "readonly": false,
         "destructive": false,

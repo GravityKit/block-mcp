@@ -58,7 +58,7 @@ class CreatePatternAbilityTest extends RestControllerTestCase {
 
 		$this->assertNotWPError( $result );
 		$this->assertIsArray( $result );
-		$post = get_post( $result['id'] );
+		$post = get_post( $result['pattern_id'] );
 		$this->assertSame( 'wp_block', $post->post_type );
 		$this->assertSame( 'Ability Pattern', $post->post_title );
 	}
