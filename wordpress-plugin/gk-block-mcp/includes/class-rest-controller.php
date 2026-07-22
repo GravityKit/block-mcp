@@ -1243,10 +1243,46 @@ class REST_Controller {
 
 			$patterns = $this->pattern_manager->get_patterns( $args );
 
-			return new \WP_REST_Response( array( 'patterns' => $patterns ), 200 );
+			return new \WP_REST_Response(
+				array(
+					'patterns'   => $patterns,
+					'categories' => $this->get_pattern_categories(),
+				),
+				200
+			);
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * Registered pattern-category vocabulary, for the `category` filter on
+	 * this route. Note the semantic split: registered patterns are matched
+	 * against these declared categories, while synced patterns are matched
+	 * against the block categories used in their content (there is no
+	 * separate category taxonomy for synced patterns) — see
+	 * `Pattern_Manager::get_block_categories_in_content()`.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return array[] List of `{name, label}` entries.
+	 */
+	private function get_pattern_categories() {
+		if ( ! class_exists( '\WP_Block_Pattern_Categories_Registry' ) ) {
+			return array();
+		}
+
+		$categories = \WP_Block_Pattern_Categories_Registry::get_instance()->get_all_registered();
+
+		return array_map(
+			function ( $category ) {
+				return array(
+					'name'  => $category['name'],
+					'label' => isset( $category['label'] ) ? $category['label'] : $category['name'],
+				);
+			},
+			$categories
+		);
 	}
 
 	/**
