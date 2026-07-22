@@ -35,7 +35,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 
 	/**
 	 * Abilities_Registry::load_manifest() must parse the checked-in
-	 * tools.manifest.json and return the full, current 32-tool set, matching
+	 * tools.manifest.json and return the full, current 33-tool set, matching
 	 * the npm MCP server's tool list one-for-one (this includes the four
 	 * templates tools — manifest registration is data-driven and doesn't
 	 * depend on Tool_Executor actually knowing how to run a tool; see
@@ -62,7 +62,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		$manifest = $method->invoke( $registry );
 
 		$this->assertIsArray( $manifest );
-		$this->assertCount( 32, $manifest['tools'] );
+		$this->assertCount( 33, $manifest['tools'] );
 		$names = wp_list_pluck( $manifest['tools'], 'name' );
 		$this->assertContains( 'get_page_blocks', $names );
 		$this->assertContains( 'edit_block_tree', $names );
@@ -142,7 +142,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	 *
 	 * Count excludes the three yoast_* tools: get_ability_ids() reflects what
 	 * actually registers, which is conditional on Yoast being active, unlike
-	 * the manifest itself (still 32 — test_manifest_lists_all_block_mcp_tools).
+	 * the manifest itself (still 33 — test_manifest_lists_all_block_mcp_tools).
 	 * This test is untagged, so it only ever runs in the default (non-Yoast)
 	 * suite.
 	 */
@@ -153,7 +153,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		);
 
 		$ids = $registry->get_ability_ids();
-		$this->assertCount( 29, $ids );
+		$this->assertCount( 30, $ids );
 		$this->assertContains( 'gk-block-mcp/get-page-blocks', $ids );
 		$this->assertContains( 'gk-block-mcp/edit-block-tree', $ids );
 		$this->assertContains( 'gk-block-mcp/site-editor-context', $ids );
@@ -201,7 +201,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 	/**
 	 * Mirror of test_yoast_abilities_not_registered_when_yoast_inactive() for
 	 * the positive case: when Yoast SEO is active, the three yoast_* tools
-	 * ARE registered as abilities (and the manifest's full 32 count is
+	 * ARE registered as abilities (and the manifest's full 33 count is
 	 * reachable). Tagged `@group yoast` so it only runs under
 	 * tests/phpunit/yoast.xml, the one config that loads Yoast SEO
 	 * (GK_LOAD_YOAST=1) — the default suite excludes the yoast group, so
@@ -218,7 +218,7 @@ class AbilitiesRegistryTest extends RestControllerTestCase {
 		);
 
 		$ids = $registry->get_ability_ids();
-		$this->assertCount( 32, $ids );
+		$this->assertCount( 33, $ids );
 		$this->assertContains( 'gk-block-mcp/yoast-get-seo', $ids );
 		$this->assertContains( 'gk-block-mcp/yoast-update-seo', $ids );
 		$this->assertContains( 'gk-block-mcp/yoast-bulk-update-seo', $ids );
