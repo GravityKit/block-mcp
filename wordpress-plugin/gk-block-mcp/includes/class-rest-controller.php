@@ -354,9 +354,10 @@ class REST_Controller {
 		);
 
 		// Update a template/template part's whole content. Gated: the toggle
-		// must be on AND the actor needs edit_posts or edit_theme_options
-		// (check_template_edit_permissions). Same /template path as the GET
-		// route above, registered separately for the POST method.
+		// must be on AND the actor needs the dedicated gk_block_mcp_edit_templates
+		// capability or edit_theme_options (check_template_edit_permissions) —
+		// edit_posts is not sufficient. Same /template path as the GET route
+		// above, registered separately for the POST method.
 		register_rest_route(
 			self::NAMESPACE,
 			'/template',

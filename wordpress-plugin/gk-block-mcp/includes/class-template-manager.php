@@ -124,7 +124,8 @@ class Template_Manager {
 
 		$query = array();
 
-		if ( 'wp_template_part' === $type && ! empty( $args['area'] ) ) {
+		$is_template_part_with_area = 'wp_template_part' === $type && ! empty( $args['area'] );
+		if ( $is_template_part_with_area ) {
 			$query['area'] = sanitize_key( $args['area'] );
 		}
 

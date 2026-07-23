@@ -145,7 +145,7 @@ All routes under `gk-block-api/v1`.
 | POST | `/posts` · PATCH `/posts/{id}` | create / update (status, terms, explicit author arg) |
 | GET | `/terms` · POST `/media` | term listing · media upload (SSRF-guarded) |
 | POST | `/storage-modes/scan` | dual-storage classification scan (`manage_options`) |
-| POST | `/template` · POST `/template/reset` | whole-template write / override-delete (`check_template_edit_permissions`: toggle ON and `edit_posts` or `edit_theme_options`) |
+| POST | `/template` · POST `/template/reset` | whole-template write / override-delete (`check_template_edit_permissions`: toggle ON and the dedicated `gk_block_mcp_edit_templates` capability or `edit_theme_options`, not `edit_posts`) |
 
 ### Integrations / connect
 
