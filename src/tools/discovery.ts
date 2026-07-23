@@ -148,6 +148,11 @@ export async function handleDiscoveryTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'list_block_types': {
+      if (args.include_supports !== undefined && typeof args.include_supports !== 'boolean') {
+        throw new Error(
+          `list_block_types: "include_supports" must be a boolean, got ${JSON.stringify(args.include_supports)}.`,
+        );
+      }
       const response = await client.getBlockTypes({
         namespace:        args.namespace as string | undefined,
         category:         args.category as string | undefined,

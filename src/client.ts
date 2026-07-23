@@ -9,7 +9,7 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 import { restRouteUrl } from './rest-url.js';
-import { coercePostId } from './coerce.js';
+import { coercePostId, isNonEmptyArray, isNonEmptyString } from './coerce.js';
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */
 function mimeForFilename(filename: string): string {
@@ -406,8 +406,8 @@ export class WordPressBlockClient {
     if (!data.title || data.title.trim() === '') {
       throw new Error('create_pattern: a non-empty "title" is required');
     }
-    const hasContent = typeof data.content === 'string' && data.content !== '';
-    const hasBlocks = Array.isArray(data.blocks) && data.blocks.length > 0;
+    const hasContent = isNonEmptyString(data.content);
+    const hasBlocks = isNonEmptyArray(data.blocks);
     if (hasContent === hasBlocks) {
       throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
     }

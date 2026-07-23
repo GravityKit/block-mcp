@@ -40053,6 +40053,12 @@ function coercePostId(value, label) {
   }
   throw new Error(`${label}: post_id must be a positive integer`);
 }
+function isNonEmptyArray(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+function isNonEmptyString(value) {
+  return typeof value === "string" && value !== "";
+}
 
 // src/client.ts
 function mimeForFilename(filename) {
@@ -40275,8 +40281,8 @@ var WordPressBlockClient = class {
     if (!data.title || data.title.trim() === "") {
       throw new Error('create_pattern: a non-empty "title" is required');
     }
-    const hasContent = typeof data.content === "string" && data.content !== "";
-    const hasBlocks = Array.isArray(data.blocks) && data.blocks.length > 0;
+    const hasContent = isNonEmptyString(data.content);
+    const hasBlocks = isNonEmptyArray(data.blocks);
     if (hasContent === hasBlocks) {
       throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
     }
@@ -41288,6 +41294,11 @@ var DISCOVERY_TOOLS = [
 async function handleDiscoveryTool(toolName, args, client) {
   switch (toolName) {
     case "list_block_types": {
+      if (args.include_supports !== void 0 && typeof args.include_supports !== "boolean") {
+        throw new Error(
+          `list_block_types: "include_supports" must be a boolean, got ${JSON.stringify(args.include_supports)}.`
+        );
+      }
       const response = await client.getBlockTypes({
         namespace: args.namespace,
         category: args.category,
@@ -52827,7 +52838,12 @@ var PATTERN_TOOLS = [
           description: "Default publish."
         }
       },
-      required: ["title"]
+      required: ["title"],
+      // Structurally enforces "exactly one of blocks/content" for schema-
+      // validating clients: an object with both keys matches both branches,
+      // one with neither matches zero — either way oneOf's "exactly one
+      // match" requirement rejects it. The handler validates this too.
+      oneOf: [{ required: ["blocks"] }, { required: ["content"] }]
     }
   },
   {
@@ -52868,10 +52884,20 @@ async function handlePatternTool(toolName, args, client) {
       if (typeof args.title !== "string" || args.title.trim() === "") {
         throw new Error('create_pattern: a non-empty "title" is required');
       }
-      const hasBlocks = Array.isArray(args.blocks) && args.blocks.length > 0;
-      const hasContent = typeof args.content === "string" && args.content !== "";
+      const hasBlocks = isNonEmptyArray(args.blocks);
+      const hasContent = isNonEmptyString(args.content);
       if (hasBlocks === hasContent) {
         throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+      }
+      if (args.sync_status !== void 0 && args.sync_status !== "synced" && args.sync_status !== "unsynced") {
+        throw new Error(
+          `create_pattern: "sync_status" must be "synced" or "unsynced", got ${JSON.stringify(args.sync_status)}.`
+        );
+      }
+      if (args.status !== void 0 && args.status !== "publish" && args.status !== "draft") {
+        throw new Error(
+          `create_pattern: "status" must be "publish" or "draft", got ${JSON.stringify(args.status)}.`
+        );
       }
       return await client.createPattern({
         title: args.title,
@@ -53578,7 +53604,7 @@ var TEMPLATE_SOURCE_ENUM = ["theme", "plugin", "custom"];
 var TEMPLATE_TOOLS = [
   {
     name: "list_templates",
-    description: 'List the active theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer") \u2014 works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` \u2014 non-null only when a database override shadows the theme file, which is what makes a template editable via update_template. Returns an empty list with a `note` only when there is truly nothing to list.',
+    description: 'List the active theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer") \u2014 works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` \u2014 present (non-null) whenever the template is backed by a database post, whether that\'s an override shadowing a theme file or a fully custom template with none; that\'s what makes it editable via update_template. Returns an empty list with a `note` only when there is truly nothing to list.',
     annotations: { ...READ_ANNOT2, title: "List templates" },
     inputSchema: {
       type: "object",

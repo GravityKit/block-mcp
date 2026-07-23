@@ -164,7 +164,9 @@ class Template_Manager {
 		// can still have real templates/parts get_block_templates() finds via
 		// theme files or DB overrides, so an empty result alone doesn't mean
 		// "not a block theme" — only note that when it's also actually true.
-		if ( empty( $formatted ) && ! wp_is_block_theme() ) {
+		$has_no_results        = empty( $formatted );
+		$theme_is_not_fse_full = ! wp_is_block_theme();
+		if ( $has_no_results && $theme_is_not_fse_full ) {
 			$result['note'] = __( 'Active theme is not a full block theme; only registered block templates/parts are listed.', 'gk-block-mcp' );
 		}
 
@@ -280,7 +282,12 @@ class Template_Manager {
 		// resolvable templates/parts, and those are meaningful to edit.
 		$template = get_block_template( $id, $type );
 		if ( ! $template ) {
-			if ( ! wp_is_block_theme() ) {
+			// classic_theme is reserved for a genuinely classic theme (no
+			// templates/parts at all) — a hybrid theme with real content
+			// elsewhere just has the wrong id, which not_found says
+			// accurately; classic_theme would falsely claim nothing exists.
+			$is_genuinely_classic = ! wp_is_block_theme() && ! $this->theme_has_any_block_templates();
+			if ( $is_genuinely_classic ) {
 				return new \WP_Error(
 					'classic_theme',
 					__( 'Active theme is not a block theme; there are no block templates to edit.', 'gk-block-mcp' ),
@@ -319,18 +326,18 @@ class Template_Manager {
 			// it only via a tax_query on this term). If term assignment
 			// fails, delete the freshly-created post rather than leaving
 			// an untraceable orphan behind.
-			$theme_term = wp_set_object_terms( $post_id, get_stylesheet(), 'wp_theme' );
-			if ( is_wp_error( $theme_term ) ) {
-				wp_delete_post( $post_id, true );
-				return $theme_term;
+			$theme_term        = wp_set_object_terms( $post_id, get_stylesheet(), 'wp_theme' );
+			$theme_term_failed = is_wp_error( $theme_term );
+			if ( $theme_term_failed ) {
+				return $this->rollback_override( $post_id, $theme_term );
 			}
 
 			if ( 'wp_template_part' === $type ) {
-				$area      = ! empty( $template->area ) ? (string) $template->area : WP_TEMPLATE_PART_AREA_UNCATEGORIZED;
-				$area_term = wp_set_object_terms( $post_id, _filter_block_template_part_area( $area ), 'wp_template_part_area' );
-				if ( is_wp_error( $area_term ) ) {
-					wp_delete_post( $post_id, true );
-					return $area_term;
+				$area             = ! empty( $template->area ) ? (string) $template->area : WP_TEMPLATE_PART_AREA_UNCATEGORIZED;
+				$area_term        = wp_set_object_terms( $post_id, _filter_block_template_part_area( $area ), 'wp_template_part_area' );
+				$area_term_failed = is_wp_error( $area_term );
+				if ( $area_term_failed ) {
+					return $this->rollback_override( $post_id, $area_term );
 				}
 			}
 		}
@@ -341,9 +348,10 @@ class Template_Manager {
 			$result = $this->block_crud->save_post_content( $post_id, wp_kses_post( $args['content'] ) );
 		}
 
-		if ( is_wp_error( $result ) ) {
+		$content_write_failed = is_wp_error( $result );
+		if ( $content_write_failed ) {
 			if ( $override_created ) {
-				wp_delete_post( $post_id, true );
+				return $this->rollback_override( $post_id, $result );
 			}
 			return $result;
 		}
@@ -357,6 +365,35 @@ class Template_Manager {
 			'before_revision_id' => isset( $result['before_revision_id'] ) ? $result['before_revision_id'] : null,
 			'revision_id'        => isset( $result['revision_id'] ) ? $result['revision_id'] : null,
 		);
+	}
+
+	/**
+	 * Delete a freshly-created override post that a later step failed to
+	 * complete, folding a deletion failure into the returned error so a
+	 * stray, un-deletable post is surfaced to the caller instead of
+	 * silently left behind with no error to explain it.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param int       $post_id The override post to delete.
+	 * @param \WP_Error $cause   The error that triggered the rollback.
+	 * @return \WP_Error
+	 */
+	private function rollback_override( $post_id, \WP_Error $cause ) {
+		$deleted = wp_delete_post( $post_id, true );
+		if ( ! $deleted ) {
+			return new \WP_Error(
+				'rollback_failed',
+				sprintf(
+					/* translators: 1: original error message, 2: orphaned post ID */
+					__( '%1$s Additionally, the partially-created override (post ID %2$d) could not be automatically removed and may need manual cleanup.', 'gk-block-mcp' ),
+					$cause->get_error_message(),
+					$post_id
+				),
+				array( 'status' => 500 )
+			);
+		}
+		return $cause;
 	}
 
 	/**
@@ -391,7 +428,8 @@ class Template_Manager {
 		// Same resolution-based gate as update_template() — see its comment.
 		$template = get_block_template( $id, $type );
 		if ( ! $template ) {
-			if ( ! wp_is_block_theme() ) {
+			$is_genuinely_classic = ! wp_is_block_theme() && ! $this->theme_has_any_block_templates();
+			if ( $is_genuinely_classic ) {
 				return new \WP_Error(
 					'classic_theme',
 					__( 'Active theme is not a block theme; there are no template overrides to reset.', 'gk-block-mcp' ),
@@ -450,6 +488,24 @@ class Template_Manager {
 			__( 'Editing theme templates is turned off for this site. A site administrator can enable it under Block MCP → Settings.', 'gk-block-mcp' ),
 			array( 'status' => 403 )
 		);
+	}
+
+	/**
+	 * Whether the active theme has ANY real template or part — theme file
+	 * or DB override, either type. Distinct from wp_is_block_theme(),
+	 * which is false for both a genuinely classic theme and a hybrid one.
+	 * Used only to pick the more accurate error when an id fails to
+	 * resolve: a hybrid theme with real content elsewhere gets
+	 * "not_found" (this id is simply wrong); a genuinely classic theme
+	 * with none gets "classic_theme" (there's nothing here to edit at all).
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool
+	 */
+	private function theme_has_any_block_templates() {
+		return ! empty( get_block_templates( array(), 'wp_template' ) )
+			|| ! empty( get_block_templates( array(), 'wp_template_part' ) );
 	}
 
 	/**
