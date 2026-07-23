@@ -210,14 +210,19 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * With the toggle on, an editor (edit_posts, no edit_theme_options) can
-	 * write via the ability — matching the REST route's two-part permission
-	 * callback (toggle ON and edit_posts OR edit_theme_options) — and the
-	 * change round-trips through get-template.
+	 * With the toggle on, an actor holding edit_theme_options can write via
+	 * the ability — matching the REST route's permission callback (toggle
+	 * ON and the dedicated cap OR edit_theme_options) — and the change
+	 * round-trips through get-template.
 	 */
 	public function test_update_template_ability_persists_change_when_gate_on() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
-		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		// edit_posts too, unlike the write-only test below: the get-template
+		// read-back is gated on the 'read' bucket, which checks edit_posts.
+		$role_name = 'gk_test_ability_persist_theme_options_only';
+		add_role( $role_name, 'Theme Options Only', array( 'read' => true, 'edit_posts' => true, 'edit_theme_options' => true ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => $role_name ) ) );
 
 		$result = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
 			array(
@@ -232,9 +237,35 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 		$this->assertGreaterThan( 0, $result['wp_id'] );
 
 		$read = wp_get_ability( 'gk-block-mcp/get-template' )->execute( array( 'id' => $this->theme . '//index' ) );
+
+		remove_role( $role_name );
+
 		$this->assertNotWPError( $read );
 		$this->assertSame( 'custom', $read['source'] );
 		$this->assertStringContainsString( 'ABILITY-MARKER', $read['content'] );
+	}
+
+	/**
+	 * With the toggle on, an editor (edit_posts, no dedicated cap, no
+	 * edit_theme_options) is denied via the ability, matching REST-level
+	 * coverage of the same fix — the Abilities surface delegates to the
+	 * same check_template_edit_permissions() callback, so it can't be used
+	 * to bypass the capability gate REST enforces.
+	 */
+	public function test_update_template_ability_denies_editor_even_with_gate_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		$this->setExpectedIncorrectUsage( 'WP_Ability::execute' );
+		$result = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
+			array(
+				'id'      => $this->theme . '//index',
+				'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'ability_invalid_permissions', $result->get_error_code() );
 	}
 
 	/**
@@ -292,7 +323,12 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 	 */
 	public function test_reset_template_ability_deletes_override_when_gate_on() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
-		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+
+		// edit_posts too: the get-template read-back is gated on the 'read'
+		// bucket, which checks edit_posts, not edit_theme_options.
+		$role_name = 'gk_test_ability_reset_theme_options_only';
+		add_role( $role_name, 'Theme Options Only', array( 'read' => true, 'edit_posts' => true, 'edit_theme_options' => true ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => $role_name ) ) );
 
 		$created = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
 			array(
@@ -310,6 +346,9 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 		$this->assertNull( get_post( $created['wp_id'] ) );
 
 		$read = wp_get_ability( 'gk-block-mcp/get-template' )->execute( array( 'id' => $this->theme . '//index' ) );
+
+		remove_role( $role_name );
+
 		$this->assertNotWPError( $read );
 		$this->assertSame( 'theme', $read['source'] );
 		$this->assertNull( $read['wp_id'] );

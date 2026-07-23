@@ -6,6 +6,7 @@
  * @package GravityKit\BlockMCP\Tests
  */
 
+use GravityKit\BlockMCP\Agent_Provisioner;
 use GravityKit\BlockMCP\Template_Manager;
 
 class TemplatesRestTest extends RestControllerTestCase {
@@ -165,20 +166,34 @@ class TemplatesRestTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * With the toggle on, an editor (edit_posts, no edit_theme_options)
-	 * can create an override — the whole point of the toggle over relying
-	 * on edit_theme_options alone.
+	 * With the toggle on, a plain contributor (edit_posts, no dedicated
+	 * cap, no edit_theme_options) must still be denied. The plugin performs
+	 * the underlying wp_insert_post()/wp_update_post() itself — those don't
+	 * enforce capabilities — so edit_posts alone would let any
+	 * contributor-or-above account (or a leaked low-privilege Application
+	 * Password) rewrite sitewide template chrome.
 	 */
-	public function test_update_template_route_succeeds_for_editor_when_toggle_on() {
+	public function test_update_template_route_403_for_contributor_even_with_toggle_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'contributor' ) ) );
+
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 403, $response->get_status() );
+	}
+
+	/**
+	 * Same denial for an editor — edit_posts (plus the wider edit_others_posts/
+	 * publish_posts an editor also holds) is still not the dedicated
+	 * gk_block_mcp_edit_templates cap, so an editor is denied exactly like a
+	 * contributor. Proves the fix isn't just "block the weakest role."
+	 */
+	public function test_update_template_route_403_for_editor_even_with_toggle_on() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
 
 		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>Via REST</p><!-- /wp:paragraph -->' ) );
 
-		$this->assertSame( 200, $response->get_status() );
-		$data = $response->get_data();
-		$this->assertTrue( $data['success'] );
-		$this->assertTrue( $data['override_created'] );
-		$this->assertGreaterThan( 0, $data['wp_id'] );
+		$this->assertSame( 403, $response->get_status() );
 	}
 
 	/**
@@ -196,9 +211,9 @@ class TemplatesRestTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * An actor with edit_theme_options but NOT edit_posts (the other half
-	 * of the "edit_posts OR edit_theme_options" gate) can also write —
-	 * this is the path a "self" (human admin) connection uses.
+	 * An actor with edit_theme_options but no dedicated cap (the other half
+	 * of the gate) can still write — this is the path a "self" (human
+	 * admin) connection uses.
 	 */
 	public function test_update_template_route_succeeds_via_edit_theme_options_alone() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
@@ -212,6 +227,57 @@ class TemplatesRestTest extends RestControllerTestCase {
 		remove_role( $role_name );
 
 		$this->assertSame( 200, $response->get_status() );
+	}
+
+	/**
+	 * The dedicated agent role is the one actor the toggle is actually
+	 * meant to empower: with the toggle on, register_role() grants it
+	 * Agent_Provisioner::TEMPLATE_EDIT_CAP (confirmed at the capability
+	 * level, not just behaviorally), and POST /template succeeds.
+	 */
+	public function test_update_template_route_succeeds_for_agent_role_when_toggle_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ) );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => Agent_Provisioner::ROLE ) ) );
+
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>Via agent role</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 200, $response->get_status() );
+		$data = $response->get_data();
+		$this->assertTrue( $data['success'] );
+		$this->assertTrue( $data['override_created'] );
+	}
+
+	/**
+	 * Turning the toggle back off and re-running register_role() revokes
+	 * Agent_Provisioner::TEMPLATE_EDIT_CAP from the role (the additive
+	 * re-assert loop never removes caps — this is the one deliberate
+	 * exception) and the route 403s for the same agent-role user. With the
+	 * toggle off the 403 is dominated by the toggle gate itself
+	 * (template_edits_disabled), so the capability-level assertion is what
+	 * actually proves the revoke happened.
+	 */
+	public function test_agent_role_loses_template_edit_cap_and_route_403s_when_toggle_off() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+		$user_id = self::factory()->user->create( array( 'role' => Agent_Provisioner::ROLE ) );
+
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '0' );
+		Agent_Provisioner::register_role();
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'toggle-off must revoke the managed cap, not just leave it granted' );
+
+		wp_set_current_user( $user_id );
+		$response = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertSame( 403, $response->get_status() );
 	}
 
 	/**
@@ -272,12 +338,19 @@ class TemplatesRestTest extends RestControllerTestCase {
 	 */
 	public function test_reset_template_route_deletes_override() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$role_name = 'gk_test_reset_theme_options_only';
+		add_role( $role_name, 'Theme Options Only', array( 'read' => true, 'edit_theme_options' => true ) );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => $role_name ) ) );
+
 		$created = $this->dispatch( $this->update_request( $this->theme . '//index', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
 		$wp_id   = $created->get_data()['wp_id'];
 
 		$request = new \WP_REST_Request( 'POST', '/gk-block-api/v1/template/reset' );
 		$request->set_param( 'id', $this->theme . '//index' );
 		$response = $this->dispatch( $request );
+
+		remove_role( $role_name );
 
 		$this->assertSame( 200, $response->get_status() );
 		$this->assertSame( $wp_id, $response->get_data()['wp_id'] );
