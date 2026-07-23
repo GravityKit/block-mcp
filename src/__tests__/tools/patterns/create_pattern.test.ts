@@ -49,6 +49,37 @@ describe('create_pattern — validation', () => {
       handlePatternTool('create_pattern', { title: 'X' }, client as any)
     ).rejects.toThrow(/content.*blocks|mutually exclusive/i);
   });
+
+  it('rejects an invalid sync_status instead of silently defaulting', async () => {
+    await expect(
+      handlePatternTool('create_pattern', {
+        title: 'X',
+        content: '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+        sync_status: 'sometimes',
+      }, client as any)
+    ).rejects.toThrow(/sync_status/i);
+  });
+
+  it('rejects an invalid status instead of silently defaulting', async () => {
+    await expect(
+      handlePatternTool('create_pattern', {
+        title: 'X',
+        content: '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+        status: 'pending',
+      }, client as any)
+    ).rejects.toThrow(/status/i);
+  });
+});
+
+describe('create_pattern — inputSchema XOR contract', () => {
+  it('declares oneOf(blocks, content) so a schema-validating client rejects both-or-neither before dispatch', async () => {
+    const { PATTERN_TOOLS } = await import('../../../tools/patterns.js');
+    const tool = PATTERN_TOOLS.find((t) => t.name === 'create_pattern')!;
+    expect((tool.inputSchema as any).oneOf).toEqual([
+      { required: ['blocks'] },
+      { required: ['content'] },
+    ]);
+  });
 });
 
 describe('create_pattern — dispatch and defaults', () => {

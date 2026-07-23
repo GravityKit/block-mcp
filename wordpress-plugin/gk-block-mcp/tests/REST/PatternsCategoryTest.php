@@ -42,36 +42,58 @@ final class PatternsCategoryTest extends RestControllerTestCase {
 		return $response->get_data();
 	}
 
+	/**
+	 * Contract: `category` narrows registered patterns to those whose
+	 * declared `categories` array contains the requested slug — a pattern
+	 * in a different category is excluded, not just deprioritized.
+	 * Failure mode: the in-category pattern missing means the filter
+	 * isn't applied; the out-of-category pattern present means it's a
+	 * no-op / overly broad match.
+	 */
 	public function test_category_narrows_registered_patterns() {
-		register_block_pattern(
-			'block-types-test/in-category',
-			array(
-				'title'      => 'In Category',
-				'categories' => array( 'block-types-test-category' ),
-				'content'    => '<!-- wp:paragraph --><p>in</p><!-- /wp:paragraph -->',
-			)
-		);
-		register_block_pattern(
-			'block-types-test/out-of-category',
-			array(
-				'title'      => 'Out Of Category',
-				'categories' => array( 'featured' ),
-				'content'    => '<!-- wp:paragraph --><p>out</p><!-- /wp:paragraph -->',
-			)
-		);
+		try {
+			register_block_pattern(
+				'block-types-test/in-category',
+				array(
+					'title'      => 'In Category',
+					'categories' => array( 'block-types-test-category' ),
+					'content'    => '<!-- wp:paragraph --><p>in</p><!-- /wp:paragraph -->',
+				)
+			);
+			register_block_pattern(
+				'block-types-test/out-of-category',
+				array(
+					'title'      => 'Out Of Category',
+					'categories' => array( 'featured' ),
+					'content'    => '<!-- wp:paragraph --><p>out</p><!-- /wp:paragraph -->',
+				)
+			);
 
-		$data = $this->get_patterns( array( 'category' => 'block-types-test-category', 'synced' => false ) );
-		$ids  = wp_list_pluck( $data['patterns'], 'id' );
+			$data = $this->get_patterns( array( 'category' => 'block-types-test-category', 'synced' => false ) );
+			$ids  = wp_list_pluck( $data['patterns'], 'id' );
 
-		$this->assertContains( 'block-types-test/in-category', $ids );
-		$this->assertNotContains( 'block-types-test/out-of-category', $ids );
-
-		unregister_block_pattern( 'block-types-test/in-category' );
-		unregister_block_pattern( 'block-types-test/out-of-category' );
+			$this->assertContains( 'block-types-test/in-category', $ids );
+			$this->assertNotContains( 'block-types-test/out-of-category', $ids );
+		} finally {
+			// Run on assertion failure too — an unregistered leftover
+			// pattern would otherwise leak into every later test in this run.
+			unregister_block_pattern( 'block-types-test/in-category' );
+			unregister_block_pattern( 'block-types-test/out-of-category' );
+		}
 	}
 
+	/**
+	 * Contract: a synced pattern (a `wp_block` post, which has no
+	 * category taxonomy of its own) is matched by `category` against the
+	 * block categories used in its content
+	 * (`Pattern_Manager::get_block_categories_in_content()`), not by a
+	 * literal taxonomy term. core/paragraph is in the "text" category;
+	 * core/image is "media" — a pattern built from a paragraph block must
+	 * match `category=text` and must not match `category=media`.
+	 * Failure mode: a missing match means content-based category
+	 * inference is broken; an unexpected match means it's too broad.
+	 */
 	public function test_synced_pattern_category_matches_block_categories_in_content() {
-		// core/paragraph is in the "text" category; core/image is "media".
 		$post_id = self::factory()->post->create(
 			array(
 				'post_type'    => 'wp_block',
@@ -88,6 +110,14 @@ final class PatternsCategoryTest extends RestControllerTestCase {
 		$this->assertNotContains( $post_id, wp_list_pluck( $non_matching['patterns'], 'id' ) );
 	}
 
+	/**
+	 * Contract: the top-level `categories` vocabulary lists WordPress's
+	 * registered pattern categories (e.g. "text", "buttons"), each with
+	 * `name` and `label`, regardless of the `category` filter — it's the
+	 * full picklist a caller browses before filtering. Failure mode: a
+	 * missing core category or a missing name/label means the vocabulary
+	 * is incomplete or malformed for building a filter UI.
+	 */
 	public function test_categories_key_includes_core_categories() {
 		$data = $this->get_patterns();
 

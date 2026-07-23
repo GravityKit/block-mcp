@@ -53,6 +53,30 @@ describe('list_block_types — include_supports schema', () => {
   });
 });
 
+describe('list_block_types — include_supports validation', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => {
+    client = makeMockClient();
+    client.getBlockTypes.mockResolvedValue(blockTypesResponse);
+  });
+
+  it('rejects a non-boolean include_supports (e.g. the string "false") instead of silently forwarding it', async () => {
+    // A bare `as boolean` cast would let the truthy string "false" flow
+    // through to client.ts's own truthy check and be sent as
+    // include_supports=true — the exact opposite of what was asked.
+    await expect(
+      handleDiscoveryTool('list_block_types', { include_supports: 'false' }, client as any),
+    ).rejects.toThrow(/include_supports.*must be a boolean/i);
+    expect(client.getBlockTypes).not.toHaveBeenCalled();
+  });
+
+  it('accepts a real boolean include_supports', async () => {
+    await expect(
+      handleDiscoveryTool('list_block_types', { include_supports: false }, client as any),
+    ).resolves.toBeDefined();
+  });
+});
+
 describe('list_block_types — pagination', () => {
   let client: ReturnType<typeof makeMockClient>;
   beforeEach(() => {

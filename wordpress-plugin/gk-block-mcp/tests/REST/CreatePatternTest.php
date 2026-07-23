@@ -165,7 +165,7 @@ final class CreatePatternTest extends RestControllerTestCase {
 		$this->assertSame( 403, $data['status'] );
 	}
 
-	// ── Codex review: title sanitized before, not after, the empty check ──
+	// ── Title sanitize-then-check contract ──────────────────────────────
 
 	/**
 	 * A whitespace-only title passes the raw non-empty-string check but
@@ -204,14 +204,16 @@ final class CreatePatternTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * A title with real text plus incidental surrounding whitespace/markup
-	 * must still succeed — the fix must sanitize-then-check, not reject
-	 * every title that needs sanitizing.
+	 * A title with real text plus incidental surrounding whitespace and
+	 * markup must still succeed, with the markup stripped and text
+	 * preserved — sanitize-then-check must not reject every title that
+	 * needs sanitizing, and sanitization must not be so aggressive it
+	 * loses the underlying text.
 	 */
 	public function test_title_with_real_text_and_surrounding_whitespace_is_accepted() {
 		$response = $this->create_pattern(
 			array(
-				'title'   => '  Real Title  ',
+				'title'   => '  <em>Real Title</em>  ',
 				'content' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
 			)
 		);
@@ -220,7 +222,7 @@ final class CreatePatternTest extends RestControllerTestCase {
 		$this->assertSame( 'Real Title', $response->get_data()['title'] );
 	}
 
-	// ── Codex review: `reference` must not propagate an unsynced pattern ──
+	// ── reference / insert_hint response shape ──────────────────────────
 
 	/**
 	 * A synced pattern (the default) keeps returning the ready-to-insert

@@ -96,21 +96,18 @@ class TemplateManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Register the fixture theme directory containing "hybrid-theme" (a
-	 * theme with templates/ and parts/ files but no templates/index.html,
-	 * so wp_is_block_theme() is false). A separate root from
-	 * ensure_theme_root_resolvable()'s dummy one; by the time it's
-	 * registered the "more than one root" workaround already applies, so
-	 * this one just needs to contain the fixture.
+	 * Register the fixture theme directory containing "hybrid-theme" (real
+	 * templates/ and parts/ files but no templates/index.html, so
+	 * wp_is_block_theme() is false) and force a rescan:
+	 * register_theme_directory() alone doesn't refresh
+	 * search_theme_directories()'s memoized scan once anything else in the
+	 * run has already triggered it, so without wp_clean_themes_cache() the
+	 * fixture stays invisible to wp_get_themes().
 	 *
 	 * @return void
 	 */
 	private function register_hybrid_theme_root() {
 		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
-		// search_theme_directories() memoizes its scan in a function-local
-		// static for the rest of the process; by this point in the run
-		// something has always already forced that memoization without
-		// this root, so appending it here is invisible until forced.
 		wp_clean_themes_cache();
 	}
 
@@ -319,9 +316,8 @@ class TemplateManagerTest extends WP_UnitTestCase {
 	/**
 	 * A theme can have real templates and parts on disk without satisfying
 	 * wp_is_block_theme() (which checks specifically for templates/index.html
-	 * or block-templates/index.html). The old unconditional
-	 * `! wp_is_block_theme()` short-circuit hid those templates/parts
-	 * entirely and printed a note claiming none exist.
+	 * or block-templates/index.html) — get_templates() must list them, with
+	 * no "not a block theme" note, since they genuinely exist.
 	 */
 	public function test_get_templates_hybrid_theme_lists_real_templates_and_parts() {
 		$this->register_hybrid_theme_root();
