@@ -164,4 +164,107 @@ final class CreatePatternTest extends RestControllerTestCase {
 		$data = $permission_result->get_error_data();
 		$this->assertSame( 403, $data['status'] );
 	}
+
+	// ── Codex review: title sanitized before, not after, the empty check ──
+
+	/**
+	 * A whitespace-only title passes the raw non-empty-string check but
+	 * `sanitize_text_field()` trims it to '' when building post_title,
+	 * silently creating a nameless pattern. The emptiness check must run
+	 * against the sanitized value.
+	 */
+	public function test_whitespace_only_title_is_rejected() {
+		$response = $this->create_pattern(
+			array(
+				'title'   => '   ',
+				'content' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $response );
+		$this->assertSame( 'missing_title', $response->get_error_code() );
+	}
+
+	/**
+	 * A title that is entirely markup with no surviving text (e.g. a bare
+	 * tag pair) passes the raw non-empty-string check but
+	 * `sanitize_text_field()` (which strips tags) collapses it to '' —
+	 * same failure mode as the whitespace-only case, different input shape.
+	 */
+	public function test_markup_only_title_that_sanitizes_to_empty_is_rejected() {
+		$response = $this->create_pattern(
+			array(
+				'title'   => '<script></script>',
+				'content' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $response );
+		$this->assertSame( 'missing_title', $response->get_error_code() );
+	}
+
+	/**
+	 * A title with real text plus incidental surrounding whitespace/markup
+	 * must still succeed — the fix must sanitize-then-check, not reject
+	 * every title that needs sanitizing.
+	 */
+	public function test_title_with_real_text_and_surrounding_whitespace_is_accepted() {
+		$response = $this->create_pattern(
+			array(
+				'title'   => '  Real Title  ',
+				'content' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$this->assertInstanceOf( \WP_REST_Response::class, $response );
+		$this->assertSame( 'Real Title', $response->get_data()['title'] );
+	}
+
+	// ── Codex review: `reference` must not propagate an unsynced pattern ──
+
+	/**
+	 * A synced pattern (the default) keeps returning the ready-to-insert
+	 * `core/block` reference — this pins the backward-compatible shape for
+	 * the common case.
+	 */
+	public function test_synced_pattern_returns_core_block_reference() {
+		$response = $this->create_pattern(
+			array(
+				'title'   => 'Synced Reference Pattern',
+				'content' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$data = $response->get_data();
+		$this->assertSame( 'core/block', $data['reference']['blockName'] );
+		$this->assertSame( $data['pattern_id'], $data['reference']['attrs']['ref'] );
+		$this->assertArrayNotHasKey( 'insert_hint', $data );
+	}
+
+	/**
+	 * An unsynced pattern must NOT return a `core/block` reference: that
+	 * shape is WordPress's live, propagating synced-block reference, so
+	 * handing it to a caller who explicitly asked for a non-propagating
+	 * one-off would silently re-link content they asked to keep
+	 * independent. Instead it gets an explicit insert_hint naming
+	 * insert_pattern's inline path (`synced: false` against this same
+	 * pattern_id, which Block_Writer::insert_pattern() already supports
+	 * regardless of the pattern's own sync_status meta).
+	 */
+	public function test_unsynced_pattern_does_not_return_synced_reference() {
+		$response = $this->create_pattern(
+			array(
+				'title'       => 'Unsynced Reference Pattern',
+				'content'     => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+				'sync_status' => 'unsynced',
+			)
+		);
+
+		$data = $response->get_data();
+		$this->assertArrayNotHasKey( 'reference', $data, 'an unsynced pattern must not surface a synced core/block reference' );
+		$this->assertArrayHasKey( 'insert_hint', $data );
+		$this->assertSame( 'insert_pattern', $data['insert_hint']['tool'] );
+		$this->assertSame( $data['pattern_id'], $data['insert_hint']['params']['pattern_id'] );
+		$this->assertFalse( $data['insert_hint']['params']['synced'] );
+	}
 }
