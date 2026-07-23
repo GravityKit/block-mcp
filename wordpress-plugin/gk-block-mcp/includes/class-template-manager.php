@@ -122,14 +122,6 @@ class Template_Manager {
 			return $type;
 		}
 
-		if ( ! wp_is_block_theme() ) {
-			return array(
-				'templates' => array(),
-				'count'     => 0,
-				'note'      => __( 'Active theme is not a block theme; no block templates exist.', 'gk-block-mcp' ),
-			);
-		}
-
 		$query = array();
 
 		if ( 'wp_template_part' === $type && ! empty( $args['area'] ) ) {
@@ -163,10 +155,20 @@ class Template_Manager {
 
 		$formatted = array_map( array( $this, 'format_template_summary' ), $templates );
 
-		return array(
+		$result = array(
 			'templates' => $formatted,
 			'count'     => count( $formatted ),
 		);
+
+		// A hybrid theme (wp_is_block_theme() false, e.g. no templates/index.html)
+		// can still have real templates/parts get_block_templates() finds via
+		// theme files or DB overrides, so an empty result alone doesn't mean
+		// "not a block theme" — only note that when it's also actually true.
+		if ( empty( $formatted ) && ! wp_is_block_theme() ) {
+			$result['note'] = __( 'Active theme is not a full block theme; only registered block templates/parts are listed.', 'gk-block-mcp' );
+		}
+
+		return $result;
 	}
 
 	/**
@@ -254,14 +256,6 @@ class Template_Manager {
 			return $type;
 		}
 
-		if ( ! wp_is_block_theme() ) {
-			return new \WP_Error(
-				'classic_theme',
-				__( 'Active theme is not a block theme; there are no block templates to edit.', 'gk-block-mcp' ),
-				array( 'status' => 400 )
-			);
-		}
-
 		$id = is_string( $id ) ? sanitize_text_field( $id ) : '';
 		if ( '' === $id ) {
 			return new \WP_Error(
@@ -281,8 +275,18 @@ class Template_Manager {
 			);
 		}
 
+		// Gate on whether the id actually resolves, not wp_is_block_theme():
+		// a hybrid theme (no templates/index.html) can still have real,
+		// resolvable templates/parts, and those are meaningful to edit.
 		$template = get_block_template( $id, $type );
 		if ( ! $template ) {
+			if ( ! wp_is_block_theme() ) {
+				return new \WP_Error(
+					'classic_theme',
+					__( 'Active theme is not a block theme; there are no block templates to edit.', 'gk-block-mcp' ),
+					array( 'status' => 400 )
+				);
+			}
 			return new \WP_Error(
 				'not_found',
 				sprintf( /* translators: %s: template id */ __( 'Template "%s" not found.', 'gk-block-mcp' ), $id ),
@@ -375,14 +379,6 @@ class Template_Manager {
 			return $type;
 		}
 
-		if ( ! wp_is_block_theme() ) {
-			return new \WP_Error(
-				'classic_theme',
-				__( 'Active theme is not a block theme; there are no template overrides to reset.', 'gk-block-mcp' ),
-				array( 'status' => 400 )
-			);
-		}
-
 		$id = is_string( $id ) ? sanitize_text_field( $id ) : '';
 		if ( '' === $id ) {
 			return new \WP_Error(
@@ -392,8 +388,16 @@ class Template_Manager {
 			);
 		}
 
+		// Same resolution-based gate as update_template() — see its comment.
 		$template = get_block_template( $id, $type );
 		if ( ! $template ) {
+			if ( ! wp_is_block_theme() ) {
+				return new \WP_Error(
+					'classic_theme',
+					__( 'Active theme is not a block theme; there are no template overrides to reset.', 'gk-block-mcp' ),
+					array( 'status' => 400 )
+				);
+			}
 			return new \WP_Error(
 				'not_found',
 				sprintf( /* translators: %s: template id */ __( 'Template "%s" not found.', 'gk-block-mcp' ), $id ),

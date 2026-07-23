@@ -96,6 +96,25 @@ class TemplateManagerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Register the fixture theme directory containing "hybrid-theme" (a
+	 * theme with templates/ and parts/ files but no templates/index.html,
+	 * so wp_is_block_theme() is false). A separate root from
+	 * ensure_theme_root_resolvable()'s dummy one; by the time it's
+	 * registered the "more than one root" workaround already applies, so
+	 * this one just needs to contain the fixture.
+	 *
+	 * @return void
+	 */
+	private function register_hybrid_theme_root() {
+		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
+		// search_theme_directories() memoizes its scan in a function-local
+		// static for the rest of the process; by this point in the run
+		// something has always already forced that memoization without
+		// this root, so appending it here is invisible until forced.
+		wp_clean_themes_cache();
+	}
+
+	/**
 	 * Find a formatted template row by slug.
 	 *
 	 * @param array  $templates Formatted template rows.
@@ -293,5 +312,40 @@ class TemplateManagerTest extends WP_UnitTestCase {
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'invalid_type', $result->get_error_code() );
+	}
+
+	// ── get_templates(): hybrid theme ─────────────────────────────────
+
+	/**
+	 * A theme can have real templates and parts on disk without satisfying
+	 * wp_is_block_theme() (which checks specifically for templates/index.html
+	 * or block-templates/index.html). The old unconditional
+	 * `! wp_is_block_theme()` short-circuit hid those templates/parts
+	 * entirely and printed a note claiming none exist.
+	 */
+	public function test_get_templates_hybrid_theme_lists_real_templates_and_parts() {
+		$this->register_hybrid_theme_root();
+		switch_theme( 'hybrid-theme' );
+		$this->assertFalse( wp_is_block_theme(), 'Fixture must reproduce wp_is_block_theme() === false to exercise the hybrid case.' );
+
+		$templates = $this->tm->get_templates( array( 'type' => 'wp_template' ) );
+		$this->assertNotNull( $this->find_by_slug( $templates['templates'], 'single' ) );
+		$this->assertArrayNotHasKey( 'note', $templates );
+
+		$parts = $this->tm->get_templates( array( 'type' => 'wp_template_part' ) );
+		$this->assertNotNull( $this->find_by_slug( $parts['templates'], 'footer' ) );
+		$this->assertArrayNotHasKey( 'note', $parts );
+	}
+
+	/**
+	 * The note is informational, not a blanket "any empty result" flag: an
+	 * empty result on a real block theme (e.g. an area filter matching
+	 * nothing) must not carry a "not a block theme" note that isn't true.
+	 */
+	public function test_get_templates_full_block_theme_empty_result_has_no_note() {
+		$result = $this->tm->get_templates( array( 'type' => 'wp_template_part', 'area' => 'no-such-area' ) );
+
+		$this->assertSame( array(), $result['templates'] );
+		$this->assertArrayNotHasKey( 'note', $result );
 	}
 }
