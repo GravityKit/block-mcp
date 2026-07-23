@@ -390,4 +390,87 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$post = get_post( $created['wp_id'] );
 		$this->assertStringContainsString( 'Changed via update_block', $post->post_content );
 	}
+
+	// ── Codex review: term-assignment failure must not orphan the override ─
+
+	/**
+	 * `wp_insert_post()`'s error is checked, but the two `wp_set_object_terms()`
+	 * calls that follow it were not — a taxonomy failure (e.g. a
+	 * `pre_insert_term` filter rejecting the `wp_theme` term) left a
+	 * published `wp_template`/`wp_template_part` row with no `wp_theme`
+	 * term, so `get_block_templates()` could never find it again
+	 * (`get_template()` would keep resolving the theme file), yet the
+	 * orphaned post — and whatever content the call went on to write into it
+	 * — stayed in the database with `success: true` reported to the caller.
+	 * The fix must check both term-assignment calls and roll back
+	 * (`wp_delete_post()`) the freshly-created override on failure, exactly
+	 * like the existing legacy-block-rejection rollback.
+	 */
+	public function test_update_template_rolls_back_new_override_when_wp_theme_term_assignment_fails() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$filter = static function ( $term, $taxonomy ) {
+			if ( 'wp_theme' === $taxonomy ) {
+				return new \WP_Error( 'term_insert_failed', 'Simulated taxonomy failure.' );
+			}
+			return $term;
+		};
+		add_filter( 'pre_insert_term', $filter, 10, 2 );
+
+		$result = $this->tm->update_template(
+			$this->theme . '//index',
+			'wp_template',
+			array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
+		);
+
+		remove_filter( 'pre_insert_term', $filter, 10 );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+
+		$matching = new \WP_Query(
+			array(
+				'post_type'      => 'wp_template',
+				'post_name'      => 'index',
+				'post_status'    => 'any',
+				'posts_per_page' => -1,
+			)
+		);
+		$this->assertCount( 0, $matching->posts, 'A term-assignment failure must not leave an orphaned override post behind.' );
+	}
+
+	/**
+	 * Same failure mode for a template part: the `wp_template_part_area`
+	 * term-assignment call must also be checked and roll back the override.
+	 */
+	public function test_update_template_rolls_back_new_override_when_area_term_assignment_fails() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$filter = static function ( $term, $taxonomy ) {
+			if ( 'wp_template_part_area' === $taxonomy ) {
+				return new \WP_Error( 'term_insert_failed', 'Simulated taxonomy failure.' );
+			}
+			return $term;
+		};
+		add_filter( 'pre_insert_term', $filter, 10, 2 );
+
+		$result = $this->tm->update_template(
+			$this->theme . '//small-header',
+			'wp_template_part',
+			array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
+		);
+
+		remove_filter( 'pre_insert_term', $filter, 10 );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+
+		$matching = new \WP_Query(
+			array(
+				'post_type'      => 'wp_template_part',
+				'post_name'      => 'small-header',
+				'post_status'    => 'any',
+				'posts_per_page' => -1,
+			)
+		);
+		$this->assertCount( 0, $matching->posts, 'A term-assignment failure must not leave an orphaned override post behind.' );
+	}
 }

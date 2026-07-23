@@ -312,12 +312,22 @@ class Template_Manager {
 
 			// Mandatory: without the wp_theme term the override is orphaned
 			// and never shadows the theme file (get_block_templates() finds
-			// it only via a tax_query on this term for the active stylesheet).
-			wp_set_object_terms( $post_id, get_stylesheet(), 'wp_theme' );
+			// it only via a tax_query on this term). If term assignment
+			// fails, delete the freshly-created post rather than leaving
+			// an untraceable orphan behind.
+			$theme_term = wp_set_object_terms( $post_id, get_stylesheet(), 'wp_theme' );
+			if ( is_wp_error( $theme_term ) ) {
+				wp_delete_post( $post_id, true );
+				return $theme_term;
+			}
 
 			if ( 'wp_template_part' === $type ) {
-				$area = ! empty( $template->area ) ? (string) $template->area : WP_TEMPLATE_PART_AREA_UNCATEGORIZED;
-				wp_set_object_terms( $post_id, _filter_block_template_part_area( $area ), 'wp_template_part_area' );
+				$area      = ! empty( $template->area ) ? (string) $template->area : WP_TEMPLATE_PART_AREA_UNCATEGORIZED;
+				$area_term = wp_set_object_terms( $post_id, _filter_block_template_part_area( $area ), 'wp_template_part_area' );
+				if ( is_wp_error( $area_term ) ) {
+					wp_delete_post( $post_id, true );
+					return $area_term;
+				}
 			}
 		}
 
