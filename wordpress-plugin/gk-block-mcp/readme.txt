@@ -120,6 +120,16 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🐛 Fixed
+
+* Editing tools now work on hosts whose firewall rejects the PUT, PATCH, and DELETE request types. On those hosts every editing tool failed with a "405 Not Allowed" error while reading and creating content kept working, because the firewall turned the request away before WordPress ever saw it. The assistant now retries such a request in a form those firewalls accept, and remembers the result so later edits go through on the first try.
+
+#### 💻 Developer Updates
+
+* `WordPressBlockClient` falls back to `X-HTTP-Method-Override` on a POST when a PUT, PATCH, or DELETE returns a 405, and caches that per client instance. Hosts that accept the real verbs are unaffected: the fallback engages only after a rejection. The editing routes are registered as literal `PUT` / `PATCH` / `DELETE` rather than `EDITABLE`, so the override header (not a plain POST) is what carries the intended verb.
+
 = 2.2.0 on July 22, 2026 =
 
 This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery.
