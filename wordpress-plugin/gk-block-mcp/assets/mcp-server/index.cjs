@@ -52800,7 +52800,7 @@ async function handleWriteTool(toolName, args, client) {
 var PATTERN_TOOLS = [
   {
     name: "create_pattern",
-    description: 'Extract repeated sections into a reusable pattern, then reference it. Creates a synced pattern (a wp_block post) from either structured `blocks` (validated the same way as create_post \u2014 legacy blocks rejected) or raw `content` \u2014 exactly one of the two. `sync_status:"synced"` (default) means edits to the pattern update every page that references it; `"unsynced"` creates an independent one-off starting point instead. Response includes a ready-to-insert `reference` snippet (`{blockName:"core/block", attrs:{ref}}`) for insert_blocks.',
+    description: 'Extract repeated sections into a reusable pattern, then reference it. Creates a pattern (a wp_block post) from either structured `blocks` (validated the same way as create_post \u2014 legacy blocks rejected) or raw `content` \u2014 exactly one of the two. `sync_status:"synced"` (default) means edits to the pattern update every page that references it; `"unsynced"` creates an independent one-off starting point instead. For a synced pattern, the response includes a ready-to-insert `reference` snippet (`{blockName:"core/block", attrs:{ref}}`) for insert_blocks. For an unsynced pattern, `reference` is omitted (that shape is a live, propagating synced-block reference and would be wrong for a one-off) \u2014 instead the response includes `insert_hint` (`{tool:"insert_pattern", params:{pattern_id, synced:false}}`) pointing at the correct follow-up call.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Create pattern" },
     inputSchema: {
       type: "object",

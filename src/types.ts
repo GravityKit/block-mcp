@@ -487,10 +487,15 @@ export interface CreatePatternResponse {
   slug: string;
   sync_status: 'synced' | 'unsynced';
   edit_url: string;
-  /** Ready-to-insert core/block reference snippet for this new synced pattern. */
-  reference: {
+  /** Ready-to-insert core/block reference snippet. Present only when sync_status is "synced". */
+  reference?: {
     blockName: 'core/block';
     attrs: { ref: number };
+  };
+  /** Follow-up call shape for an unsynced pattern (core/block would be wrong: it's synced-only). Present only when sync_status is "unsynced". */
+  insert_hint?: {
+    tool: 'insert_pattern';
+    params: { pattern_id: number; synced: false };
   };
   warnings?: Array<Record<string, unknown>>;
 }

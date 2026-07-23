@@ -740,12 +740,20 @@ class Pattern_Manager {
 	 *     @type string $status      'publish' (default) or 'draft'.
 	 * }
 	 *
-	 * @return array|\WP_Error `{pattern_id, title, slug, sync_status, edit_url, reference, warnings}` or an error.
+	 * @return array|\WP_Error `{pattern_id, title, slug, sync_status, edit_url, warnings}` plus, for a
+	 *                         synced pattern, `reference` (a ready-to-insert core/block snippet), or
+	 *                         for an unsynced pattern, `insert_hint` (an insert_pattern call shape) —
+	 *                         or a `WP_Error`.
 	 */
 	public function create_pattern( array $args ) {
-		// Explicit empty-string test, not empty(): title "0" is valid.
-		$title = isset( $args['title'] ) ? $args['title'] : null;
-		if ( ! is_string( $title ) || '' === $title ) {
+		// Sanitize before checking emptiness, not after: a whitespace- or
+		// markup-only title passes a raw non-empty-string check but
+		// collapses to '' once sanitize_text_field() strips tags/trims it,
+		// which would otherwise create a nameless pattern. Explicit
+		// empty-string test, not empty(): title "0" is valid.
+		$raw_title = isset( $args['title'] ) ? $args['title'] : null;
+		$title     = is_string( $raw_title ) ? sanitize_text_field( $raw_title ) : '';
+		if ( '' === $title ) {
 			return new \WP_Error(
 				'missing_title',
 				__( 'A non-empty "title" is required.', 'gk-block-mcp' ),
@@ -814,7 +822,7 @@ class Pattern_Manager {
 		$postarr = array(
 			'post_type'    => 'wp_block',
 			'post_status'  => $status,
-			'post_title'   => sanitize_text_field( $title ),
+			'post_title'   => $title,
 			'post_content' => $content,
 		);
 		if ( isset( $args['slug'] ) && is_string( $args['slug'] ) && '' !== $args['slug'] ) {
@@ -849,17 +857,37 @@ class Pattern_Manager {
 
 		$post = get_post( $post_id );
 
-		return array(
+		$response = array(
 			'pattern_id'  => $post_id,
 			'title'       => $post->post_title,
 			'slug'        => $post->post_name,
 			'sync_status' => $sync_status,
 			'edit_url'    => get_edit_post_link( $post_id, 'raw' ),
-			'reference'   => array(
-				'blockName' => 'core/block',
-				'attrs'     => array( 'ref' => $post_id ),
-			),
 			'warnings'    => $warnings,
 		);
+
+		if ( 'synced' === $sync_status ) {
+			// core/block is WordPress's live, propagating synced-block
+			// reference. Only safe for a synced pattern: handing it to a
+			// caller who explicitly asked for a non-propagating one-off
+			// would silently re-link content they asked to keep independent.
+			$response['reference'] = array(
+				'blockName' => 'core/block',
+				'attrs'     => array( 'ref' => $post_id ),
+			);
+		} else {
+			// insert_pattern() supports an inline (non-synced) copy of any
+			// pattern via synced:false, independent of the pattern's own
+			// sync_status meta — point unsynced callers there instead.
+			$response['insert_hint'] = array(
+				'tool'   => 'insert_pattern',
+				'params' => array(
+					'pattern_id' => $post_id,
+					'synced'     => false,
+				),
+			);
+		}
+
+		return $response;
 	}
 }

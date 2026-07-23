@@ -149,13 +149,14 @@ class Tool_Executor {
 	 */
 	private function execute_list_block_types( array $input ) {
 		$params = array(
-			'namespace'      => isset( $input['namespace'] ) ? (string) $input['namespace'] : null,
-			'category'       => isset( $input['category'] ) ? (string) $input['category'] : null,
-			'preferred_only' => ! empty( $input['preferred_only'] ),
-			'tier'           => isset( $input['tier'] ) ? (string) $input['tier'] : null,
-			'storage_mode'   => isset( $input['storage_mode'] ) ? (string) $input['storage_mode'] : null,
-			'search'         => isset( $input['search'] ) ? (string) $input['search'] : null,
-			'usage_only'     => ! empty( $input['usage_only'] ),
+			'namespace'        => isset( $input['namespace'] ) ? (string) $input['namespace'] : null,
+			'category'         => isset( $input['category'] ) ? (string) $input['category'] : null,
+			'preferred_only'   => ! empty( $input['preferred_only'] ),
+			'tier'             => isset( $input['tier'] ) ? (string) $input['tier'] : null,
+			'storage_mode'     => isset( $input['storage_mode'] ) ? (string) $input['storage_mode'] : null,
+			'search'           => isset( $input['search'] ) ? (string) $input['search'] : null,
+			'usage_only'       => ! empty( $input['usage_only'] ),
+			'include_supports' => ! empty( $input['include_supports'] ),
 		);
 
 		$data = $this->call_controller(
@@ -193,6 +194,7 @@ class Tool_Executor {
 		$offset = isset( $input['offset'] ) ? max( 0, (int) $input['offset'] ) : 0;
 		$params = array(
 			'q'         => isset( $input['search'] ) ? (string) $input['search'] : null,
+			'category'  => isset( $input['category'] ) ? (string) $input['category'] : null,
 			'synced'    => array_key_exists( 'synced', $input ) ? (bool) $input['synced'] : null,
 			'min_score' => isset( $input['min_score'] ) ? (int) $input['min_score'] : null,
 			// Fetch the full filtered set (get_patterns builds all matches before
@@ -211,12 +213,14 @@ class Tool_Executor {
 			return $data;
 		}
 
-		$patterns = isset( $data['patterns'] ) && is_array( $data['patterns'] ) ? $data['patterns'] : array();
-		$total    = count( $patterns );
-		$page     = array_slice( $patterns, $offset, $limit );
+		$patterns   = isset( $data['patterns'] ) && is_array( $data['patterns'] ) ? $data['patterns'] : array();
+		$categories = isset( $data['categories'] ) && is_array( $data['categories'] ) ? $data['categories'] : array();
+		$total      = count( $patterns );
+		$page       = array_slice( $patterns, $offset, $limit );
 
 		return array(
 			'patterns'    => $page,
+			'categories'  => $categories,
 			'count'       => count( $page ),
 			'total'       => $total,
 			'offset'      => $offset,
