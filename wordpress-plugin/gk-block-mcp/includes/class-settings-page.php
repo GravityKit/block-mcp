@@ -1224,7 +1224,7 @@ class Settings_Page {
 
 				<h2><?php esc_html_e( 'Template editing', 'gk-block-mcp' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Let the assistant edit theme templates and template parts. Edits create database overrides; Appearance → Editor can revert them.', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Let the assistant edit theme templates and template parts. This grants the Block MCP agent account permission to change the theme layer that wraps every page (header, footer, archives). Edits create database overrides; Appearance → Editor or reset_template can revert them.', 'gk-block-mcp' ); ?>
 				</p>
 				<?php
 				// Belt-and-braces: emit '0' even when the box is unchecked so
@@ -1240,7 +1240,7 @@ class Settings_Page {
 						value="1"
 						<?php checked( $templates_enabled ); ?>
 					/>
-					<?php esc_html_e( 'Let the assistant edit theme templates and template parts', 'gk-block-mcp' ); ?>
+					<?php esc_html_e( 'Let the assistant edit theme templates and template parts (header, footer, archives)', 'gk-block-mcp' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so admins aren't confused

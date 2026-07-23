@@ -20,6 +20,7 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockMCP\Agent_Provisioner;
+use GravityKit\BlockMCP\Template_Manager;
 
 /**
  * Tests for Agent_Provisioner::ensure().
@@ -126,6 +127,45 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 		$this->assertFalse( $role->has_cap( 'edit_theme_options' ), 'forbidden cap must be stripped from the existing role' );
 		$this->assertTrue( $role->has_cap( 'edit_others_posts' ), 'content-editing cap must survive' );
 		$this->assertTrue( $role->has_cap( 'a_custom_operator_cap' ), 'operator-added caps must not be stripped' );
+	}
+
+	/**
+	 * register_role() grants TEMPLATE_EDIT_CAP on a fresh role when the
+	 * gk_block_api_template_edits toggle is on — the cap that gates
+	 * POST /template, computed from the toggle rather than hardcoded.
+	 */
+	public function test_register_role_grants_template_edit_cap_when_toggle_on() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		Agent_Provisioner::register_role();
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ) );
+	}
+
+	/**
+	 * register_role() must REVOKE TEMPLATE_EDIT_CAP from an existing role
+	 * when the toggle is later switched off — unlike every other capability
+	 * in the map, the additive re-assert loop never removes this one, so a
+	 * dedicated removal branch is required or a toggled-off grant would
+	 * outlive the setting that authorized it. This is the one exception to
+	 * "additive only" that test_register_role_strips_forbidden_caps_from_existing_role()
+	 * (above) proves still holds for everything else.
+	 */
+	public function test_register_role_revokes_template_edit_cap_when_toggle_off() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'setup: cap must be granted before it can be revoked' );
+
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '0' );
+		Agent_Provisioner::register_role();
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ) );
 	}
 
 	/**
