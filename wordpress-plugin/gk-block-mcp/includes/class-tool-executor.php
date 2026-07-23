@@ -124,6 +124,10 @@ class Tool_Executor {
 				return $this->execute_update_template( $input );
 			case 'reset_template':
 				return $this->execute_reset_template( $input );
+			case 'list_binding_sources':
+				return $this->execute_list_binding_sources( $input );
+			case 'create_pattern':
+				return $this->execute_create_pattern( $input );
 			default:
 				return new \WP_Error(
 					'unknown_tool',
@@ -248,6 +252,22 @@ class Tool_Executor {
 			array( $this->controller, 'get_site_usage' ),
 			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/site-usage' ),
 			array( 'refresh' => ! empty( $input['refresh'] ) )
+		);
+	}
+
+	/**
+	 * List registered block bindings sources via the binding-sources REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input (unused).
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_list_binding_sources( array $input ) {
+		unset( $input );
+		return $this->call_controller(
+			array( $this->controller, 'get_binding_sources' ),
+			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/binding-sources' )
 		);
 	}
 
@@ -802,6 +822,24 @@ class Tool_Executor {
 	private function execute_create_post( array $input ) {
 		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/posts' );
 		return $this->call_controller( array( $this->controller, 'create_post' ), $request, array(), $input );
+	}
+
+	/**
+	 * Create a synced pattern (a wp_block post) via the patterns-create REST
+	 * handler. Permission (edit_posts and wp_block's create_posts capability)
+	 * is enforced by Abilities_Registry::check_tool_permission()'s
+	 * 'create_pattern' branch before this method ever runs; title, the
+	 * content/blocks XOR, and the sync_status/status enums are validated by
+	 * Pattern_Manager::create_pattern() itself.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_create_pattern( array $input ) {
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/patterns' );
+		return $this->call_controller( array( $this->controller, 'create_pattern' ), $request, array(), $input );
 	}
 
 	/**

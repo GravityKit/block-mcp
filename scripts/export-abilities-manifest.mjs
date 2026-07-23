@@ -38,6 +38,21 @@ const UPLOAD = new Set(['upload_media']);
 const CREATE = new Set(['create_post']);
 
 /**
+ * create_pattern's REST twin has a dedicated permission callback
+ * (REST_Controller::check_create_pattern_permissions()) that checks the base
+ * edit_posts capability AND the wp_block post type's create_posts capability
+ * (which core maps to publish_posts, not edit_posts) — a Contributor has the
+ * former but not the latter. Mapped to its own permission key so
+ * Abilities_Registry::check_tool_permission() routes to that exact callback
+ * instead of the weaker default 'edit_post' branch, which checks only
+ * edit_posts (plus an optional per-post check that doesn't apply here, since
+ * create_pattern has no target post_id).
+ *
+ * @type {ReadonlySet<string>}
+ */
+const CREATE_PATTERN = new Set(['create_pattern']);
+
+/**
  * Template writes, gated by the site's own toggle (Template_Manager::edits_enabled(),
  * option gk_block_api_template_edits + filter gk/block-mcp/templates/allow-edits)
  * in addition to a capability check. Mapped to their own permission key so
@@ -80,6 +95,7 @@ function permissionFor(name, annotations) {
   if (MANAGE_OPTIONS.has(name)) return 'manage_options';
   if (UPLOAD.has(name)) return 'upload_files';
   if (CREATE.has(name)) return 'create_post';
+  if (CREATE_PATTERN.has(name)) return 'create_pattern';
   if (TEMPLATE_EDIT.has(name)) return 'template_edit';
   if (PER_POST_READ.has(name)) return 'edit_post';
   if (READ.has(name) || annotations?.readOnlyHint === true) return 'read';
