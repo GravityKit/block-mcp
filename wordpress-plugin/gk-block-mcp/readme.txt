@@ -4,7 +4,7 @@ Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 2.1.0
+Stable tag: 2.2.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -119,6 +119,30 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 `uninstall.php` deletes all plugin options and transients (`gk_block_api_preferences`, `gk_block_api_post_types_allowlist`, `gk_block_api_storage_modes`, the manual dual-storage list, the inventory cache, and per-post rate-limit transients). Post content and revisions are not touched.
 
 == Changelog ==
+
+= 2.2.0 on July 22, 2026 =
+
+This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery.
+
+#### 🚀 Added
+
+* You can now browse your block theme's Full Site Editing templates and template parts through the assistant, and see at a glance whether each one is served from your theme's files or from a saved customization that overrides them.
+* The assistant can now edit theme templates and template parts when you allow it. This is off by default; turn it on at **Settings → Block MCP**. Each edit is saved as a customization that leaves your original theme files untouched and can be reverted at any time, either through the assistant or from **Appearance → Editor**.
+* The assistant can now turn a selection of blocks into a reusable pattern, either synced so a single definition is reused everywhere, or as a one-time starting point.
+* The assistant can now list the block binding sources registered on your site, such as post meta and pattern overrides, so it knows what dynamic data your blocks can draw from.
+* The new template, pattern, and binding tools are also available as WordPress Abilities for the MCP Adapter, using the same sign-in and editing permissions as the REST API.
+
+#### ✨ Improved
+
+* When listing the block types available on your site, the assistant now also sees each block's style variations and nesting rules (which blocks a given block can contain and where it can be placed), so it chooses valid style names and keeps blocks in valid positions.
+* You can now filter available patterns by category, and the pattern list includes your site's full set of pattern categories.
+
+#### 💻 Developer Updates
+
+* New REST routes under `gk-block-api/v1`: `GET /templates` and `GET /template` (read Full Site Editing templates and parts), `POST /template` and `POST /template/reset` (gated template edits), `GET /binding-sources`, and `POST /patterns` (create a pattern).
+* `GET /block-types` responses now include each block's `styles`, `parent`, `ancestor`, and `allowed_blocks`, and accept an `include_supports` parameter for the full `supports` object. `GET /patterns` accepts a `category` filter and returns the registered `categories`.
+* New MCP tools, also registered as WordPress Abilities for the MCP Adapter: `list_templates`, `get_template`, `update_template`, `reset_template`, `create_pattern`, and `list_binding_sources`.
+* Template editing is gated by a new option, `gk_block_api_template_edits` (off by default), and the `gk/block-mcp/templates/allow-edits` filter.
 
 = 2.1.0 on July 20, 2026 =
 
