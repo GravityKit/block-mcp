@@ -8,7 +8,7 @@
 
 import type { WordPressBlockClient } from '../client.js';
 import type { CreatePatternRequest } from '../types.js';
-import { coercePostId } from '../coerce.js';
+import { coercePostId, isNonEmptyArray, isNonEmptyString } from '../coerce.js';
 import { BLOCK_INPUT_SCHEMA } from './write.js';
 
 /**
@@ -46,6 +46,11 @@ export const PATTERN_TOOLS = [
         },
       },
       required: ['title'],
+      // Structurally enforces "exactly one of blocks/content" for schema-
+      // validating clients: an object with both keys matches both branches,
+      // one with neither matches zero — either way oneOf's "exactly one
+      // match" requirement rejects it. The handler validates this too.
+      oneOf: [{ required: ['blocks'] }, { required: ['content'] }],
     },
   },
   {
@@ -100,10 +105,24 @@ export async function handlePatternTool(
       if (typeof args.title !== 'string' || args.title.trim() === '') {
         throw new Error('create_pattern: a non-empty "title" is required');
       }
-      const hasBlocks = Array.isArray(args.blocks) && args.blocks.length > 0;
-      const hasContent = typeof args.content === 'string' && args.content !== '';
+      const hasBlocks = isNonEmptyArray(args.blocks);
+      const hasContent = isNonEmptyString(args.content);
       if (hasBlocks === hasContent) {
         throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+      }
+      if (
+        args.sync_status !== undefined &&
+        args.sync_status !== 'synced' &&
+        args.sync_status !== 'unsynced'
+      ) {
+        throw new Error(
+          `create_pattern: "sync_status" must be "synced" or "unsynced", got ${JSON.stringify(args.sync_status)}.`,
+        );
+      }
+      if (args.status !== undefined && args.status !== 'publish' && args.status !== 'draft') {
+        throw new Error(
+          `create_pattern: "status" must be "publish" or "draft", got ${JSON.stringify(args.status)}.`,
+        );
       }
 
       return await client.createPattern({

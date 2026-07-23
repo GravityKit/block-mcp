@@ -1424,6 +1424,8 @@ class REST_Controller {
 	/**
 	 * GET /binding-sources
 	 *
+	 * @since 2.2.0
+	 *
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function get_binding_sources() {
@@ -1491,6 +1493,8 @@ class REST_Controller {
 
 	/**
 	 * POST /patterns — create a synced pattern (a `wp_block` post).
+	 *
+	 * @since 2.2.0
 	 *
 	 * @param \WP_REST_Request $request Request object.
 	 *

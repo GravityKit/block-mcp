@@ -102,15 +102,16 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Register the fixture theme directory containing "hybrid-theme". See
-	 * TemplateManagerTest::register_hybrid_theme_root() for the rationale.
+	 * Register the fixture theme directory containing "hybrid-theme" and
+	 * force a rescan: register_theme_directory() alone doesn't refresh
+	 * search_theme_directories()'s memoized scan once anything else in the
+	 * run has already triggered it, so without wp_clean_themes_cache() the
+	 * fixture stays invisible to wp_get_themes().
 	 *
 	 * @return void
 	 */
 	private function register_hybrid_theme_root() {
 		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
-		// See TemplateManagerTest::register_hybrid_theme_root() — forces
-		// search_theme_directories()'s memoized scan to pick this root up.
 		wp_clean_themes_cache();
 	}
 
@@ -404,20 +405,14 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Changed via update_block', $post->post_content );
 	}
 
-	// ── Codex review: term-assignment failure must not orphan the override ─
+	// ── Term-assignment failure rolls back the new override ─────────────
 
 	/**
-	 * `wp_insert_post()`'s error is checked, but the two `wp_set_object_terms()`
-	 * calls that follow it were not — a taxonomy failure (e.g. a
-	 * `pre_insert_term` filter rejecting the `wp_theme` term) left a
-	 * published `wp_template`/`wp_template_part` row with no `wp_theme`
-	 * term, so `get_block_templates()` could never find it again
-	 * (`get_template()` would keep resolving the theme file), yet the
-	 * orphaned post — and whatever content the call went on to write into it
-	 * — stayed in the database with `success: true` reported to the caller.
-	 * The fix must check both term-assignment calls and roll back
-	 * (`wp_delete_post()`) the freshly-created override on failure, exactly
-	 * like the existing legacy-block-rejection rollback.
+	 * A required taxonomy term (wp_theme here; wp_template_part_area for
+	 * parts, below) failing to assign — e.g. a pre_insert_term filter
+	 * rejecting it — returns a WP_Error and deletes the freshly-created
+	 * override post, rather than leaving an orphan with no wp_theme term
+	 * for get_block_templates() to ever find again.
 	 */
 	public function test_update_template_rolls_back_new_override_when_wp_theme_term_assignment_fails() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
@@ -487,13 +482,61 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$this->assertCount( 0, $matching->posts, 'A term-assignment failure must not leave an orphaned override post behind.' );
 	}
 
+	/**
+	 * When the term-assignment rollback's own wp_delete_post() also fails
+	 * (not just the term assignment), the caller must be told the cleanup
+	 * itself failed — a distinct error, not the original term error
+	 * silently standing in for a rollback that never actually happened.
+	 */
+	public function test_update_template_reports_rollback_failure_when_delete_also_fails() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$term_filter = static function ( $term, $taxonomy ) {
+			if ( 'wp_theme' === $taxonomy ) {
+				return new \WP_Error( 'term_insert_failed', 'Simulated taxonomy failure.' );
+			}
+			return $term;
+		};
+		add_filter( 'pre_insert_term', $term_filter, 10, 2 );
+
+		$delete_filter = static function () {
+			return false; // Force wp_delete_post() to short-circuit and fail.
+		};
+		add_filter( 'pre_delete_post', $delete_filter );
+
+		$result = $this->tm->update_template(
+			$this->theme . '//index',
+			'wp_template',
+			array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
+		);
+
+		remove_filter( 'pre_insert_term', $term_filter, 10 );
+		remove_filter( 'pre_delete_post', $delete_filter );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'rollback_failed', $result->get_error_code() );
+		$this->assertStringContainsString( 'Simulated taxonomy failure', $result->get_error_message() );
+		$data = $result->get_error_data();
+		$this->assertSame( 500, $data['status'] );
+
+		// The post genuinely could not be deleted — matches what the error warns about.
+		$matching = new \WP_Query(
+			array(
+				'post_type'      => 'wp_template',
+				'post_name'      => 'index',
+				'post_status'    => 'any',
+				'posts_per_page' => -1,
+			)
+		);
+		$this->assertCount( 1, $matching->posts );
+	}
+
 	// ── Hybrid theme (wp_is_block_theme() false, but a part resolves) ───
 
 	/**
-	 * A hybrid theme's template part resolves via get_block_template(),
-	 * so a gated write against it must succeed — the old unconditional
-	 * `! wp_is_block_theme()` 400 guard blocked this even though the part
-	 * genuinely renders on such a site.
+	 * A hybrid theme's template part resolves via get_block_template(), so
+	 * a gated write against it must succeed — it genuinely renders on the
+	 * site regardless of wp_is_block_theme()'s file-existence check.
 	 */
 	public function test_update_template_creates_override_for_hybrid_theme_template_part() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
@@ -540,16 +583,72 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Unchanged regression: a genuinely classic theme (no templates/parts
-	 * at all) still gets the specific, actionable "classic_theme" 400 —
-	 * proves the resolution-based gate doesn't regress into a generic
-	 * not_found for the case that guard exists to make clearer.
+	 * A hybrid theme has real content (the "footer" part), so a wrong id
+	 * on it must return not_found, not classic_theme — classic_theme
+	 * would falsely tell the caller this theme has nothing to edit at
+	 * all, when it demonstrably does (just not under this id).
+	 */
+	public function test_update_template_hybrid_theme_bad_id_returns_not_found_not_classic_theme() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		$this->register_hybrid_theme_root();
+		switch_theme( 'hybrid-theme' );
+
+		$result = $this->tm->update_template(
+			'hybrid-theme//does-not-exist',
+			'wp_template_part',
+			array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
+		);
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'not_found', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( 404, $data['status'] );
+	}
+
+	/**
+	 * Same distinction for reset_template: a hybrid theme's wrong id is
+	 * not_found, not classic_theme.
+	 */
+	public function test_reset_template_hybrid_theme_bad_id_returns_not_found_not_classic_theme() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		$this->register_hybrid_theme_root();
+		switch_theme( 'hybrid-theme' );
+
+		$result = $this->tm->reset_template( 'hybrid-theme//does-not-exist', 'wp_template_part' );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'not_found', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( 404, $data['status'] );
+	}
+
+	/**
+	 * A genuinely classic theme (no templates/parts at all) gets the
+	 * specific, actionable "classic_theme" 400 — contrast the hybrid-theme
+	 * tests above, where the same "id doesn't resolve" case is not_found
+	 * because the theme demonstrably has content elsewhere.
 	 */
 	public function test_update_template_classic_theme_still_returns_400_when_nothing_resolves() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
 		switch_theme( 'default' );
 
 		$result = $this->tm->update_template( 'default//does-not-exist', 'wp_template', array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'classic_theme', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( 400, $data['status'] );
+	}
+
+	/**
+	 * Same classic-theme "id doesn't resolve" contract as update_template's,
+	 * for reset_template.
+	 */
+	public function test_reset_template_classic_theme_still_returns_400_when_nothing_resolves() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		switch_theme( 'default' );
+
+		$result = $this->tm->reset_template( 'default//does-not-exist', 'wp_template' );
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
 		$this->assertSame( 'classic_theme', $result->get_error_code() );
