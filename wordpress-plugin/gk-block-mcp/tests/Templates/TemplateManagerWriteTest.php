@@ -101,6 +101,16 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		return null;
 	}
 
+	/**
+	 * Register the fixture theme directory containing "hybrid-theme". See
+	 * TemplateManagerTest::register_hybrid_theme_root() for the rationale.
+	 *
+	 * @return void
+	 */
+	private function register_hybrid_theme_root() {
+		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
+	}
+
 	// ── Gate ───────────────────────────────────────────────────────────
 
 	/**
@@ -472,5 +482,75 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 			)
 		);
 		$this->assertCount( 0, $matching->posts, 'A term-assignment failure must not leave an orphaned override post behind.' );
+	}
+
+	// ── Hybrid theme (wp_is_block_theme() false, but a part resolves) ───
+
+	/**
+	 * A hybrid theme's template part resolves via get_block_template(),
+	 * so a gated write against it must succeed — the old unconditional
+	 * `! wp_is_block_theme()` 400 guard blocked this even though the part
+	 * genuinely renders on such a site.
+	 */
+	public function test_update_template_creates_override_for_hybrid_theme_template_part() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		$this->register_hybrid_theme_root();
+		switch_theme( 'hybrid-theme' );
+		$this->assertFalse( wp_is_block_theme(), 'Fixture must reproduce wp_is_block_theme() === false to exercise the hybrid case.' );
+
+		$result = $this->tm->update_template(
+			'hybrid-theme//footer',
+			'wp_template_part',
+			array( 'content' => '<!-- wp:paragraph --><p>Overridden footer</p><!-- /wp:paragraph -->' )
+		);
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+
+		$fetched = $this->tm->get_template( 'hybrid-theme//footer', 'wp_template_part' );
+		$this->assertSame( 'custom', $fetched['source'] );
+		$this->assertStringContainsString( 'Overridden footer', $fetched['content'] );
+	}
+
+	/**
+	 * reset_template must be gated the same way — resolution, not
+	 * wp_is_block_theme() — so it can revert the override this test just
+	 * created on a hybrid theme.
+	 */
+	public function test_reset_template_reverts_hybrid_theme_override() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		$this->register_hybrid_theme_root();
+		switch_theme( 'hybrid-theme' );
+
+		$updated = $this->tm->update_template(
+			'hybrid-theme//footer',
+			'wp_template_part',
+			array( 'content' => '<!-- wp:paragraph --><p>Overridden</p><!-- /wp:paragraph -->' )
+		);
+		$this->assertTrue( $updated['success'] );
+
+		$reset = $this->tm->reset_template( 'hybrid-theme//footer', 'wp_template_part' );
+
+		$this->assertIsArray( $reset );
+		$this->assertTrue( $reset['success'] );
+		$this->assertNull( get_post( $updated['wp_id'] ) );
+	}
+
+	/**
+	 * Unchanged regression: a genuinely classic theme (no templates/parts
+	 * at all) still gets the specific, actionable "classic_theme" 400 —
+	 * proves the resolution-based gate doesn't regress into a generic
+	 * not_found for the case that guard exists to make clearer.
+	 */
+	public function test_update_template_classic_theme_still_returns_400_when_nothing_resolves() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		switch_theme( 'default' );
+
+		$result = $this->tm->update_template( 'default//does-not-exist', 'wp_template', array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'classic_theme', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( 400, $data['status'] );
 	}
 }
