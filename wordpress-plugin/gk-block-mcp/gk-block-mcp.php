@@ -335,6 +335,11 @@ function init_agent() {
 	// (priority 20) so it intercepts both wrong-password WP_Error results and
 	// correctly-authenticated WP_User objects for the service account.
 	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 30, 3 );
+	// register_role() derives Agent_Provisioner::TEMPLATE_EDIT_CAP from this
+	// toggle; re-assert on save so grant/revoke is immediate rather than
+	// waiting for the next `init`. register_role() takes no required args,
+	// so WordPress's extra ($old_value) argument here is simply unused.
+	add_action( 'update_option_' . \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' ) );
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
 

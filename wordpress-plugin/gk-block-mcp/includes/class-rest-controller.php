@@ -1169,16 +1169,20 @@ class REST_Controller {
 	 * Permission callback for template write endpoints (POST /template,
 	 * POST /template/reset).
 	 *
-	 * Gated on the site toggle first, then a capability check. The
-	 * dedicated agent role never holds `edit_theme_options`
-	 * (`Agent_Provisioner::forbidden_capabilities()`), so `edit_posts` alone
-	 * is enough for it once an operator opts in via the toggle; a "self"
-	 * connection (a real admin's own Application Password) already carries
-	 * `edit_theme_options` and needs no toggle-adjacent capability grant.
-	 * The plugin performs the underlying post writes itself — `wp_insert_post()`
-	 * / `wp_update_post()` do not enforce capabilities — so core's own
-	 * `/wp/v2/templates`, the customizer, menus, and theme switching stay
-	 * closed to the agent regardless of this toggle.
+	 * Gated on the site toggle first, then a capability check. `edit_posts`
+	 * alone is NOT sufficient here, unlike every other write route on this
+	 * namespace: the plugin performs the underlying `wp_insert_post()` /
+	 * `wp_update_post()` on `wp_template`/`wp_template_part` itself, which
+	 * do not enforce capabilities, so an `edit_posts`-only actor (any
+	 * contributor-or-above, or a leaked low-privilege Application Password)
+	 * would otherwise be able to rewrite sitewide template chrome — header,
+	 * footer, 404, archive, search — regardless of their own post-editing
+	 * scope. The toggle grants `Agent_Provisioner::TEMPLATE_EDIT_CAP`
+	 * specifically to the agent role instead of `edit_theme_options`, so
+	 * turning it on never reopens core's own `/wp/v2/templates`, the
+	 * Customizer, menus, or widgets to the agent's Application Password.
+	 * A "self" connection (a real admin's own Application Password) already
+	 * carries `edit_theme_options` and needs no toggle-adjacent grant.
 	 *
 	 * @since 2.2.0
 	 *
@@ -1192,7 +1196,7 @@ class REST_Controller {
 				array( 'status' => 403 )
 			);
 		}
-		if ( ! current_user_can( 'edit_posts' ) && ! current_user_can( 'edit_theme_options' ) ) {
+		if ( ! current_user_can( Agent_Provisioner::TEMPLATE_EDIT_CAP ) && ! current_user_can( 'edit_theme_options' ) ) {
 			return new \WP_Error(
 				'rest_forbidden',
 				__( 'You do not have permission to edit templates.', 'gk-block-mcp' ),
