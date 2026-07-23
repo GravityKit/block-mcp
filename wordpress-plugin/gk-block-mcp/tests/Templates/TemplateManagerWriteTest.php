@@ -504,16 +504,22 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		};
 		add_filter( 'pre_delete_post', $delete_filter );
 
-		$result = $this->tm->update_template(
-			$this->theme . '//index',
-			'wp_template',
-			array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
-		);
-
-		remove_filter( 'pre_insert_term', $term_filter, 10 );
-		remove_filter( 'pre_delete_post', $delete_filter );
+		try {
+			$result = $this->tm->update_template(
+				$this->theme . '//index',
+				'wp_template',
+				array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' )
+			);
+		} finally {
+			// Run on an unexpected exception too — a leftover filter here
+			// would otherwise contaminate every later term/delete call in
+			// the same PHP process, not just this test.
+			remove_filter( 'pre_insert_term', $term_filter, 10 );
+			remove_filter( 'pre_delete_post', $delete_filter );
+		}
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
+		/** @var \WP_Error $result */
 		$this->assertSame( 'rollback_failed', $result->get_error_code() );
 		$this->assertStringContainsString( 'Simulated taxonomy failure', $result->get_error_message() );
 		$data = $result->get_error_data();
@@ -600,6 +606,7 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		);
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
+		/** @var \WP_Error $result */
 		$this->assertSame( 'not_found', $result->get_error_code() );
 		$data = $result->get_error_data();
 		$this->assertSame( 404, $data['status'] );
@@ -617,6 +624,7 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$result = $this->tm->reset_template( 'hybrid-theme//does-not-exist', 'wp_template_part' );
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
+		/** @var \WP_Error $result */
 		$this->assertSame( 'not_found', $result->get_error_code() );
 		$data = $result->get_error_data();
 		$this->assertSame( 404, $data['status'] );
@@ -635,6 +643,7 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$result = $this->tm->update_template( 'default//does-not-exist', 'wp_template', array( 'content' => '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->' ) );
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
+		/** @var \WP_Error $result */
 		$this->assertSame( 'classic_theme', $result->get_error_code() );
 		$data = $result->get_error_data();
 		$this->assertSame( 400, $data['status'] );
@@ -651,6 +660,7 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 		$result = $this->tm->reset_template( 'default//does-not-exist', 'wp_template' );
 
 		$this->assertInstanceOf( \WP_Error::class, $result );
+		/** @var \WP_Error $result */
 		$this->assertSame( 'classic_theme', $result->get_error_code() );
 		$data = $result->get_error_data();
 		$this->assertSame( 400, $data['status'] );

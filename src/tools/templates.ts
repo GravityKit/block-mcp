@@ -25,7 +25,7 @@ export const TEMPLATE_TOOLS = [
   {
     name: 'list_templates',
     description:
-      'List the active theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer") — works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` — present (non-null) whenever the template is backed by a database post, whether that\'s an override shadowing a theme file or a fully custom template with none; that\'s what makes it editable via update_template. Returns an empty list with a `note` only when there is truly nothing to list.',
+      'List the active theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer") — works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` — present (non-null) when a database post already backs the template (an override shadowing a theme file, or a fully custom template with none); null means it currently resolves purely to the theme file. Every template is editable via update_template regardless — a null `wp_id` just means calling it creates the override rather than updating an existing one. Returns an empty list with a `note` only when there is truly nothing to list.',
     annotations: { ...READ_ANNOT, title: 'List templates' },
     inputSchema: {
       type: 'object' as const,
