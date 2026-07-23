@@ -169,6 +169,66 @@ class AgentProvisionerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Deleting the toggle option must revoke TEMPLATE_EDIT_CAP immediately —
+	 * without an explicit register_role() call in between.
+	 *
+	 * A settings reset calls delete_option(), which fires the generic
+	 * `deleted_option` action rather than `update_option_{$option}`. Before
+	 * the fix, the plugin bootstrap only hooked `update_option_{$option}`, so
+	 * a delete-based reset left the agent holding TEMPLATE_EDIT_CAP until the
+	 * next `init` — a live security-cap grant outliving the setting that
+	 * authorized it. This pins that `deleted_option` also reasserts the role.
+	 */
+	public function test_deleting_template_edits_option_immediately_revokes_agent_cap() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'setup: cap must be granted before the option is deleted' );
+
+		delete_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION );
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse(
+			$role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ),
+			'deleting the toggle option must revoke the cap immediately, without an explicit register_role() call'
+		);
+	}
+
+	/**
+	 * Enabling the toggle for the FIRST time — when the option row does not
+	 * yet exist — must grant TEMPLATE_EDIT_CAP immediately, without an
+	 * explicit register_role() call in between.
+	 *
+	 * update_option() calls add_option() internally when the option does not
+	 * already exist, firing `add_option_{$option}` rather than
+	 * `update_option_{$option}`. Before the fix, only the update-scoped hook
+	 * was registered, so a fresh site's first enable of the toggle left the
+	 * agent without the cap until the next `init`.
+	 */
+	public function test_first_enabling_template_edits_option_grants_agent_cap_immediately() {
+		remove_role( Agent_Provisioner::ROLE );
+		delete_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION );
+
+		// Precondition: role exists but the option row is absent, so the next
+		// update_option() call below takes the add_option() path.
+		Agent_Provisioner::register_role();
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'precondition: no cap before the option exists' );
+
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue(
+			$role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ),
+			'first-time enable via add_option() must grant the cap immediately, without an explicit register_role() call'
+		);
+	}
+
+	/**
 	 * Calling ensure() twice must return the same user ID and not create a
 	 * second user with the same login. The resolved ID must be persisted in
 	 * the gk_block_api_agent_user_id option.

@@ -16,6 +16,7 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockMCP\Agent_Provisioner;
+use GravityKit\BlockMCP\Template_Manager;
 
 /**
  * Tests for Agent_Provisioner::register_role().
@@ -166,5 +167,34 @@ class AgentRoleTest extends WP_UnitTestCase {
 		);
 
 		unregister_post_type( 'doc' );
+	}
+
+	/**
+	 * The public gk/block-mcp/agent/caps filter can unset the
+	 * TEMPLATE_EDIT_CAP entry entirely (not merely set it false), and
+	 * register_role() must treat that the same as an explicit false —
+	 * revoking the cap from an existing role — without emitting a PHP
+	 * warning for the missing array key.
+	 */
+	public function test_register_role_revokes_template_edit_cap_when_filter_unsets_key() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertTrue( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'setup: cap must be granted before the filter unsets it' );
+
+		$filter = static function ( $caps ) {
+			unset( $caps[ Agent_Provisioner::TEMPLATE_EDIT_CAP ] );
+			return $caps;
+		};
+		add_filter( 'gk/block-mcp/agent/caps', $filter );
+
+		Agent_Provisioner::register_role();
+
+		remove_filter( 'gk/block-mcp/agent/caps', $filter );
+
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertNotNull( $role );
+		$this->assertFalse( $role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ), 'an unset cap-map key must revoke the cap, the safe default for a security-gating capability' );
 	}
 }
