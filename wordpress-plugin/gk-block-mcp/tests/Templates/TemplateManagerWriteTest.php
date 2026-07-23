@@ -109,6 +109,9 @@ class TemplateManagerWriteTest extends WP_UnitTestCase {
 	 */
 	private function register_hybrid_theme_root() {
 		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
+		// See TemplateManagerTest::register_hybrid_theme_root() — forces
+		// search_theme_directories()'s memoized scan to pick this root up.
+		wp_clean_themes_cache();
 	}
 
 	// ── Gate ───────────────────────────────────────────────────────────

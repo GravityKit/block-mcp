@@ -107,6 +107,11 @@ class TemplateManagerTest extends WP_UnitTestCase {
 	 */
 	private function register_hybrid_theme_root() {
 		register_theme_directory( dirname( __DIR__ ) . '/fixtures/themes' );
+		// search_theme_directories() memoizes its scan in a function-local
+		// static for the rest of the process; by this point in the run
+		// something has always already forced that memoization without
+		// this root, so appending it here is invisible until forced.
+		wp_clean_themes_cache();
 	}
 
 	/**
