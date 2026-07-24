@@ -2,7 +2,7 @@
 Contributors: gravitykit, katzwebservices
 Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
-Tested up to: 6.9
+Tested up to: 7.0.1
 Requires PHP: 7.4
 Stable tag: 2.2.0
 License: GPL-2.0-or-later
@@ -120,7 +120,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= 2.2.0 on July 24, 2026 =
+= 2.2.0 on July 23, 2026 =
 
 This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery.
 
