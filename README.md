@@ -468,10 +468,10 @@ With path-based addressing, the agent would need to re-fetch between every step.
 Run all suites locally:
 
 ```bash
-# TypeScript (Vitest) — 257 tests
+# TypeScript (Vitest): 885 tests
 npm test
 
-# PHP (PHPUnit, stub WP bootstrap) — 335 tests
+# PHP (PHPUnit, stub WP bootstrap): 1,440 tests
 cd wordpress-plugin/gk-block-mcp && phpunit -c tests/phpunit.xml
 ```
 
@@ -615,6 +615,17 @@ Every REST endpoint returns errors as JSON in the standard WordPress shape `{ co
 |---|---|---|
 | `rate_limit_exceeded` | Per-post write budget exhausted (10 writes/min, or 2 full-rewrites/min) | Wait up to 60 s and retry; consider batching with `update_blocks` |
 | `scan_rate_limited` | Settings-page scan triggered too frequently | Wait; this affects admin-side scans only |
+
+### Method not allowed (HTTP 405)
+
+Not a plugin error: a 405 comes from the host's firewall or web server, ahead of WordPress. Some managed hosts reject `PUT`, `PATCH`, and `DELETE` outright, which is why reads and `create_post` succeed on such a host while every editing tool fails.
+
+The client handles this on its own. When one of those verbs is rejected, it replays the request as a `POST` carrying an `X-HTTP-Method-Override` header (the form WordPress core accepts), and remembers the host, so later edits go through on the first attempt. Hosts that accept the real verbs never see the header.
+
+| Symptom | What it means | How to recover |
+|---|---|---|
+| `Block API Error (405)` with an HTML body (e.g. `nginx`) on an editing tool | The firewall rejected both the real verb and the override replay | Ask the host to allow `PUT`, `PATCH`, and `DELETE`, or to stop stripping `X-HTTP-Method-Override`, on the WordPress REST path |
+| Reads work, edits fail immediately after install | The host rejects editing verbs; the fallback could not complete | Same as above; confirm with `curl -X PATCH` against `/wp-json/gk-block-api/v1/...` |
 
 ### Upstream (HTTP 502)
 

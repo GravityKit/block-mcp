@@ -40076,6 +40076,7 @@ function mimeForFilename(filename) {
 }
 var MAX_RETRIES = 2;
 var IDEMPOTENT_METHODS = /* @__PURE__ */ new Set(["get", "head", "options"]);
+var METHOD_OVERRIDE_VERBS = /* @__PURE__ */ new Set(["put", "patch", "delete"]);
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -40102,6 +40103,17 @@ function isRetryable(error2) {
 }
 var WordPressBlockClient = class {
   client;
+  /**
+   * Set once a host proves it rejects PUT / PATCH / DELETE at the edge.
+   *
+   * Some managed hosts front WordPress with a WAF that answers those verbs with
+   * a 405 before the request reaches PHP, which breaks every editing tool while
+   * GET and POST keep working. WordPress core honours `X-HTTP-Method-Override`
+   * on a POST, so a rejected request is replayed in that shape. The flag makes
+   * the fallback sticky for the life of the client: only the first write pays
+   * for the rejected round-trip.
+   */
+  useMethodOverride = false;
   /**
    * Create a new WordPress Block API client.
    *
@@ -40135,10 +40147,25 @@ var WordPressBlockClient = class {
       },
       timeout: 3e4
     });
+    this.client.interceptors.request.use((config3) => {
+      const method = (config3.method ?? "get").toLowerCase();
+      const needsOverride = this.useMethodOverride && METHOD_OVERRIDE_VERBS.has(method);
+      if (needsOverride) {
+        config3.headers.set("X-HTTP-Method-Override", method.toUpperCase());
+        config3.method = "post";
+      }
+      return config3;
+    });
     this.client.interceptors.response.use(
       (r4) => r4,
       async (error2) => {
         const config3 = error2.config;
+        const method = (config3?.method ?? "get").toLowerCase();
+        const edgeRejectedVerb = error2.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
+        if (config3 && edgeRejectedVerb) {
+          this.useMethodOverride = true;
+          return this.client.request(config3);
+        }
         if (config3 && isRetryable(error2)) {
           const attempt = (config3.__retryCount ?? 0) + 1;
           if (attempt <= MAX_RETRIES) {

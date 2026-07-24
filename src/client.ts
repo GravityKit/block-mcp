@@ -39,6 +39,15 @@ const MAX_RETRIES = 2;
  */
 const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options']);
 
+/**
+ * Verbs that some hosts reject at the edge before the request reaches PHP.
+ *
+ * The plugin registers its editing routes as literal `PUT` / `PATCH` / `DELETE`
+ * rather than the `EDITABLE` alias, so a plain POST does not match them — the
+ * `X-HTTP-Method-Override` header is what carries the intended verb through.
+ */
+const METHOD_OVERRIDE_VERBS = new Set(['put', 'patch', 'delete']);
+
 /** Sleep for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -176,6 +185,18 @@ export class WordPressBlockClient {
   private client: AxiosInstance;
 
   /**
+   * Set once a host proves it rejects PUT / PATCH / DELETE at the edge.
+   *
+   * Some managed hosts front WordPress with a WAF that answers those verbs with
+   * a 405 before the request reaches PHP, which breaks every editing tool while
+   * GET and POST keep working. WordPress core honours `X-HTTP-Method-Override`
+   * on a POST, so a rejected request is replayed in that shape. The flag makes
+   * the fallback sticky for the life of the client: only the first write pays
+   * for the rejected round-trip.
+   */
+  private useMethodOverride = false;
+
+  /**
    * Create a new WordPress Block API client.
    *
    * @param config - MCP server configuration with URL and credentials
@@ -216,6 +237,18 @@ export class WordPressBlockClient {
       timeout: 30000,
     });
 
+    // Request interceptor: once a host is known to reject real verbs, send the
+    // intended method as an override header on a POST instead.
+    this.client.interceptors.request.use((config) => {
+      const method = (config.method ?? 'get').toLowerCase();
+      const needsOverride = this.useMethodOverride && METHOD_OVERRIDE_VERBS.has(method);
+      if (needsOverride) {
+        config.headers.set('X-HTTP-Method-Override', method.toUpperCase());
+        config.method = 'post';
+      }
+      return config;
+    });
+
     // Response interceptor: retry transient errors with exponential backoff,
     // then format any final error so it carries wpCode/wpData/wpStatus for
     // the server-level catch in src/index.ts.
@@ -223,6 +256,20 @@ export class WordPressBlockClient {
       (r) => r,
       async (error: AxiosError) => {
         const config = error.config as (AxiosRequestConfig & { __retryCount?: number }) | undefined;
+
+        // A 405 on a real verb comes from the edge, not WordPress: the plugin
+        // answers these paths. Replay every one, not just the first: concurrent
+        // writes all go out as real verbs, so each needs its own replay or it
+        // fails spuriously. A replay arrives here as `post`, which is not an
+        // override verb, so a rejected replay surfaces instead of looping.
+        const method = (config?.method ?? 'get').toLowerCase();
+        const edgeRejectedVerb =
+          error.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
+        if (config && edgeRejectedVerb) {
+          this.useMethodOverride = true;
+          return this.client.request(config);
+        }
+
         if (config && isRetryable(error)) {
           const attempt = (config.__retryCount ?? 0) + 1;
           if (attempt <= MAX_RETRIES) {
