@@ -331,6 +331,227 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * The `values` HTML used across the core/list tests — two <li> items that
+	 * live in the deprecated `values` block attribute, not inside the wrapper.
+	 */
+	private const INVALID_LIST_VALUES = '<li>First</li><li>Second</li>';
+
+	/**
+	 * The invalid core/list innerHTML: an empty <ul> wrapper with no <li> items
+	 * and no core/list-item innerBlocks. The items are stranded in `values`.
+	 */
+	private const INVALID_LIST_HTML = '<ul class="wp-block-list"></ul>';
+
+	/**
+	 * Build a flat core/list block array in WP-internal shape.
+	 *
+	 * @param array  $attrs Block attributes (the JSON-comment delimiter payload).
+	 * @param string $html  The list wrapper innerHTML.
+	 *
+	 * @return array
+	 */
+	private function list_block( array $attrs, string $html ): array {
+		return array(
+			'blockName'    => 'core/list',
+			'attrs'        => $attrs,
+			'innerHTML'    => $html,
+			'innerContent' => array( $html ),
+			'innerBlocks'  => array(),
+		);
+	}
+
+	/**
+	 * Locate the first core/list block in a parsed tree.
+	 *
+	 * @param array $blocks parse_blocks() output.
+	 *
+	 * @return array|null
+	 */
+	private function find_list( array $blocks ) {
+		foreach ( $blocks as $block ) {
+			if ( isset( $block['blockName'] ) && 'core/list' === $block['blockName'] ) {
+				return $block;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Assert that the stored core/list at the given post has its `values` items
+	 * baked into the wrapper.
+	 *
+	 * @param int $post_id Post to read.
+	 */
+	private function assert_stored_list_baked( int $post_id ): void {
+		$list = $this->find_list( $this->block_tree( $post_id ) );
+		$this->assertNotNull( $list, 'a core/list block must be present in stored content' );
+		$this->assertStringContainsString( '<li>First</li>', $list['innerHTML'], 'the first values item must be inside the wrapper' );
+		$this->assertStringContainsString( '<li>Second</li>', $list['innerHTML'], 'the second values item must be inside the wrapper' );
+		$this->assertStringNotContainsString( '<ul class="wp-block-list"></ul>', $list['innerHTML'], 'the wrapper must no longer be empty' );
+	}
+
+	/**
+	 * The reported bug: a core/list whose `<li>` items live in the deprecated
+	 * `values` attribute, with an EMPTY <ul> wrapper and no core/list-item
+	 * innerBlocks, renders an empty list on modern WordPress (which builds the
+	 * list from core/list-item children, not `values`).
+	 *
+	 * Normalization must bake the `values` HTML into the wrapper so the front
+	 * end serves a populated list and the stored form matches core/list's
+	 * values-based deprecation (Gutenberg migrates it cleanly on next edit).
+	 * This signature is unique to agent-authored markup: a real values-based
+	 * deprecation carries the <li> items INSIDE the wrapper.
+	 */
+	public function test_core_list_values_with_empty_wrapper_are_baked_in() {
+		$block = $this->list_block(
+			array( 'values' => self::INVALID_LIST_VALUES ),
+			self::INVALID_LIST_HTML
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertStringContainsString( '<li>First</li>', $out[0]['innerHTML'], 'first item must be baked into the wrapper' );
+		$this->assertStringContainsString( '<li>Second</li>', $out[0]['innerHTML'], 'second item must be baked into the wrapper' );
+		$this->assertStringContainsString( 'wp-block-list', $out[0]['innerHTML'], 'the wp-block-list class must be preserved' );
+		$this->assertSame( $out[0]['innerHTML'], $out[0]['innerContent'][0], 'innerContent must track the repaired innerHTML' );
+		$this->assertSame( array(), $out[0]['innerBlocks'], 'the block must stay a leaf: no child blocks added' );
+	}
+
+	/**
+	 * insert_blocks funnels through save_blocks(), the single write chokepoint.
+	 * An invalid core/list inserted there must be baked before it is persisted.
+	 */
+	public function test_insert_blocks_normalizes_invalid_list() {
+		$post_id = $this->make_block_post();
+
+		$result = $this->crud->insert_blocks(
+			$post_id,
+			null,
+			array(
+				array(
+					'name'       => 'core/list',
+					'attributes' => array( 'values' => self::INVALID_LIST_VALUES ),
+					'innerHTML'  => self::INVALID_LIST_HTML,
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assert_stored_list_baked( $post_id );
+	}
+
+	/**
+	 * create_post is the sibling write funnel (Post_Manager serializes blocks
+	 * directly, bypassing save_blocks). It must bake an invalid list too.
+	 */
+	public function test_create_post_normalizes_invalid_list() {
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$pm = new \GravityKit\BlockMCP\Post_Manager( $this->crud );
+
+		$result = $pm->create_post(
+			array(
+				'title'  => 'List Normalization',
+				'blocks' => array(
+					array(
+						'name'       => 'core/list',
+						'attributes' => array( 'values' => self::INVALID_LIST_VALUES ),
+						'innerHTML'  => self::INVALID_LIST_HTML,
+					),
+				),
+			)
+		);
+
+		$this->assertIsArray( $result );
+		$this->assert_stored_list_baked( (int) $result['id'] );
+	}
+
+	/**
+	 * Normalization is idempotent: once the items are inside the wrapper the
+	 * "wrapper already contains an <li>" guard makes a second pass a
+	 * byte-for-byte no-op. Without it the second pass would re-append `values`.
+	 */
+	public function test_normalize_list_is_idempotent() {
+		$block = $this->list_block(
+			array( 'values' => self::INVALID_LIST_VALUES ),
+			self::INVALID_LIST_HTML
+		);
+
+		$once  = Block_Normalizer::normalize_tree( array( $block ) );
+		$twice = Block_Normalizer::normalize_tree( $once );
+
+		$this->assertSame( $once, $twice );
+	}
+
+	/**
+	 * No false repair: a correctly-authored modern core/list stores its items as
+	 * core/list-item innerBlocks (and carries no `values`). The non-empty
+	 * innerBlocks guard must leave it byte-identical.
+	 */
+	public function test_valid_list_with_list_item_children_is_not_modified() {
+		$child_html = '<li class="wp-block-list-item">Item</li>';
+		$list_item  = array(
+			'blockName'    => 'core/list-item',
+			'attrs'        => array(),
+			'innerHTML'    => $child_html,
+			'innerContent' => array( $child_html ),
+			'innerBlocks'  => array(),
+		);
+		$block      = array(
+			'blockName'    => 'core/list',
+			'attrs'        => array(),
+			'innerHTML'    => '<ul class="wp-block-list"></ul>',
+			'innerContent' => array( '<ul class="wp-block-list">', null, '</ul>' ),
+			'innerBlocks'  => array( $list_item ),
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertSame( array( $block ), $out, 'a modern list with child blocks must not be touched' );
+	}
+
+	/**
+	 * A nested sublist and an inline link carried inside `values` must survive
+	 * the bake: the whole values fragment (its <a> links and any nested
+	 * <ul>/<ol>) lands inside the wrapper verbatim.
+	 */
+	public function test_core_list_nested_sublist_and_inline_link_survive() {
+		$values = '<li><a href="https://example.com">Link</a></li><li>Parent<ul class="wp-block-list"><li>Child</li></ul></li>';
+		$block  = $this->list_block(
+			array( 'values' => $values ),
+			self::INVALID_LIST_HTML
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertStringContainsString( '<a href="https://example.com">Link</a>', $out[0]['innerHTML'], 'inline link must survive' );
+		$this->assertStringContainsString( '<li>Child</li>', $out[0]['innerHTML'], 'nested sublist item must survive' );
+		$this->assertStringContainsString( $values, $out[0]['innerHTML'], 'the values fragment must be baked in verbatim' );
+	}
+
+	/**
+	 * The wrapper tag is reconciled with the `ordered` attribute. A block that
+	 * (wrongly) supplies a <ul> while `ordered` is true must be emitted as an
+	 * <ol> carrying the ordered HTML attributes (here `start`).
+	 */
+	public function test_ordered_list_with_ul_supplied_emits_ol() {
+		$block = $this->list_block(
+			array(
+				'values'  => self::INVALID_LIST_VALUES,
+				'ordered' => true,
+				'start'   => 3,
+			),
+			self::INVALID_LIST_HTML
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertStringContainsString( '<ol', $out[0]['innerHTML'], 'an ordered list must be emitted as <ol>' );
+		$this->assertStringNotContainsString( '<ul', $out[0]['innerHTML'], 'the <ul> wrapper must be reconciled away' );
+		$this->assertStringContainsString( 'start="3"', $out[0]['innerHTML'], 'the ordered start attribute must be carried onto the <ol>' );
+		$this->assertStringContainsString( '<li>First</li>', $out[0]['innerHTML'], 'the values items must be baked into the <ol>' );
+	}
+
+	/**
 	 * update_block's `saved` snapshot must echo what actually landed on disk.
 	 *
 	 * The snapshot is the documented verification channel ("the response IS
