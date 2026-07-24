@@ -52349,6 +52349,11 @@ function inferLanguage(code) {
 function escapeAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+function ensureMonospaceFallback(fontFamily) {
+  const hasGenericFamily = /\b(?:monospace|ui-monospace|sans-serif|serif|system-ui|cursive|fantasy)\b/i.test(fontFamily);
+  if (hasGenericFamily) return fontFamily;
+  return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
+}
 registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code;
@@ -52381,7 +52386,7 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
     );
   } else {
     const styleParts = [];
-    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${escapeAttr(attrs.fontFamily)}`);
+    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
     if (typeof attrs.fontSize === "string") styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
     if (typeof attrs.lineHeight === "string") styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
     if (typeof attrs.bgColor === "string") styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);
