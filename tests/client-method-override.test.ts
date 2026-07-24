@@ -237,6 +237,36 @@ describe('the fallback stays narrowly scoped', () => {
     await new Promise<void>((r) => server.close(() => r()));
   });
 
+  it('ignores a structured 405 answered by the REST API', async () => {
+    seen.length = 0;
+    // A 405 carrying a REST error body is a real answer, not an edge rejection.
+    // Replaying it as POST could reach a different route, so it must surface.
+    ({ server, port } = await startServer(seen, () => ({
+      status: 405,
+      json: { code: 'rest_method_not_allowed', message: 'nope' },
+    })));
+
+    await expect(clientFor(port).updatePost(1, { title: 'T' })).rejects.toThrow(/405/);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'PATCH', override: undefined });
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  it('does not remember the host when the replay is also rejected', async () => {
+    seen.length = 0;
+    ({ server, port } = await startServer(seen, () => ({ status: 405 })));
+    const client = clientFor(port);
+
+    await expect(client.updatePost(1, { title: 'a' })).rejects.toThrow(/405/);
+    seen.length = 0;
+
+    // The fallback never succeeded, so the next write must still probe with the
+    // real verb rather than assume the override works.
+    await expect(client.updatePost(2, { title: 'b' })).rejects.toThrow(/405/);
+    expect(seen[0]).toMatchObject({ method: 'PATCH', override: undefined });
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
   it('surfaces the error and stops when the replay is rejected too', async () => {
     seen.length = 0;
     // 405s the real verb AND the overridden POST — a host we cannot write to.
