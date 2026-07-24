@@ -226,6 +226,24 @@ describe('enrichBlockTypes — tier grouping', () => {
     };
     expect(() => enrichBlockTypes([weirdType])).not.toThrow();
   });
+
+  it('styles/parent/ancestor/allowed_blocks/supports survive unchanged', () => {
+    const type: BlockType = {
+      ...makeBlockType('core/image', 'preferred', 90),
+      styles: [{ name: 'rounded', label: 'Rounded', is_default: false }],
+      parent: ['core/columns'],
+      ancestor: ['core/group'],
+      allowed_blocks: ['core/paragraph'],
+      supports: { anchor: true },
+    };
+    const result = enrichBlockTypes([type]);
+    expect(result.block_types[0]).toBe(type);
+    expect(result.block_types[0].styles).toEqual([{ name: 'rounded', label: 'Rounded', is_default: false }]);
+    expect(result.block_types[0].parent).toEqual(['core/columns']);
+    expect(result.block_types[0].ancestor).toEqual(['core/group']);
+    expect(result.block_types[0].allowed_blocks).toEqual(['core/paragraph']);
+    expect(result.block_types[0].supports).toEqual({ anchor: true });
+  });
 });
 
 describe('enrichBlockTypes — inline snapshot for stable guidance format', () => {

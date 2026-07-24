@@ -382,6 +382,28 @@ class Block_Reader {
 	}
 
 	/**
+	 * Parse and format a raw block-markup string that has no owning post —
+	 * theme template/template-part files, for instance.
+	 *
+	 * Deliberately bypasses assign_missing_refs_recursive(): there is no post
+	 * to persist a gk_ref into, and a ref that only ever lives in-memory would
+	 * look stable across calls while actually regenerating on every read. Ref
+	 * fields are surfaced only when the source markup already embeds one.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param string $content Raw block markup (post_content-style HTML comments).
+	 * @return array Formatted block data (same shape as format_blocks()).
+	 */
+	public function format_content_blocks( $content ) {
+		$blocks = parse_blocks( (string) $content );
+		if ( ! is_array( $blocks ) ) {
+			$blocks = array();
+		}
+		return $this->format_blocks( $blocks );
+	}
+
+	/**
 	 * Recursively format blocks with path tracking.
 	 *
 	 * @param array $blocks             Parsed blocks.

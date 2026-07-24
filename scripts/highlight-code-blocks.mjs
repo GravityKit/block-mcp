@@ -34,7 +34,7 @@
 import { createHighlighter, createCssVariablesTheme } from 'shiki';
 import axios from 'axios';
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { runWpCli } from './wp-exec.mjs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -195,20 +195,7 @@ const gkcloneDir = process.env.GKCLONE_DIR ?? join(__dirname, '..', '..', 'Tooli
 const wpCliSsh   = process.env.WP_CLI_SSH ?? '';
 
 function wpExec(cmd, { input } = {}) {
-  const full = wpCliSsh
-    ? `${wpCliSsh} ${cmd}`
-    : `npx wp-env run cli -- wp ${cmd}`;
-  return execSync(full, {
-    encoding: 'utf-8',
-    maxBuffer: 50 * 1024 * 1024,
-    cwd: wpCliSsh ? undefined : gkcloneDir,
-    input,
-    stdio: input !== undefined ? ['pipe', 'pipe', 'pipe'] : undefined,
-    shell: wpCliSsh ? '/bin/bash' : undefined,
-  }).split('\n')
-    .filter(l => !l.startsWith('ℹ') && !l.startsWith('✔') && !l.startsWith('PHP Warning') && !l.startsWith('PHP Notice'))
-    .join('\n')
-    .trim();
+  return runWpCli(cmd, { input, wpCliSsh, gkcloneDir });
 }
 
 function discoverPostIds(blockNames) {

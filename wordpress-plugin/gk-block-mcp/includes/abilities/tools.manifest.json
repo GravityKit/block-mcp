@@ -6,7 +6,7 @@
       "name": "list_block_types",
       "ability": "gk-block-mcp/list-block-types",
       "label": "List block types",
-      "description": "Registered block types with per-block `preference` (tier + replacement), `storage_mode` (\"static\"|\"dynamic\"|\"dual\"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.",
+      "description": "Registered block types with per-block `preference` (tier + replacement), `storage_mode` (\"static\"|\"dynamic\"|\"dual\"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations — check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints — respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -48,6 +48,10 @@
           "usage_only": {
             "type": "boolean",
             "description": "Only blocks with usage.count > 0 on this site."
+          },
+          "include_supports": {
+            "type": "boolean",
+            "description": "Include each block's full `supports` object. Default false."
           },
           "limit": {
             "type": "number",
@@ -96,7 +100,7 @@
       "name": "list_patterns",
       "ability": "gk-block-mcp/list-patterns",
       "label": "List patterns",
-      "description": "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild.",
+      "description": "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild. `category` filters differently by pattern kind: registered patterns are matched against their declared pattern categories, while synced patterns (no separate category taxonomy) are matched against the block categories actually used in their content. The response's top-level `categories` lists the registered pattern-category vocabulary.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -107,6 +111,10 @@
           "synced": {
             "type": "boolean",
             "description": "true = synced only, false = registered only, omit = all."
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by pattern category. Registered patterns match declared categories; synced patterns match block categories used in their content."
           },
           "min_score": {
             "type": "number",
@@ -155,6 +163,25 @@
         "required": [
           "pattern_id"
         ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "list_binding_sources",
+      "ability": "gk-block-mcp/list-binding-sources",
+      "label": "List block bindings sources",
+      "description": "Registered block bindings sources — what a block's `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
       },
       "output_schema": {
         "type": "object"
@@ -1089,6 +1116,99 @@
       }
     },
     {
+      "name": "create_pattern",
+      "ability": "gk-block-mcp/create-pattern",
+      "label": "Create pattern",
+      "description": "Extract repeated sections into a reusable pattern, then reference it. Creates a pattern (a wp_block post) from either structured `blocks` (validated the same way as create_post — legacy blocks rejected) or raw `content` — exactly one of the two. `sync_status:\"synced\"` (default) means edits to the pattern update every page that references it; `\"unsynced\"` creates an independent one-off starting point instead. For a synced pattern, the response includes a ready-to-insert `reference` snippet (`{blockName:\"core/block\", attrs:{ref}}`) for insert_blocks. For an unsynced pattern, `reference` is omitted (that shape is a live, propagating synced-block reference and would be wrong for a one-off) — instead the response includes `insert_hint` (`{tool:\"insert_pattern\", params:{pattern_id, synced:false}}`) pointing at the correct follow-up call.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Pattern title (required, non-empty)."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Structured blocks. Mutually exclusive with content — provide exactly one. Validated against block registry and preference tier — legacy blocks are rejected.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw post_content (HTML or block markup). Mutually exclusive with blocks — provide exactly one."
+          },
+          "sync_status": {
+            "type": "string",
+            "enum": [
+              "synced",
+              "unsynced"
+            ],
+            "description": "\"synced\" (default): edits propagate to every page referencing this pattern. \"unsynced\": an independent copy, no propagation."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "publish",
+              "draft"
+            ],
+            "description": "Default publish."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "blocks"
+            ]
+          },
+          {
+            "required": [
+              "content"
+            ]
+          }
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "create_pattern",
+      "annotations": {
+        "readonly": false,
+        "destructive": false,
+        "idempotent": false
+      }
+    },
+    {
       "name": "insert_pattern",
       "ability": "gk-block-mcp/insert-pattern",
       "label": "Insert pattern",
@@ -1986,6 +2106,195 @@
         "type": "object"
       },
       "permission": "edit_post",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "list_templates",
+      "ability": "gk-block-mcp/list-templates",
+      "label": "List templates",
+      "description": "List the active theme's templates (page layouts like \"single\", \"archive\") or template parts (reusable regions like \"header\", \"footer\") — works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` — present (non-null) when a database post already backs the template (an override shadowing a theme file, or a fully custom template with none); null means it currently resolves purely to the theme file. Every template is editable via update_template regardless — a null `wp_id` just means calling it creates the override rather than updating an existing one. Returns an empty list with a `note` only when there is truly nothing to list.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template (page layouts) or wp_template_part (reusable regions). Default wp_template."
+          },
+          "area": {
+            "type": "string",
+            "description": "Template-part area filter (e.g. \"header\", \"footer\"). wp_template_part only."
+          },
+          "post_type": {
+            "type": "string",
+            "description": "Scope wp_template results to templates usable by this post type."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Comma-separated slugs to match exactly (e.g. \"single,page\")."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "theme",
+              "plugin",
+              "custom"
+            ],
+            "description": "\"theme\" (theme file, unmodified), \"custom\" (database override), or \"plugin\" (plugin-registered)."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "get_template",
+      "ability": "gk-block-mcp/get-template",
+      "label": "Get template",
+      "description": "A single template or template part's metadata, raw block markup (`content`), and parsed `blocks`. Use after list_templates. `wp_id` tells you whether a database override shadows the theme file — null means the id currently resolves to the theme file itself.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Template id from list_templates, e.g. \"twentytwentyfive//index\"."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template or wp_template_part. Default wp_template."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "read",
+      "annotations": {
+        "readonly": true,
+        "destructive": false,
+        "idempotent": true
+      }
+    },
+    {
+      "name": "update_template",
+      "ability": "gk-block-mcp/update-template",
+      "label": "Update template",
+      "description": "Replace a template or template part's entire content — whole-template replacement, like rewrite_post_blocks, not a per-block edit. Requires the site's \"Let the assistant edit theme templates\" toggle (off by default; returns a 403 with an actionable message when off). If the id currently resolves to the theme file (`wp_id: null`), a database override is created (`override_created: true`) and the theme file itself is never touched. `content` and `blocks` are mutually exclusive — `blocks` goes through the same registry/tier/dual-storage validation as any other structured-block write. Use reset_template to revert.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Template id from list_templates, e.g. \"twentytwentyfive//index\"."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template or wp_template_part. Default wp_template."
+          },
+          "content": {
+            "type": "string",
+            "description": "Raw block markup to replace the template with. Mutually exclusive with blocks."
+          },
+          "blocks": {
+            "type": "array",
+            "description": "Structured blocks to replace the template with. Mutually exclusive with content.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Fully-qualified block name (e.g. \"core/heading\")."
+                },
+                "attributes": {
+                  "type": "object",
+                  "description": "Block attributes."
+                },
+                "innerHTML": {
+                  "type": "string",
+                  "description": "Wrapper HTML for container blocks (e.g. \"<ul class=\"wp-block-list\"></ul>\"); leaf-block HTML otherwise. REQUIRED when `attributes` includes any source-bound field (rich-text / html / text / raw / attribute / query — e.g. `content` on core/paragraph, `url` on core/image). The server returns `inner_html_required` (HTTP 400) otherwise: an attribute-only insert saves a self-closing block that Gutenberg flags as \"Block contains unexpected or invalid content\" on next edit."
+                },
+                "innerBlocks": {
+                  "type": "array",
+                  "description": "Child blocks. Nest recursively to build lists, columns, groups, etc.",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "template_edit",
+      "annotations": {
+        "readonly": false,
+        "destructive": true,
+        "idempotent": false
+      }
+    },
+    {
+      "name": "reset_template",
+      "ability": "gk-block-mcp/reset-template",
+      "label": "Reset template",
+      "description": "Delete a template's database override, reverting it to the theme file. Requires the site's \"Let the assistant edit theme templates\" toggle (off by default; returns a 403 with an actionable message when off). 404s when the id has no override to remove.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Template id from list_templates, e.g. \"twentytwentyfive//index\"."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "wp_template",
+              "wp_template_part"
+            ],
+            "description": "wp_template or wp_template_part. Default wp_template."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "permission": "template_edit",
       "annotations": {
         "readonly": false,
         "destructive": true,

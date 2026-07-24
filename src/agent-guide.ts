@@ -77,9 +77,21 @@ How to discover the policy at runtime:
 2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields — they reflect the live config.
 3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
 
+Before setting an \`is-style-*\` className, check \`list_block_types\` output's \`styles\` field for the valid variations on that block; respect \`parent\`/\`ancestor\`/\`allowed_blocks\` when nesting blocks so the insert doesn't land somewhere the editor would reject.
+
 How to behave:
 
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch — call \`list_patterns\` first.
+- Reuse existing patterns before building from scratch — call \`list_patterns\` first. Notice a section repeated across pages? Extract it into a pattern with \`create_pattern\`, then reference it — a synced pattern keeps every instance in sync from one edit.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
+
+## Templates (block themes)
+
+\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only — the per-block write tools do not apply to template content.
+
+\`update_template\` and \`reset_template\` write to templates and are gated: if the site hasn't turned on "Let the assistant edit theme templates and template parts", every call 403s with \`template_edits_disabled\`. Don't retry silently — tell the user the toggle needs to be enabled under Settings → Block MCP. \`update_template\` replaces the whole template (like \`rewrite_post_blocks\`, not a per-block edit) and takes exactly one of \`content\` or \`blocks\`; if no override exists yet, one is created automatically and the response's \`override_created\` tells you so. \`reset_template\` deletes the override and reverts to the theme file. Once an override exists, its \`wp_id\` works with the normal per-block tools (\`update_block\`, \`get_page_blocks\`) like any other post.
+
+## Block bindings
+
+Before wiring a block's \`metadata.bindings\` attribute to a source (e.g. \`core/post-meta\`), call \`list_binding_sources\` to confirm the source name is actually registered on this site — an unregistered source silently fails to resolve at render time.`;

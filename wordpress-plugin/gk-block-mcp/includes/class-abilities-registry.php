@@ -277,6 +277,22 @@ class Abilities_Registry {
 				);
 			case 'create_post':
 				return $this->controller_check( array( $this->controller, 'check_edit_permissions' ) );
+			case 'create_pattern':
+				// Delegates to the exact same dedicated permission callback
+				// POST /patterns uses, which checks edit_posts AND the
+				// wp_block post type's create_posts capability (publish_posts) —
+				// the plain edit_post branch below checks only the former,
+				// which would let a Contributor through the ability while
+				// REST denies them.
+				return $this->controller_check( array( $this->controller, 'check_create_pattern_permissions' ) );
+			case 'template_edit':
+				// Delegates to the exact same permission callback the REST
+				// routes use (POST /template, POST /template/reset) so the
+				// Abilities surface can never bypass the toggle
+				// (Template_Manager::edits_enabled()) or its capability half
+				// (edit_posts or edit_theme_options) — no gate logic is
+				// re-implemented here.
+				return $this->controller_check( array( $this->controller, 'check_template_edit_permissions' ) );
 			case 'edit_post':
 			default:
 				$base = $this->controller_check( array( $this->controller, 'check_edit_permissions' ) );

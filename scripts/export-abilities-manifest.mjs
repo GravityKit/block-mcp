@@ -18,6 +18,7 @@ import { POST_TOOLS } from '../src/tools/posts.js';
 import { TERM_TOOLS } from '../src/tools/terms.js';
 import { MEDIA_TOOLS } from '../src/tools/media.js';
 import { YOAST_TOOLS } from '../src/tools/yoast.js';
+import { TEMPLATE_TOOLS } from '../src/tools/templates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,34 @@ const UPLOAD = new Set(['upload_media']);
 
 /** @type {ReadonlySet<string>} */
 const CREATE = new Set(['create_post']);
+
+/**
+ * create_pattern's REST twin has a dedicated permission callback
+ * (REST_Controller::check_create_pattern_permissions()) that checks the base
+ * edit_posts capability AND the wp_block post type's create_posts capability
+ * (which core maps to publish_posts, not edit_posts) — a Contributor has the
+ * former but not the latter. Mapped to its own permission key so
+ * Abilities_Registry::check_tool_permission() routes to that exact callback
+ * instead of the weaker default 'edit_post' branch, which checks only
+ * edit_posts (plus an optional per-post check that doesn't apply here, since
+ * create_pattern has no target post_id).
+ *
+ * @type {ReadonlySet<string>}
+ */
+const CREATE_PATTERN = new Set(['create_pattern']);
+
+/**
+ * Template writes, gated by the site's own toggle (Template_Manager::edits_enabled(),
+ * option gk_block_api_template_edits + filter gk/block-mcp/templates/allow-edits)
+ * in addition to a capability check. Mapped to their own permission key so
+ * Abilities_Registry::check_tool_permission() can route them to
+ * check_template_edit_permissions() instead of the ungated default 'edit_post'
+ * branch — the same gate their REST twins (POST /template, POST /template/reset)
+ * enforce.
+ *
+ * @type {ReadonlySet<string>}
+ */
+const TEMPLATE_EDIT = new Set(['update_template', 'reset_template']);
 
 /** @type {ReadonlySet<string>} */
 const READ = new Set([
@@ -66,6 +95,8 @@ function permissionFor(name, annotations) {
   if (MANAGE_OPTIONS.has(name)) return 'manage_options';
   if (UPLOAD.has(name)) return 'upload_files';
   if (CREATE.has(name)) return 'create_post';
+  if (CREATE_PATTERN.has(name)) return 'create_pattern';
+  if (TEMPLATE_EDIT.has(name)) return 'template_edit';
   if (PER_POST_READ.has(name)) return 'edit_post';
   if (READ.has(name) || annotations?.readOnlyHint === true) return 'read';
   return 'edit_post';
@@ -119,6 +150,7 @@ export function buildManifest() {
     ...TERM_TOOLS,
     ...MEDIA_TOOLS,
     ...YOAST_TOOLS,
+    ...TEMPLATE_TOOLS,
     ...EXTRA_TOOLS,
   ];
 

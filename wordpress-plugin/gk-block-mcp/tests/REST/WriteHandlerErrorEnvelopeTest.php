@@ -30,6 +30,7 @@ use GravityKit\BlockMCP\Pattern_Manager;
 use GravityKit\BlockMCP\Post_Manager;
 use GravityKit\BlockMCP\Preferences;
 use GravityKit\BlockMCP\REST_Controller;
+use GravityKit\BlockMCP\Template_Manager;
 use GravityKit\BlockMCP\Term_Manager;
 
 class WriteHandlerErrorEnvelopeTest extends BlockApiTestCase {
@@ -53,7 +54,7 @@ class WriteHandlerErrorEnvelopeTest extends BlockApiTestCase {
 		$crud            = new Block_CRUD( $preferences, $safety, $transformer, $block_inventory );
 		$mutator         = new Block_Mutator( $crud, $preferences );
 		$registry        = new Block_Registry( $preferences, $block_inventory );
-		$patterns        = new Pattern_Manager( $preferences );
+		$patterns        = new Pattern_Manager( $preferences, $crud );
 
 		$this->controller = new REST_Controller(
 			$registry,
@@ -64,7 +65,8 @@ class WriteHandlerErrorEnvelopeTest extends BlockApiTestCase {
 			new Post_Manager( $crud ),
 			new Term_Manager(),
 			new Media_Manager(),
-			$preferences
+			$preferences,
+			new Template_Manager( $crud )
 		);
 
 		$this->subscriber_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );

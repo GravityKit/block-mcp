@@ -3,7 +3,7 @@
  * Plugin Name: Block MCP by GravityKit
  * Plugin URI: https://www.gravitykit.com/wordpress-block-mcp/
  * Description: Lets an AI assistant (Claude, Cursor) safely create and edit your WordPress content over the Model Context Protocol (MCP).
- * Version: 2.1.0
+ * Version: 2.2.0
  * Author: GravityKit
  * Author URI: https://www.gravitykit.com
  * License: GPL-2.0-or-later
@@ -35,7 +35,7 @@ if ( ! defined( 'GK_BLOCK_MCP_DISABLE_FOUNDATION' ) ) {
 	}
 }
 
-define( 'GK_BLOCK_MCP_VERSION', '2.1.0' );
+define( 'GK_BLOCK_MCP_VERSION', '2.2.0' );
 define( 'GK_BLOCK_MCP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'GK_BLOCK_MCP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
@@ -189,14 +189,15 @@ function build_block_services() {
 	$preferences      = new Preferences();
 	$block_inventory  = new Block_Inventory();
 	$block_registry   = new Block_Registry( $preferences, $block_inventory );
-	$pattern_manager  = new Pattern_Manager( $preferences );
 	$block_safety     = new Block_Safety();
 	$html_transformer = new HTML_Transformer();
 	$block_crud       = new Block_CRUD( $preferences, $block_safety, $html_transformer, $block_inventory );
+	$pattern_manager  = new Pattern_Manager( $preferences, $block_crud );
 	$block_mutator    = new Block_Mutator( $block_crud, $preferences );
 	$post_manager     = new Post_Manager( $block_crud );
 	$term_manager     = new Term_Manager();
 	$media_manager    = new Media_Manager();
+	$template_manager = new Template_Manager( $block_crud );
 
 	$controller = new REST_Controller(
 		$block_registry,
@@ -207,7 +208,8 @@ function build_block_services() {
 		$post_manager,
 		$term_manager,
 		$media_manager,
-		$preferences
+		$preferences,
+		$template_manager
 	);
 
 	return array(
@@ -333,6 +335,24 @@ function init_agent() {
 	// (priority 20) so it intercepts both wrong-password WP_Error results and
 	// correctly-authenticated WP_User objects for the service account.
 	add_filter( 'authenticate', array( __NAMESPACE__ . '\\Agent_Provisioner', 'block_agent_login' ), 30, 3 );
+	// register_role() derives Agent_Provisioner::TEMPLATE_EDIT_CAP from this
+	// toggle, so grant/revoke must track add, update, AND delete of the
+	// option, not just update — a settings reset calls delete_option(),
+	// which fires the generic `deleted_option` action rather than an
+	// option-scoped one (WordPress has no `delete_option_{$option}` hook),
+	// hence the name guard below; and a fresh site's first enable routes
+	// through add_option() rather than update_option().
+	$reassert_agent_role = array( __NAMESPACE__ . '\\Agent_Provisioner', 'register_role' );
+	add_action( 'add_option_' . \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, $reassert_agent_role );
+	add_action( 'update_option_' . \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, $reassert_agent_role );
+	add_action(
+		'deleted_option',
+		static function ( $option ) use ( $reassert_agent_role ) {
+			if ( \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION === $option ) {
+				call_user_func( $reassert_agent_role );
+			}
+		}
+	);
 }
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\init_agent' );
 

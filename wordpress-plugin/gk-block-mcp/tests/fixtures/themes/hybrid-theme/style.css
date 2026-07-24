@@ -1,0 +1,7 @@
+/*
+Theme Name: Hybrid Theme
+Theme URI: https://wordpress.org/
+Description: For testing purposes only — a "hybrid" theme with no templates/index.html or block-templates/index.html (so wp_is_block_theme() is false) but real files under templates/ and parts/ (so get_block_templates() still finds them).
+Version: 1.0.0
+Text Domain: hybrid-theme
+*/

@@ -96,17 +96,26 @@ class REST_Controller {
 	private $preferences;
 
 	/**
+	 * Template manager instance (list/get FSE templates + template parts).
+	 *
+	 * @since 2.2.0
+	 * @var Template_Manager
+	 */
+	private $template_manager;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Block_Registry  $block_registry  Block registry.
-	 * @param Pattern_Manager $pattern_manager Pattern manager.
-	 * @param Block_CRUD      $block_crud      Block CRUD.
-	 * @param Block_Inventory $block_inventory Site-wide block inventory.
-	 * @param Block_Mutator   $block_mutator   Block mutator.
-	 * @param Post_Manager    $post_manager    Post manager.
-	 * @param Term_Manager    $term_manager    Term manager.
-	 * @param Media_Manager   $media_manager   Media manager.
-	 * @param Preferences     $preferences     Preferences (tier classification source).
+	 * @param Block_Registry   $block_registry   Block registry.
+	 * @param Pattern_Manager  $pattern_manager  Pattern manager.
+	 * @param Block_CRUD       $block_crud       Block CRUD.
+	 * @param Block_Inventory  $block_inventory  Site-wide block inventory.
+	 * @param Block_Mutator    $block_mutator    Block mutator.
+	 * @param Post_Manager     $post_manager     Post manager.
+	 * @param Term_Manager     $term_manager     Term manager.
+	 * @param Media_Manager    $media_manager    Media manager.
+	 * @param Preferences      $preferences      Preferences (tier classification source).
+	 * @param Template_Manager $template_manager Template manager.
 	 */
 	public function __construct(
 		Block_Registry $block_registry,
@@ -117,17 +126,19 @@ class REST_Controller {
 		Post_Manager $post_manager,
 		Term_Manager $term_manager,
 		Media_Manager $media_manager,
-		Preferences $preferences
+		Preferences $preferences,
+		Template_Manager $template_manager
 	) {
-		$this->block_registry  = $block_registry;
-		$this->pattern_manager = $pattern_manager;
-		$this->block_crud      = $block_crud;
-		$this->block_inventory = $block_inventory;
-		$this->block_mutator   = $block_mutator;
-		$this->post_manager    = $post_manager;
-		$this->term_manager    = $term_manager;
-		$this->media_manager   = $media_manager;
-		$this->preferences     = $preferences;
+		$this->block_registry   = $block_registry;
+		$this->pattern_manager  = $pattern_manager;
+		$this->block_crud       = $block_crud;
+		$this->block_inventory  = $block_inventory;
+		$this->block_mutator    = $block_mutator;
+		$this->post_manager     = $post_manager;
+		$this->term_manager     = $term_manager;
+		$this->media_manager    = $media_manager;
+		$this->preferences      = $preferences;
+		$this->template_manager = $template_manager;
 	}
 
 	/**
@@ -143,35 +154,51 @@ class REST_Controller {
 				'callback'            => array( $this, 'get_block_types' ),
 				'permission_callback' => array( $this, 'check_permissions' ),
 				'args'                => array(
-					'namespace'      => array(
+					'namespace'        => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'category'       => array(
+					'category'         => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'preferred_only' => array(
+					'preferred_only'   => array(
 						'type'    => 'boolean',
 						'default' => false,
 					),
-					'tier'           => array(
+					'tier'             => array(
 						'type' => 'string',
 						'enum' => array( 'preferred', 'acceptable', 'avoid', 'legacy' ),
 					),
-					'storage_mode'   => array(
+					'storage_mode'     => array(
 						'type' => 'string',
 						'enum' => array( 'static', 'dynamic', 'dual' ),
 					),
-					'search'         => array(
+					'search'           => array(
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_text_field',
 					),
-					'usage_only'     => array(
+					'usage_only'       => array(
+						'type'    => 'boolean',
+						'default' => false,
+					),
+					'include_supports' => array(
 						'type'    => 'boolean',
 						'default' => false,
 					),
 				),
+			)
+		);
+
+		// Block bindings sources.
+		register_rest_route(
+			self::NAMESPACE,
+			'/binding-sources',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_binding_sources' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(),
 			)
 		);
 
@@ -180,10 +207,17 @@ class REST_Controller {
 			self::NAMESPACE,
 			'/patterns',
 			array(
-				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => array( $this, 'get_patterns' ),
-				'permission_callback' => array( $this, 'check_permissions' ),
-				'args'                => $this->get_pattern_query_args(),
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_patterns' ),
+					'permission_callback' => array( $this, 'check_permissions' ),
+					'args'                => $this->get_pattern_query_args(),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'create_pattern' ),
+					'permission_callback' => array( $this, 'check_create_pattern_permissions' ),
+				),
 			)
 		);
 
@@ -253,6 +287,128 @@ class REST_Controller {
 					'refresh' => array(
 						'type'    => 'boolean',
 						'default' => false,
+					),
+				),
+			)
+		);
+
+		// FSE templates + template parts (read-only).
+		register_rest_route(
+			self::NAMESPACE,
+			'/templates',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_templates' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'type'      => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+					'area'      => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+						'description'       => 'Template-part area (wp_template_part only, e.g. "header").',
+					),
+					'post_type' => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+					),
+					'slug'      => array(
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Comma-separated slugs to match exactly.',
+					),
+					'source'    => array(
+						'type' => 'string',
+						'enum' => array( 'theme', 'plugin', 'custom' ),
+					),
+				),
+			)
+		);
+
+		// Single FSE template or template part, with raw content + parsed blocks.
+		// Query args (not a path segment) because ids contain "//".
+		register_rest_route(
+			self::NAMESPACE,
+			'/template',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_template' ),
+				'permission_callback' => array( $this, 'check_permissions' ),
+				'args'                => array(
+					'id'   => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type' => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+				),
+			)
+		);
+
+		// Update a template/template part's whole content. Gated: the toggle
+		// must be on AND the actor needs the dedicated gk_block_mcp_edit_templates
+		// capability or edit_theme_options (check_template_edit_permissions) —
+		// edit_posts is not sufficient. Same /template path as the GET route
+		// above, registered separately for the POST method.
+		register_rest_route(
+			self::NAMESPACE,
+			'/template',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'update_template' ),
+				'permission_callback' => array( $this, 'check_template_edit_permissions' ),
+				'args'                => array(
+					'id'      => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type'    => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
+					),
+					'content' => array(
+						'type'        => 'string',
+						'description' => 'Raw block markup. Mutually exclusive with "blocks".',
+					),
+					'blocks'  => array(
+						'type'        => 'array',
+						'description' => 'Structured blocks. Mutually exclusive with "content".',
+					),
+				),
+			)
+		);
+
+		// Delete a template/template part's database override, reverting it
+		// to the theme file. Same gate as the update route.
+		register_rest_route(
+			self::NAMESPACE,
+			'/template/reset',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'reset_template' ),
+				'permission_callback' => array( $this, 'check_template_edit_permissions' ),
+				'args'                => array(
+					'id'   => array(
+						'type'              => 'string',
+						'required'          => true,
+						'sanitize_callback' => 'sanitize_text_field',
+						'description'       => 'Template id, e.g. "twentytwentyfive//index".',
+					),
+					'type' => array(
+						'type'    => 'string',
+						'enum'    => Template_Manager::TEMPLATE_TYPES,
+						'default' => 'wp_template',
 					),
 				),
 			)
@@ -978,6 +1134,80 @@ class REST_Controller {
 	}
 
 	/**
+	 * Permission callback for POST /patterns (create_pattern).
+	 *
+	 * A `wp_block` post's `create_posts` capability maps to `publish_posts`
+	 * (WordPress core's `register_post_type( 'wp_block', … )`), which the
+	 * dedicated agent role holds — see `Agent_Provisioner::default_caps()`.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool|\WP_Error
+	 */
+	public function check_create_pattern_permissions() {
+		$base_check = $this->check_permissions();
+		if ( is_wp_error( $base_check ) ) {
+			return $base_check;
+		}
+
+		$pattern_post_type = get_post_type_object( 'wp_block' );
+		$create_cap        = ( $pattern_post_type && isset( $pattern_post_type->cap->create_posts ) )
+			? $pattern_post_type->cap->create_posts
+			: 'edit_posts';
+
+		if ( ! current_user_can( $create_cap ) ) {
+			return new \WP_Error(
+				'rest_cannot_create',
+				__( 'Sorry, you are not allowed to create patterns.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Permission callback for template write endpoints (POST /template,
+	 * POST /template/reset).
+	 *
+	 * Gated on the site toggle first, then a capability check. `edit_posts`
+	 * alone is NOT sufficient here, unlike every other write route on this
+	 * namespace: the plugin performs the underlying `wp_insert_post()` /
+	 * `wp_update_post()` on `wp_template`/`wp_template_part` itself, which
+	 * do not enforce capabilities, so an `edit_posts`-only actor (any
+	 * contributor-or-above, or a leaked low-privilege Application Password)
+	 * would otherwise be able to rewrite sitewide template chrome — header,
+	 * footer, 404, archive, search — regardless of their own post-editing
+	 * scope. The toggle grants `Agent_Provisioner::TEMPLATE_EDIT_CAP`
+	 * specifically to the agent role instead of `edit_theme_options`, so
+	 * turning it on never reopens core's own `/wp/v2/templates`, the
+	 * Customizer, menus, or widgets to the agent's Application Password.
+	 * A "self" connection (a real admin's own Application Password) already
+	 * carries `edit_theme_options` and needs no toggle-adjacent grant.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return bool|\WP_Error
+	 */
+	public function check_template_edit_permissions() {
+		if ( ! Template_Manager::edits_enabled() ) {
+			return new \WP_Error(
+				'template_edits_disabled',
+				__( 'Editing theme templates is turned off for this site. A site administrator can enable it under Block MCP → Settings.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+		if ( ! current_user_can( Agent_Provisioner::TEMPLATE_EDIT_CAP ) && ! current_user_can( 'edit_theme_options' ) ) {
+			return new \WP_Error(
+				'rest_forbidden',
+				__( 'You do not have permission to edit templates.', 'gk-block-mcp' ),
+				array( 'status' => 403 )
+			);
+		}
+		return true;
+	}
+
+	/**
 	 * GET /instructions — serve the site's MCP serverInfo addendum.
 	 *
 	 * Public endpoint by design. The MCP server fetches this at startup
@@ -1178,18 +1408,34 @@ class REST_Controller {
 	public function get_block_types( $request ) {
 		try {
 			$args = array(
-				'namespace'      => $request->get_param( 'namespace' ),
-				'category'       => $request->get_param( 'category' ),
-				'preferred_only' => (bool) $request->get_param( 'preferred_only' ),
-				'tier'           => $request->get_param( 'tier' ),
-				'storage_mode'   => $request->get_param( 'storage_mode' ),
-				'search'         => $request->get_param( 'search' ),
-				'usage_only'     => (bool) $request->get_param( 'usage_only' ),
+				'namespace'        => $request->get_param( 'namespace' ),
+				'category'         => $request->get_param( 'category' ),
+				'preferred_only'   => (bool) $request->get_param( 'preferred_only' ),
+				'tier'             => $request->get_param( 'tier' ),
+				'storage_mode'     => $request->get_param( 'storage_mode' ),
+				'search'           => $request->get_param( 'search' ),
+				'usage_only'       => (bool) $request->get_param( 'usage_only' ),
+				'include_supports' => (bool) $request->get_param( 'include_supports' ),
 			);
 
 			$block_types = $this->block_registry->get_block_types( $args );
 
 			return new \WP_REST_Response( array( 'block_types' => $block_types ), 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /binding-sources
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_binding_sources() {
+		try {
+			return new \WP_REST_Response( $this->block_registry->get_binding_sources(), 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
@@ -1238,10 +1484,73 @@ class REST_Controller {
 
 			$patterns = $this->pattern_manager->get_patterns( $args );
 
-			return new \WP_REST_Response( array( 'patterns' => $patterns ), 200 );
+			return new \WP_REST_Response(
+				array(
+					'patterns'   => $patterns,
+					'categories' => $this->get_pattern_categories(),
+				),
+				200
+			);
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}
+	}
+
+	/**
+	 * POST /patterns — create a synced pattern (a `wp_block` post).
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function create_pattern( $request ) {
+		try {
+			$args = $request->get_json_params();
+			if ( ! is_array( $args ) ) {
+				$args = $request->get_params();
+			}
+
+			$result = $this->pattern_manager->create_pattern( (array) $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * Registered pattern-category vocabulary, for the `category` filter on
+	 * this route. Note the semantic split: registered patterns are matched
+	 * against these declared categories, while synced patterns are matched
+	 * against the block categories used in their content (there is no
+	 * separate category taxonomy for synced patterns) — see
+	 * `Pattern_Manager::get_block_categories_in_content()`.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @return array[] List of `{name, label}` entries.
+	 */
+	private function get_pattern_categories() {
+		if ( ! class_exists( '\WP_Block_Pattern_Categories_Registry' ) ) {
+			return array();
+		}
+
+		$categories = \WP_Block_Pattern_Categories_Registry::get_instance()->get_all_registered();
+
+		return array_map(
+			function ( $category ) {
+				return array(
+					'name'  => $category['name'],
+					'label' => isset( $category['label'] ) ? $category['label'] : $category['name'],
+				);
+			},
+			$categories
+		);
 	}
 
 	/**
@@ -1314,6 +1623,123 @@ class REST_Controller {
 			$stats   = $this->block_inventory->get_stats( $refresh );
 
 			return new \WP_REST_Response( $stats, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	// =========================================================================
+	// FSE Template Endpoints
+	// =========================================================================
+
+	/**
+	 * GET /templates
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_templates( $request ) {
+		try {
+			$args = array(
+				'type'      => $request->get_param( 'type' ),
+				'area'      => $request->get_param( 'area' ),
+				'post_type' => $request->get_param( 'post_type' ),
+				'slug'      => $request->get_param( 'slug' ),
+				'source'    => $request->get_param( 'source' ),
+			);
+
+			$result = $this->template_manager->get_templates( $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * GET /template
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_template( $request ) {
+		try {
+			$id     = $request->get_param( 'id' );
+			$type   = $request->get_param( 'type' );
+			$result = $this->template_manager->get_template( $id, $type );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /template — whole-template content replacement, gated by
+	 * check_template_edit_permissions().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function update_template( $request ) {
+		try {
+			$id   = $request->get_param( 'id' );
+			$type = $request->get_param( 'type' );
+
+			$args = array();
+			if ( $request->has_param( 'content' ) ) {
+				$args['content'] = $request->get_param( 'content' );
+			}
+			if ( $request->has_param( 'blocks' ) ) {
+				$args['blocks'] = $request->get_param( 'blocks' );
+			}
+
+			$result = $this->template_manager->update_template( $id, $type, $args );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
+		} catch ( \Throwable $e ) {
+			return $this->handle_error( $e );
+		}
+	}
+
+	/**
+	 * POST /template/reset — delete a template's database override,
+	 * gated by check_template_edit_permissions().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 *
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function reset_template( $request ) {
+		try {
+			$id     = $request->get_param( 'id' );
+			$type   = $request->get_param( 'type' );
+			$result = $this->template_manager->reset_template( $id, $type );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			return new \WP_REST_Response( $result, 200 );
 		} catch ( \Throwable $e ) {
 			return $this->handle_error( $e );
 		}

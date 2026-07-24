@@ -16,7 +16,7 @@ export const DISCOVERY_TOOLS = [
   {
     name: 'list_block_types',
     description:
-      'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
+      'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations — check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints — respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset → next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: 'List block types' },
     outputSchema: {
       type: 'object',
@@ -37,22 +37,24 @@ export const DISCOVERY_TOOLS = [
         tier:           { type: 'string',  enum: ['preferred', 'acceptable', 'avoid', 'legacy'], description: 'Exact tier match. Use for migration audits.' },
         storage_mode:   { type: 'string',  enum: ['static', 'dynamic', 'dual'], description: 'Filter by storage mode. "dual" surfaces blocks needing both attrs+innerHTML on update.' },
         search:         { type: 'string',  description: 'Case-insensitive substring match against name + title.' },
-        preferred_only: { type: 'boolean', description: 'Shorthand for `tier in {preferred,acceptable}` (score ≥ 50).' },
-        usage_only:     { type: 'boolean', description: 'Only blocks with usage.count > 0 on this site.' },
-        limit:          { type: 'number',  description: 'Max results. Default 50.' },
-        offset:         { type: 'number',  description: 'Skip this many. Default 0.' },
+        preferred_only:   { type: 'boolean', description: 'Shorthand for `tier in {preferred,acceptable}` (score ≥ 50).' },
+        usage_only:       { type: 'boolean', description: 'Only blocks with usage.count > 0 on this site.' },
+        include_supports: { type: 'boolean', description: 'Include each block\'s full `supports` object. Default false.' },
+        limit:            { type: 'number',  description: 'Max results. Default 50.' },
+        offset:           { type: 'number',  description: 'Skip this many. Default 0.' },
       },
     },
   },
   {
     name: 'list_patterns',
-    description: 'Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild.',
+    description: 'Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour — pass `refresh:true` to rebuild. `category` filters differently by pattern kind: registered patterns are matched against their declared pattern categories, while synced patterns (no separate category taxonomy) are matched against the block categories actually used in their content. The response\'s top-level `categories` lists the registered pattern-category vocabulary.',
     annotations: { ...READ_ANNOT, title: 'List patterns' },
     inputSchema: {
       type: 'object' as const,
       properties: {
         search:    { type: 'string',  description: 'Search by name or keyword.' },
         synced:    { type: 'boolean', description: 'true = synced only, false = registered only, omit = all.' },
+        category:  { type: 'string',  description: 'Filter by pattern category. Registered patterns match declared categories; synced patterns match block categories used in their content.' },
         min_score: { type: 'number',  description: 'Min preference score; 0 excludes legacy.' },
         limit:     { type: 'number',  description: 'Max results. Default 20.' },
         offset:    { type: 'number',  description: 'Skip this many results. Default 0.' },
@@ -71,6 +73,12 @@ export const DISCOVERY_TOOLS = [
       },
       required: ['pattern_id'],
     },
+  },
+  {
+    name: 'list_binding_sources',
+    description: 'Registered block bindings sources — what a block\'s `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.',
+    annotations: { ...READ_ANNOT, title: 'List block bindings sources' },
+    inputSchema: { type: 'object' as const, properties: {} },
   },
   {
     name: 'get_site_usage',
@@ -140,14 +148,20 @@ export async function handleDiscoveryTool(
 ): Promise<unknown> {
   switch (toolName) {
     case 'list_block_types': {
+      if (args.include_supports !== undefined && typeof args.include_supports !== 'boolean') {
+        throw new Error(
+          `list_block_types: "include_supports" must be a boolean, got ${JSON.stringify(args.include_supports)}.`,
+        );
+      }
       const response = await client.getBlockTypes({
-        namespace:      args.namespace as string | undefined,
-        category:       args.category as string | undefined,
-        preferred_only: args.preferred_only as boolean | undefined,
-        tier:           args.tier as 'preferred' | 'acceptable' | 'avoid' | 'legacy' | undefined,
-        storage_mode:   args.storage_mode as 'static' | 'dynamic' | 'dual' | undefined,
-        search:         args.search as string | undefined,
-        usage_only:     args.usage_only as boolean | undefined,
+        namespace:        args.namespace as string | undefined,
+        category:         args.category as string | undefined,
+        preferred_only:   args.preferred_only as boolean | undefined,
+        tier:             args.tier as 'preferred' | 'acceptable' | 'avoid' | 'legacy' | undefined,
+        storage_mode:     args.storage_mode as 'static' | 'dynamic' | 'dual' | undefined,
+        search:           args.search as string | undefined,
+        usage_only:       args.usage_only as boolean | undefined,
+        include_supports: args.include_supports as boolean | undefined,
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total  = enriched.block_types.length;
@@ -174,6 +188,7 @@ export async function handleDiscoveryTool(
       const response = await client.getPatterns({
         q: args.search as string | undefined,
         synced: args.synced as boolean | undefined,
+        category: args.category as string | undefined,
         min_score: args.min_score as number | undefined,
         refresh: args.refresh as boolean | undefined,
       });
@@ -187,6 +202,7 @@ export async function handleDiscoveryTool(
         offset,
         next_offset: offset + page.length < total ? offset + page.length : null,
         summary: enriched.summary,
+        categories: response.categories,
       };
     }
 
@@ -198,6 +214,9 @@ export async function handleDiscoveryTool(
 
     case 'get_site_usage':
       return await client.getSiteUsage(args.refresh as boolean | undefined);
+
+    case 'list_binding_sources':
+      return await client.getBindingSources();
 
     case 'scan_storage_modes':
       return await client.scanStorageModes();

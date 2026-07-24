@@ -35215,7 +35215,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.1.0",
+  version: "2.2.0",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
@@ -40053,6 +40053,12 @@ function coercePostId(value, label) {
   }
   throw new Error(`${label}: post_id must be a positive integer`);
 }
+function isNonEmptyArray(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+function isNonEmptyString(value) {
+  return typeof value === "string" && value !== "";
+}
 
 // src/client.ts
 function mimeForFilename(filename) {
@@ -40070,6 +40076,7 @@ function mimeForFilename(filename) {
 }
 var MAX_RETRIES = 2;
 var IDEMPOTENT_METHODS = /* @__PURE__ */ new Set(["get", "head", "options"]);
+var METHOD_OVERRIDE_VERBS = /* @__PURE__ */ new Set(["put", "patch", "delete"]);
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -40096,6 +40103,19 @@ function isRetryable(error2) {
 }
 var WordPressBlockClient = class {
   client;
+  /**
+   * True once a replay has proven this host rejects PUT / PATCH / DELETE at the
+   * edge yet honours `X-HTTP-Method-Override` on a POST.
+   *
+   * Some managed hosts answer those verbs with a 405 before the request reaches
+   * PHP, which breaks every editing tool while GET and POST keep working.
+   *
+   * Only requests issued after this is true skip the rejected probe; writes
+   * already in flight have each gone out as a real verb and pay their own. Set
+   * only after a replay succeeds, so a host that rejects the override too is
+   * never treated as override-capable.
+   */
+  useMethodOverride = false;
   /**
    * Create a new WordPress Block API client.
    *
@@ -40129,10 +40149,30 @@ var WordPressBlockClient = class {
       },
       timeout: 3e4
     });
+    this.client.interceptors.request.use((config3) => {
+      const method = (config3.method ?? "get").toLowerCase();
+      const forced = config3.__overrideMethod === true;
+      const needsOverride = (this.useMethodOverride || forced) && METHOD_OVERRIDE_VERBS.has(method);
+      if (needsOverride) {
+        config3.headers.set("X-HTTP-Method-Override", method.toUpperCase());
+        config3.method = "post";
+      }
+      return config3;
+    });
     this.client.interceptors.response.use(
       (r4) => r4,
       async (error2) => {
         const config3 = error2.config;
+        const method = (config3?.method ?? "get").toLowerCase();
+        const body3 = error2.response?.data;
+        const isRestErrorBody = !!body3 && typeof body3 === "object" && "code" in body3;
+        const edgeRejectedVerb = error2.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method) && !isRestErrorBody;
+        if (config3 && edgeRejectedVerb) {
+          config3.__overrideMethod = true;
+          const replay = await this.client.request(config3);
+          this.useMethodOverride = true;
+          return replay;
+        }
         if (config3 && isRetryable(error2)) {
           const attempt = (config3.__retryCount ?? 0) + 1;
           if (attempt <= MAX_RETRIES) {
@@ -40210,6 +40250,7 @@ var WordPressBlockClient = class {
     if (params?.storage_mode) queryParams.storage_mode = params.storage_mode;
     if (params?.search) queryParams.search = params.search;
     if (params?.usage_only) queryParams.usage_only = "true";
+    if (params?.include_supports) queryParams.include_supports = "true";
     const response = await this.client.get("/block-types", {
       params: queryParams
     });
@@ -40263,6 +40304,26 @@ var WordPressBlockClient = class {
     return response.data;
   }
   /**
+   * Create a synced pattern (a `wp_block` post). Exactly one of
+   * `content`/`blocks` is required; structured `blocks` go through the same
+   * registry/tier/dual-storage validation as `create_post`.
+   *
+   * @param data - Pattern title plus exactly one of content/blocks, sync_status, slug, status
+   * @returns The created pattern's id, slug, sync_status, edit_url, and a ready-to-insert `reference` snippet
+   */
+  async createPattern(data) {
+    if (!data.title || data.title.trim() === "") {
+      throw new Error('create_pattern: a non-empty "title" is required');
+    }
+    const hasContent = isNonEmptyString(data.content);
+    const hasBlocks = isNonEmptyArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+    }
+    const response = await this.client.post("/patterns", data);
+    return response.data;
+  }
+  /**
    * Resolve a URL or path to a WordPress post ID.
    *
    * Accepts any URL on the site (full URL or path). Handles all post types,
@@ -40303,6 +40364,18 @@ var WordPressBlockClient = class {
     const params = {};
     if (refresh) params.refresh = "true";
     const response = await this.client.get("/site-usage", { params });
+    return response.data;
+  }
+  /**
+   * Get registered block bindings sources (e.g. `core/post-meta`,
+   * `core/pattern-overrides`) — what a block's `metadata.bindings` attribute
+   * can reference to pull an attribute value dynamically.
+   *
+   * @returns `{sources, note?}` — `note` is present (and `sources` empty)
+   *          on WordPress below 6.5, which has no Block Bindings API.
+   */
+  async getBindingSources() {
+    const response = await this.client.get("/binding-sources");
     return response.data;
   }
   // ============================================
@@ -40773,6 +40846,78 @@ var WordPressBlockClient = class {
     const response = await this.client.patch("/yoast/bulk", { posts });
     return response.data;
   }
+  // ──────────────────────────────────────────────────────────
+  // v2.2 — FSE templates (read-only)
+  // ──────────────────────────────────────────────────────────
+  /** List a block theme's templates or template parts. */
+  async getTemplates(params) {
+    const queryParams = {};
+    if (params?.type) queryParams.type = params.type;
+    if (params?.area) queryParams.area = params.area;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.slug) queryParams.slug = params.slug;
+    if (params?.source) queryParams.source = params.source;
+    const response = await this.client.get("/templates", { params: queryParams });
+    return response.data;
+  }
+  /**
+   * Get a single template or template part, including raw content and
+   * parsed blocks.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index". Passed as a
+   *             query arg (not a path segment) because ids embed "//".
+   * @param type Defaults to "wp_template".
+   */
+  async getTemplate(id, type) {
+    if (!id) {
+      throw new Error('get_template: "id" is required');
+    }
+    const params = { id };
+    if (type) params.type = type;
+    const response = await this.client.get("/template", { params });
+    return response.data;
+  }
+  /**
+   * Replace a template or template part's entire content. Whole-template
+   * replacement (like `replaceAllBlocks`), not a per-block edit. Gated by
+   * the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   * @param data Exactly one of `content` or `blocks`.
+   */
+  async updateTemplate(id, type, data) {
+    if (!id) {
+      throw new Error('update_template: "id" is required');
+    }
+    const hasContent = typeof data.content === "string";
+    const hasBlocks = Array.isArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('update_template: provide exactly one of "content" or "blocks"');
+    }
+    const body3 = { id };
+    if (type) body3.type = type;
+    if (hasContent) body3.content = data.content;
+    if (hasBlocks) body3.blocks = data.blocks;
+    const response = await this.client.post("/template", body3);
+    return response.data;
+  }
+  /**
+   * Delete a template's database override, reverting it to the theme file.
+   * Gated by the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   */
+  async resetTemplate(id, type) {
+    if (!id) {
+      throw new Error('reset_template: "id" is required');
+    }
+    const body3 = { id };
+    if (type) body3.type = type;
+    const response = await this.client.post("/template/reset", body3);
+    return response.data;
+  }
 };
 
 // src/config.ts
@@ -41057,7 +41202,7 @@ var READ_ANNOT = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 var DISCOVERY_TOOLS = [
   {
     name: "list_block_types",
-    description: 'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset \u2192 next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
+    description: 'Registered block types with per-block `preference` (tier + replacement), `storage_mode` ("static"|"dynamic"|"dual"), `usage` (count + post_count), `attributes` (incl. `source` declarations), and a top-level `guidance` summary grouped by tier. `styles` lists valid is-style-* variations \u2014 check it before setting an is-style-* className; `parent`/`ancestor`/`allowed_blocks` are nesting constraints \u2014 respect them when nesting. Pass `include_supports:true` for the full supports object. Filters: namespace, category, tier, storage_mode, search (name/title substring), preferred_only, usage_only. Pagination: limit/offset \u2192 next_offset. Returns `{block_types[], count, total, offset, next_offset, guidance}`.',
     annotations: { ...READ_ANNOT, title: "List block types" },
     outputSchema: {
       type: "object",
@@ -41080,6 +41225,7 @@ var DISCOVERY_TOOLS = [
         search: { type: "string", description: "Case-insensitive substring match against name + title." },
         preferred_only: { type: "boolean", description: "Shorthand for `tier in {preferred,acceptable}` (score \u2265 50)." },
         usage_only: { type: "boolean", description: "Only blocks with usage.count > 0 on this site." },
+        include_supports: { type: "boolean", description: "Include each block's full `supports` object. Default false." },
         limit: { type: "number", description: "Max results. Default 50." },
         offset: { type: "number", description: "Skip this many. Default 0." }
       }
@@ -41087,13 +41233,14 @@ var DISCOVERY_TOOLS = [
   },
   {
     name: "list_patterns",
-    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour \u2014 pass `refresh:true` to rebuild.",
+    description: "Block patterns sorted by preference score. Check before building from scratch. Server respects `limit`; `offset` slices client-side. Reference counts are cached for 1 hour \u2014 pass `refresh:true` to rebuild. `category` filters differently by pattern kind: registered patterns are matched against their declared pattern categories, while synced patterns (no separate category taxonomy) are matched against the block categories actually used in their content. The response's top-level `categories` lists the registered pattern-category vocabulary.",
     annotations: { ...READ_ANNOT, title: "List patterns" },
     inputSchema: {
       type: "object",
       properties: {
         search: { type: "string", description: "Search by name or keyword." },
         synced: { type: "boolean", description: "true = synced only, false = registered only, omit = all." },
+        category: { type: "string", description: "Filter by pattern category. Registered patterns match declared categories; synced patterns match block categories used in their content." },
         min_score: { type: "number", description: "Min preference score; 0 excludes legacy." },
         limit: { type: "number", description: "Max results. Default 20." },
         offset: { type: "number", description: "Skip this many results. Default 0." },
@@ -41112,6 +41259,12 @@ var DISCOVERY_TOOLS = [
       },
       required: ["pattern_id"]
     }
+  },
+  {
+    name: "list_binding_sources",
+    description: "Registered block bindings sources \u2014 what a block's `metadata.bindings` attribute can reference to pull an attribute value dynamically (e.g. `core/post-meta`, `core/pattern-overrides`). Returns `{sources: [{name, label, uses_context?}], note?}`; `note` is present with `sources` empty on WordPress below 6.5.",
+    annotations: { ...READ_ANNOT, title: "List block bindings sources" },
+    inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_site_usage",
@@ -41175,6 +41328,11 @@ var DISCOVERY_TOOLS = [
 async function handleDiscoveryTool(toolName, args, client) {
   switch (toolName) {
     case "list_block_types": {
+      if (args.include_supports !== void 0 && typeof args.include_supports !== "boolean") {
+        throw new Error(
+          `list_block_types: "include_supports" must be a boolean, got ${JSON.stringify(args.include_supports)}.`
+        );
+      }
       const response = await client.getBlockTypes({
         namespace: args.namespace,
         category: args.category,
@@ -41182,7 +41340,8 @@ async function handleDiscoveryTool(toolName, args, client) {
         tier: args.tier,
         storage_mode: args.storage_mode,
         search: args.search,
-        usage_only: args.usage_only
+        usage_only: args.usage_only,
+        include_supports: args.include_supports
       });
       const enriched = enrichBlockTypes(response.block_types);
       const total = enriched.block_types.length;
@@ -41204,6 +41363,7 @@ async function handleDiscoveryTool(toolName, args, client) {
       const response = await client.getPatterns({
         q: args.search,
         synced: args.synced,
+        category: args.category,
         min_score: args.min_score,
         refresh: args.refresh
       });
@@ -41216,7 +41376,8 @@ async function handleDiscoveryTool(toolName, args, client) {
         total,
         offset,
         next_offset: offset + page.length < total ? offset + page.length : null,
-        summary: enriched.summary
+        summary: enriched.summary,
+        categories: response.categories
       };
     }
     case "get_pattern": {
@@ -41226,6 +41387,8 @@ async function handleDiscoveryTool(toolName, args, client) {
     }
     case "get_site_usage":
       return await client.getSiteUsage(args.refresh);
+    case "list_binding_sources":
+      return await client.getBindingSources();
     case "scan_storage_modes":
       return await client.scanStorageModes();
     case "resolve_url": {
@@ -52681,6 +52844,43 @@ async function handleWriteTool(toolName, args, client) {
 // src/tools/patterns.ts
 var PATTERN_TOOLS = [
   {
+    name: "create_pattern",
+    description: 'Extract repeated sections into a reusable pattern, then reference it. Creates a pattern (a wp_block post) from either structured `blocks` (validated the same way as create_post \u2014 legacy blocks rejected) or raw `content` \u2014 exactly one of the two. `sync_status:"synced"` (default) means edits to the pattern update every page that references it; `"unsynced"` creates an independent one-off starting point instead. For a synced pattern, the response includes a ready-to-insert `reference` snippet (`{blockName:"core/block", attrs:{ref}}`) for insert_blocks. For an unsynced pattern, `reference` is omitted (that shape is a live, propagating synced-block reference and would be wrong for a one-off) \u2014 instead the response includes `insert_hint` (`{tool:"insert_pattern", params:{pattern_id, synced:false}}`) pointing at the correct follow-up call.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Create pattern" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Pattern title (required, non-empty)." },
+        blocks: {
+          type: "array",
+          description: "Structured blocks. Mutually exclusive with content \u2014 provide exactly one. Validated against block registry and preference tier \u2014 legacy blocks are rejected.",
+          items: BLOCK_INPUT_SCHEMA
+        },
+        content: {
+          type: "string",
+          description: "Raw post_content (HTML or block markup). Mutually exclusive with blocks \u2014 provide exactly one."
+        },
+        sync_status: {
+          type: "string",
+          enum: ["synced", "unsynced"],
+          description: '"synced" (default): edits propagate to every page referencing this pattern. "unsynced": an independent copy, no propagation.'
+        },
+        slug: { type: "string" },
+        status: {
+          type: "string",
+          enum: ["publish", "draft"],
+          description: "Default publish."
+        }
+      },
+      required: ["title"],
+      // Structurally enforces "exactly one of blocks/content" for schema-
+      // validating clients: an object with both keys matches both branches,
+      // one with neither matches zero — either way oneOf's "exactly one
+      // match" requirement rejects it. The handler validates this too.
+      oneOf: [{ required: ["blocks"] }, { required: ["content"] }]
+    }
+  },
+  {
     name: "insert_pattern",
     description: "Insert a pattern. Default synced=true inserts a core/block reference (edits to source update all pages); synced=false inlines blocks for per-page edits. NOTE: registered (non-numeric) patterns cannot be synced \u2014 server forces synced=false. Response includes `synced` (actual mode used) so you can detect the override.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: "Insert pattern" },
@@ -52714,6 +52914,34 @@ var PATTERN_TOOLS = [
 ];
 async function handlePatternTool(toolName, args, client) {
   switch (toolName) {
+    case "create_pattern": {
+      if (typeof args.title !== "string" || args.title.trim() === "") {
+        throw new Error('create_pattern: a non-empty "title" is required');
+      }
+      const hasBlocks = isNonEmptyArray(args.blocks);
+      const hasContent = isNonEmptyString(args.content);
+      if (hasBlocks === hasContent) {
+        throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+      }
+      if (args.sync_status !== void 0 && args.sync_status !== "synced" && args.sync_status !== "unsynced") {
+        throw new Error(
+          `create_pattern: "sync_status" must be "synced" or "unsynced", got ${JSON.stringify(args.sync_status)}.`
+        );
+      }
+      if (args.status !== void 0 && args.status !== "publish" && args.status !== "draft") {
+        throw new Error(
+          `create_pattern: "status" must be "publish" or "draft", got ${JSON.stringify(args.status)}.`
+        );
+      }
+      return await client.createPattern({
+        title: args.title,
+        blocks: hasBlocks ? args.blocks : void 0,
+        content: hasContent ? args.content : void 0,
+        sync_status: args.sync_status ?? "synced",
+        slug: args.slug,
+        status: args.status ?? "publish"
+      });
+    }
     case "insert_pattern": {
       const postId = coercePostId(args.post_id, "insert_pattern");
       const patternId = args.pattern_id;
@@ -53402,6 +53630,158 @@ function narrowYoastFields(input) {
   return out;
 }
 
+// src/tools/templates.ts
+var READ_ANNOT2 = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+var WRITE_ANNOT = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
+var TEMPLATE_TYPE_ENUM = ["wp_template", "wp_template_part"];
+var TEMPLATE_SOURCE_ENUM = ["theme", "plugin", "custom"];
+var TEMPLATE_TOOLS = [
+  {
+    name: "list_templates",
+    description: 'List the active theme\'s templates (page layouts like "single", "archive") or template parts (reusable regions like "header", "footer") \u2014 works on a theme without a full block-theme structure too, as long as it has real templates/parts. Each row includes `wp_id` \u2014 present (non-null) when a database post already backs the template (an override shadowing a theme file, or a fully custom template with none); null means it currently resolves purely to the theme file. Every template is editable via update_template regardless \u2014 a null `wp_id` just means calling it creates the override rather than updating an existing one. Returns an empty list with a `note` only when there is truly nothing to list.',
+    annotations: { ...READ_ANNOT2, title: "List templates" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template (page layouts) or wp_template_part (reusable regions). Default wp_template."
+        },
+        area: {
+          type: "string",
+          description: 'Template-part area filter (e.g. "header", "footer"). wp_template_part only.'
+        },
+        post_type: {
+          type: "string",
+          description: "Scope wp_template results to templates usable by this post type."
+        },
+        slug: {
+          type: "string",
+          description: 'Comma-separated slugs to match exactly (e.g. "single,page").'
+        },
+        source: {
+          type: "string",
+          enum: [...TEMPLATE_SOURCE_ENUM],
+          description: '"theme" (theme file, unmodified), "custom" (database override), or "plugin" (plugin-registered).'
+        }
+      }
+    }
+  },
+  {
+    name: "get_template",
+    description: "A single template or template part's metadata, raw block markup (`content`), and parsed `blocks`. Use after list_templates. `wp_id` tells you whether a database override shadows the theme file \u2014 null means the id currently resolves to the theme file itself.",
+    annotations: { ...READ_ANNOT2, title: "Get template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "update_template",
+    description: "Replace a template or template part's entire content \u2014 whole-template replacement, like rewrite_post_blocks, not a per-block edit. Requires the site's \"Let the assistant edit theme templates\" toggle (off by default; returns a 403 with an actionable message when off). If the id currently resolves to the theme file (`wp_id: null`), a database override is created (`override_created: true`) and the theme file itself is never touched. `content` and `blocks` are mutually exclusive \u2014 `blocks` goes through the same registry/tier/dual-storage validation as any other structured-block write. Use reset_template to revert.",
+    annotations: { ...WRITE_ANNOT, title: "Update template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        },
+        content: {
+          type: "string",
+          description: "Raw block markup to replace the template with. Mutually exclusive with blocks."
+        },
+        blocks: {
+          type: "array",
+          description: "Structured blocks to replace the template with. Mutually exclusive with content.",
+          items: BLOCK_INPUT_SCHEMA
+        }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "reset_template",
+    description: `Delete a template's database override, reverting it to the theme file. Requires the site's "Let the assistant edit theme templates" toggle (off by default; returns a 403 with an actionable message when off). 404s when the id has no override to remove.`,
+    annotations: { ...WRITE_ANNOT, title: "Reset template" },
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: 'Template id from list_templates, e.g. "twentytwentyfive//index".'
+        },
+        type: {
+          type: "string",
+          enum: [...TEMPLATE_TYPE_ENUM],
+          description: "wp_template or wp_template_part. Default wp_template."
+        }
+      },
+      required: ["id"]
+    }
+  }
+];
+async function handleTemplateTool(toolName, args, client) {
+  switch (toolName) {
+    case "list_templates":
+      return await client.getTemplates({
+        type: args.type,
+        area: args.area,
+        post_type: args.post_type,
+        slug: args.slug,
+        source: args.source
+      });
+    case "get_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('get_template: a non-empty "id" is required');
+      }
+      return await client.getTemplate(id, args.type);
+    }
+    case "update_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('update_template: a non-empty "id" is required');
+      }
+      const hasContent = typeof args.content === "string";
+      const hasBlocks = Array.isArray(args.blocks);
+      if (hasContent === hasBlocks) {
+        throw new Error('update_template: provide exactly one of "content" or "blocks"');
+      }
+      return await client.updateTemplate(id, args.type, {
+        content: hasContent ? args.content : void 0,
+        blocks: hasBlocks ? args.blocks : void 0
+      });
+    }
+    case "reset_template": {
+      const id = args.id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error('reset_template: a non-empty "id" is required');
+      }
+      return await client.resetTemplate(id, args.type);
+    }
+    default:
+      throw new Error(`Unknown template tool: ${toolName}`);
+  }
+}
+
 // src/validate-args.ts
 function validateToolArgs(toolName, inputSchema, args) {
   const properties = inputSchema?.properties;
@@ -53537,12 +53917,24 @@ How to discover the policy at runtime:
 2. \`get_page_blocks\` annotates non-preferred blocks inline with \`preference.tier\` and (when configured) \`preference.suggested_replacement\`. Trust those fields \u2014 they reflect the live config.
 3. \`insert_blocks\` rejects legacy-tier blocks with a \`legacy_block\` error that includes the rejected namespace, the suggested replacement, and a pointer back to this resource.
 
+Before setting an \`is-style-*\` className, check \`list_block_types\` output's \`styles\` field for the valid variations on that block; respect \`parent\`/\`ancestor\`/\`allowed_blocks\` when nesting blocks so the insert doesn't land somewhere the editor would reject.
+
 How to behave:
 
 - Prefer the highest-tier blocks for new content. Defer to the server's classification rather than guessing from a namespace prefix.
-- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first.
+- Reuse existing patterns before building from scratch \u2014 call \`list_patterns\` first. Notice a section repeated across pages? Extract it into a pattern with \`create_pattern\`, then reference it \u2014 a synced pattern keeps every instance in sync from one edit.
 - For patterns that need per-page customization, use \`synced: false\` to inline them.
-- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.`;
+- When you encounter legacy blocks on a page during a read, note them but do not replace unless asked.
+
+## Templates (block themes)
+
+\`list_templates\` and \`get_template\` are read-only. They browse a block theme's templates (page layouts) and template parts (reusable regions like header/footer), the same list the Site Editor shows. \`wp_id\` tells you whether a database override shadows the theme file: null means the id still resolves to the theme file itself; a number means a customization exists and identifies that override post. Templates are index-addressed only \u2014 the per-block write tools do not apply to template content.
+
+\`update_template\` and \`reset_template\` write to templates and are gated: if the site hasn't turned on "Let the assistant edit theme templates and template parts", every call 403s with \`template_edits_disabled\`. Don't retry silently \u2014 tell the user the toggle needs to be enabled under Settings \u2192 Block MCP. \`update_template\` replaces the whole template (like \`rewrite_post_blocks\`, not a per-block edit) and takes exactly one of \`content\` or \`blocks\`; if no override exists yet, one is created automatically and the response's \`override_created\` tells you so. \`reset_template\` deletes the override and reverts to the theme file. Once an override exists, its \`wp_id\` works with the normal per-block tools (\`update_block\`, \`get_page_blocks\`) like any other post.
+
+## Block bindings
+
+Before wiring a block's \`metadata.bindings\` attribute to a source (e.g. \`core/post-meta\`), call \`list_binding_sources\` to confirm the source name is actually registered on this site \u2014 an unregistered source silently fails to resolve at render time.`;
 
 // src/connect.ts
 var http3 = __toESM(require("node:http"), 1);
@@ -54089,7 +54481,8 @@ var ALL_TOOLS = [
   ...POST_TOOLS,
   ...TERM_TOOLS,
   ...MEDIA_TOOLS,
-  ...YOAST_TOOLS
+  ...YOAST_TOOLS,
+  ...TEMPLATE_TOOLS
 ];
 var TOOL_GROUPS = [
   { tools: DISCOVERY_TOOLS, handle: handleDiscoveryTool },
@@ -54100,7 +54493,8 @@ var TOOL_GROUPS = [
   { tools: POST_TOOLS, handle: handlePostTool },
   { tools: TERM_TOOLS, handle: handleTermTool },
   { tools: MEDIA_TOOLS, handle: handleMediaTool },
-  { tools: YOAST_TOOLS, handle: handleYoastTool }
+  { tools: YOAST_TOOLS, handle: handleYoastTool },
+  { tools: TEMPLATE_TOOLS, handle: handleTemplateTool }
 ];
 var TOOL_DISPATCH = /* @__PURE__ */ new Map();
 for (const { tools, handle: handle2 } of TOOL_GROUPS) {

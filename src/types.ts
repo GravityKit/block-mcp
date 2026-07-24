@@ -73,6 +73,19 @@ export interface BlockType {
   storage_mode?: 'static' | 'dynamic' | 'dual';
   /** Block names this block replaces (e.g. legacy equivalents) */
   replaces?: string[];
+  /**
+   * Valid `is-style-*` className variations — block.json `styles` merged
+   * with anything registered via `register_block_style()`, deduped by name.
+   */
+  styles?: Array<{ name: string; label: string; is_default: boolean }>;
+  /** Block names this block may only be inserted as a child of. */
+  parent?: string[];
+  /** Block names this block must be nested inside somewhere in the tree. */
+  ancestor?: string[];
+  /** Block names this block accepts as direct children. */
+  allowed_blocks?: string[];
+  /** Full block `supports` object. Present only when `include_supports:true` was requested. */
+  supports?: Record<string, unknown>;
 }
 
 // ============================================
@@ -97,6 +110,8 @@ export interface Pattern {
   name: string;
   /** "synced" (wp_block post) or "registered" */
   type: 'synced' | 'registered';
+  /** Synced patterns only: 'synced' (default) or 'unsynced' (wp_pattern_sync_status meta). */
+  sync_status?: 'synced' | 'unsynced';
   /** Creation date (ISO date string) */
   created: string;
   /** Last modification date (ISO date string) */
@@ -453,6 +468,36 @@ export interface PatternInsertResponse {
   before_revision_id: number;
   /** WordPress revision ID of the post-edit state */
   revision_id: number;
+}
+
+/** Request body for POST /patterns (create_pattern). Exactly one of `content`/`blocks`. */
+export interface CreatePatternRequest {
+  title: string;
+  blocks?: BlockInput[];
+  content?: string;
+  sync_status?: 'synced' | 'unsynced';
+  slug?: string;
+  status?: 'publish' | 'draft';
+}
+
+/** Response from POST /patterns (create_pattern). */
+export interface CreatePatternResponse {
+  pattern_id: number;
+  title: string;
+  slug: string;
+  sync_status: 'synced' | 'unsynced';
+  edit_url: string;
+  /** Ready-to-insert core/block reference snippet. Present only when sync_status is "synced". */
+  reference?: {
+    blockName: 'core/block';
+    attrs: { ref: number };
+  };
+  /** Follow-up call shape for an unsynced pattern (core/block would be wrong: it's synced-only). Present only when sync_status is "unsynced". */
+  insert_hint?: {
+    tool: 'insert_pattern';
+    params: { pattern_id: number; synced: false };
+  };
+  warnings?: Array<Record<string, unknown>>;
 }
 
 // ============================================
@@ -874,3 +919,98 @@ export type YoastBulkUpdateResponse = Array<
   | YoastSEOMeta
   | { post_id?: number; error: string }
 >;
+
+// ============================================
+// v2.2 — FSE Templates
+// ============================================
+
+/** Either of the two block-template post types. */
+export type TemplateType = 'wp_template' | 'wp_template_part';
+
+/** Where a template's content currently comes from. */
+export type TemplateSource = 'theme' | 'plugin' | 'custom';
+
+/**
+ * Summary shape shared by every row in `list_templates` and the metadata
+ * half of `get_template`. `wp_id` is the bridge to a write: present (and
+ * non-null) only when a database override row shadows the theme file.
+ */
+export interface TemplateSummary {
+  id: string;
+  slug: string;
+  theme: string;
+  type: TemplateType;
+  title: string;
+  description: string;
+  source: TemplateSource;
+  origin: string | null;
+  status: string;
+  has_theme_file: boolean;
+  is_custom: boolean;
+  /** Template-part area (e.g. "header"). Present only when type is wp_template_part. */
+  area?: string;
+  /** DB post ID of the customization override, when one exists; null otherwise. */
+  wp_id: number | null;
+}
+
+/** Response from `GET /templates`. */
+export interface ListTemplatesResponse {
+  templates: TemplateSummary[];
+  count: number;
+  /** Present only on a classic (non-block) theme, where no templates exist. */
+  note?: string;
+}
+
+/** Query params for `GET /templates`. */
+export interface ListTemplatesParams {
+  type?: TemplateType;
+  /** Template-part area filter. wp_template_part only. */
+  area?: string;
+  post_type?: string;
+  /** Comma-separated slugs to match exactly. */
+  slug?: string;
+  source?: TemplateSource;
+}
+
+/** Response from `GET /template` — a TemplateSummary plus raw content and parsed blocks. */
+export interface TemplateDetail extends TemplateSummary {
+  /** Raw block markup (post_content-style HTML comments). */
+  content: string;
+  /**
+   * Parsed blocks, formatted the same way get_page_blocks() formats a
+   * post's content. Index-addressed only — ref-based tools (update_block,
+   * edit_block_tree by ref) do not apply to templates.
+   */
+  blocks: Block[];
+}
+
+/** Body of `POST /template`. Exactly one of `content` or `blocks`. */
+export interface UpdateTemplateRequest {
+  /** Raw block markup. Mutually exclusive with `blocks`. */
+  content?: string;
+  /** Structured blocks. Mutually exclusive with `content`. Validated like any other block write (registry, tier, dual-storage). */
+  blocks?: BlockInput[];
+}
+
+/** Response from `POST /template`. */
+export interface UpdateTemplateResponse {
+  success: boolean;
+  /** Post ID of the database override — pre-existing, or freshly created by this call. */
+  wp_id: number;
+  /** True when this call created the override (no `wp_id` existed beforehand). */
+  override_created: boolean;
+  /** Names reset_template and the Site Editor's Reset action as ways to revert. */
+  revert_hint: string;
+  warnings: PreferenceWarning[];
+  before_revision_id: number | null;
+  revision_id: number | null;
+}
+
+/** Response from `POST /template/reset`. */
+export interface ResetTemplateResponse {
+  success: boolean;
+  /** The template id that was reset. */
+  id: string;
+  /** Post ID of the override that was deleted. */
+  wp_id: number;
+}

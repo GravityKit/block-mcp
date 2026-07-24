@@ -39,3 +39,26 @@ export function coercePostId(value: unknown, label: string): number | undefined 
   }
   throw new Error(`${label}: post_id must be a positive integer`);
 }
+
+/**
+ * Whether `value` is a non-empty array — the single definition of "present"
+ * for a caller-supplied list field (e.g. create_pattern's `blocks`), shared
+ * between the MCP dispatch layer (src/tools/*.ts) and the REST client layer
+ * (src/client.ts) so the two don't carry independent copies that could
+ * silently drift apart.
+ *
+ * @param value - Raw field value from tool arguments or a request object.
+ */
+export function isNonEmptyArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+/**
+ * Whether `value` is a non-empty string — see isNonEmptyArray() for why
+ * this is centralized rather than redefined at each call site.
+ *
+ * @param value - Raw field value from tool arguments or a request object.
+ */
+export function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value !== '';
+}

@@ -9,7 +9,7 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 import { restRouteUrl } from './rest-url.js';
-import { coercePostId } from './coerce.js';
+import { coercePostId, isNonEmptyArray, isNonEmptyString } from './coerce.js';
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */
 function mimeForFilename(filename: string): string {
@@ -38,6 +38,15 @@ const MAX_RETRIES = 2;
  * delete_block tool mirrors this with `idempotentHint: false`.
  */
 const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options']);
+
+/**
+ * Verbs that some hosts reject at the edge before the request reaches PHP.
+ *
+ * The plugin registers its editing routes as literal `PUT` / `PATCH` / `DELETE`
+ * rather than the `EDITABLE` alias, so a plain POST does not match them — the
+ * `X-HTTP-Method-Override` header is what carries the intended verb through.
+ */
+const METHOD_OVERRIDE_VERBS = new Set(['put', 'patch', 'delete']);
 
 /** Sleep for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
@@ -105,6 +114,8 @@ import type {
   GetBlockResponse,
   StorageModeScanResult,
   PatternInsertResponse,
+  CreatePatternRequest,
+  CreatePatternResponse,
   MutationRequest,
   MutationResponse,
   ResolveUrlResponse,
@@ -121,6 +132,13 @@ import type {
   YoastUpdateRequest,
   YoastBulkUpdateItem,
   YoastBulkUpdateResponse,
+  ListTemplatesParams,
+  ListTemplatesResponse,
+  TemplateDetail,
+  TemplateType,
+  UpdateTemplateRequest,
+  UpdateTemplateResponse,
+  ResetTemplateResponse,
 } from './types.js';
 
 /** Response wrapper for block type listing. */
@@ -128,9 +146,18 @@ interface BlockTypesResponse {
   block_types: BlockType[];
 }
 
+/** Response wrapper for block bindings source listing. */
+interface BindingSourcesResponse {
+  sources: Array<{ name: string; label: string; uses_context?: string[] }>;
+  /** Present (with `sources` empty) on WordPress below 6.5. */
+  note?: string;
+}
+
 /** Response wrapper for pattern listing. */
 interface PatternsResponse {
   patterns: Pattern[];
+  /** Registered pattern-category vocabulary: `{name, label}`. */
+  categories?: Array<{ name: string; label: string }>;
 }
 
 /** Response wrapper for page blocks. */
@@ -156,6 +183,20 @@ interface PageBlocksResponse {
  */
 export class WordPressBlockClient {
   private client: AxiosInstance;
+
+  /**
+   * True once a replay has proven this host rejects PUT / PATCH / DELETE at the
+   * edge yet honours `X-HTTP-Method-Override` on a POST.
+   *
+   * Some managed hosts answer those verbs with a 405 before the request reaches
+   * PHP, which breaks every editing tool while GET and POST keep working.
+   *
+   * Only requests issued after this is true skip the rejected probe; writes
+   * already in flight have each gone out as a real verb and pay their own. Set
+   * only after a replay succeeds, so a host that rejects the override too is
+   * never treated as override-capable.
+   */
+  private useMethodOverride = false;
 
   /**
    * Create a new WordPress Block API client.
@@ -198,13 +239,47 @@ export class WordPressBlockClient {
       timeout: 30000,
     });
 
+    // Request interceptor: once a host is known to reject real verbs, send the
+    // intended method as an override header on a POST instead.
+    this.client.interceptors.request.use((config) => {
+      const method = (config.method ?? 'get').toLowerCase();
+      const forced = (config as AxiosRequestConfig & { __overrideMethod?: boolean }).__overrideMethod === true;
+      const needsOverride = (this.useMethodOverride || forced) && METHOD_OVERRIDE_VERBS.has(method);
+      if (needsOverride) {
+        config.headers.set('X-HTTP-Method-Override', method.toUpperCase());
+        config.method = 'post';
+      }
+      return config;
+    });
+
     // Response interceptor: retry transient errors with exponential backoff,
     // then format any final error so it carries wpCode/wpData/wpStatus for
     // the server-level catch in src/index.ts.
     this.client.interceptors.response.use(
       (r) => r,
       async (error: AxiosError) => {
-        const config = error.config as (AxiosRequestConfig & { __retryCount?: number }) | undefined;
+        const config = error.config as
+          | (AxiosRequestConfig & { __retryCount?: number; __overrideMethod?: boolean })
+          | undefined;
+
+        // WordPress answers an unroutable method with 404 `rest_no_route`, so a
+        // 405 with no REST error body came from the edge. A structured 405 is a
+        // real answer, left alone because replaying it as POST could reach a
+        // different route. Every edge rejection is replayed, not just the
+        // first: concurrent writes each go out as a real verb. A replay carries
+        // `post`, not an override verb, so it cannot loop back here.
+        const method = (config?.method ?? 'get').toLowerCase();
+        const body = error.response?.data;
+        const isRestErrorBody = !!body && typeof body === 'object' && 'code' in body;
+        const edgeRejectedVerb =
+          error.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method) && !isRestErrorBody;
+        if (config && edgeRejectedVerb) {
+          config.__overrideMethod = true;
+          const replay = await this.client.request(config);
+          this.useMethodOverride = true;
+          return replay;
+        }
+
         if (config && isRetryable(error)) {
           const attempt = (config.__retryCount ?? 0) + 1;
           if (attempt <= MAX_RETRIES) {
@@ -298,15 +373,17 @@ export class WordPressBlockClient {
     storage_mode?: 'static' | 'dynamic' | 'dual';
     search?: string;
     usage_only?: boolean;
+    include_supports?: boolean;
   }): Promise<BlockTypesResponse> {
     const queryParams: Record<string, string> = {};
-    if (params?.namespace)      queryParams.namespace      = params.namespace;
-    if (params?.category)       queryParams.category       = params.category;
-    if (params?.preferred_only) queryParams.preferred_only = 'true';
-    if (params?.tier)           queryParams.tier           = params.tier;
-    if (params?.storage_mode)   queryParams.storage_mode   = params.storage_mode;
-    if (params?.search)         queryParams.search         = params.search;
-    if (params?.usage_only)     queryParams.usage_only     = 'true';
+    if (params?.namespace)        queryParams.namespace        = params.namespace;
+    if (params?.category)         queryParams.category         = params.category;
+    if (params?.preferred_only)   queryParams.preferred_only   = 'true';
+    if (params?.tier)             queryParams.tier             = params.tier;
+    if (params?.storage_mode)     queryParams.storage_mode     = params.storage_mode;
+    if (params?.search)           queryParams.search           = params.search;
+    if (params?.usage_only)       queryParams.usage_only       = 'true';
+    if (params?.include_supports) queryParams.include_supports = 'true';
 
     const response = await this.client.get<BlockTypesResponse>('/block-types', {
       params: queryParams,
@@ -375,6 +452,27 @@ export class WordPressBlockClient {
   }
 
   /**
+   * Create a synced pattern (a `wp_block` post). Exactly one of
+   * `content`/`blocks` is required; structured `blocks` go through the same
+   * registry/tier/dual-storage validation as `create_post`.
+   *
+   * @param data - Pattern title plus exactly one of content/blocks, sync_status, slug, status
+   * @returns The created pattern's id, slug, sync_status, edit_url, and a ready-to-insert `reference` snippet
+   */
+  async createPattern(data: CreatePatternRequest): Promise<CreatePatternResponse> {
+    if (!data.title || data.title.trim() === '') {
+      throw new Error('create_pattern: a non-empty "title" is required');
+    }
+    const hasContent = isNonEmptyString(data.content);
+    const hasBlocks = isNonEmptyArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('create_pattern: provide exactly one of "content" or "blocks"');
+    }
+    const response = await this.client.post<CreatePatternResponse>('/patterns', data);
+    return response.data;
+  }
+
+  /**
    * Resolve a URL or path to a WordPress post ID.
    *
    * Accepts any URL on the site (full URL or path). Handles all post types,
@@ -419,6 +517,19 @@ export class WordPressBlockClient {
     if (refresh) params.refresh = 'true';
 
     const response = await this.client.get<SiteUsage>('/site-usage', { params });
+    return response.data;
+  }
+
+  /**
+   * Get registered block bindings sources (e.g. `core/post-meta`,
+   * `core/pattern-overrides`) — what a block's `metadata.bindings` attribute
+   * can reference to pull an attribute value dynamically.
+   *
+   * @returns `{sources, note?}` — `note` is present (and `sources` empty)
+   *          on WordPress below 6.5, which has no Block Bindings API.
+   */
+  async getBindingSources(): Promise<BindingSourcesResponse> {
+    const response = await this.client.get<BindingSourcesResponse>('/binding-sources');
     return response.data;
   }
 
@@ -1023,6 +1134,92 @@ export class WordPressBlockClient {
       throw new Error('yoast_bulk_update_seo: non-empty `posts` array is required');
     }
     const response = await this.client.patch<YoastBulkUpdateResponse>('/yoast/bulk', { posts });
+    return response.data;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v2.2 — FSE templates (read-only)
+  // ──────────────────────────────────────────────────────────
+
+  /** List a block theme's templates or template parts. */
+  async getTemplates(params?: ListTemplatesParams): Promise<ListTemplatesResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params?.type) queryParams.type = params.type;
+    if (params?.area) queryParams.area = params.area;
+    if (params?.post_type) queryParams.post_type = params.post_type;
+    if (params?.slug) queryParams.slug = params.slug;
+    if (params?.source) queryParams.source = params.source;
+
+    const response = await this.client.get<ListTemplatesResponse>('/templates', { params: queryParams });
+    return response.data;
+  }
+
+  /**
+   * Get a single template or template part, including raw content and
+   * parsed blocks.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index". Passed as a
+   *             query arg (not a path segment) because ids embed "//".
+   * @param type Defaults to "wp_template".
+   */
+  async getTemplate(id: string, type?: TemplateType): Promise<TemplateDetail> {
+    if (!id) {
+      throw new Error('get_template: "id" is required');
+    }
+    const params: Record<string, string> = { id };
+    if (type) params.type = type;
+
+    const response = await this.client.get<TemplateDetail>('/template', { params });
+    return response.data;
+  }
+
+  /**
+   * Replace a template or template part's entire content. Whole-template
+   * replacement (like `replaceAllBlocks`), not a per-block edit. Gated by
+   * the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   * @param data Exactly one of `content` or `blocks`.
+   */
+  async updateTemplate(
+    id: string,
+    type: TemplateType | undefined,
+    data: UpdateTemplateRequest
+  ): Promise<UpdateTemplateResponse> {
+    if (!id) {
+      throw new Error('update_template: "id" is required');
+    }
+    const hasContent = typeof data.content === 'string';
+    const hasBlocks = Array.isArray(data.blocks);
+    if (hasContent === hasBlocks) {
+      throw new Error('update_template: provide exactly one of "content" or "blocks"');
+    }
+
+    const body: { id: string; type?: TemplateType; content?: string; blocks?: UpdateTemplateRequest['blocks'] } = { id };
+    if (type) body.type = type;
+    if (hasContent) body.content = data.content;
+    if (hasBlocks) body.blocks = data.blocks;
+
+    const response = await this.client.post<UpdateTemplateResponse>('/template', body);
+    return response.data;
+  }
+
+  /**
+   * Delete a template's database override, reverting it to the theme file.
+   * Gated by the site's "Let the assistant edit theme templates" toggle.
+   *
+   * @param id   Template id, e.g. "twentytwentyfive//index".
+   * @param type Defaults to "wp_template".
+   */
+  async resetTemplate(id: string, type?: TemplateType): Promise<ResetTemplateResponse> {
+    if (!id) {
+      throw new Error('reset_template: "id" is required');
+    }
+    const body: { id: string; type?: TemplateType } = { id };
+    if (type) body.type = type;
+
+    const response = await this.client.post<ResetTemplateResponse>('/template/reset', body);
     return response.data;
   }
 }

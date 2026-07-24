@@ -70,6 +70,22 @@ class Agent_Provisioner {
 	const USER_ID_OPTION = 'gk_block_api_agent_user_id';
 
 	/**
+	 * Plugin-owned primitive cap that gates template writes (POST /template,
+	 * POST /template/reset), managed here rather than granted via core's
+	 * `edit_theme_options` — that cap also opens core's own
+	 * `/wp/v2/templates`, `/wp/v2/template-parts`, `/wp/v2/navigation`,
+	 * `/wp/v2/global-styles`, the Customizer, menus, and widgets, none of
+	 * which the agent should ever reach. Deliberately NOT in
+	 * forbidden_capabilities() — that denylist exists to strip caps this
+	 * class does not grant; this one it grants and revokes on purpose,
+	 * following the site's `gk_block_api_template_edits` toggle.
+	 *
+	 * @since 2.2.0
+	 * @var string
+	 */
+	const TEMPLATE_EDIT_CAP = 'gk_block_mcp_edit_templates';
+
+	/**
 	 * Register the minimal block_mcp_agent role idempotently.
 	 *
 	 * The capability set is passed through the `gk/block-mcp/agent/caps`
@@ -104,10 +120,12 @@ class Agent_Provisioner {
 		 *
 		 * @param array<string,bool> $caps Map of capability name => granted, for the agent role.
 		 */
-		$caps = apply_filters(
-			'gk/block-mcp/agent/caps',
-			self::derive_capabilities()
-		);
+		$caps = self::derive_capabilities();
+		// The one entry in this map that register_role() below both adds AND
+		// removes on an existing role, tracking the toggle live rather than
+		// whatever was true when the role was first created.
+		$caps[ self::TEMPLATE_EDIT_CAP ] = Template_Manager::edits_enabled();
+		$caps                            = apply_filters( 'gk/block-mcp/agent/caps', $caps );
 
 		/**
 		 * Run the AI agent on a role you control instead of the built-in one.
@@ -156,6 +174,18 @@ class Agent_Provisioner {
 					if ( $existing->has_cap( $forbidden ) ) {
 						$existing->remove_cap( $forbidden );
 					}
+				}
+				// TEMPLATE_EDIT_CAP is the one cap this class both adds and
+				// removes: the additive loop above never takes it away, so a
+				// toggle flipped off needs this explicit revoke or the grant
+				// would outlive the setting that authorized it. The public
+				// gk/block-mcp/agent/caps filter can unset the key entirely
+				// rather than setting it false; treat that the same way —
+				// revoke, the safe default for a security-gating capability.
+				$template_edit_cap_granted  = ! empty( $caps[ self::TEMPLATE_EDIT_CAP ] );
+				$role_has_template_edit_cap = $existing->has_cap( self::TEMPLATE_EDIT_CAP );
+				if ( ! $template_edit_cap_granted && $role_has_template_edit_cap ) {
+					$existing->remove_cap( self::TEMPLATE_EDIT_CAP );
 				}
 			}
 		}

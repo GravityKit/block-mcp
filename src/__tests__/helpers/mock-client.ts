@@ -57,6 +57,7 @@ export function makeMockClient() {
       scanned_posts: 0, unique_blocks: 0, classification: {},
       dual_count: 0, dynamic_count: 0, static_count: 0,
     }),
+    getBindingSources: vi.fn().mockResolvedValue({ sources: [] }),
 
     // ── Read ─────────────────────────────────────────────────────────────
     getPageBlocks: vi.fn().mockResolvedValue(
@@ -142,6 +143,11 @@ export function makeMockClient() {
       before_revision_id: 1,
       revision_id: 2,
     }),
+    createPattern: vi.fn().mockResolvedValue({
+      pattern_id: 1, title: 'Test Pattern', slug: 'test-pattern', sync_status: 'synced',
+      edit_url: 'https://example.test/wp-admin/post.php?post=1&action=edit',
+      reference: { blockName: 'core/block', attrs: { ref: 1 } }, warnings: [],
+    }),
 
     // ── Post lifecycle ────────────────────────────────────────────────────
     createPost: vi.fn().mockResolvedValue({
@@ -181,5 +187,20 @@ export function makeMockClient() {
       seo_score: 80, readability_score: 70, inclusive_language_score: null,
     }),
     bulkUpdateYoastSEO: vi.fn().mockResolvedValue([]),
+
+    // ── Templates ────────────────────────────────────────────────────────
+    getTemplates: vi.fn().mockResolvedValue({ templates: [], count: 0 }),
+    getTemplate: vi.fn().mockResolvedValue({
+      id: 'test-theme//index', slug: 'index', theme: 'test-theme', type: 'wp_template',
+      title: 'Index', description: '', source: 'theme', origin: null, status: 'publish',
+      has_theme_file: true, is_custom: true, wp_id: null,
+      content: '', blocks: [],
+    }),
+    updateTemplate: vi.fn().mockResolvedValue({
+      success: true, wp_id: 1, override_created: true,
+      revert_hint: 'Call reset_template to remove this override and revert to the theme file.',
+      warnings: [], before_revision_id: null, revision_id: null,
+    }),
+    resetTemplate: vi.fn().mockResolvedValue({ success: true, id: 'test-theme//index', wp_id: 1 }),
   };
 }

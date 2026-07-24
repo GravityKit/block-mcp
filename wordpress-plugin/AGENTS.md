@@ -34,6 +34,7 @@ gk-block-mcp/
     ├── class-post-manager.php     # create_post / update_post (+ trash toggle, explicit author arg) (~915)
     ├── class-term-manager.php     # list_terms (~175)
     ├── class-media-manager.php    # upload_media (multipart/URL/base64 + SSRF guard) (~680)
+    ├── class-template-manager.php # list/get FSE templates + template parts (read-only) (~235)
     ── HTTP + integrations ───────────────────────────────────────────────
     ├── class-rest-controller.php  # Route registration + HTTP layer (~2655)
     ├── class-instructions.php     # MCP instructions endpoint + addendum store (~260)
@@ -128,6 +129,7 @@ All routes under `gk-block-api/v1`.
 | GET | `/resolve?url=` · `/post-info` · `/find-posts` | URL→post resolution, post metadata, post search |
 | GET | `/patterns` · `/patterns/search` · `/patterns/{id}` | pattern listing/search/detail |
 | GET | `/site-usage` | block/pattern usage stats |
+| GET | `/templates` · `/template?id=` | FSE template/template-part listing + single detail (`Template_Manager`; block themes only) |
 
 ### Write / mutation
 
@@ -143,6 +145,7 @@ All routes under `gk-block-api/v1`.
 | POST | `/posts` · PATCH `/posts/{id}` | create / update (status, terms, explicit author arg) |
 | GET | `/terms` · POST `/media` | term listing · media upload (SSRF-guarded) |
 | POST | `/storage-modes/scan` | dual-storage classification scan (`manage_options`) |
+| POST | `/template` · POST `/template/reset` | whole-template write / override-delete (`check_template_edit_permissions`: toggle ON and the dedicated `gk_block_mcp_edit_templates` capability or `edit_theme_options`, not `edit_posts`) |
 
 ### Integrations / connect
 
@@ -169,6 +172,10 @@ All routes under `gk-block-api/v1`.
 **`Post_Manager`** — `create_post()` (title required, post-type allow-list, status enum, parent/term/featured validation, optional explicit `author` arg gated on `edit_others_{type}`), `update_post()` (status transitions via `wp_trash_post`/`wp_untrash_post`; `mixed_trash_payload` guard; **trash gated by `Post_Manager::trashing_enabled()` / option `gk_block_api_allow_trash`, filtered through `gk/block-mcp/post/allow-trash`**, default off). Shares the per-post write rate bucket.
 
 **`Term_Manager`** — `list_terms()` (cap `edit_posts`, per-page ≤200). **`Media_Manager`** — `upload_media()` (multipart / URL sideload / base64; SSRF guard rejecting reserved/private/link-local IPs before `download_url()`; MIME allow-list; size caps; `gk/block-mcp/media/sideload-blocked-ranges` filter).
+
+**`Template_Manager`** — `get_templates()` / `get_template()`, thin wrappers over core's `get_block_templates()` / `get_block_template()`. Read-only, `check_permissions` (cap `edit_posts`). `get_template()` reuses `Block_CRUD::format_content_blocks()` (a `Block_Reader` method that parses a raw markup string with no owning post) for the `blocks` field; it never assigns/persists `gk_ref`s, since there is no post to write them into. On a classic (non-block) theme, `get_templates()` returns an empty list with an explanatory `note` instead of an error.
+
+`update_template()` / `reset_template()` are the gated write pair — off by default (`ALLOW_TEMPLATE_EDITS_OPTION` / `edits_enabled()`, modeled on `Post_Manager::trashing_enabled()`, checked both in the REST permission callback and again inside the service methods). `update_template()` resolves the id via `get_block_template()`; a theme-file-only id gets an override created (`wp_insert_post()` + the mandatory `wp_theme` term, plus `wp_template_part_area` for parts, via `_filter_block_template_part_area()`), then the new content is applied through `Block_CRUD::replace_all_blocks()` (`blocks`, full registry/tier/dual-storage validation) or `Block_CRUD::save_post_content()` (`content`, `wp_kses_post()`-sanitized). A content-apply failure on a freshly-created override rolls it back (`wp_delete_post()`) rather than leaving an empty shell. `reset_template()` is `wp_delete_post( wp_id, true )`. Once an override exists, its `wp_id` is a normal post accessible to the rest of the per-block tool surface (`update_block` et al. — verified, not just assumed).
 
 **`REST_Controller`** — registers every route; `check_permissions` (read) / `check_edit_permissions` + `check_post_edit_permission` (write); `handle_error()` envelope; sparse-field selection; recursive search.
 

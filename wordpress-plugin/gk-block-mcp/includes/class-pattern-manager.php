@@ -49,6 +49,16 @@ class Pattern_Manager {
 	const SCAN_BATCH_SIZE = 200;
 
 	/**
+	 * Core's own post meta key for a synced pattern's sync status.
+	 *
+	 * A `wp_block` post is synced by default (no meta row); the value
+	 * `'unsynced'` opts it out. This is the same key WordPress core and the
+	 * Site Editor read/write, so `create_pattern()` stays interoperable with
+	 * patterns created any other way.
+	 */
+	const SYNC_STATUS_META_KEY = 'wp_pattern_sync_status';
+
+	/**
 	 * Preferences instance.
 	 *
 	 * @var Preferences
@@ -69,12 +79,23 @@ class Pattern_Manager {
 	private $ref_counts_memo;
 
 	/**
+	 * Block CRUD facade — used by create_pattern() for the same
+	 * build/validation path (registry check, tier rejection, dual-storage)
+	 * that Post_Manager::create_post() uses for structured `blocks` input.
+	 *
+	 * @var Block_CRUD
+	 */
+	private $block_crud;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Preferences $preferences Preferences instance.
+	 * @param Block_CRUD  $block_crud  Block CRUD facade (build/validate block defs).
 	 */
-	public function __construct( Preferences $preferences ) {
+	public function __construct( Preferences $preferences, Block_CRUD $block_crud ) {
 		$this->preferences = $preferences;
+		$this->block_crud  = $block_crud;
 	}
 
 	/**
@@ -341,6 +362,7 @@ class Pattern_Manager {
 			'id'                => $post->ID,
 			'name'              => $post->post_title,
 			'type'              => 'synced',
+			'sync_status'       => $this->get_sync_status( $post->ID ),
 			'created'           => gmdate( 'Y-m-d', strtotime( $post->post_date ) ),
 			'modified'          => gmdate( 'Y-m-d', strtotime( $post->post_modified ) ),
 			'reference_count'   => $reference_count,
@@ -677,5 +699,195 @@ class Pattern_Manager {
 		);
 
 		return $patterns;
+	}
+
+	/**
+	 * A synced pattern's sync status: 'synced' (default — the meta row is
+	 * absent) or 'unsynced' (the meta row is present and set).
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param int $post_id `wp_block` post ID.
+	 *
+	 * @return string 'synced'|'unsynced'.
+	 */
+	private function get_sync_status( $post_id ) {
+		$meta = get_post_meta( $post_id, self::SYNC_STATUS_META_KEY, true );
+		return 'unsynced' === $meta ? 'unsynced' : 'synced';
+	}
+
+	/**
+	 * Create a synced pattern (a `wp_block` post).
+	 *
+	 * Structured `blocks` go through the same registry/tier/dual-storage
+	 * validation as `Post_Manager::create_post()`'s structured path (via
+	 * `Block_CRUD::build_block_from_def()`); raw `content` is sanitized the
+	 * same way. Sync status is core's own `wp_pattern_sync_status` meta —
+	 * present and `'unsynced'` opts a pattern out of sync; absent (the
+	 * default) means synced, matching how the Site Editor and WP-CLI's
+	 * `block synced-pattern create` represent the same state.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array $args {
+	 *     Pattern arguments.
+	 *
+	 *     @type string $title       Required, non-empty.
+	 *     @type array  $blocks      Structured block definitions. Exactly one of blocks/content.
+	 *     @type string $content     Raw post_content. Exactly one of blocks/content.
+	 *     @type string $sync_status 'synced' (default) or 'unsynced'.
+	 *     @type string $slug        Optional post_name.
+	 *     @type string $status      'publish' (default) or 'draft'.
+	 * }
+	 *
+	 * @return array|\WP_Error `{pattern_id, title, slug, sync_status, edit_url, warnings}` plus, for a
+	 *                         synced pattern, `reference` (a ready-to-insert core/block snippet), or
+	 *                         for an unsynced pattern, `insert_hint` (an insert_pattern call shape) —
+	 *                         or a `WP_Error`.
+	 */
+	public function create_pattern( array $args ) {
+		// Sanitize before checking emptiness, not after: a whitespace- or
+		// markup-only title passes a raw non-empty-string check but
+		// collapses to '' once sanitize_text_field() strips tags/trims it,
+		// which would otherwise create a nameless pattern. Explicit
+		// empty-string test, not empty(): title "0" is valid.
+		$raw_title = isset( $args['title'] ) ? $args['title'] : null;
+		$title     = is_string( $raw_title ) ? sanitize_text_field( $raw_title ) : '';
+		if ( '' === $title ) {
+			return new \WP_Error(
+				'missing_title',
+				__( 'A non-empty "title" is required.', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$has_blocks  = ! empty( $args['blocks'] ) && is_array( $args['blocks'] );
+		$has_content = isset( $args['content'] ) && is_string( $args['content'] ) && '' !== $args['content'];
+
+		if ( $has_blocks === $has_content ) {
+			return new \WP_Error(
+				'mutually_exclusive',
+				__( 'Provide exactly one of "content" or "blocks".', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$sync_status = isset( $args['sync_status'] ) ? sanitize_key( $args['sync_status'] ) : 'synced';
+		if ( ! in_array( $sync_status, array( 'synced', 'unsynced' ), true ) ) {
+			return new \WP_Error(
+				'invalid_sync_status',
+				__( '"sync_status" must be "synced" or "unsynced".', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$status = isset( $args['status'] ) ? sanitize_key( $args['status'] ) : 'publish';
+		if ( ! in_array( $status, array( 'publish', 'draft' ), true ) ) {
+			return new \WP_Error(
+				'invalid_status',
+				__( '"status" must be "publish" or "draft".', 'gk-block-mcp' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$warnings = array();
+		$content  = '';
+
+		if ( $has_blocks ) {
+			$depth_check = Block_CRUD::validate_tree_depth( $args['blocks'] );
+			if ( is_wp_error( $depth_check ) ) {
+				return $depth_check;
+			}
+
+			$built = array();
+			foreach ( $args['blocks'] as $block_def ) {
+				if ( ! is_array( $block_def ) ) {
+					return new \WP_Error(
+						'invalid_block',
+						__( 'Each block must be an object.', 'gk-block-mcp' ),
+						array( 'status' => 400 )
+					);
+				}
+				$block = $this->block_crud->build_block_from_def( $block_def, $warnings );
+				if ( is_wp_error( $block ) ) {
+					return $block;
+				}
+				$built[] = $block;
+			}
+			$content = serialize_blocks( $built );
+		} else {
+			$content = wp_kses_post( $args['content'] );
+		}
+
+		$postarr = array(
+			'post_type'    => 'wp_block',
+			'post_status'  => $status,
+			'post_title'   => $title,
+			'post_content' => $content,
+		);
+		if ( isset( $args['slug'] ) && is_string( $args['slug'] ) && '' !== $args['slug'] ) {
+			$postarr['post_name'] = sanitize_title( $args['slug'] );
+		}
+
+		// wp_insert_post() runs wp_unslash() on string fields; our content is
+		// already unslashed (serialize_blocks() output / decoded JSON args),
+		// so wp_slash it first to keep escapes like \n, \" and -- intact.
+		$post_id = wp_insert_post( wp_slash( $postarr ), true );
+		if ( is_wp_error( $post_id ) ) {
+			$code    = $post_id->get_error_code();
+			$message = $post_id->get_error_message();
+			$data    = (array) $post_id->get_error_data();
+			if ( ! isset( $data['status'] ) ) {
+				$data['status'] = 400;
+			}
+			return new \WP_Error( '' !== $code ? $code : 'wp_insert_post_failed', $message, $data );
+		}
+		$post_id = (int) $post_id;
+		if ( $post_id <= 0 ) {
+			return new \WP_Error(
+				'wp_insert_post_failed',
+				__( 'wp_insert_post returned a non-positive ID.', 'gk-block-mcp' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		if ( 'unsynced' === $sync_status ) {
+			update_post_meta( $post_id, self::SYNC_STATUS_META_KEY, 'unsynced' );
+		}
+
+		$post = get_post( $post_id );
+
+		$response = array(
+			'pattern_id'  => $post_id,
+			'title'       => $post->post_title,
+			'slug'        => $post->post_name,
+			'sync_status' => $sync_status,
+			'edit_url'    => get_edit_post_link( $post_id, 'raw' ),
+			'warnings'    => $warnings,
+		);
+
+		if ( 'synced' === $sync_status ) {
+			// core/block is WordPress's live, propagating synced-block
+			// reference. Only safe for a synced pattern: handing it to a
+			// caller who explicitly asked for a non-propagating one-off
+			// would silently re-link content they asked to keep independent.
+			$response['reference'] = array(
+				'blockName' => 'core/block',
+				'attrs'     => array( 'ref' => $post_id ),
+			);
+		} else {
+			// insert_pattern() supports an inline (non-synced) copy of any
+			// pattern via synced:false, independent of the pattern's own
+			// sync_status meta — point unsynced callers there instead.
+			$response['insert_hint'] = array(
+				'tool'   => 'insert_pattern',
+				'params' => array(
+					'pattern_id' => $post_id,
+					'synced'     => false,
+				),
+			);
+		}
+
+		return $response;
 	}
 }

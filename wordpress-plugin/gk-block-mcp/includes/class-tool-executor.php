@@ -116,6 +116,18 @@ class Tool_Executor {
 				return $this->execute_yoast_update_seo( $input );
 			case 'yoast_bulk_update_seo':
 				return $this->execute_yoast_bulk_update_seo( $input );
+			case 'list_templates':
+				return $this->execute_list_templates( $input );
+			case 'get_template':
+				return $this->execute_get_template( $input );
+			case 'update_template':
+				return $this->execute_update_template( $input );
+			case 'reset_template':
+				return $this->execute_reset_template( $input );
+			case 'list_binding_sources':
+				return $this->execute_list_binding_sources( $input );
+			case 'create_pattern':
+				return $this->execute_create_pattern( $input );
 			default:
 				return new \WP_Error(
 					'unknown_tool',
@@ -137,13 +149,14 @@ class Tool_Executor {
 	 */
 	private function execute_list_block_types( array $input ) {
 		$params = array(
-			'namespace'      => isset( $input['namespace'] ) ? (string) $input['namespace'] : null,
-			'category'       => isset( $input['category'] ) ? (string) $input['category'] : null,
-			'preferred_only' => ! empty( $input['preferred_only'] ),
-			'tier'           => isset( $input['tier'] ) ? (string) $input['tier'] : null,
-			'storage_mode'   => isset( $input['storage_mode'] ) ? (string) $input['storage_mode'] : null,
-			'search'         => isset( $input['search'] ) ? (string) $input['search'] : null,
-			'usage_only'     => ! empty( $input['usage_only'] ),
+			'namespace'        => isset( $input['namespace'] ) ? (string) $input['namespace'] : null,
+			'category'         => isset( $input['category'] ) ? (string) $input['category'] : null,
+			'preferred_only'   => ! empty( $input['preferred_only'] ),
+			'tier'             => isset( $input['tier'] ) ? (string) $input['tier'] : null,
+			'storage_mode'     => isset( $input['storage_mode'] ) ? (string) $input['storage_mode'] : null,
+			'search'           => isset( $input['search'] ) ? (string) $input['search'] : null,
+			'usage_only'       => ! empty( $input['usage_only'] ),
+			'include_supports' => ! empty( $input['include_supports'] ),
 		);
 
 		$data = $this->call_controller(
@@ -181,6 +194,7 @@ class Tool_Executor {
 		$offset = isset( $input['offset'] ) ? max( 0, (int) $input['offset'] ) : 0;
 		$params = array(
 			'q'         => isset( $input['search'] ) ? (string) $input['search'] : null,
+			'category'  => isset( $input['category'] ) ? (string) $input['category'] : null,
 			'synced'    => array_key_exists( 'synced', $input ) ? (bool) $input['synced'] : null,
 			'min_score' => isset( $input['min_score'] ) ? (int) $input['min_score'] : null,
 			// Fetch the full filtered set (get_patterns builds all matches before
@@ -199,12 +213,14 @@ class Tool_Executor {
 			return $data;
 		}
 
-		$patterns = isset( $data['patterns'] ) && is_array( $data['patterns'] ) ? $data['patterns'] : array();
-		$total    = count( $patterns );
-		$page     = array_slice( $patterns, $offset, $limit );
+		$patterns   = isset( $data['patterns'] ) && is_array( $data['patterns'] ) ? $data['patterns'] : array();
+		$categories = isset( $data['categories'] ) && is_array( $data['categories'] ) ? $data['categories'] : array();
+		$total      = count( $patterns );
+		$page       = array_slice( $patterns, $offset, $limit );
 
 		return array(
 			'patterns'    => $page,
+			'categories'  => $categories,
 			'count'       => count( $page ),
 			'total'       => $total,
 			'offset'      => $offset,
@@ -240,6 +256,22 @@ class Tool_Executor {
 			array( $this->controller, 'get_site_usage' ),
 			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/site-usage' ),
 			array( 'refresh' => ! empty( $input['refresh'] ) )
+		);
+	}
+
+	/**
+	 * List registered block bindings sources via the binding-sources REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input (unused).
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_list_binding_sources( array $input ) {
+		unset( $input );
+		return $this->call_controller(
+			array( $this->controller, 'get_binding_sources' ),
+			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/binding-sources' )
 		);
 	}
 
@@ -797,6 +829,24 @@ class Tool_Executor {
 	}
 
 	/**
+	 * Create a synced pattern (a wp_block post) via the patterns-create REST
+	 * handler. Permission (edit_posts and wp_block's create_posts capability)
+	 * is enforced by Abilities_Registry::check_tool_permission()'s
+	 * 'create_pattern' branch before this method ever runs; title, the
+	 * content/blocks XOR, and the sync_status/status enums are validated by
+	 * Pattern_Manager::create_pattern() itself.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_create_pattern( array $input ) {
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/patterns' );
+		return $this->call_controller( array( $this->controller, 'create_pattern' ), $request, array(), $input );
+	}
+
+	/**
 	 * Update a post's fields (status, terms, author, etc.) via the post-update REST handler.
 	 *
 	 * @param array<string, mixed> $input Tool input.
@@ -969,6 +1019,113 @@ class Tool_Executor {
 			array(),
 			array( 'posts' => $input['posts'] )
 		);
+	}
+
+	/**
+	 * List a block theme's templates/template parts via the templates REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_list_templates( array $input ) {
+		$params = array(
+			'type'      => isset( $input['type'] ) ? (string) $input['type'] : null,
+			'area'      => isset( $input['area'] ) ? (string) $input['area'] : null,
+			'post_type' => isset( $input['post_type'] ) ? (string) $input['post_type'] : null,
+			'slug'      => isset( $input['slug'] ) ? (string) $input['slug'] : null,
+			'source'    => isset( $input['source'] ) ? (string) $input['source'] : null,
+		);
+
+		return $this->call_controller(
+			array( $this->controller, 'get_templates' ),
+			new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/templates' ),
+			$params
+		);
+	}
+
+	/**
+	 * Fetch a single template's metadata, raw content, and parsed blocks via
+	 * the template REST handler.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_get_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'GET', '/' . REST_Controller::NAMESPACE . '/template' );
+		return $this->call_controller( array( $this->controller, 'get_template' ), $request, $params );
+	}
+
+	/**
+	 * Replace a template's entire content via the gated template-update REST
+	 * handler. Permission (the gk_block_api_template_edits toggle plus
+	 * edit_posts/edit_theme_options) is enforced by
+	 * Abilities_Registry::check_tool_permission()'s 'template_edit' branch
+	 * before this method ever runs.
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_update_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$body = array();
+		if ( isset( $input['content'] ) && is_string( $input['content'] ) ) {
+			$body['content'] = $input['content'];
+		}
+		if ( isset( $input['blocks'] ) && is_array( $input['blocks'] ) ) {
+			$body['blocks'] = $input['blocks'];
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/template' );
+		return $this->call_controller( array( $this->controller, 'update_template' ), $request, $params, $body );
+	}
+
+	/**
+	 * Delete a template's database override via the gated template-reset REST
+	 * handler. Gated the same way as execute_update_template().
+	 *
+	 * @since 2.2.0
+	 *
+	 * @param array<string, mixed> $input Tool input.
+	 * @return array<string, mixed>|\WP_Error
+	 */
+	private function execute_reset_template( array $input ) {
+		$id = isset( $input['id'] ) ? (string) $input['id'] : '';
+		if ( '' === $id ) {
+			return new \WP_Error( 'missing_id', __( 'id is required.', 'gk-block-mcp' ), array( 'status' => 400 ) );
+		}
+
+		$params = array(
+			'id'   => $id,
+			'type' => isset( $input['type'] ) ? (string) $input['type'] : null,
+		);
+
+		$request = new \WP_REST_Request( 'POST', '/' . REST_Controller::NAMESPACE . '/template/reset' );
+		return $this->call_controller( array( $this->controller, 'reset_template' ), $request, $params );
 	}
 
 	/**

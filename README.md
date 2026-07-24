@@ -27,6 +27,8 @@
   * [3. Manual setup (advanced)](#3-manual-setup-advanced)
   * [4. (Optional) Tune the settings](#4-optional-tune-the-settings)
 * [MCP Tools](#mcp-tools)
+* [Templates](#templates)
+  * [Editing templates](#editing-templates)
 * [Stable Refs](#stable-refs)
 * [Configuration](#configuration)
   * [Namespace tier scores](#namespace-tier-scores)
@@ -286,6 +288,7 @@ See the [Configuration](#configuration) section below for the full breakdown.
 | `rewrite_post_blocks` | Full page rewrite |
 | `edit_block_tree` | 9 path-or-ref-based structural ops |
 | `insert_pattern` | Insert a pattern, synced or inline |
+| `create_pattern` | Create a synced pattern from structured blocks or raw content, with sync-status control |
 | `revert_to_revision` | Roll back to a prior revision ID |
 
 **Posts & taxonomies**
@@ -307,9 +310,10 @@ See the [Configuration](#configuration) section below for the full breakdown.
 
 | Tool | Purpose |
 |---|---|
-| `list_block_types` | Browse registered block types with preference tiers |
-| `list_patterns` / `get_pattern` | Search and inspect patterns with scoring |
+| `list_block_types` | Browse registered block types with preference tiers, style variations, and nesting constraints (`parent`/`ancestor`/`allowed_blocks`). Pass `include_supports:true` for each block's full `supports` object (opt-in, default `false`) |
+| `list_patterns` / `get_pattern` | Search and inspect patterns with scoring; filter by `category` and browse the registered category vocabulary |
 | `get_site_usage` | Block/pattern usage analytics |
+| `list_binding_sources` | Registered block bindings sources (e.g. `core/post-meta`, `core/pattern-overrides`) a block's `metadata.bindings` can reference |
 
 **SEO** (when [Yoast SEO](https://wordpress.org/plugins/wordpress-seo/) is active)
 
@@ -317,6 +321,32 @@ See the [Configuration](#configuration) section below for the full breakdown.
 |---|---|
 | `yoast_get_seo` | Read SEO metadata: title, description, robots, OG, Twitter, schema, scores |
 | `yoast_update_seo` / `yoast_bulk_update_seo` | Update SEO fields on one or many posts |
+
+**Templates** (block themes only)
+
+| Tool | Purpose |
+|---|---|
+| `list_templates` | Browse a block theme's templates and template parts (filter by type, area, post_type, slug, source) |
+| `get_template` | A single template's metadata, raw content, and parsed blocks |
+| `update_template` | Replace a template/part's entire content, gated by a site setting (off by default) |
+| `reset_template` | Delete a template's database override, reverting it to the theme file |
+
+## Templates
+
+`list_templates` / `get_template` are read-only tools for browsing a block theme's templates (page layouts like `single`, `archive`) and template parts (reusable regions like `header`, `footer`), the same content the Site Editor's template list shows.
+
+Each row's `wp_id` tells you whether a database override currently shadows the theme file: `null` means the id resolves to the theme file itself; a number means a customization exists and that post ID is the override. On a classic (non-block) theme, `list_templates` returns an empty list with a `note` explaining why, rather than an error.
+
+Templates are index-addressed only. `get_template`'s `blocks` field is formatted like `get_page_blocks`. Whether the per-block write tools (`update_block`, `edit_block_tree` by ref) apply depends on the `wp_id`: a template that still resolves to the theme file (`wp_id: null`) is not writable by them, while a template with a database override (a numeric `wp_id`) is an ordinary post they edit like any other. Use `update_template` (see Editing templates below) to materialize the override for a theme-file-only template.
+
+### Editing templates
+
+`update_template` / `reset_template` write to templates. Both are off by default. Enable **"Let the assistant edit theme templates and template parts"** under Settings → Block MCP first, or every call returns a 403 with an actionable message. Turning the toggle on grants the Block MCP agent account a dedicated `gk_block_mcp_edit_templates` capability (nothing else it can do changes); a human's own "self" connection can edit templates too, since it already carries `edit_theme_options`.
+
+- `update_template` replaces a template's entire content: whole-template replacement, like `rewrite_post_blocks`, not a per-block edit. Provide exactly one of `content` (raw markup) or `blocks` (structured; validated against the block registry and preference tiers, same as any other structured-block write). If the id currently resolves to the theme file, a database override is created automatically (`override_created: true`); the theme file itself is never touched. Writing again reuses the same override.
+- `reset_template` deletes the override, reverting the id back to the theme file. Appearance → Editor → Reset does the same thing from the WordPress admin.
+
+Once an override exists, its `wp_id` is a normal post ID — `update_block`, `get_page_blocks`, and the rest of the per-block tool surface work against it like any other post.
 
 ## Stable Refs
 
@@ -438,10 +468,10 @@ With path-based addressing, the agent would need to re-fetch between every step.
 Run all suites locally:
 
 ```bash
-# TypeScript (Vitest) — 257 tests
+# TypeScript (Vitest): 885 tests
 npm test
 
-# PHP (PHPUnit, stub WP bootstrap) — 335 tests
+# PHP (PHPUnit, stub WP bootstrap): 1,440 tests
 cd wordpress-plugin/gk-block-mcp && phpunit -c tests/phpunit.xml
 ```
 
@@ -585,6 +615,17 @@ Every REST endpoint returns errors as JSON in the standard WordPress shape `{ co
 |---|---|---|
 | `rate_limit_exceeded` | Per-post write budget exhausted (10 writes/min, or 2 full-rewrites/min) | Wait up to 60 s and retry; consider batching with `update_blocks` |
 | `scan_rate_limited` | Settings-page scan triggered too frequently | Wait; this affects admin-side scans only |
+
+### Method not allowed (HTTP 405)
+
+Not a plugin error: a 405 comes from the host's firewall or web server, ahead of WordPress. Some managed hosts reject `PUT`, `PATCH`, and `DELETE` outright, which is why reads and `create_post` succeed on such a host while every editing tool fails.
+
+The client handles this on its own. When one of those verbs is rejected, it replays the request as a `POST` carrying an `X-HTTP-Method-Override` header (the form WordPress core accepts), and remembers the host, so later edits go through on the first attempt. Hosts that accept the real verbs never see the header.
+
+| Symptom | What it means | How to recover |
+|---|---|---|
+| `Block API Error (405)` with an HTML body (e.g. `nginx`) on an editing tool | The firewall rejected both the real verb and the override replay | Ask the host to allow `PUT`, `PATCH`, and `DELETE`, or to stop stripping `X-HTTP-Method-Override`, on the WordPress REST path |
+| Reads work, edits fail immediately after install | The host rejects editing verbs; the fallback could not complete | Same as above; confirm with `curl -X PATCH` against `/wp-json/gk-block-api/v1/...` |
 
 ### Upstream (HTTP 502)
 

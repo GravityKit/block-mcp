@@ -510,4 +510,83 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 		$html = $this->render_policy_html();
 		$this->assertStringContainsString( 'Remove this row', $html, 'the replacement new/template row must render a Remove control even with no stored mappings' );
 	}
+
+	// -- Security toggles reflect the stored option, not a filter override --
+
+	/**
+	 * Each security toggle whose checkbox must mirror the stored option.
+	 *
+	 * Columns: option key, its override filter, the stored value, the value the
+	 * filter forces (opposite of stored), and the checkbox state the box must
+	 * render (which follows the STORED value, never the filter).
+	 *
+	 * @return array<string, array<int, mixed>>
+	 */
+	public function security_toggle_override_provider(): array {
+		return array(
+			'uploads stored on, filter forces off'   => array( \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION, 'gk/block-mcp/media/uploads-enabled', '1', false, true ),
+			'trash stored off, filter forces on'     => array( \GravityKit\BlockMCP\Post_Manager::ALLOW_TRASH_OPTION, 'gk/block-mcp/post/allow-trash', '0', true, false ),
+			'templates stored off, filter forces on' => array( \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, 'gk/block-mcp/templates/allow-edits', '0', true, false ),
+			'abilities stored off, filter forces on' => array( \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION, 'gk/block-mcp/abilities/enabled', '0', true, false ),
+		);
+	}
+
+	/**
+	 * A security toggle's checkbox renders from the stored option, never the
+	 * post-filter effective value.
+	 *
+	 * The checkbox is the form control that POSTs back to the option. When a
+	 * gk/block-mcp/* filter overrides the stored value and the box is rendered
+	 * from that effective value, saving any setting silently writes the filtered
+	 * value into the option — flipping the admin's persisted security choice
+	 * (e.g. template-edit or trash access) with no interaction. The box must
+	 * follow the stored value; the divergence is surfaced by the "Heads up"
+	 * override notice instead. Pins all four toggles (uploads, trash, template
+	 * editing, Abilities) against that persist-on-save regression.
+	 *
+	 * @dataProvider security_toggle_override_provider
+	 *
+	 * @param string $option         Option key backing the toggle.
+	 * @param string $filter         Filter that overrides the stored value.
+	 * @param string $stored         Stored option value ('0' or '1').
+	 * @param bool   $filter_forces  Value the filter forces (opposite of stored).
+	 * @param bool   $expect_checked Whether the checkbox must render checked.
+	 * @return void
+	 */
+	public function test_policy_tab_security_toggle_checkbox_reflects_stored_option_not_filter_override( string $option, string $filter, string $stored, bool $filter_forces, bool $expect_checked ) {
+		update_option( $option, $stored );
+		add_filter( $filter, $filter_forces ? '__return_true' : '__return_false' );
+
+		$html = $this->render_policy_html();
+
+		$this->assertSame(
+			$expect_checked,
+			$this->checkbox_is_checked( $html, $option ),
+			sprintf( 'the %s checkbox must reflect the stored option (%s), not the filter override', $option, $stored )
+		);
+		$this->assertStringContainsString(
+			'<code>' . $filter . '</code>',
+			$html,
+			'a filter diverging from the stored value must surface the Heads-up override notice naming the filter'
+		);
+	}
+
+	/**
+	 * Reports whether the checkbox <input> for an option renders as checked.
+	 *
+	 * Targets the checkbox input (type=checkbox, the one that carries the checked
+	 * attribute), not the paired hidden value="0" input of the same name.
+	 *
+	 * @param string $html   Rendered settings HTML.
+	 * @param string $option Option key naming the input.
+	 * @return bool
+	 */
+	private function checkbox_is_checked( string $html, string $option ): bool {
+		$pattern = '/<input\s+type="checkbox"[^>]*\bname="' . preg_quote( $option, '/' ) . '"[^>]*>/';
+		if ( ! preg_match( $pattern, $html, $m ) ) {
+			$this->fail( sprintf( 'no checkbox input found for option %s', $option ) );
+		}
+		return false !== strpos( $m[0], 'checked' );
+	}
+
 }
