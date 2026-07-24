@@ -162,6 +162,24 @@ describe('method override fallback on hosts that reject PUT/PATCH/DELETE', () =>
     expect(seen[0]).toMatchObject({ method: 'POST', override: 'PATCH' });
   });
 
+  it('replays every concurrent rejection, not just the first', async () => {
+    // Writes issued together all go out as real verbs, because none of them has
+    // seen a 405 yet. Replaying only the first would leave the rest surfacing a
+    // 405 the caller can do nothing about.
+    seen.length = 0;
+    const client = clientFor(port);
+
+    const results = await Promise.all([
+      client.updatePost(1, { title: 'a' }),
+      client.updatePost(2, { title: 'b' }),
+      client.updatePost(3, { title: 'c' }),
+    ]);
+
+    expect(results).toEqual([{ success: true }, { success: true }, { success: true }]);
+    expect(seen.filter((s) => s.method === 'PATCH')).toHaveLength(3);
+    expect(seen.filter((s) => s.method === 'POST' && s.override === 'PATCH')).toHaveLength(3);
+  });
+
   it('keeps the fallback per client, not global', async () => {
     // One client learning the host must not silence the real-verb attempt for
     // a client pointed at a different (possibly healthy) host.

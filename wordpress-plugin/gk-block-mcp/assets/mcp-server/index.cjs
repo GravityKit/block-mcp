@@ -40162,7 +40162,7 @@ var WordPressBlockClient = class {
         const config3 = error2.config;
         const method = (config3?.method ?? "get").toLowerCase();
         const edgeRejectedVerb = error2.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
-        if (config3 && edgeRejectedVerb && !this.useMethodOverride) {
+        if (config3 && edgeRejectedVerb) {
           this.useMethodOverride = true;
           return this.client.request(config3);
         }

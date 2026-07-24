@@ -258,12 +258,14 @@ export class WordPressBlockClient {
         const config = error.config as (AxiosRequestConfig & { __retryCount?: number }) | undefined;
 
         // A 405 on a real verb comes from the edge, not WordPress: the plugin
-        // answers these paths. The replay carries method `post`, so a second
-        // 405 cannot loop back here.
+        // answers these paths. Replay every one, not just the first: concurrent
+        // writes all go out as real verbs, so each needs its own replay or it
+        // fails spuriously. A replay arrives here as `post`, which is not an
+        // override verb, so a rejected replay surfaces instead of looping.
         const method = (config?.method ?? 'get').toLowerCase();
         const edgeRejectedVerb =
           error.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
-        if (config && edgeRejectedVerb && !this.useMethodOverride) {
+        if (config && edgeRejectedVerb) {
           this.useMethodOverride = true;
           return this.client.request(config);
         }
