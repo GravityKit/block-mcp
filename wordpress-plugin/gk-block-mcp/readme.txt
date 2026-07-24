@@ -122,7 +122,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 = 2.2.0 on July 23, 2026 =
 
-This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery.
+This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery. It also restores editing on sites behind a server firewall and keeps your saved settings from being overwritten.
 
 #### 🚀 Added
 
@@ -139,8 +139,8 @@ This release adds tools for browsing and safely editing your theme's Full Site E
 
 #### 🐛 Fixed
 
-* The toggles on **Settings → Block MCP** (Media uploads, Move posts to trash, template editing, and the MCP Adapter) now show the value you saved rather than a value forced by a developer filter. Previously, when a filter was overriding one of these, saving the settings page could quietly rewrite your stored choice to match the filter.
-* Editing tools now work on hosts whose firewall rejects the PUT, PATCH, and DELETE request types. On those hosts every editing tool failed with a "405 Not Allowed" error while reading and creating content kept working, because the firewall turned the request away before WordPress ever saw it. The assistant now retries such a request in a form those firewalls accept, and remembers the result so later edits go through on the first try.
+* The toggles on **Settings → Block MCP** (Media uploads, Move posts to trash, and the MCP Adapter) now show the value you saved rather than a value forced by a developer filter. Previously, when a filter was overriding one of these, saving the settings page could quietly rewrite your stored choice to match the filter.
+* Fixes editing on sites whose server firewall rejects certain request types, where every editing tool returned a "405 Not Allowed" error while reading and creating content continued to work.
 
 #### 💻 Developer Updates
 
@@ -148,7 +148,6 @@ This release adds tools for browsing and safely editing your theme's Full Site E
 * `GET /block-types` responses now include each block's `styles`, `parent`, `ancestor`, and `allowed_blocks`, and accept an `include_supports` parameter for the full `supports` object. `GET /patterns` accepts a `category` filter and returns the registered `categories`.
 * New MCP tools, also registered as WordPress Abilities for the MCP Adapter: `list_templates`, `get_template`, `update_template`, `reset_template`, `create_pattern`, and `list_binding_sources`.
 * Template editing is gated by a new option, `gk_block_api_template_edits` (off by default), and the `gk/block-mcp/templates/allow-edits` filter.
-* `WordPressBlockClient` falls back to `X-HTTP-Method-Override` on a POST when a PUT, PATCH, or DELETE returns a 405, and caches that per client instance. Hosts that accept the real verbs are unaffected: the fallback engages only after a rejection. The editing routes are registered as literal `PUT` / `PATCH` / `DELETE` rather than `EDITABLE`, so the override header (not a plain POST) is what carries the intended verb.
 
 = 2.1.0 on July 20, 2026 =
 
