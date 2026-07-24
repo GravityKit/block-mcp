@@ -328,27 +328,65 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 	 */
 	public function test_update_template_ability_succeeds_via_dedicated_capability() {
 		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+
+		// register_role() updates the canonical role in place when it already
+		// exists, so removing it outright would leave later tests without the
+		// role they inherited. Snapshot it and put it back exactly as found.
+		$prior       = get_role( Agent_Provisioner::ROLE );
+		$prior_caps  = $prior ? $prior->capabilities : null;
+		$prior_label = $prior ? ( wp_roles()->role_names[ Agent_Provisioner::ROLE ] ?? Agent_Provisioner::ROLE ) : null;
+
 		Agent_Provisioner::register_role();
+
+		// The point of this path is that the dedicated capability alone carries
+		// the write. Without these the test would still pass if the role picked
+		// up edit_theme_options, which is the "self" path covered elsewhere.
+		$role = get_role( Agent_Provisioner::ROLE );
+		$this->assertTrue(
+			$role->has_cap( Agent_Provisioner::TEMPLATE_EDIT_CAP ),
+			'the agent role must hold the dedicated template-edit capability'
+		);
+		foreach ( array( 'edit_theme_options', 'manage_options', 'unfiltered_html', 'delete_posts', 'delete_published_posts' ) as $forbidden ) {
+			$this->assertFalse(
+				$role->has_cap( $forbidden ),
+				sprintf( 'the agent role must stay least-privilege and must not hold %s', $forbidden )
+			);
+		}
 
 		wp_set_current_user( self::factory()->user->create( array( 'role' => Agent_Provisioner::ROLE ) ) );
 
-		$marker = 'AGENT-CAP-MARKER-' . wp_rand();
-		$result = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
-			array(
-				'id'      => $this->theme . '//index',
-				'content' => '<!-- wp:paragraph --><p>' . $marker . '</p><!-- /wp:paragraph -->',
-			)
-		);
+		$override_id = 0;
 
-		$this->assertNotWPError( $result );
-		$this->assertTrue( $result['success'] );
+		try {
+			$marker = 'AGENT-CAP-MARKER-' . wp_rand();
+			$result = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
+				array(
+					'id'      => $this->theme . '//index',
+					'content' => '<!-- wp:paragraph --><p>' . $marker . '</p><!-- /wp:paragraph -->',
+				)
+			);
 
-		$read = wp_get_ability( 'gk-block-mcp/get-template' )->execute( array( 'id' => $this->theme . '//index' ) );
+			$this->assertNotWPError( $result );
+			$this->assertTrue( $result['success'] );
+			$override_id = isset( $result['wp_id'] ) ? (int) $result['wp_id'] : 0;
 
-		remove_role( Agent_Provisioner::ROLE );
+			$read = wp_get_ability( 'gk-block-mcp/get-template' )->execute( array( 'id' => $this->theme . '//index' ) );
 
-		$this->assertNotWPError( $read );
-		$this->assertStringContainsString( $marker, $read['content'] );
+			$this->assertNotWPError( $read );
+			$this->assertStringContainsString( $marker, $read['content'] );
+		} finally {
+			// A successful write leaves a wp_template override shadowing the
+			// theme file; anything reading that template afterwards would see
+			// this test's content instead of the theme's.
+			if ( $override_id ) {
+				wp_delete_post( $override_id, true );
+			}
+
+			remove_role( Agent_Provisioner::ROLE );
+			if ( null !== $prior_caps ) {
+				add_role( Agent_Provisioner::ROLE, $prior_label, $prior_caps );
+			}
+		}
 	}
 
 	/**

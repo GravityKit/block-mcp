@@ -555,20 +555,28 @@ class SettingsPagePreferencesTest extends WP_UnitTestCase {
 	 */
 	public function test_policy_tab_security_toggle_checkbox_reflects_stored_option_not_filter_override( string $option, string $filter, string $stored, bool $filter_forces, bool $expect_checked ) {
 		update_option( $option, $stored );
-		add_filter( $filter, $filter_forces ? '__return_true' : '__return_false' );
+		$callback = $filter_forces ? '__return_true' : '__return_false';
+		add_filter( $filter, $callback );
 
-		$html = $this->render_policy_html();
+		// Each provider row registers a filter that changes an effective
+		// security setting, so it has to come off even when an assertion
+		// fails, or the rows that follow read a value this one forced.
+		try {
+			$html = $this->render_policy_html();
 
-		$this->assertSame(
-			$expect_checked,
-			$this->checkbox_is_checked( $html, $option ),
-			sprintf( 'the %s checkbox must reflect the stored option (%s), not the filter override', $option, $stored )
-		);
-		$this->assertStringContainsString(
-			'<code>' . $filter . '</code>',
-			$html,
-			'a filter diverging from the stored value must surface the Heads-up override notice naming the filter'
-		);
+			$this->assertSame(
+				$expect_checked,
+				$this->checkbox_is_checked( $html, $option ),
+				sprintf( 'the %s checkbox must reflect the stored option (%s), not the filter override', $option, $stored )
+			);
+			$this->assertStringContainsString(
+				'<code>' . $filter . '</code>',
+				$html,
+				'a filter diverging from the stored value must surface the Heads-up override notice naming the filter'
+			);
+		} finally {
+			remove_filter( $filter, $callback );
+		}
 	}
 
 	/**
