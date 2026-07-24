@@ -178,8 +178,13 @@ class Agent_Provisioner {
 				// TEMPLATE_EDIT_CAP is the one cap this class both adds and
 				// removes: the additive loop above never takes it away, so a
 				// toggle flipped off needs this explicit revoke or the grant
-				// would outlive the setting that authorized it.
-				if ( ! $caps[ self::TEMPLATE_EDIT_CAP ] && $existing->has_cap( self::TEMPLATE_EDIT_CAP ) ) {
+				// would outlive the setting that authorized it. The public
+				// gk/block-mcp/agent/caps filter can unset the key entirely
+				// rather than setting it false; treat that the same way —
+				// revoke, the safe default for a security-gating capability.
+				$template_edit_cap_granted  = ! empty( $caps[ self::TEMPLATE_EDIT_CAP ] );
+				$role_has_template_edit_cap = $existing->has_cap( self::TEMPLATE_EDIT_CAP );
+				if ( ! $template_edit_cap_granted && $role_has_template_edit_cap ) {
 					$existing->remove_cap( self::TEMPLATE_EDIT_CAP );
 				}
 			}

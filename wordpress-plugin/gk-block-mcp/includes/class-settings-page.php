@@ -758,8 +758,17 @@ class Settings_Page {
 		$abilities_option  = \GravityKit\BlockMCP\Block_Abilities::ENABLED_OPTION;
 		$templates_enabled = \GravityKit\BlockMCP\Template_Manager::edits_enabled();
 		$templates_option  = \GravityKit\BlockMCP\Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION;
-		$instructions_val  = Instructions::get_addendum();
-		$instructions_max  = Instructions::MAX_LENGTH;
+		// Each checkbox reflects the admin's STORED choice, not the *_enabled
+		// post-filter effective value: the checkbox is the form control, so
+		// rendering it from a filter override would persist that override back
+		// into the option on the next save, silently changing the stored
+		// setting. The *_enabled values feed the "Heads up" override notices below.
+		$uploads_stored   = '0' !== (string) get_option( $uploads_option, '1' );
+		$trash_stored     = '0' !== (string) get_option( $trash_option, '0' );
+		$abilities_stored = '0' !== (string) get_option( $abilities_option, '0' );
+		$templates_stored = '0' !== (string) get_option( $templates_option, '0' );
+		$instructions_val = Instructions::get_addendum();
+		$instructions_max = Instructions::MAX_LENGTH;
 
 		$registered_post_types = get_post_types( array( 'public' => true ), 'objects' );
 
@@ -1149,20 +1158,14 @@ class Settings_Page {
 						type="checkbox"
 						name="<?php echo esc_attr( $uploads_option ); ?>"
 						value="1"
-						<?php checked( $uploads_enabled ); ?>
+						<?php checked( $uploads_stored ); ?>
 					/>
 					<?php esc_html_e( 'Allow AI assistants to upload media', 'gk-block-mcp' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so admins aren't confused
 				// by a checked box that the API still rejects.
-				$option_raw = get_option( $uploads_option, '1' );
-				// Applies the gk/block-mcp/media/uploads-enabled filter (documented in class-media-manager.php).
-				$filtered = (bool) apply_filters(
-					'gk/block-mcp/media/uploads-enabled',
-					( '0' !== (string) $option_raw && false !== $option_raw )
-				);
-				if ( ( '0' !== (string) $option_raw && false !== $option_raw ) !== $filtered ) :
+				if ( $uploads_stored !== $uploads_enabled ) :
 					?>
 					<p class="description" style="color:#b32d2e;">
 						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
@@ -1195,18 +1198,14 @@ class Settings_Page {
 						type="checkbox"
 						name="<?php echo esc_attr( $trash_option ); ?>"
 						value="1"
-						<?php checked( $trash_enabled ); ?>
+						<?php checked( $trash_stored ); ?>
 					/>
 					<?php esc_html_e( 'Allow AI assistants to move posts to the trash', 'gk-block-mcp' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so admins aren't confused
 				// by a box whose state the API doesn't actually honor.
-				$trash_raw    = get_option( $trash_option, '0' );
-				$trash_stored = ( '0' !== (string) $trash_raw && false !== $trash_raw );
-				// Applies the gk/block-mcp/post/allow-trash filter (documented in class-post-manager.php).
-				$trash_filtered = (bool) apply_filters( 'gk/block-mcp/post/allow-trash', $trash_stored );
-				if ( $trash_stored !== $trash_filtered ) :
+				if ( $trash_stored !== $trash_enabled ) :
 					?>
 					<p class="description" style="color:#b32d2e;">
 						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
@@ -1238,18 +1237,14 @@ class Settings_Page {
 						type="checkbox"
 						name="<?php echo esc_attr( $templates_option ); ?>"
 						value="1"
-						<?php checked( $templates_enabled ); ?>
+						<?php checked( $templates_stored ); ?>
 					/>
 					<?php esc_html_e( 'Let the assistant edit theme templates and template parts (header, footer, archives)', 'gk-block-mcp' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so admins aren't confused
 				// by a box whose state the API doesn't actually honor.
-				$templates_raw    = get_option( $templates_option, '0' );
-				$templates_stored = ( '0' !== (string) $templates_raw && false !== $templates_raw );
-				// Applies the gk/block-mcp/templates/allow-edits filter (documented in class-template-manager.php).
-				$templates_filtered = (bool) apply_filters( 'gk/block-mcp/templates/allow-edits', $templates_stored );
-				if ( $templates_stored !== $templates_filtered ) :
+				if ( $templates_stored !== $templates_enabled ) :
 					?>
 					<p class="description" style="color:#b32d2e;">
 						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>
@@ -1309,17 +1304,13 @@ class Settings_Page {
 						type="checkbox"
 						name="<?php echo esc_attr( $abilities_option ); ?>"
 						value="1"
-						<?php checked( $abilities_enabled ); ?>
+						<?php checked( $abilities_stored ); ?>
 					/>
 					<?php esc_html_e( 'Let AI agents edit my pages and posts through the WordPress MCP Adapter', 'gk-block-mcp' ); ?>
 				</label>
 				<?php
 				// Surface filter-driven overrides so the box reflects the value the API actually honors.
-				$abilities_raw    = get_option( $abilities_option, '0' );
-				$abilities_stored = '0' !== (string) $abilities_raw;
-				// Applies the gk/block-mcp/abilities/enabled filter (documented in class-block-abilities.php).
-				$abilities_filtered = (bool) apply_filters( 'gk/block-mcp/abilities/enabled', $abilities_stored );
-				if ( $abilities_stored !== $abilities_filtered ) :
+				if ( $abilities_stored !== $abilities_enabled ) :
 					?>
 					<p class="description" style="color:#b32d2e;">
 						<strong><?php esc_html_e( 'Heads up:', 'gk-block-mcp' ); ?></strong>

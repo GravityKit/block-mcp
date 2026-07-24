@@ -147,6 +147,10 @@ This release adds tools for browsing and safely editing your theme's Full Site E
 * When listing the block types available on your site, the assistant now also sees each block's style variations and nesting rules (which blocks a given block can contain and where it can be placed), so it chooses valid style names and keeps blocks in valid positions.
 * You can now filter available patterns by category, and the pattern list includes your site's full set of pattern categories.
 
+#### 🐛 Fixed
+
+* The toggles on **Settings → Block MCP** (Media uploads, Move posts to trash, template editing, and the MCP Adapter) now show the value you saved rather than a value forced by a developer filter. Previously, when a filter was overriding one of these, saving the settings page could quietly rewrite your stored choice to match the filter.
+
 #### 💻 Developer Updates
 
 * New REST routes under `gk-block-api/v1`: `GET /templates` and `GET /template` (read Full Site Editing templates and parts), `POST /template` and `POST /template/reset` (gated template edits), `GET /binding-sources`, and `POST /patterns` (create a pattern).

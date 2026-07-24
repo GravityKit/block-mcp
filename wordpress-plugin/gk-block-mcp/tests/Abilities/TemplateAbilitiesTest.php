@@ -13,6 +13,7 @@
 declare( strict_types=1 );
 
 use GravityKit\BlockMCP\Abilities_Registry;
+use GravityKit\BlockMCP\Agent_Provisioner;
 use GravityKit\BlockMCP\Block_Abilities;
 use GravityKit\BlockMCP\Template_Manager;
 use GravityKit\BlockMCP\Tool_Executor;
@@ -314,6 +315,40 @@ class TemplateAbilitiesTest extends RestControllerTestCase {
 
 		$this->assertNotWPError( $result );
 		$this->assertTrue( $result['success'] );
+	}
+
+	/**
+	 * With the toggle on, the dedicated block_mcp_agent role — holding
+	 * Agent_Provisioner::TEMPLATE_EDIT_CAP but neither edit_theme_options nor
+	 * any other site-administration capability — can write via the ability,
+	 * the least-privilege agent-connection path distinct from the "self"
+	 * edit_theme_options path already covered above. Round-trips through
+	 * get-template to prove the write actually landed, not just that the
+	 * call returned success.
+	 */
+	public function test_update_template_ability_succeeds_via_dedicated_capability() {
+		update_option( Template_Manager::ALLOW_TEMPLATE_EDITS_OPTION, '1' );
+		Agent_Provisioner::register_role();
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => Agent_Provisioner::ROLE ) ) );
+
+		$marker = 'AGENT-CAP-MARKER-' . wp_rand();
+		$result = wp_get_ability( 'gk-block-mcp/update-template' )->execute(
+			array(
+				'id'      => $this->theme . '//index',
+				'content' => '<!-- wp:paragraph --><p>' . $marker . '</p><!-- /wp:paragraph -->',
+			)
+		);
+
+		$this->assertNotWPError( $result );
+		$this->assertTrue( $result['success'] );
+
+		$read = wp_get_ability( 'gk-block-mcp/get-template' )->execute( array( 'id' => $this->theme . '//index' ) );
+
+		remove_role( Agent_Provisioner::ROLE );
+
+		$this->assertNotWPError( $read );
+		$this->assertStringContainsString( $marker, $read['content'] );
 	}
 
 	/**
