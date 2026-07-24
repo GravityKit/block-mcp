@@ -145,6 +145,68 @@ describe('enrichBlock — Code Block Pro', () => {
     expect(result.innerHTML).toContain('color:#d8dee9ff');
   });
 
+  /**
+   * A custom fontFamily value (a CBP font-name like `Code-Pro-JetBrains-Mono`)
+   * is not a loaded webfont, so a bare `font-family:Code-Pro-JetBrains-Mono`
+   * makes browsers fall back to the default serif. The real CBP editor bakes a
+   * full monospace stack; the enricher must append the same generic fallback so
+   * a custom name still renders as monospace.
+   */
+  it('appends a monospace fallback stack to a custom fontFamily', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontFamily: 'Code-Pro-JetBrains-Mono',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain(
+      'font-family:Code-Pro-JetBrains-Mono,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+    );
+  });
+
+  /**
+   * Idempotency: a fontFamily that already ends in a generic family keyword
+   * (`Menlo,monospace`) is emitted UNCHANGED — no appended stack, no doubled
+   * `monospace`. Re-running the enricher must never keep growing the value.
+   */
+  it('leaves a fontFamily that already ends in a generic family unchanged', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontFamily: 'Menlo,monospace',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain('font-family:Menlo,monospace');
+    // No appended stack, and monospace is not doubled.
+    expect(result.innerHTML).not.toContain('Menlo,monospace,ui-monospace');
+    expect(result.innerHTML).not.toContain('monospace,monospace');
+  });
+
+  /**
+   * A value that is itself a generic family (`ui-monospace`) already provides a
+   * monospace fallback, so it is left unchanged.
+   */
+  it('leaves a bare generic-family fontFamily unchanged', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontFamily: 'ui-monospace',
+      },
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain('font-family:ui-monospace');
+    expect(result.innerHTML).not.toContain('ui-monospace,ui-monospace');
+    expect(result.innerHTML).not.toContain('ui-monospace,SFMono-Regular');
+  });
+
   it('includes copy-textarea when copyButton is enabled', async () => {
     const block: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',

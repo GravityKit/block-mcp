@@ -250,6 +250,24 @@ function escapeAttr(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Guarantee a CSS generic-family fallback on a font-family value.
+ *
+ * A custom CBP font-name like `Code-Pro-JetBrains-Mono` is not a loaded
+ * webfont, so `font-family:Code-Pro-JetBrains-Mono` alone makes browsers fall
+ * back to the default serif. The real CBP editor bakes a full monospace stack;
+ * mirror it here. If the value already contains a generic family keyword
+ * (`monospace`, `ui-monospace`, `sans-serif`, `serif`, `system-ui`, `cursive`,
+ * `fantasy`) it already has a usable fallback and is returned unchanged. The
+ * word-boundary match also matches inside `ui-monospace` and a value already
+ * ending in `monospace`, so re-runs never double-append.
+ */
+function ensureMonospaceFallback(fontFamily: string): string {
+  const hasGenericFamily = /\b(?:monospace|ui-monospace|sans-serif|serif|system-ui|cursive|fantasy)\b/i.test(fontFamily);
+  if (hasGenericFamily) return fontFamily;
+  return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
+}
+
 registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code as string | undefined;
@@ -329,7 +347,7 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
     // `foo" onclick="…`). The encoder collapses all five
     // attribute-significant characters to entities.
     const styleParts: string[] = [];
-    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${escapeAttr(attrs.fontFamily)}`);
+    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
     if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
     if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
     if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);
