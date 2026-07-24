@@ -185,14 +185,16 @@ export class WordPressBlockClient {
   private client: AxiosInstance;
 
   /**
-   * Set once a host proves it rejects PUT / PATCH / DELETE at the edge.
+   * True once a replay has proven this host rejects PUT / PATCH / DELETE at the
+   * edge yet honours `X-HTTP-Method-Override` on a POST.
    *
-   * Some managed hosts front WordPress with a WAF that answers those verbs with
-   * a 405 before the request reaches PHP, which breaks every editing tool while
-   * GET and POST keep working. WordPress core honours `X-HTTP-Method-Override`
-   * on a POST, so a rejected request is replayed in that shape. The flag makes
-   * the fallback sticky for the life of the client: only the first write pays
-   * for the rejected round-trip.
+   * Some managed hosts answer those verbs with a 405 before the request reaches
+   * PHP, which breaks every editing tool while GET and POST keep working.
+   *
+   * Only requests issued after this is true skip the rejected probe; writes
+   * already in flight have each gone out as a real verb and pay their own. Set
+   * only after a replay succeeds, so a host that rejects the override too is
+   * never treated as override-capable.
    */
   private useMethodOverride = false;
 
@@ -241,7 +243,8 @@ export class WordPressBlockClient {
     // intended method as an override header on a POST instead.
     this.client.interceptors.request.use((config) => {
       const method = (config.method ?? 'get').toLowerCase();
-      const needsOverride = this.useMethodOverride && METHOD_OVERRIDE_VERBS.has(method);
+      const forced = (config as AxiosRequestConfig & { __overrideMethod?: boolean }).__overrideMethod === true;
+      const needsOverride = (this.useMethodOverride || forced) && METHOD_OVERRIDE_VERBS.has(method);
       if (needsOverride) {
         config.headers.set('X-HTTP-Method-Override', method.toUpperCase());
         config.method = 'post';
@@ -255,19 +258,26 @@ export class WordPressBlockClient {
     this.client.interceptors.response.use(
       (r) => r,
       async (error: AxiosError) => {
-        const config = error.config as (AxiosRequestConfig & { __retryCount?: number }) | undefined;
+        const config = error.config as
+          | (AxiosRequestConfig & { __retryCount?: number; __overrideMethod?: boolean })
+          | undefined;
 
-        // A 405 on a real verb comes from the edge, not WordPress: the plugin
-        // answers these paths. Replay every one, not just the first: concurrent
-        // writes all go out as real verbs, so each needs its own replay or it
-        // fails spuriously. A replay arrives here as `post`, which is not an
-        // override verb, so a rejected replay surfaces instead of looping.
+        // WordPress answers an unroutable method with 404 `rest_no_route`, so a
+        // 405 with no REST error body came from the edge. A structured 405 is a
+        // real answer, left alone because replaying it as POST could reach a
+        // different route. Every edge rejection is replayed, not just the
+        // first: concurrent writes each go out as a real verb. A replay carries
+        // `post`, not an override verb, so it cannot loop back here.
         const method = (config?.method ?? 'get').toLowerCase();
+        const body = error.response?.data;
+        const isRestErrorBody = !!body && typeof body === 'object' && 'code' in body;
         const edgeRejectedVerb =
-          error.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
+          error.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method) && !isRestErrorBody;
         if (config && edgeRejectedVerb) {
+          config.__overrideMethod = true;
+          const replay = await this.client.request(config);
           this.useMethodOverride = true;
-          return this.client.request(config);
+          return replay;
         }
 
         if (config && isRetryable(error)) {

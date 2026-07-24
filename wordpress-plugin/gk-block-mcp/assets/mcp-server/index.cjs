@@ -40104,14 +40104,16 @@ function isRetryable(error2) {
 var WordPressBlockClient = class {
   client;
   /**
-   * Set once a host proves it rejects PUT / PATCH / DELETE at the edge.
+   * True once a replay has proven this host rejects PUT / PATCH / DELETE at the
+   * edge yet honours `X-HTTP-Method-Override` on a POST.
    *
-   * Some managed hosts front WordPress with a WAF that answers those verbs with
-   * a 405 before the request reaches PHP, which breaks every editing tool while
-   * GET and POST keep working. WordPress core honours `X-HTTP-Method-Override`
-   * on a POST, so a rejected request is replayed in that shape. The flag makes
-   * the fallback sticky for the life of the client: only the first write pays
-   * for the rejected round-trip.
+   * Some managed hosts answer those verbs with a 405 before the request reaches
+   * PHP, which breaks every editing tool while GET and POST keep working.
+   *
+   * Only requests issued after this is true skip the rejected probe; writes
+   * already in flight have each gone out as a real verb and pay their own. Set
+   * only after a replay succeeds, so a host that rejects the override too is
+   * never treated as override-capable.
    */
   useMethodOverride = false;
   /**
@@ -40149,7 +40151,8 @@ var WordPressBlockClient = class {
     });
     this.client.interceptors.request.use((config3) => {
       const method = (config3.method ?? "get").toLowerCase();
-      const needsOverride = this.useMethodOverride && METHOD_OVERRIDE_VERBS.has(method);
+      const forced = config3.__overrideMethod === true;
+      const needsOverride = (this.useMethodOverride || forced) && METHOD_OVERRIDE_VERBS.has(method);
       if (needsOverride) {
         config3.headers.set("X-HTTP-Method-Override", method.toUpperCase());
         config3.method = "post";
@@ -40161,10 +40164,14 @@ var WordPressBlockClient = class {
       async (error2) => {
         const config3 = error2.config;
         const method = (config3?.method ?? "get").toLowerCase();
-        const edgeRejectedVerb = error2.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method);
+        const body3 = error2.response?.data;
+        const isRestErrorBody = !!body3 && typeof body3 === "object" && "code" in body3;
+        const edgeRejectedVerb = error2.response?.status === 405 && METHOD_OVERRIDE_VERBS.has(method) && !isRestErrorBody;
         if (config3 && edgeRejectedVerb) {
+          config3.__overrideMethod = true;
+          const replay = await this.client.request(config3);
           this.useMethodOverride = true;
-          return this.client.request(config3);
+          return replay;
         }
         if (config3 && isRetryable(error2)) {
           const attempt = (config3.__retryCount ?? 0) + 1;
