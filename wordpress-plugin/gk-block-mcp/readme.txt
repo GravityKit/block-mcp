@@ -120,6 +120,12 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🐛 Fixed
+
+* A damaged plugin install no longer breaks the WordPress admin. If one of the plugin's files goes missing or is emptied, every admin page returned a critical error and WordPress emailed a recovery link. Now the rest of the admin keeps loading, and a notice explains that part of Block MCP could not be loaded and that reinstalling usually fixes it.
+
 = 2.2.0 on July 23, 2026 =
 
 This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery. It also restores editing on sites behind a server firewall and keeps your saved settings from being overwritten.

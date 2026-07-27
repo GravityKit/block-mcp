@@ -20,6 +20,8 @@
 
 namespace GravityKit\BlockMCP;
 
+use Throwable;
+
 // Exit if accessed directly.
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -65,6 +67,24 @@ class Settings_Page {
 	private $inventory;
 
 	/**
+	 * Whether loading part of the plugin failed during this request.
+	 *
+	 * @since TBD
+	 *
+	 * @var bool
+	 */
+	private $install_damaged = false;
+
+	/**
+	 * Whether the damaged-install notice has already been printed this request.
+	 *
+	 * @since TBD
+	 *
+	 * @var bool
+	 */
+	private $notice_printed = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Block_Inventory $inventory Used by the "Re-scan storage modes" button.
@@ -85,6 +105,7 @@ class Settings_Page {
 		add_action( 'admin_post_gk_block_api_scan_storage_modes', array( $this, 'handle_scan' ) );
 		add_action( 'admin_post_gk_block_api_reset_defaults', array( $this, 'handle_reset' ) );
 		add_action( 'admin_post_gk_block_api_dismiss_prefs_notice', array( $this, 'handle_dismiss_prefs_notice' ) );
+		add_action( 'admin_notices', array( $this, 'maybe_print_damaged_install_notice' ) );
 		add_action( 'in_admin_header', array( $this, 'suppress_foreign_admin_notices' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
@@ -134,13 +155,98 @@ class Settings_Page {
 		if ( $on_settings_page ) {
 			remove_all_actions( 'admin_notices' );
 			remove_all_actions( 'all_admin_notices' );
+
+			// Re-arm this plugin's own damaged-install warning, which the sweep
+			// above would otherwise drop on the one screen it matters most.
+			add_action( 'admin_notices', array( $this, 'maybe_print_damaged_install_notice' ) );
 		}
 	}
 
 	/**
 	 * Register settings + sections + fields.
+	 *
+	 * Runs on `admin_init`, so it executes on every admin page. A damaged
+	 * install — one of this plugin's class files missing or empty — would
+	 * otherwise escalate a single unloadable class into a fatal on the whole
+	 * WordPress admin. Failures are contained here: this plugin stops working,
+	 * the rest of the admin keeps loading.
 	 */
 	public function register_settings() {
+		try {
+			$this->register_plugin_settings();
+		} catch ( Throwable $e ) {
+			$this->note_damaged_install( $e );
+		}
+	}
+
+	/**
+	 * Record that part of the plugin could not be loaded.
+	 *
+	 * Sets the flag the admin notice reads and logs the underlying failure for
+	 * whoever has to diagnose it. Runs on `admin_init`, which fires before
+	 * `admin_notices`, so the notice sees the flag in the same request.
+	 *
+	 * @since TBD
+	 *
+	 * @param Throwable $e The failure that was caught.
+	 * @return void
+	 */
+	private function note_damaged_install( Throwable $e ) {
+		$this->install_damaged = true;
+
+		if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+			error_log( 'Block MCP: damaged install — ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+		}
+	}
+
+	/**
+	 * Tell the site owner the plugin's files are damaged.
+	 *
+	 * Without this the plugin fails silently: it stays listed as active while
+	 * doing nothing, giving no clue that a file is missing. Shown only to users
+	 * who can act on it.
+	 *
+	 * @since TBD
+	 *
+	 * @return void
+	 */
+	public function maybe_print_damaged_install_notice() {
+		if ( ! $this->install_damaged ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+
+		$this->print_damaged_install_notice();
+	}
+
+	/**
+	 * Print the damaged-install notice markup.
+	 *
+	 * @since TBD
+	 *
+	 * @return void
+	 */
+	private function print_damaged_install_notice() {
+		if ( $this->notice_printed ) {
+			return;
+		}
+
+		$this->notice_printed = true;
+
+		echo '<div class="notice notice-error"><p>' .
+			esc_html__( 'Block MCP is not working because part of the plugin could not be loaded. Reinstalling the plugin usually fixes this.', 'gk-block-mcp' ) .
+			'</p></div>';
+	}
+
+	/**
+	 * Declare every setting this plugin persists.
+	 *
+	 * @since TBD
+	 */
+	private function register_plugin_settings() {
 		// 1. Preferences (tier scores + replacement map). Stored as a single
 		// associative array; we sanitize sub-keys in the callback.
 		register_setting(
@@ -720,8 +826,33 @@ class Settings_Page {
 
 	/**
 	 * Render the settings page.
+	 *
+	 * Output is buffered so a failure part-way through discards the half-built
+	 * page and shows the damaged-install notice instead of a truncated screen
+	 * or a fatal. See register_settings() for why this class fails soft.
 	 */
 	public function render_page() {
+		ob_start();
+
+		try {
+			$this->render_settings_page();
+		} catch ( Throwable $e ) {
+			ob_end_clean();
+			$this->note_damaged_install( $e );
+			$this->print_damaged_install_notice();
+
+			return;
+		}
+
+		ob_end_flush();
+	}
+
+	/**
+	 * Render the settings page body.
+	 *
+	 * @since TBD
+	 */
+	private function render_settings_page() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'You do not have permission to view this page.', 'gk-block-mcp' ), '', array( 'response' => 403 ) );
 		}
