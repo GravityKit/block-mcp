@@ -100,12 +100,27 @@ class Core_List_Normalizer {
 		// value is written back to the attribute as well: Gutenberg matches the
 		// values-based deprecation by regenerating markup from `values`, so the
 		// two must agree or the repaired block reads as invalid again.
-		$values          = Block_Writer::sanitize_inner_html( $values );
+		$values = Block_Writer::sanitize_inner_html( $values );
+
+		// Guard: sanitization can reduce the fragment to markup carrying no
+		// <li> at all. Splicing that into the wrapper would emit a list whose
+		// children are not list items.
+		if ( ! self::contains_li( $values ) ) {
+			return $block;
+		}
+
 		$attrs['values'] = $values;
 		$block['attrs']  = $attrs;
 
 		$is_ordered = ! empty( $attrs['ordered'] );
 		$html       = self::bake_values_into_wrapper( $html, $values, $is_ordered, $attrs );
+
+		// The wrapper is assembled here from the incoming innerHTML plus
+		// attribute data, so the composed result is sanitized as a whole before
+		// it becomes post_content. Sanitization is idempotent, so the already
+		// sanitized `values` fragment survives byte-for-byte and keeps agreeing
+		// with the attribute written above.
+		$html = Block_Writer::sanitize_inner_html( $html );
 
 		// The block is a leaf here — a block with innerBlocks returned above —
 		// so one innerContent chunk keeps the null-placeholder invariant.
@@ -113,6 +128,31 @@ class Core_List_Normalizer {
 		$block['innerContent'] = array( $html );
 
 		return $block;
+	}
+
+	/**
+	 * Locate the last closing tag for a tag name.
+	 *
+	 * An end tag may carry whitespace before its `>` (`</ul >` is valid), so a
+	 * literal `</ul>` search misses it — the caller then splices content outside
+	 * the wrapper, or leaves a mismatched closing tag behind after a rename.
+	 *
+	 * @param string $html HTML fragment to search.
+	 * @param string $tag  Lowercase tag name.
+	 *
+	 * @return array|null `offset` and `length` of the last match, null when absent.
+	 */
+	private static function find_last_closing_tag( $html, $tag ) {
+		$pattern = '#</' . preg_quote( $tag, '#' ) . '\s*>#i';
+		$found   = preg_match_all( $pattern, $html, $matches, PREG_OFFSET_CAPTURE );
+		if ( ! $found ) {
+			return null;
+		}
+		$last = end( $matches[0] );
+		return array(
+			'offset' => $last[1],
+			'length' => strlen( $last[0] ),
+		);
 	}
 
 	/**
@@ -159,16 +199,15 @@ class Core_List_Normalizer {
 		// wrapper is empty at this point (guarded above), so there is exactly
 		// one closing tag; any nested sublist inside `values` therefore lands
 		// inside the wrapper rather than confusing the match.
-		$close = '</' . $desired_tag . '>';
-		$pos   = strripos( $wrapper, $close );
-		if ( false === $pos ) {
+		$close = self::find_last_closing_tag( $wrapper, $desired_tag );
+		if ( null === $close ) {
 			// An unclosed wrapper still carries the class and the ordered
 			// attributes prepare_wrapper() applied, so close it rather than
 			// rebuilding a bare opening tag and dropping them.
-			return $wrapper . $values . $close;
+			return $wrapper . $values . '</' . $desired_tag . '>';
 		}
 
-		return substr( $wrapper, 0, $pos ) . $values . substr( $wrapper, $pos );
+		return substr( $wrapper, 0, $close['offset'] ) . $values . substr( $wrapper, $close['offset'] );
 	}
 
 	/**
@@ -222,11 +261,10 @@ class Core_List_Normalizer {
 		$html = $processor->get_updated_html();
 
 		if ( $wrapper_tag !== $desired_tag ) {
-			$html      = preg_replace( '/<' . $wrapper_tag . '\b/i', '<' . $desired_tag, $html, 1 );
-			$close_old = '</' . $wrapper_tag . '>';
-			$close_pos = strripos( $html, $close_old );
-			if ( false !== $close_pos ) {
-				$html = substr( $html, 0, $close_pos ) . '</' . $desired_tag . '>' . substr( $html, $close_pos + strlen( $close_old ) );
+			$html  = preg_replace( '/<' . $wrapper_tag . '\b/i', '<' . $desired_tag, $html, 1 );
+			$close = self::find_last_closing_tag( $html, $wrapper_tag );
+			if ( null !== $close ) {
+				$html = substr( $html, 0, $close['offset'] ) . '</' . $desired_tag . '>' . substr( $html, $close['offset'] + $close['length'] );
 			}
 		}
 

@@ -623,6 +623,108 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	}
 
 	/**
+	 * `values` carrying no list item leaves the block alone.
+	 *
+	 * The wrapper guard only inspects innerHTML, so a `values` attribute holding
+	 * a non-list fragment reached the bake and was spliced between `<ul>` and
+	 * `</ul>`, emitting a list whose children are not list items.
+	 */
+	public function test_values_without_a_list_item_leaves_the_block_unchanged() {
+		$block = $this->list_block(
+			array( 'values' => '<p>Not a list at all</p>' ),
+			self::INVALID_LIST_HTML
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertSame( self::INVALID_LIST_HTML, $out[0]['innerHTML'], 'a values fragment with no <li> must not be baked into the wrapper' );
+		$this->assertStringNotContainsString( '<p>Not a list at all</p>', $out[0]['innerHTML'], 'non-list content must never become a list child' );
+	}
+
+	/**
+	 * `values` reduced to a non-list fragment BY sanitization leaves the block
+	 * alone. The guard has to run against the sanitized value, not the raw one:
+	 * `<script>` survives the raw check and is stripped moments later.
+	 */
+	public function test_values_stripped_to_no_list_item_by_sanitization_leaves_the_block_unchanged() {
+		$block = $this->list_block(
+			array( 'values' => '<script>alert(1)</script>' ),
+			self::INVALID_LIST_HTML
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertSame( self::INVALID_LIST_HTML, $out[0]['innerHTML'], 'a values fragment sanitized down to no <li> must not be baked in' );
+		$this->assertStringNotContainsString( 'alert(1)', $out[0]['innerHTML'], 'stripped script contents must not land in the wrapper' );
+	}
+
+	/**
+	 * A closing tag carrying whitespace still receives the items.
+	 *
+	 * `</ul >` is a valid end tag, but a literal `</ul>` search misses it, so the
+	 * bake fell through to the unclosed-wrapper fallback and appended the items
+	 * AFTER the existing closing tag — outside the list entirely.
+	 */
+	public function test_closing_tag_with_whitespace_receives_the_items_inside_the_wrapper() {
+		$block = $this->list_block(
+			array( 'values' => self::INVALID_LIST_VALUES ),
+			'<ul class="wp-block-list"></ul >'
+		);
+
+		$out  = Block_Normalizer::normalize_tree( array( $block ) );
+		$html = $out[0]['innerHTML'];
+
+		$item_pos  = strpos( $html, '<li>First</li>' );
+		$close_pos = strpos( $html, '</ul' );
+
+		$this->assertNotFalse( $item_pos, 'the values items must be baked in' );
+		$this->assertNotFalse( $close_pos, 'the wrapper must still be closed' );
+		$this->assertLessThan( $close_pos, $item_pos, 'the items must sit INSIDE the wrapper, before its closing tag' );
+		$this->assertSame( 1, substr_count( $html, '</ul' ), 'the wrapper must not gain a second closing tag' );
+	}
+
+	/**
+	 * Renaming the wrapper rewrites a whitespace-bearing closing tag too.
+	 *
+	 * An ordered list supplied as `<ul></ul >` had its opening tag renamed to
+	 * `<ol` while the literal `</ul>` search missed the close, leaving the
+	 * mismatched pair `<ol …></ul >`.
+	 */
+	public function test_tag_rename_rewrites_a_closing_tag_with_whitespace() {
+		$block = $this->list_block(
+			array(
+				'values'  => self::INVALID_LIST_VALUES,
+				'ordered' => true,
+			),
+			'<ul class="wp-block-list"></ul >'
+		);
+
+		$out  = Block_Normalizer::normalize_tree( array( $block ) );
+		$html = $out[0]['innerHTML'];
+
+		$this->assertStringContainsString( '</ol>', $html, 'the closing tag must be rewritten to match the renamed wrapper' );
+		$this->assertStringNotContainsString( '</ul', $html, 'no mismatched list closing tag may survive the rename' );
+	}
+
+	/**
+	 * The assembled wrapper is sanitized, not just the `values` fragment.
+	 *
+	 * Sanitizing only `values` left everything the wrapper itself carried —
+	 * event handlers included — to be composed straight into post_content.
+	 */
+	public function test_composed_wrapper_markup_is_sanitized() {
+		$block = $this->list_block(
+			array( 'values' => self::INVALID_LIST_VALUES ),
+			'<ul class="wp-block-list" onclick="evil()"></ul>'
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertStringNotContainsString( 'onclick', $out[0]['innerHTML'], 'an event handler on the wrapper must not survive normalization' );
+		$this->assertStringContainsString( '<li>First</li>', $out[0]['innerHTML'], 'the values items must still be baked in' );
+	}
+
+	/**
 	 * update_block's `saved` snapshot must echo what actually landed on disk.
 	 *
 	 * The snapshot is the documented verification channel ("the response IS
