@@ -120,6 +120,13 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
+= develop =
+
+#### 🐛 Fixed
+
+* Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.
+* Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
+
 = 2.2.0 on July 23, 2026 =
 
 This release adds tools for browsing and safely editing your theme's Full Site Editing templates, creating reusable patterns, and listing block binding sources, along with richer block-type and pattern discovery. It also restores editing on sites behind a server firewall and keeps your saved settings from being overwritten.

@@ -538,3 +538,104 @@ describe('registerBlockEnricher', () => {
     expect(result).toBe(block);
   });
 });
+
+// ── Wrapper font-family sync (existing innerHTML) ─────────────────────────────
+
+/**
+ * The in-place branch rewrites the <pre> and the copy <textarea>, and must keep
+ * the wrapper in sync as well: a fontFamily attribute change has to reach the
+ * rendered markup, and a font stack with no generic family renders code in the
+ * browser's default serif.
+ */
+describe('CBP enricher — wrapper font-family sync', () => {
+  const WRAPPER_OPEN =
+    '<div class="wp-block-kevinbatdorf-code-block-pro" style="font-family:Code-Pro-JetBrains-Mono;font-size:1rem">';
+
+  function blockWithWrapper(overrides: Record<string, unknown> = {}): BlockDef {
+    return {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: {
+        code: 'const a = 1;',
+        language: 'javascript',
+        fontSize: '1rem',
+        ...overrides,
+      },
+      innerHTML:
+        `${WRAPPER_OPEN}<pre class="shiki gravitykit-dark"><code>stale</code></pre>` +
+        '<textarea style="display:none" aria-hidden="true">stale</textarea></div>',
+    };
+  }
+
+  it('rewrites a stale wrapper font-family from the current attribute', async () => {
+    const result = await enrichBlock(
+      blockWithWrapper({ fontFamily: 'Menlo,monospace' }),
+    );
+    expect(result.innerHTML).toContain('font-family:Menlo,monospace;font-size:1rem');
+    expect(result.innerHTML).not.toContain('font-family:Code-Pro-JetBrains-Mono;');
+  });
+
+  /**
+   * With no fontFamily attribute to go on, the value already in the markup is
+   * still repaired — that bare name is exactly the serif-fallback bug.
+   */
+  it('adds a generic fallback to a bare family already in the wrapper', async () => {
+    const result = await enrichBlock(blockWithWrapper());
+    expect(result.innerHTML).toContain(
+      'font-family:Code-Pro-JetBrains-Mono,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+    );
+  });
+
+  /**
+   * CBP's own save() packs CSS custom properties into the same style attribute.
+   * Rebuilding the attribute wholesale would drop them and take line numbers and
+   * theme colours with it, so only the one declaration may be touched.
+   */
+  it('preserves other declarations and custom properties in the style attribute', async () => {
+    const block: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'const a = 1;', language: 'javascript', fontFamily: 'Menlo,monospace' },
+      innerHTML:
+        '<div class="wp-block-kevinbatdorf-code-block-pro cbp-has-line-numbers" ' +
+        'data-code-block-pro-font-family="Code-Pro-JetBrains-Mono" ' +
+        'style="font-family:Code-Pro-JetBrains-Mono;--cbp-line-number-color:#d8dee9ff;--shiki-token-comment:#8899aa">' +
+        '<pre class="shiki gravitykit-dark"><code>stale</code></pre></div>',
+    };
+    const result = await enrichBlock(block);
+    expect(result.innerHTML).toContain('--cbp-line-number-color:#d8dee9ff');
+    expect(result.innerHTML).toContain('--shiki-token-comment:#8899aa');
+    expect(result.innerHTML).toContain('cbp-has-line-numbers');
+    // The webfont-loading attribute tracks the same value.
+    expect(result.innerHTML).toContain('data-code-block-pro-font-family="Menlo,monospace"');
+  });
+
+  /**
+   * A fontFamily-only edit reaches the enricher with identical codeHTML and
+   * language and so hits the early bail-out. It must still produce an update,
+   * or the attribute saves while the rendered markup keeps the old font.
+   */
+  it('still updates when only fontFamily changed', async () => {
+    const first = await enrichBlock(blockWithWrapper({ fontFamily: 'Menlo,monospace' }));
+
+    const restyled: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { ...first.attributes, fontFamily: 'Consolas,monospace' },
+      innerHTML: first.innerHTML,
+    };
+    const second = await enrichBlock(restyled);
+
+    expect(second.innerHTML).toContain('font-family:Consolas,monospace');
+    expect(second.innerHTML).not.toContain('font-family:Menlo,monospace');
+  });
+
+  it('leaves markup untouched when the font already matches', async () => {
+    const first = await enrichBlock(blockWithWrapper({ fontFamily: 'Menlo,monospace' }));
+
+    const unchanged: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { ...first.attributes },
+      innerHTML: first.innerHTML,
+    };
+    const second = await enrichBlock(unchanged);
+    expect(second).toBe(unchanged);
+  });
+});

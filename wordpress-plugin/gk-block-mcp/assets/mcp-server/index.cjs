@@ -52354,6 +52354,28 @@ function ensureMonospaceFallback(fontFamily) {
   if (hasGenericFamily) return fontFamily;
   return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
 }
+function syncWrapperFontFamily(innerHTML, fontFamily) {
+  const openTagPattern = /<div class="wp-block-kevinbatdorf-code-block-pro[^>]*>/;
+  const match = innerHTML.match(openTagPattern);
+  if (!match) return innerHTML;
+  let tag = match[0];
+  const declared = tag.match(/font-family:([^;"]*)/);
+  const attrFont = typeof fontFamily === "string" && fontFamily.trim() !== "" ? fontFamily : null;
+  const nextFont = attrFont !== null ? escapeAttr(ensureMonospaceFallback(attrFont)) : declared ? ensureMonospaceFallback(declared[1]) : null;
+  if (nextFont === null) return innerHTML;
+  if (declared) {
+    tag = tag.replace(/font-family:[^;"]*/, () => `font-family:${nextFont}`);
+  } else if (/\sstyle="/.test(tag)) {
+    tag = tag.replace(/\sstyle="/, () => ` style="font-family:${nextFont};`);
+  } else {
+    tag = tag.replace(/>$/, () => ` style="font-family:${nextFont}">`);
+  }
+  tag = tag.replace(
+    /data-code-block-pro-font-family="[^"]*"/,
+    () => `data-code-block-pro-font-family="${nextFont}"`
+  );
+  return innerHTML.replace(openTagPattern, () => tag);
+}
 registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code;
@@ -52369,10 +52391,12 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
   const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split("\n").length;
   const incomingInnerHTML = block.innerHTML ?? "";
-  if (codeHTML === attrs.codeHTML && lang29 === rawLang && incomingInnerHTML !== "") {
-    return null;
-  }
   const updatedAttrs = { ...attrs, language: lang29, codeHTML, highestLineNumber };
+  if (codeHTML === attrs.codeHTML && lang29 === rawLang && incomingInnerHTML !== "") {
+    const syncedInnerHTML = syncWrapperFontFamily(incomingInnerHTML, attrs.fontFamily);
+    if (syncedInnerHTML === incomingInnerHTML) return null;
+    return { ...block, attributes: updatedAttrs, innerHTML: syncedInnerHTML };
+  }
   const encodedCode = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   let updatedInnerHTML;
   if (incomingInnerHTML !== "") {
@@ -52384,6 +52408,7 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
       (_m, open, _old, close) => `${open}${encodedCode}${close}`
     );
+    updatedInnerHTML = syncWrapperFontFamily(updatedInnerHTML, attrs.fontFamily);
   } else {
     const styleParts = [];
     if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
