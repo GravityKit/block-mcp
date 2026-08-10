@@ -250,6 +250,104 @@ function escapeAttr(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Guarantee a CSS generic-family fallback on a font-family value.
+ *
+ * A custom CBP font-name like `Code-Pro-JetBrains-Mono` is not a loaded
+ * webfont, so `font-family:Code-Pro-JetBrains-Mono` alone makes browsers fall
+ * back to the default serif. The real CBP editor bakes a full monospace stack;
+ * mirror it here. A value that already ends in a generic family has a usable
+ * fallback and is returned unchanged, which also makes re-runs idempotent.
+ *
+ * The generic family must be a whole comma-separated entry. A substring test
+ * reads `Source Serif 4` or `custom-monospace-font` as generic and skips the
+ * fallback those names most need.
+ */
+const GENERIC_FONT_FAMILIES = new Set([
+  'monospace',
+  'ui-monospace',
+  'sans-serif',
+  'serif',
+  'system-ui',
+  'cursive',
+  'fantasy',
+]);
+
+function ensureMonospaceFallback(fontFamily: string): string {
+  const entries = fontFamily
+    .split(',')
+    .map((entry) => entry.trim().replace(/^["']|["']$/g, '').toLowerCase());
+  const hasGenericFamily = entries.some((entry) => GENERIC_FONT_FAMILIES.has(entry));
+  if (hasGenericFamily) return fontFamily;
+  return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
+}
+
+/**
+ * Whether a caller-supplied font-family can be interpolated into a style
+ * attribute.
+ *
+ * `escapeAttr` stops a value from breaking out of the attribute, but a
+ * font-family is spliced in among other declarations, so an unescaped `;`, `{`
+ * or `}` would still append CSS of the caller's choosing. None of those, nor
+ * the parens a `url()` needs, appear in a real font-family value.
+ */
+function isUsableFontFamily(fontFamily: unknown): fontFamily is string {
+  if (typeof fontFamily !== 'string') return false;
+  const trimmed = fontFamily.trim();
+  if (trimmed === '') return false;
+  return !/[;{}<>()\\]/.test(trimmed);
+}
+
+/**
+ * Hold the CBP wrapper's font-family to the block's attributes, with a generic
+ * family always present.
+ *
+ * The in-place branch below rewrites only the <pre> and the copy <textarea>, so
+ * without this the wrapper keeps whatever font-family it was serialized with:
+ * a fontFamily attribute change never reaches the rendered markup, and a stack
+ * carrying no generic family (a bare `Code-Pro-JetBrains-Mono`) falls back to
+ * the browser default serif whenever that webfont is unavailable.
+ *
+ * Only the font-family declaration is rewritten. CBP's save() output packs CSS
+ * custom properties (--cbp-*, --shiki-*) into the same style attribute, so
+ * rebuilding that attribute wholesale would discard them.
+ */
+function syncWrapperFontFamily(innerHTML: string, fontFamily: unknown): string {
+  const openTagPattern = /<div class="wp-block-kevinbatdorf-code-block-pro[^>]*>/;
+  const match = innerHTML.match(openTagPattern);
+  if (!match) return innerHTML;
+
+  let tag = match[0];
+  const declared = tag.match(/font-family:([^;"]*)/);
+
+  // The attribute wins when set. Otherwise reuse what the wrapper already
+  // declares — that value is HTML-encoded in the markup and must not be
+  // encoded a second time, or a quoted font name becomes `&amp;quot;`.
+  const attrFont = isUsableFontFamily(fontFamily) ? fontFamily : null;
+  const nextFont = attrFont !== null
+    ? escapeAttr(ensureMonospaceFallback(attrFont))
+    : (declared ? ensureMonospaceFallback(declared[1]) : null);
+  if (nextFont === null) return innerHTML;
+
+  // Replacer functions throughout: a font stack is arbitrary text and a
+  // `$&` / `$'` sequence in it would otherwise be read as a replacement pattern.
+  if (declared) {
+    tag = tag.replace(/font-family:[^;"]*/, () => `font-family:${nextFont}`);
+  } else if (/\sstyle="/.test(tag)) {
+    tag = tag.replace(/\sstyle="/, () => ` style="font-family:${nextFont};`);
+  } else {
+    tag = tag.replace(/>$/, () => ` style="font-family:${nextFont}">`);
+  }
+
+  // CBP's front-end script reads this attribute to decide which webfont to load.
+  tag = tag.replace(
+    /data-code-block-pro-font-family="[^"]*"/,
+    () => `data-code-block-pro-font-family="${nextFont}"`,
+  );
+
+  return innerHTML.replace(openTagPattern, () => tag);
+}
+
 registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   const attrs = block.attributes ?? {};
   const code = attrs.code as string | undefined;
@@ -279,14 +377,20 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
   const codeHTML = await shikiHighlight(code, effectiveLang, themeName);
   const highestLineNumber = code.split('\n').length;
   const incomingInnerHTML = block.innerHTML ?? '';
+  const updatedAttrs = { ...attrs, language: lang, codeHTML, highestLineNumber };
+
   // Bail out only when nothing meaningful has changed AND innerHTML is already
   // populated. An empty incomingInnerHTML always falls through so the wrapper
   // gets built below, even if codeHTML matches a previously-stored attribute.
+  //
+  // A fontFamily-only edit arrives with identical codeHTML and language, so the
+  // wrapper sync must be attempted before giving up — otherwise the attribute
+  // saves and the rendered markup keeps the old font indefinitely.
   if (codeHTML === attrs.codeHTML && lang === rawLang && incomingInnerHTML !== '') {
-    return null;
+    const syncedInnerHTML = syncWrapperFontFamily(incomingInnerHTML, attrs.fontFamily);
+    if (syncedInnerHTML === incomingInnerHTML) return null;
+    return { ...block, attributes: updatedAttrs, innerHTML: syncedInnerHTML };
   }
-
-  const updatedAttrs = { ...attrs, language: lang, codeHTML, highestLineNumber };
 
   // Encode `&`, `<`, `>` before injecting raw source code into the
   // copy-button <textarea>'s text content. A literal `</textarea>` in the
@@ -317,6 +421,7 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
       /(<textarea[^>]*>)([\s\S]*?)(<\/textarea>)/,
       (_m, open, _old, close) => `${open}${encodedCode}${close}`,
     );
+    updatedInnerHTML = syncWrapperFontFamily(updatedInnerHTML, attrs.fontFamily);
   } else {
     // Mirror CBP's save() inline style attribute. Without these the wrapper
     // falls back to theme defaults and the code uses the surrounding font /
@@ -329,7 +434,7 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
     // `foo" onclick="…`). The encoder collapses all five
     // attribute-significant characters to entities.
     const styleParts: string[] = [];
-    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${escapeAttr(attrs.fontFamily)}`);
+    if (isUsableFontFamily(attrs.fontFamily)) styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
     if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
     if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
     if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);

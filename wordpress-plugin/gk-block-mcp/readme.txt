@@ -125,6 +125,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🐛 Fixed
 
 * A damaged plugin install no longer breaks the WordPress admin. If one of the plugin's files goes missing or is emptied, every admin page returned a critical error and WordPress emailed a recovery link. Now the rest of the admin keeps loading, and a notice explains that part of Block MCP could not be loaded and that reinstalling usually fixes it.
+* Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.
+* Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
+* A list written by the assistant could show up empty on the site and as invalid in the editor, even though its items were saved.
 
 = 2.2.0 on July 23, 2026 =
 
