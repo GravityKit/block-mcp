@@ -126,6 +126,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 * Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.
 * Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
+* A list written by the assistant could show up empty on the site and as invalid in the editor, even though its items were saved.
 
 = 2.2.0 on July 23, 2026 =
 

@@ -52349,10 +52349,26 @@ function inferLanguage(code) {
 function escapeAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+var GENERIC_FONT_FAMILIES = /* @__PURE__ */ new Set([
+  "monospace",
+  "ui-monospace",
+  "sans-serif",
+  "serif",
+  "system-ui",
+  "cursive",
+  "fantasy"
+]);
 function ensureMonospaceFallback(fontFamily) {
-  const hasGenericFamily = /\b(?:monospace|ui-monospace|sans-serif|serif|system-ui|cursive|fantasy)\b/i.test(fontFamily);
+  const entries = fontFamily.split(",").map((entry) => entry.trim().replace(/^["']|["']$/g, "").toLowerCase());
+  const hasGenericFamily = entries.some((entry) => GENERIC_FONT_FAMILIES.has(entry));
   if (hasGenericFamily) return fontFamily;
   return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
+}
+function isUsableFontFamily(fontFamily) {
+  if (typeof fontFamily !== "string") return false;
+  const trimmed = fontFamily.trim();
+  if (trimmed === "") return false;
+  return !/[;{}<>()\\]/.test(trimmed);
 }
 function syncWrapperFontFamily(innerHTML, fontFamily) {
   const openTagPattern = /<div class="wp-block-kevinbatdorf-code-block-pro[^>]*>/;
@@ -52360,7 +52376,7 @@ function syncWrapperFontFamily(innerHTML, fontFamily) {
   if (!match) return innerHTML;
   let tag = match[0];
   const declared = tag.match(/font-family:([^;"]*)/);
-  const attrFont = typeof fontFamily === "string" && fontFamily.trim() !== "" ? fontFamily : null;
+  const attrFont = isUsableFontFamily(fontFamily) ? fontFamily : null;
   const nextFont = attrFont !== null ? escapeAttr(ensureMonospaceFallback(attrFont)) : declared ? ensureMonospaceFallback(declared[1]) : null;
   if (nextFont === null) return innerHTML;
   if (declared) {
@@ -52411,7 +52427,7 @@ registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {
     updatedInnerHTML = syncWrapperFontFamily(updatedInnerHTML, attrs.fontFamily);
   } else {
     const styleParts = [];
-    if (typeof attrs.fontFamily === "string") styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
+    if (isUsableFontFamily(attrs.fontFamily)) styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
     if (typeof attrs.fontSize === "string") styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
     if (typeof attrs.lineHeight === "string") styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
     if (typeof attrs.bgColor === "string") styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);

@@ -256,16 +256,46 @@ function escapeAttr(value: string): string {
  * A custom CBP font-name like `Code-Pro-JetBrains-Mono` is not a loaded
  * webfont, so `font-family:Code-Pro-JetBrains-Mono` alone makes browsers fall
  * back to the default serif. The real CBP editor bakes a full monospace stack;
- * mirror it here. If the value already contains a generic family keyword
- * (`monospace`, `ui-monospace`, `sans-serif`, `serif`, `system-ui`, `cursive`,
- * `fantasy`) it already has a usable fallback and is returned unchanged. The
- * word-boundary match also matches inside `ui-monospace` and a value already
- * ending in `monospace`, so re-runs never double-append.
+ * mirror it here. A value that already ends in a generic family has a usable
+ * fallback and is returned unchanged, which also makes re-runs idempotent.
+ *
+ * The generic family must be a whole comma-separated entry. A substring test
+ * reads `Source Serif 4` or `custom-monospace-font` as generic and skips the
+ * fallback those names most need.
  */
+const GENERIC_FONT_FAMILIES = new Set([
+  'monospace',
+  'ui-monospace',
+  'sans-serif',
+  'serif',
+  'system-ui',
+  'cursive',
+  'fantasy',
+]);
+
 function ensureMonospaceFallback(fontFamily: string): string {
-  const hasGenericFamily = /\b(?:monospace|ui-monospace|sans-serif|serif|system-ui|cursive|fantasy)\b/i.test(fontFamily);
+  const entries = fontFamily
+    .split(',')
+    .map((entry) => entry.trim().replace(/^["']|["']$/g, '').toLowerCase());
+  const hasGenericFamily = entries.some((entry) => GENERIC_FONT_FAMILIES.has(entry));
   if (hasGenericFamily) return fontFamily;
   return `${fontFamily},ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace`;
+}
+
+/**
+ * Whether a caller-supplied font-family can be interpolated into a style
+ * attribute.
+ *
+ * `escapeAttr` stops a value from breaking out of the attribute, but a
+ * font-family is spliced in among other declarations, so an unescaped `;`, `{`
+ * or `}` would still append CSS of the caller's choosing. None of those, nor
+ * the parens a `url()` needs, appear in a real font-family value.
+ */
+function isUsableFontFamily(fontFamily: unknown): fontFamily is string {
+  if (typeof fontFamily !== 'string') return false;
+  const trimmed = fontFamily.trim();
+  if (trimmed === '') return false;
+  return !/[;{}<>()\\]/.test(trimmed);
 }
 
 /**
@@ -293,7 +323,7 @@ function syncWrapperFontFamily(innerHTML: string, fontFamily: unknown): string {
   // The attribute wins when set. Otherwise reuse what the wrapper already
   // declares — that value is HTML-encoded in the markup and must not be
   // encoded a second time, or a quoted font name becomes `&amp;quot;`.
-  const attrFont = typeof fontFamily === 'string' && fontFamily.trim() !== '' ? fontFamily : null;
+  const attrFont = isUsableFontFamily(fontFamily) ? fontFamily : null;
   const nextFont = attrFont !== null
     ? escapeAttr(ensureMonospaceFallback(attrFont))
     : (declared ? ensureMonospaceFallback(declared[1]) : null);
@@ -404,7 +434,7 @@ registerBlockEnricher('kevinbatdorf/code-block-pro', async (block) => {
     // `foo" onclick="…`). The encoder collapses all five
     // attribute-significant characters to entities.
     const styleParts: string[] = [];
-    if (typeof attrs.fontFamily === 'string') styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
+    if (isUsableFontFamily(attrs.fontFamily)) styleParts.push(`font-family:${escapeAttr(ensureMonospaceFallback(attrs.fontFamily))}`);
     if (typeof attrs.fontSize === 'string') styleParts.push(`font-size:${escapeAttr(attrs.fontSize)}`);
     if (typeof attrs.lineHeight === 'string') styleParts.push(`line-height:${escapeAttr(attrs.lineHeight)}`);
     if (typeof attrs.bgColor === 'string') styleParts.push(`background-color:${escapeAttr(attrs.bgColor)}`);

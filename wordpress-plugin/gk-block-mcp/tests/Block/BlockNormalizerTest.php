@@ -536,9 +536,11 @@ class BlockNormalizerTest extends BlockApiTestCase {
 	public function test_ordered_list_with_ul_supplied_emits_ol() {
 		$block = $this->list_block(
 			array(
-				'values'  => self::INVALID_LIST_VALUES,
-				'ordered' => true,
-				'start'   => 3,
+				'values'   => self::INVALID_LIST_VALUES,
+				'ordered'  => true,
+				'start'    => 3,
+				'type'     => 'A',
+				'reversed' => true,
 			),
 			self::INVALID_LIST_HTML
 		);
@@ -548,7 +550,76 @@ class BlockNormalizerTest extends BlockApiTestCase {
 		$this->assertStringContainsString( '<ol', $out[0]['innerHTML'], 'an ordered list must be emitted as <ol>' );
 		$this->assertStringNotContainsString( '<ul', $out[0]['innerHTML'], 'the <ul> wrapper must be reconciled away' );
 		$this->assertStringContainsString( 'start="3"', $out[0]['innerHTML'], 'the ordered start attribute must be carried onto the <ol>' );
+		$this->assertStringContainsString( 'type="A"', $out[0]['innerHTML'], 'the ordered type attribute must be carried onto the <ol>' );
+		$this->assertStringContainsString( 'reversed', $out[0]['innerHTML'], 'the reversed attribute must be carried onto the <ol>' );
 		$this->assertStringContainsString( '<li>First</li>', $out[0]['innerHTML'], 'the values items must be baked into the <ol>' );
+	}
+
+	/**
+	 * Markup baked out of `values` must be sanitized.
+	 *
+	 * `values` is attribute data, and normalization runs after the write path's
+	 * innerHTML sanitization chokepoint (Block_Writer::sanitize_inner_html), so
+	 * baking it in raw published whatever the attribute carried as live markup:
+	 * a `<script>` element and an `onclick` handler supplied through `values`
+	 * reached post_content intact, bypassing wp_kses_post entirely.
+	 *
+	 * The sanitized value is also written back to the attribute, because
+	 * Gutenberg matches the values-based deprecation by regenerating markup
+	 * from `values` — if the attribute kept markup the innerHTML no longer has,
+	 * the repaired block would read as invalid again on the next edit.
+	 */
+	public function test_core_list_values_markup_is_sanitized_before_baking() {
+		$post_id = $this->make_block_post();
+
+		$result = $this->crud->insert_blocks(
+			$post_id,
+			null,
+			array(
+				array(
+					'name'       => 'core/list',
+					'attributes' => array( 'values' => '<li>First</li><li><script>alert(1)</script><a href="#" onclick="evil()">Second</a></li>' ),
+					'innerHTML'  => self::INVALID_LIST_HTML,
+				),
+			)
+		);
+
+		$this->assertNotWPError( $result );
+
+		$stored = get_post( $post_id )->post_content;
+		$list   = $this->find_list( $this->block_tree( $post_id ) );
+
+		$this->assertNotNull( $list, 'a core/list block must be present in stored content' );
+		$this->assertStringContainsString( '<li>First</li>', $list['innerHTML'], 'benign values items must still be baked in' );
+		$this->assertStringNotContainsString( '<script>', $stored, 'a script element from `values` must not reach post_content' );
+		$this->assertStringNotContainsString( 'onclick', $stored, 'an event handler from `values` must not reach post_content' );
+		$this->assertStringNotContainsString( '<script>', (string) $list['attrs']['values'], 'the `values` attribute must be sanitized alongside the baked markup' );
+	}
+
+	/**
+	 * An unclosed wrapper keeps the attributes prepare_wrapper() applied.
+	 *
+	 * When the supplied innerHTML has no closing tag the bake cannot splice, and
+	 * the fallback rebuilt a bare `<ul class="wp-block-list">` from scratch —
+	 * discarding the reconciled tag's ordered attributes and any classes the
+	 * wrapper already carried.
+	 */
+	public function test_unclosed_wrapper_keeps_prepared_attributes() {
+		$block = $this->list_block(
+			array(
+				'values'  => self::INVALID_LIST_VALUES,
+				'ordered' => true,
+				'start'   => 5,
+			),
+			'<ul class="wp-block-list custom-class">'
+		);
+
+		$out = Block_Normalizer::normalize_tree( array( $block ) );
+
+		$this->assertStringContainsString( 'start="5"', $out[0]['innerHTML'], 'the ordered start attribute must survive the unclosed-wrapper path' );
+		$this->assertStringContainsString( 'custom-class', $out[0]['innerHTML'], 'an existing wrapper class must survive the unclosed-wrapper path' );
+		$this->assertStringContainsString( '<li>First</li>', $out[0]['innerHTML'], 'the values items must still be baked in' );
+		$this->assertStringContainsString( '</ol>', $out[0]['innerHTML'], 'the wrapper must be closed' );
 	}
 
 	/**

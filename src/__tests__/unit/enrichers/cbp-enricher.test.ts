@@ -281,11 +281,11 @@ describe('enrichBlock — Code Block Pro', () => {
       attributes: {
         code: 'const a = 1;',
         language: 'javascript',
-        fontFamily: 'Arial" onerror="alert(1)',
+        fontFamily: 'Arial" onerror="alert',
       },
     };
     const result = await enrichBlock(block);
-    expect(result.innerHTML).not.toContain('onerror="alert(1)');
+    expect(result.innerHTML).not.toContain('onerror="alert');
     expect(result.innerHTML).toContain('&quot;');
   });
 
@@ -575,6 +575,52 @@ describe('CBP enricher — wrapper font-family sync', () => {
   });
 
   /**
+   * A generic family counts only as a whole comma-separated entry. Matching it
+   * as a substring reads a custom name that merely contains one — `Source
+   * Serif 4`, `custom-monospace-font` — as already-safe and withholds the
+   * fallback stack those names most need.
+   */
+  it('adds the fallback to custom names that merely contain a generic family', async () => {
+    const serif = await enrichBlock(blockWithWrapper({ fontFamily: 'Source Serif 4' }));
+    expect(serif.innerHTML).toContain(
+      'font-family:Source Serif 4,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+    );
+
+    const mono = await enrichBlock(blockWithWrapper({ fontFamily: 'custom-monospace-font' }));
+    expect(mono.innerHTML).toContain(
+      'font-family:custom-monospace-font,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+    );
+  });
+
+  /**
+   * A real generic entry is still recognized, including when quoted or padded,
+   * so the helper stays idempotent across re-runs.
+   */
+  it('leaves a stack that already ends in a generic family unchanged', async () => {
+    const result = await enrichBlock(
+      blockWithWrapper({ fontFamily: '"Fira Code", monospace' }),
+    );
+    expect(result.innerHTML).toContain('font-family:&quot;Fira Code&quot;, monospace;');
+    expect(result.innerHTML).not.toContain('SFMono-Regular');
+  });
+
+  /**
+   * A font-family is spliced in among other declarations, so a value carrying
+   * CSS structure would append declarations of the caller's choosing. Blank and
+   * structurally-invalid values are dropped rather than emitted.
+   */
+  it('drops a blank or CSS-bearing font-family instead of emitting it', async () => {
+    const blank = await enrichBlock(blockWithWrapper({ fontFamily: '   ' }));
+    expect(blank.innerHTML).not.toContain('font-family:;');
+    expect(blank.innerHTML).not.toContain('font-family: ;');
+
+    const hostile = await enrichBlock(
+      blockWithWrapper({ fontFamily: 'Menlo;background:url(x)' }),
+    );
+    expect(hostile.innerHTML).not.toContain('background:url(x)');
+  });
+
+  /**
    * With no fontFamily attribute to go on, the value already in the markup is
    * still repaired — that bare name is exactly the serif-fallback bug.
    */
@@ -612,9 +658,22 @@ describe('CBP enricher — wrapper font-family sync', () => {
    * A fontFamily-only edit reaches the enricher with identical codeHTML and
    * language and so hits the early bail-out. It must still produce an update,
    * or the attribute saves while the rendered markup keeps the old font.
+   *
+   * CBP's front-end script picks the webfont to load from the wrapper's
+   * data attribute, so that has to track the same value as the style
+   * declaration — a wrapper carrying one must not be left on the old font.
    */
   it('still updates when only fontFamily changed', async () => {
-    const first = await enrichBlock(blockWithWrapper({ fontFamily: 'Menlo,monospace' }));
+    const seeded: BlockDef = {
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'const a = 1;', language: 'javascript', fontFamily: 'Menlo,monospace' },
+      innerHTML:
+        '<div class="wp-block-kevinbatdorf-code-block-pro" ' +
+        'data-code-block-pro-font-family="Code-Pro-JetBrains-Mono" ' +
+        'style="font-family:Code-Pro-JetBrains-Mono;font-size:1rem">' +
+        '<pre class="shiki gravitykit-dark"><code>stale</code></pre></div>',
+    };
+    const first = await enrichBlock(seeded);
 
     const restyled: BlockDef = {
       name: 'kevinbatdorf/code-block-pro',
@@ -625,6 +684,8 @@ describe('CBP enricher — wrapper font-family sync', () => {
 
     expect(second.innerHTML).toContain('font-family:Consolas,monospace');
     expect(second.innerHTML).not.toContain('font-family:Menlo,monospace');
+    expect(second.innerHTML).toContain('data-code-block-pro-font-family="Consolas,monospace"');
+    expect(second.innerHTML).not.toContain('data-code-block-pro-font-family="Menlo,monospace"');
   });
 
   it('leaves markup untouched when the font already matches', async () => {

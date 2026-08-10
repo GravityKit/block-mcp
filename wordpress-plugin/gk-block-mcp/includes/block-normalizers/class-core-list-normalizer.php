@@ -13,20 +13,22 @@
  * innerHTML, and a modern one has core/list-item children and no `values`. The
  * repair bakes the `values` HTML into the wrapper, which both populates the
  * front end and matches core/list's values-based deprecation so Gutenberg
- * migrates it cleanly on the next edit. The `values` attribute is left in place
- * for that reason.
+ * migrates it cleanly on the next edit. The `values` attribute is kept for that
+ * reason, sanitized to the same markup that was baked in.
  *
  * @package GravityKit\BlockMCP\Block_Normalizers
  */
 
 namespace GravityKit\BlockMCP\Block_Normalizers;
 
+use GravityKit\BlockMCP\Block_Writer;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Normalizer for core/list blocks.
  *
- * @since TODO
+ * @since 2.2.1
  */
 class Core_List_Normalizer {
 
@@ -40,7 +42,7 @@ class Core_List_Normalizer {
 	 *
 	 * Called once at plugin init by the normalizer loader.
 	 *
-	 * @since TODO
+	 * @since 2.2.1
 	 *
 	 * @return void
 	 */
@@ -57,7 +59,7 @@ class Core_List_Normalizer {
 	 * it bakes the `values` HTML into the wrapper, reconciling the wrapper tag
 	 * with the `ordered` attribute, and keeps the block a leaf.
 	 *
-	 * @since TODO
+	 * @since 2.2.1
 	 *
 	 * @param array  $block      Block in WP-internal shape.
 	 * @param string $block_name Block name being normalized.
@@ -87,17 +89,28 @@ class Core_List_Normalizer {
 		// Guard: a wrapper that already holds an <li> is a real (deprecated or
 		// current) serialization, not the empty-wrapper bug. This also makes a
 		// second normalize pass a byte-for-byte no-op.
-		if ( self::contains_li( $html ) ) {
+		$has_li = self::contains_li( $html );
+		if ( $has_li ) {
 			return $block;
 		}
+
+		// `values` is attribute data and normalization runs after the write
+		// path's innerHTML sanitization, so baking it in raw would put whatever
+		// the attribute holds into post_content as live markup. The sanitized
+		// value is written back to the attribute as well: Gutenberg matches the
+		// values-based deprecation by regenerating markup from `values`, so the
+		// two must agree or the repaired block reads as invalid again.
+		$values          = Block_Writer::sanitize_inner_html( $values );
+		$attrs['values'] = $values;
+		$block['attrs']  = $attrs;
 
 		$is_ordered = ! empty( $attrs['ordered'] );
 		$html       = self::bake_values_into_wrapper( $html, $values, $is_ordered, $attrs );
 
-		$block['innerHTML'] = $html;
-		if ( empty( $block['innerBlocks'] ) ) {
-			$block['innerContent'] = array( $html );
-		}
+		// The block is a leaf here — a block with innerBlocks returned above —
+		// so one innerContent chunk keeps the null-placeholder invariant.
+		$block['innerHTML']    = $html;
+		$block['innerContent'] = array( $html );
 
 		return $block;
 	}
@@ -149,7 +162,10 @@ class Core_List_Normalizer {
 		$close = '</' . $desired_tag . '>';
 		$pos   = strripos( $wrapper, $close );
 		if ( false === $pos ) {
-			return '<' . $desired_tag . ' class="wp-block-list">' . $values . $close;
+			// An unclosed wrapper still carries the class and the ordered
+			// attributes prepare_wrapper() applied, so close it rather than
+			// rebuilding a bare opening tag and dropping them.
+			return $wrapper . $values . $close;
 		}
 
 		return substr( $wrapper, 0, $pos ) . $values . substr( $wrapper, $pos );
@@ -195,7 +211,8 @@ class Core_List_Normalizer {
 			if ( $has_type ) {
 				$processor->set_attribute( 'type', $attrs['type'] );
 			}
-			if ( isset( $attrs['start'] ) && is_scalar( $attrs['start'] ) ) {
+			$has_start = isset( $attrs['start'] ) && is_scalar( $attrs['start'] );
+			if ( $has_start ) {
 				$processor->set_attribute( 'start', (string) $attrs['start'] );
 			}
 			if ( ! empty( $attrs['reversed'] ) ) {
