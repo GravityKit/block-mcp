@@ -23,6 +23,8 @@
 
 namespace GravityKit\BlockMCP;
 
+use Throwable;
+
 // Exit if accessed directly.
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -841,29 +843,109 @@ class Connect_Page {
 		// unlink (finally + shutdown) is a harmless no-op.
 		register_shutdown_function( array( __CLASS__, 'unlink_temp_bundle' ), $path );
 
-		nocache_headers();
-		header( 'Content-Type: application/octet-stream' );
-		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $r['filename'] ) . '"' );
-		header( 'Content-Length: ' . filesize( $path ) );
+		$failure = $this->stream_bundle( $path, $r['filename'] );
+
+		if ( '' !== $failure ) {
+			// Nothing reached the browser, so the credential minted for it is an
+			// unusable Application Password with edit access and retrying would
+			// stack up more. Paste mode also stashes the plaintext for the next
+			// Connect-tab render, which would otherwise present a password that
+			// no longer authenticates.
+			$revoked = $this->do_revoke( $r['uuid'] );
+			$this->take_record( self::PASTE_OPTION_PREFIX . get_current_user_id() );
+
+			if ( ! $revoked && defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
+				// It stays listed on the Connect tab, where it can be removed by hand.
+				error_log( 'gk-block-mcp: could not revoke the credential for an undelivered installer' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
+
+			wp_die( esc_html( $failure ), '', array( 'response' => 500 ) );
+		}
+
+		exit;
+	}
+
+	/**
+	 * Send a generated .mcpb archive as the response body.
+	 *
+	 * The archive must be the whole body, starting at its first byte: a stray
+	 * byte from another plugin lands ahead of the zip's "PK" signature and the
+	 * bundle no longer opens. Pending output is therefore dropped first, and
+	 * when the response is past saving nothing is written at all.
+	 *
+	 * The archive is deleted either way; it carries a plaintext Application
+	 * Password and must not outlive the request.
+	 *
+	 * @since TBD
+	 *
+	 * @param string $path     Absolute path to the archive.
+	 * @param string $filename Filename offered to the browser.
+	 *
+	 * @return string Empty when bytes may have reached the browser, otherwise a
+	 *                message explaining why nothing was sent. A non-empty return
+	 *                means no installer was delivered.
+	 */
+	protected function stream_bundle( $path, $filename ) {
+		$dirty_response = __( 'Another plugin or theme on this site printed output before the installer could be sent, which would have corrupted the download. Deactivate other plugins and try again.', 'gk-block-mcp' );
+		$stream_failed  = __( 'An error occurred while preparing your download.', 'gk-block-mcp' );
+
+		// sanitize_file_name() is filterable, so it runs before the sweep and
+		// anything a callback prints goes out with the rest.
+		$download_name = sanitize_file_name( $filename );
+
+		$this->discard_output_buffers();
+
+		if ( ! $this->response_is_clean() ) {
+			self::unlink_temp_bundle( $path );
+
+			return $dirty_response;
+		}
+
+		// nocache_headers() runs a filter of its own, and a callback that prints
+		// commits the response where no sweep can reach it.
+		$this->send_download_headers( $path, $download_name );
+
+		if ( ! $this->response_is_clean() ) {
+			self::unlink_temp_bundle( $path );
+
+			return $dirty_response;
+		}
 
 		try {
-			readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
-		} catch ( \Throwable $e ) {
+			$written = $this->emit_file( $path );
+		} catch ( Throwable $e ) {
+			$written = false;
+
 			if ( defined( 'WP_DEBUG' ) && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG && WP_DEBUG_LOG ) {
 				error_log( 'gk-block-mcp: installer stream failed: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-			}
-			// Only surface an error page if nothing has been streamed yet —
-			// once octet-stream + Content-Length headers are out, the response
-			// body is committed and WordPress's HTML error handler would
-			// corrupt the partial download.
-			if ( ! headers_sent() ) {
-				wp_die( esc_html__( 'An error occurred while preparing your download.', 'gk-block-mcp' ) );
 			}
 		} finally {
 			self::unlink_temp_bundle( $path );
 		}
 
-		exit;
+		// Once any byte is out the response is committed: an error page would
+		// land inside the download, and the credential went with what did ship.
+		if ( false !== $written || $this->response_already_started() ) {
+			return '';
+		}
+
+		return $stream_failed;
+	}
+
+	/**
+	 * Write a file to the response body.
+	 *
+	 * Extracted so tests can subclass and override this method to simulate a
+	 * failed write without making a file unreadable on disk.
+	 *
+	 * @since TBD
+	 *
+	 * @param string $path Absolute path to the file.
+	 *
+	 * @return int|false Bytes written, or false when nothing could be read.
+	 */
+	protected function emit_file( $path ) {
+		return readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile
 	}
 
 	/**
@@ -886,6 +968,125 @@ class Connect_Page {
 		if ( is_string( $path ) && '' !== $path && file_exists( $path ) ) {
 			wp_delete_file( $path );
 		}
+	}
+
+	/**
+	 * Drop pending output down to output_buffer_floor().
+	 *
+	 * Each buffer is handled by what its own flags permit: removable ones are
+	 * popped, a buffer that is merely cleanable is emptied in place, and one
+	 * that is neither ends the sweep — nothing underneath it can be reached, and
+	 * calling ob_end_clean() on it would fail and raise a notice that is itself
+	 * output. response_is_clean() is the authority on the result.
+	 *
+	 * @since TBD
+	 *
+	 * @return void
+	 */
+	protected function discard_output_buffers() {
+		$floor = $this->output_buffer_floor();
+
+		while ( ob_get_level() > $floor ) {
+			$status = ob_get_status();
+			$flags  = isset( $status['flags'] ) ? (int) $status['flags'] : 0;
+
+			if ( $flags & PHP_OUTPUT_HANDLER_REMOVABLE ) {
+				ob_end_clean();
+
+				continue;
+			}
+
+			if ( $flags & PHP_OUTPUT_HANDLER_CLEANABLE ) {
+				ob_clean();
+			}
+
+			return;
+		}
+	}
+
+	/**
+	 * Whether a binary body would still start at the first byte of the response.
+	 *
+	 * False once any output has left the process, and false while output is
+	 * pending in any buffer the sweep could not empty — in that case
+	 * headers_sent() is still false, so it cannot answer this on its own.
+	 *
+	 * @since TBD
+	 *
+	 * @return bool
+	 */
+	protected function response_is_clean() {
+		if ( $this->response_already_started() ) {
+			return false;
+		}
+
+		$floor = $this->output_buffer_floor();
+
+		// Every buffer above the floor has to be empty, not just the innermost
+		// one ob_get_length() reports: the sweep stops at a buffer it cannot
+		// pop, and anything already sitting underneath that one would still be
+		// flushed ahead of the archive. ob_get_status( true ) is 0-indexed from
+		// the outermost buffer, so index N describes level N + 1.
+		foreach ( ob_get_status( true ) as $index => $status ) {
+			$pending = $index >= $floor && ! empty( $status['buffer_used'] );
+
+			if ( $pending ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * How many output buffers stay open when a binary response starts.
+	 *
+	 * Zero in a web request — the archive has to be the first byte on the wire.
+	 * Extracted so tests can subclass and override this method to keep their own
+	 * capture buffer alive while exercising the real streaming path.
+	 *
+	 * @since TBD
+	 *
+	 * @return int
+	 */
+	protected function output_buffer_floor() {
+		return 0;
+	}
+
+	/**
+	 * Whether part of the response has already left the process.
+	 *
+	 * Once that happens nothing can be un-sent, so a binary body would arrive
+	 * with someone else's bytes in front of it. Extracted so tests can subclass
+	 * and override this method; under the CLI SAPI headers_sent() is true from
+	 * the first line the test runner prints.
+	 *
+	 * @since TBD
+	 *
+	 * @return bool
+	 */
+	protected function response_already_started() {
+		return headers_sent();
+	}
+
+	/**
+	 * Send the response headers for the .mcpb download.
+	 *
+	 * Extracted so tests can subclass and override this method; header() is a
+	 * warning under the CLI SAPI, where the runner has already printed.
+	 *
+	 * @since TBD
+	 *
+	 * @param string $path          Absolute path to the archive.
+	 * @param string $download_name Sanitized filename offered to the browser.
+	 *
+	 * @return void
+	 */
+	protected function send_download_headers( $path, $download_name ) {
+		nocache_headers();
+		header( 'Content-Type: application/octet-stream' );
+		header( 'Content-Disposition: attachment; filename="' . $download_name . '"' );
+		header( 'Content-Length: ' . filesize( $path ) );
 	}
 
 	/**

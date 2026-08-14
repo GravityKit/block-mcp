@@ -2,7 +2,7 @@
 Contributors: gravitykit, katzwebservices
 Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
-Tested up to: 7.0.1
+Tested up to: 7.0.4
 Requires PHP: 7.4
 Stable tag: 2.2.0
 License: GPL-2.0-or-later
@@ -128,6 +128,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 * Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.
 * Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
 * A list written by the assistant could show up empty on the site and as invalid in the editor, even though its items were saved.
+* The Claude Desktop installer no longer downloads damaged when another plugin or theme prints stray output in the admin. Even a single blank line ended up at the front of the file, and Claude Desktop rejected it with "Failed to preview extension". That output is now discarded before the installer is sent. When it cannot be — because it already reached the browser — you get an explanation naming the cause instead of a file that will not open, and the connection created for that download is removed so it does not leave an unused password behind.
 
 = 2.2.0 on July 23, 2026 =
 
