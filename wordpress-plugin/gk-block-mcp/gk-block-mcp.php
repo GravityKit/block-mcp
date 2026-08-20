@@ -136,7 +136,7 @@ function buffer_installer_response() {
 		return false;
 	}
 
-	return ob_start();
+	return Foundation\Helpers\Output::protect();
 }
 
 buffer_installer_response();

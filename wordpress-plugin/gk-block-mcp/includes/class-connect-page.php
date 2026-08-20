@@ -23,6 +23,7 @@
 
 namespace GravityKit\BlockMCP;
 
+use GravityKit\BlockMCP\Foundation\Helpers\Output;
 use Throwable;
 
 // Exit if accessed directly.
@@ -973,69 +974,23 @@ class Connect_Page {
 	/**
 	 * Drop pending output down to output_buffer_floor().
 	 *
-	 * Each buffer is handled by what its own flags permit: removable ones are
-	 * popped, a buffer that is merely cleanable is emptied in place, and one
-	 * that is neither ends the sweep — nothing underneath it can be reached, and
-	 * calling ob_end_clean() on it would fail and raise a notice that is itself
-	 * output. response_is_clean() is the authority on the result.
-	 *
 	 * @since TBD
 	 *
 	 * @return void
 	 */
 	protected function discard_output_buffers() {
-		$floor = $this->output_buffer_floor();
-
-		while ( ob_get_level() > $floor ) {
-			$status = ob_get_status();
-			$flags  = isset( $status['flags'] ) ? (int) $status['flags'] : 0;
-
-			if ( $flags & PHP_OUTPUT_HANDLER_REMOVABLE ) {
-				ob_end_clean();
-
-				continue;
-			}
-
-			if ( $flags & PHP_OUTPUT_HANDLER_CLEANABLE ) {
-				ob_clean();
-			}
-
-			return;
-		}
+		Output::discard( $this->output_buffer_floor() );
 	}
 
 	/**
 	 * Whether a binary body would still start at the first byte of the response.
-	 *
-	 * False once any output has left the process, and false while output is
-	 * pending in any buffer the sweep could not empty — in that case
-	 * headers_sent() is still false, so it cannot answer this on its own.
 	 *
 	 * @since TBD
 	 *
 	 * @return bool
 	 */
 	protected function response_is_clean() {
-		if ( $this->response_already_started() ) {
-			return false;
-		}
-
-		$floor = $this->output_buffer_floor();
-
-		// Every buffer above the floor has to be empty, not just the innermost
-		// one ob_get_length() reports: the sweep stops at a buffer it cannot
-		// pop, and anything already sitting underneath that one would still be
-		// flushed ahead of the archive. ob_get_status( true ) is 0-indexed from
-		// the outermost buffer, so index N describes level N + 1.
-		foreach ( ob_get_status( true ) as $index => $status ) {
-			$pending = $index >= $floor && ! empty( $status['buffer_used'] );
-
-			if ( $pending ) {
-				return false;
-			}
-		}
-
-		return true;
+		return Output::is_clean( $this->output_buffer_floor(), $this->response_already_started() );
 	}
 
 	/**

@@ -26,8 +26,6 @@
  *    response, which happens after the sweep has finished.
  *  - stream_bundle() reports a write that produced no bytes rather than passing
  *    it off as a delivered download.
- *  - the sweep empties a buffer it may only clean, and gives up on one it may
- *    neither clean nor remove.
  *
  * @package GravityKit\BlockMCP\Tests\Connect
  */
@@ -436,40 +434,4 @@ class ConnectBundleStreamTest extends WP_UnitTestCase {
 		$this->assertFileDoesNotExist( $path, 'the undelivered bundle must not linger on disk' );
 	}
 
-	/**
-	 * The sweep must treat a buffer by what its flags actually permit.
-	 *
-	 * A buffer opened without PHP_OUTPUT_HANDLER_REMOVABLE cannot be popped or
-	 * flush-closed by anyone, this process included, so these run in a child
-	 * process that exits with the buffer still open.
-	 *
-	 * @dataProvider provide_restricted_buffers
-	 *
-	 * @param string $flags    Flag set the child opens its buffer with.
-	 * @param bool   $expected Whether the response should read as clean after the sweep.
-	 * @param int    $pending  Bytes expected to remain above the floor.
-	 */
-	public function test_sweep_handles_buffers_it_cannot_remove( string $flags, bool $expected, int $pending ) {
-		$fixture = dirname( __DIR__ ) . '/fixtures/connect-buffer-sweep.php';
-		$command = escapeshellarg( PHP_BINARY ) . ' -d output_buffering=0 ' . escapeshellarg( $fixture ) . ' ' . escapeshellarg( $flags ) . ' 2>&1 1>/dev/null';
-
-		$verdict = json_decode( (string) shell_exec( $command ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.system_calls_shell_exec
-
-		$this->assertIsArray( $verdict, 'the buffer probe must return a JSON verdict' );
-		$this->assertSame( $expected, $verdict['clean'], 'the guard must reflect what the sweep could actually drop' );
-		$this->assertSame( $pending, $verdict['pending'], 'bytes left above the floor must match what the flags allow' );
-	}
-
-	/**
-	 * Buffer flag sets and the verdict each must produce.
-	 *
-	 * @return array<string,array{0:string,1:bool,2:int}>
-	 */
-	public function provide_restricted_buffers(): array {
-		return array(
-			'neither removable nor cleanable' => array( 'none', false, 5 ),
-			'cleanable but not removable'     => array( 'cleanable', true, 0 ),
-			'flushable but not cleanable'     => array( 'flushable', false, 5 ),
-		);
-	}
 }

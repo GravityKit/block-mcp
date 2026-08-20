@@ -44,9 +44,11 @@ parameters:
 
 		# GravityKit Foundation is Strauss-prefixed into vendor_prefixed/ at
 		# `composer install` time, so its classes don't exist when PHPStan
-		# analyzes the bootstrap. The two references are the documented UI-less
-		# entry points (should_load gate + Core::register).
+		# analyzes the bootstrap. The references are the documented UI-less entry
+		# points (should_load gate + Core::register) and the output helpers the
+		# installer download relies on to reach the browser intact.
 		- '#Function GravityKit\\BlockMCP\\Foundation\\should_load not found\.#'
 		- '#Call to static method register\(\) on an unknown class GravityKit\\BlockMCP\\Foundation\\Core\.#'
+		- '#Call to static method (protect|discard|is_clean)\(\) on an unknown class GravityKit\\BlockMCP\\Foundation\\Helpers\\Output\.#'
 
 	treatPhpDocTypesAsCertain: false
