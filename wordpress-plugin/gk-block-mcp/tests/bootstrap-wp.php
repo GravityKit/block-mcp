@@ -58,6 +58,11 @@ tests_add_filter(
 			require $adapter;
 		}
 
+		// Foundation is not booted in tests, so the one class the plugin calls
+		// outside that boot is loaded the same way preflight_check.php loads it
+		// in production: directly, before anything can autoload.
+		require_once dirname( __DIR__ ) . '/vendor_prefixed/gravitykit/foundation/src/Helpers/Output.php';
+
 		require dirname( __DIR__ ) . '/gk-block-mcp.php';
 	}
 );

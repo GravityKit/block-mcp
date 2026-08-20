@@ -82,6 +82,66 @@ function autoload( $class_name ) {
 spl_autoload_register( __NAMESPACE__ . '\\autoload' );
 
 /**
+ * Action name of the installer download.
+ *
+ * Kept here rather than read from Connect_Page so the bootstrap can recognise
+ * the request without autoloading that class: an install whose class file has
+ * gone missing or been emptied must still reach the admin notice instead of
+ * fatalling on every request. ConnectInstallerBufferTest pins the two together.
+ */
+const CONNECT_DOWNLOAD_ACTION = 'gk_block_api_connect';
+
+/**
+ * Open an output buffer for the installer download request.
+ *
+ * The .mcpb is a zip and has to be the whole response body, but themes and
+ * plugins loading after this file can still print — a stray newline after a
+ * closing PHP tag is enough. Where the server has no output buffering of its
+ * own, that output reaches the browser before the download handler runs, and
+ * by then nothing can take it back. Buffering from here keeps it recoverable,
+ * so Connect_Page can discard it and send an intact archive.
+ *
+ * The buffer is removable, which is what lets the discard sweep drop it, and
+ * it is popped before the archive is written, so the archive itself is never
+ * held in memory.
+ *
+ * @since TBD
+ *
+ * @return bool Whether a buffer was opened.
+ */
+function buffer_installer_response() {
+	// admin-post.php defines WP_ADMIN before it loads WordPress, so this is
+	// already answerable here, and it keeps every front-end request untouched.
+	if ( ! is_admin() ) {
+		return false;
+	}
+
+	// WordPress has not rebuilt $_REQUEST yet — wp_magic_quotes() runs after
+	// plugins load — so its contents depend on the request_order ini setting.
+	// Read the arrays admin-post.php itself dispatches from.
+	$raw = null;
+
+	if ( isset( $_POST['action'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- reading only to decide whether to buffer; handle_connect() owns the nonce and capability checks.
+		$raw = $_POST['action']; // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared verbatim below, never used as a value.
+	} elseif ( isset( $_GET['action'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- as above.
+		$raw = $_GET['action']; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- as above.
+	}
+
+	// Compared verbatim because that is what admin-post.php dispatches on. A
+	// sanitizer here would answer a different question than WordPress does, and
+	// the filters inside one could print before the buffer is open.
+	$ours = is_string( $raw ) && CONNECT_DOWNLOAD_ACTION === $raw;
+
+	if ( ! $ours ) {
+		return false;
+	}
+
+	return Foundation\Helpers\Output::protect();
+}
+
+buffer_installer_response();
+
+/**
  * Schema-version option key. Bumped on schema changes so the activation
  * handler and the lazy upgrade path know to clear stale caches / migrate
  * options. Distinct from the plugin version: it tracks the stored data shape.

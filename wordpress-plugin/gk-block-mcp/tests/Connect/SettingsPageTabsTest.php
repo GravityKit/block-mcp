@@ -410,6 +410,139 @@ class SettingsPageTabsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A failure inside register_settings() must not escape the `admin_init` hook.
+	 *
+	 * register_settings() runs on `admin_init`, so it executes on every admin
+	 * page. It dereferences class constants on Media_Manager, Post_Manager,
+	 * Block_Abilities and Template_Manager. On a damaged install — a class file
+	 * missing or empty on disk — the first of those
+	 * threw `Error: Class "GravityKit\BlockMCP\Media_Manager" not found` out of
+	 * the hook, which took down the whole WordPress admin (HTTP 500 on every
+	 * page, fatal-error protection, recovery-mode email). The fix contains the
+	 * failure inside register_settings(). This pins both halves: the throw does
+	 * not escape, and later `admin_init` callbacks still run.
+	 */
+	public function test_register_settings_failure_does_not_escape_admin_init() {
+		remove_all_actions( 'admin_init' );
+
+		( new Settings_Page( new Block_Inventory() ) )->register();
+
+		add_filter(
+			'register_setting_args',
+			static function ( $args, $defaults, $option_group, $option_name ) {
+				if ( \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION === $option_name ) {
+					throw new Error( 'Class "GravityKit\BlockMCP\Media_Manager" not found' );
+				}
+				return $args;
+			},
+			10,
+			4
+		);
+
+		$later_callback_ran = false;
+		add_action(
+			'admin_init',
+			static function () use ( &$later_callback_ran ) {
+				$later_callback_ran = true;
+			},
+			99
+		);
+
+		do_action( 'admin_init' );
+
+		$this->assertTrue( $later_callback_ran, 'admin_init must keep dispatching after the plugin fails' );
+	}
+
+	/**
+	 * A failure inside render_page() must not fatal the settings screen.
+	 *
+	 * render_page() dereferences the same classes register_settings() does, so
+	 * on a damaged install the settings screen kept fataling even once
+	 * admin_init was contained — and that screen is exactly where an admin goes
+	 * to investigate. The page now discards its half-built output and explains
+	 * what is wrong instead.
+	 */
+	public function test_render_page_failure_shows_notice_instead_of_fataling() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		add_filter(
+			'gk/block-mcp/media/uploads-enabled',
+			static function () {
+				throw new Error( 'Class "GravityKit\BlockMCP\Media_Manager" not found' );
+			}
+		);
+
+		ob_start();
+		( new Settings_Page( new Block_Inventory() ) )->render_page();
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'could not be loaded', $html, 'the damaged-install notice must render' );
+		$this->assertStringNotContainsString( 'nav-tab-wrapper', $html, 'the half-built page must be discarded, not shown truncated' );
+	}
+
+	/**
+	 * A contained failure must still tell the site owner something is wrong.
+	 *
+	 * Containing the failure alone leaves the plugin listed as active while
+	 * doing nothing, with no clue why — the state that turned a damaged file
+	 * into a support ticket. An admin notice names the problem and the fix.
+	 */
+	public function test_damaged_install_prints_admin_notice() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		remove_all_actions( 'admin_init' );
+		remove_all_actions( 'admin_notices' );
+
+		$page = new Settings_Page( new Block_Inventory() );
+		$page->register();
+
+		add_filter(
+			'register_setting_args',
+			static function ( $args, $defaults, $option_group, $option_name ) {
+				if ( \GravityKit\BlockMCP\Media_Manager::UPLOADS_OPTION === $option_name ) {
+					throw new Error( 'Class "GravityKit\BlockMCP\Media_Manager" not found' );
+				}
+				return $args;
+			},
+			10,
+			4
+		);
+
+		do_action( 'admin_init' );
+
+		ob_start();
+		do_action( 'admin_notices' );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'could not be loaded', $html, 'the site owner must be told the install is damaged' );
+		$this->assertSame( 1, substr_count( $html, 'could not be loaded' ), 'the notice must not be printed twice' );
+	}
+
+	/**
+	 * A healthy install must never show the damaged-install notice.
+	 */
+	public function test_healthy_install_prints_no_damaged_notice() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+
+		remove_all_actions( 'admin_init' );
+		remove_all_actions( 'admin_notices' );
+
+		$page = new Settings_Page( new Block_Inventory() );
+		$page->register();
+
+		do_action( 'admin_init' );
+
+		ob_start();
+		do_action( 'admin_notices' );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( 'could not be loaded', $html, 'a healthy install must stay quiet' );
+	}
+
+	/**
 	 * The policy tab renders the abilities toggle (its option name + heading), so
 	 * a render_page() rework can't silently drop the Abilities section.
 	 */
