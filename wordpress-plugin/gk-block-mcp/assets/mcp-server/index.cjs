@@ -35215,7 +35215,7 @@ var StdioServerTransport = class {
 // package.json
 var package_default = {
   name: "@gravitykit/block-mcp",
-  version: "2.2.0",
+  version: "2.2.1",
   description: "MCP server for WordPress block-level content management with preference-aware editing",
   main: "dist/index.cjs",
   bin: {
