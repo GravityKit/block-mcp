@@ -77,6 +77,22 @@ jobs:
           COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.FOUNDATION_REPO_TOKEN }}"}}'
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      # composer install builds vendor_prefixed/ through its post-install
+      # hook: strauss copies the prefixed Foundation out of vendor/, then
+      # composer_post_update_install.sh patches what strauss produced. When
+      # vendor/ comes from cache that hook never fires, and vendor_prefixed/
+      # is gitignored and not cached, so the prefixed Foundation helper
+      # tests/bootstrap-wp.php requires is absent and every test fatals at
+      # bootstrap. Rebuild it here the way the install path does. The two
+      # scripts stay paired in this order: strauss regenerates the exact
+      # files the patch script edits, so running either alone leaves
+      # vendor_prefixed/ in a state the install path never produces.
+      - name: Rebuild the prefixed vendor directory
+        if: steps.vendor-cache.outputs.cache-hit == 'true'
+        run: |
+          composer run-script prefix_vendor
+          composer run-script post_update_install
+
       # composer post-install runs the SQLite installer only on a fresh
       # install; if vendor/ came from cache, re-run it explicitly so
       # both paths produce an identical state.

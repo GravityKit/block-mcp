@@ -1,6 +1,6 @@
 {
     "name": "gravitykit/gk-block-mcp",
-    "description": "GravityKit Block API — WordPress plugin exposing block-level REST endpoints.",
+    "description": "GravityKit Block API \u2014 WordPress plugin exposing block-level REST endpoints.",
     "type": "wordpress-plugin",
     "license": "GPL-2.0-or-later",
     "minimum-stability": "dev",
@@ -141,7 +141,9 @@
                     "woocommerce/action-scheduler"
                 ],
                 "file_patterns": [
-                    "#gravitykit/foundation/phpstan/#"
+                    "#gravitykit/foundation/(UI|docs|tools|tests|scripts|phpstan|js-translations-extractor)/#",
+                    "#gravitykit/foundation/\\.[^/]+#",
+                    "#gravitykit/foundation/[^/]+\\.(md|json|js|sh|xml|dist|lock)$#"
                 ]
             }
         }

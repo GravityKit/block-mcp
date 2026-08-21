@@ -2,9 +2,9 @@
 Contributors: gravitykit, katzwebservices
 Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.0
-Tested up to: 7.0.4
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.2.0
+Stable tag: 2.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,15 +120,22 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 == Changelog ==
 
-= develop =
+= 2.2.1 on August 20, 2026 =
+
+This release stops a damaged install from breaking the WordPress admin, fixes the Claude Desktop installer download being corrupted by output from other plugins, and corrects code block fonts and empty lists written by the assistant.
 
 #### 🐛 Fixed
-
-* A damaged plugin install no longer breaks the WordPress admin. If one of the plugin's files goes missing or is emptied, every admin page returned a critical error and WordPress emailed a recovery link. Now the rest of the admin keeps loading, and a notice explains that part of Block MCP could not be loaded and that reinstalling usually fixes it.
-* Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.
-* Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
+* A missing or emptied plugin file made every admin page return a critical error and triggered a WordPress recovery email — the admin now keeps loading, with a notice explaining that part of Block MCP could not be loaded and that reinstalling usually fixes it.
+* Issues with the Claude Desktop installer download:
+  - Stray output from another plugin or theme — even a single blank line left after a closing PHP tag — was prepended to the file, so Claude Desktop rejected it with "Failed to preview extension";
+  - A download that could not be repaired produced a broken file with no explanation, and left behind the connection it had created along with its unused password.
+* Code block font issues:
+  - Changing a code block's font through the assistant updated the setting but left the displayed code unchanged;
+  - Existing code blocks whose font was saved without a fallback could display in the browser's default serif instead of a monospace face.
 * A list written by the assistant could show up empty on the site and as invalid in the editor, even though its items were saved.
-* The Claude Desktop installer no longer downloads damaged when another plugin or theme prints stray output in the admin. Even a single blank line — the kind left after a closing PHP tag in a theme file — ended up at the front of the file, and Claude Desktop rejected it with "Failed to preview extension". The installer download now captures that output from the moment the plugin loads and discards it before sending the file, so the installer arrives intact even when the theme, or a plugin loading after it, is printing on every request. In the rare case where the output has already reached the browser and can no longer be taken back, you get an explanation naming the cause instead of a file that will not open, and the connection created for that download is removed so it does not leave an unused password behind.
+
+#### 💻 Developer Updates
+* Output buffering now starts when the plugin loads and is discarded before the installer file is sent, so stray output from earlier-loading plugins and themes cannot corrupt the download.
 
 = 2.2.0 on July 23, 2026 =
 
