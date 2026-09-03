@@ -384,6 +384,39 @@ class Block_Writer {
 	}
 
 	/**
+	 * Whether a block's innerHTML must be preserved verbatim for the current user.
+	 *
+	 * The core/html block is Custom HTML — its entire value is arbitrary markup, and
+	 * wp_kses_post() destroys it: `<style>` open/close tags are stripped and the
+	 * CSS between them is entity-mangled (`>` → `&gt;`), so a get_block →
+	 * update_block round-trip turned a production homepage's stylesheet into
+	 * visible page text. Verbatim preservation is gated on `unfiltered_html` —
+	 * the same capability WordPress core uses to decide whether an editor's raw
+	 * HTML is saved as-is — so the dedicated agent account (which deliberately
+	 * lacks it) still gets the kses pass.
+	 *
+	 * @param string $block_name Fully-qualified block name (e.g. `core/html`).
+	 * @return bool True when innerHTML must round-trip byte-identical.
+	 */
+	public static function preserves_raw_inner_html( $block_name ) {
+		/**
+		 * Filters the block names whose innerHTML is written verbatim (for
+		 * users with `unfiltered_html`) instead of passing through
+		 * wp_kses_post().
+		 *
+		 * @param string[] $raw_html_blocks Block names. Default: core/html.
+		 */
+		$raw_html_blocks = apply_filters( 'gk/block-mcp/write/raw-html-blocks', array( 'core/html' ) );
+
+		$is_raw_block = in_array( (string) $block_name, (array) $raw_html_blocks, true );
+		if ( ! $is_raw_block ) {
+			return false;
+		}
+
+		return current_user_can( 'unfiltered_html' );
+	}
+
+	/**
 	 * Sanitize a block's innerHTML.
 	 *
 	 * Runs wp_kses_post (stripping scripts and disallowed markup) and then
@@ -395,11 +428,20 @@ class Block_Writer {
 	 * legitimate content — displayed block markup is entity-encoded, not a live
 	 * comment.
 	 *
-	 * @param string $html Raw innerHTML.
+	 * The kses pass is skipped for raw-HTML blocks written by a user with
+	 * `unfiltered_html` (see preserves_raw_inner_html()); the delimiter guard
+	 * is structural and applies to everyone.
+	 *
+	 * @param string $html       Raw innerHTML.
+	 * @param string $block_name Optional. Block name the HTML belongs to;
+	 *                           lets raw-HTML blocks round-trip verbatim.
 	 * @return string Sanitized innerHTML.
 	 */
-	public static function sanitize_inner_html( $html ) {
-		$html = wp_kses_post( (string) $html );
+	public static function sanitize_inner_html( $html, $block_name = '' ) {
+		$html = (string) $html;
+		if ( ! self::preserves_raw_inner_html( $block_name ) ) {
+			$html = wp_kses_post( $html );
+		}
 		return (string) preg_replace( '#<!--\s*/?\s*wp:.*?-->#is', '', $html );
 	}
 
@@ -668,7 +710,11 @@ class Block_Writer {
 		}
 
 		if ( null !== $inner_html ) {
-			$block['innerHTML'] = $this->transformer->strip_empty_class_attributes( self::sanitize_inner_html( $inner_html ) );
+			$sanitized_html = self::sanitize_inner_html( $inner_html, $block_name );
+			if ( ! self::preserves_raw_inner_html( $block_name ) ) {
+				$sanitized_html = $this->transformer->strip_empty_class_attributes( $sanitized_html );
+			}
+			$block['innerHTML'] = $sanitized_html;
 			if ( ! empty( $block['innerBlocks'] ) && ! empty( $block['innerContent'] ) ) {
 				$block['innerContent'] = $this->transformer->rebuild_inner_content(
 					$block['innerContent'],
@@ -698,9 +744,11 @@ class Block_Writer {
 		$warnings = array_merge( $warnings, $validation['warnings'] );
 
 		$attrs      = isset( $block_def['attributes'] ) ? $block_def['attributes'] : array();
-		$inner_html = isset( $block_def['innerHTML'] ) ? self::sanitize_inner_html( $block_def['innerHTML'] ) : '';
-		$inner_html = $this->transformer->strip_empty_class_attributes( $inner_html );
-		$children   = array();
+		$inner_html = isset( $block_def['innerHTML'] ) ? self::sanitize_inner_html( $block_def['innerHTML'], $name ) : '';
+		if ( ! self::preserves_raw_inner_html( $name ) ) {
+			$inner_html = $this->transformer->strip_empty_class_attributes( $inner_html );
+		}
+		$children = array();
 
 		$inner_html_required = $this->require_inner_html_for_source_bound_attrs(
 			$name,

@@ -124,6 +124,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 🐛 Fixed
 
+* Custom HTML blocks now round-trip through the assistant unchanged when the connected account is allowed to write raw HTML (the same WordPress permission the block editor uses). Previously, reading a Custom HTML block and writing the same content back stripped its `<style>` tags and escaped the CSS inside them, which could turn a page's stylesheet into visible text on the site.
 * Asking the assistant to read a single block now returns the block's name, ref, and content directly in the response. Previously the content was nested inside an internal envelope with no name or ref, so assistants reading the usual fields came back empty-handed.
 * A damaged plugin install no longer breaks the WordPress admin. If one of the plugin's files goes missing or is emptied, every admin page returned a critical error and WordPress emailed a recovery link. Now the rest of the admin keeps loading, and a notice explains that part of Block MCP could not be loaded and that reinstalling usually fixes it.
 * Changing a code block's font through the assistant updated the setting but left the displayed code unchanged.

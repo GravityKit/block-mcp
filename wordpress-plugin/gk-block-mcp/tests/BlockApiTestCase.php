@@ -64,6 +64,7 @@ abstract class BlockApiTestCase extends WP_UnitTestCase {
 			'core/column',
 			'core/image',
 			'core/block',
+			'core/html',
 			// Legacy / non-core blocks used in preference-tier coverage.
 			'stackable/heading',
 			'ugb/text',

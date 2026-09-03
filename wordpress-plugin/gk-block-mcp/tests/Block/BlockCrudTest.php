@@ -418,6 +418,67 @@ class BlockCrudTest extends BlockApiTestCase {
 		$this->assertArrayNotHasKey( 'ref', $result['saved'] );
 	}
 
+	// ── core/html write fidelity ───────────────────────────────────
+
+	/**
+	 * get_block → update_block must be a byte-identical no-op for a core/html
+	 * block when the acting user holds `unfiltered_html`.
+	 *
+	 * The write path ran every innerHTML through wp_kses_post(), which strips
+	 * `<style>` open/close tags and mangles the CSS between them. On a
+	 * production homepage, echoing get_block's own `inner_html` back through
+	 * update_block stripped the tags and turned the entire stylesheet into
+	 * visible page text. core/html is Custom HTML — its whole value is
+	 * arbitrary markup — so for users WordPress trusts with raw HTML
+	 * (`unfiltered_html`, the same capability core's editor gates on) the
+	 * content must round-trip verbatim.
+	 */
+	public function test_update_block_core_html_style_round_trip_is_noop() {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( $admin_id );
+		$this->assertTrue( current_user_can( 'unfiltered_html' ) );
+
+		$css = '<style id="gk-custom">.hero > .title { color: red; } ul.grid > li:nth-child(2n) { margin: 0; }</style>';
+		$this->make_post( array(
+			$this->block( 'core/html', array(), $css ),
+		) );
+
+		$read = $this->crud->get_block( $this->post_id, null, 0 );
+		$this->assertIsArray( $read );
+		$this->assertSame( $css, $read['inner_html'] );
+
+		$result = $this->crud->update_block( $this->post_id, 0, array(), $read['inner_html'] );
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$this->assertSame( $css, $result['saved']['inner_html'] );
+
+		$after = $this->crud->get_block( $this->post_id, null, 0 );
+		$this->assertSame( $css, $after['inner_html'] );
+	}
+
+	/**
+	 * Without `unfiltered_html`, core/html writes still sanitize.
+	 *
+	 * The verbatim path is a trust decision, not a blanket exemption: the
+	 * dedicated agent account deliberately lacks `unfiltered_html`
+	 * (Agent_Provisioner), and the plugin's own kses pass is the only
+	 * sanitizer on this path (save_blocks detaches content_save_pre). A
+	 * capability-less user writing `<script>` through core/html must not get
+	 * it stored raw.
+	 */
+	public function test_update_block_core_html_still_sanitized_without_unfiltered_html() {
+		wp_set_current_user( 0 );
+
+		$this->make_post( array(
+			$this->block( 'core/html', array(), '<div>safe</div>' ),
+		) );
+
+		$result = $this->crud->update_block( $this->post_id, 0, array(), '<script>alert(1)</script><div>ok</div>' );
+		$this->assertIsArray( $result );
+		$this->assertStringNotContainsString( '<script>', $result['saved']['inner_html'] );
+		$this->assertStringContainsString( '<div>ok</div>', $result['saved']['inner_html'] );
+	}
+
 	// ── update_block ───────────────────────────────────────────────
 
 	public function test_update_block_merges_attributes() {
