@@ -717,9 +717,11 @@ class Block_CRUD {
 	}
 
 	/**
-	 * Fetch a single block by ref or flat index. Returns the same `saved`
-	 * snapshot shape that write endpoints echo, so verification reads use the
-	 * identical contract as the writes that produced them.
+	 * Fetch a single block by ref or flat index. Returns a flat, self-describing
+	 * block at the top level — `name`, `ref`, `flat_index`, `path`, `attributes`,
+	 * `inner_html`, `is_dynamic` — plus a `saved` alias carrying the same snapshot
+	 * shape that write endpoints echo, so verification reads use the identical
+	 * contract as the writes that produced them.
 	 *
 	 * Lighter than get_blocks() when you only need one block — useful for
 	 * after-the-fact re-checks when the original write response was lost or
@@ -730,7 +732,7 @@ class Block_CRUD {
 	 * @param string|int|null $ref        Stable gk_ref. Provide this OR flat_index.
 	 * @param int|null        $flat_index Flat index. Provide this OR ref.
 	 *
-	 * @return array|\WP_Error { saved: {...} } on success, WP_Error on failure.
+	 * @return array|\WP_Error Flat block fields + `saved` alias on success, WP_Error on failure.
 	 */
 	public function get_block( $post_id, $ref = null, $flat_index = null ) {
 		$has_ref = is_string( $ref ) && '' !== $ref;
@@ -786,10 +788,29 @@ class Block_CRUD {
 			);
 		}
 
-		return array(
-			'success' => true,
-			'saved'   => $this->format_saved_block( $block, $flat_idx ),
+		$saved = $this->format_saved_block( $block, $flat_idx );
+
+		// Flat, self-describing shape at the top level. `saved` is kept as a
+		// back-compat alias of the same snapshot: pre-2.3 callers read
+		// `saved.inner_html` / `saved.attributes` and must keep working.
+		$response = array(
+			'success'    => true,
+			'post_id'    => (int) $post_id,
+			'name'       => $saved['block_name'],
+			'flat_index' => $saved['flat_index'],
+			'path'       => $path,
+			'attributes' => $saved['attributes'],
+			'inner_html' => $saved['inner_html'],
+			'is_dynamic' => $saved['is_dynamic'],
 		);
+
+		if ( isset( $saved['ref'] ) ) {
+			$response['ref'] = $saved['ref'];
+		}
+
+		$response['saved'] = $saved;
+
+		return $response;
 	}
 
 	/**

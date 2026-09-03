@@ -86,14 +86,23 @@ export const READ_TOOLS = [
   {
     name: 'get_block',
     description:
-      'Fetch one block by stable ref OR flat_index — returns the canonical `saved` snapshot (inner_html + attributes) from the database. Same shape that update_block / update_blocks (with `verbose:true`) echo back, so verification reads use the identical contract as the writes that produced them. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`saved.is_dynamic`), `inner_html` is the stored template, not rendered output.',
+      'Fetch one block by stable ref OR flat_index. Returns a flat, self-describing block at the top level: `{success, post_id, name, ref?, flat_index, path?, attributes, inner_html, is_dynamic}` — read `inner_html` / `attributes` directly off the result. A `saved` key carries the same snapshot in the shape update_block / update_blocks (with `verbose:true`) echo back (`block_name` instead of `name`), kept as a back-compat alias. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`is_dynamic: true`), `inner_html` is the stored template, not rendered output.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get one block' },
     outputSchema: {
       type: 'object',
       properties: {
-        success: { type: 'boolean' },
+        success:    { type: 'boolean' },
+        post_id:    { type: 'number' },
+        name:       { type: 'string', description: 'Fully-qualified block name (e.g. core/paragraph).' },
+        ref:        { type: 'string', description: 'Stable gk_ref (present when the block has one).' },
+        flat_index: { type: 'number' },
+        path:       { type: 'array', items: { type: 'number' }, description: 'Nested path (raw parse_blocks indices); present when the plugin returns it.' },
+        attributes: { type: 'object' },
+        inner_html: { type: 'string' },
+        is_dynamic: { type: 'boolean' },
         saved: {
           type: 'object',
+          description: 'Back-compat alias: the same snapshot in write-echo shape (block_name, flat_index, attributes, inner_html, is_dynamic, ref?).',
           properties: {
             flat_index: { type: 'number' },
             block_name: { type: 'string' },
@@ -209,7 +218,29 @@ export async function handleReadTool(
         throw new Error('Provide exactly one of ref or flat_index');
       }
 
-      return await client.getBlock(postId, hasRef ? { ref } : { flatIndex });
+      const response = await client.getBlock(postId, hasRef ? { ref } : { flatIndex });
+
+      // Flatten to a self-describing block at the top level. Older plugin
+      // versions return only the `{ success, saved }` envelope, so derive the
+      // flat fields from `saved` when the plugin didn't send them — the tool
+      // contract holds regardless of which plugin version is on the site.
+      const saved = response.saved;
+      const resolvedRef = response.ref ?? saved?.ref;
+      const path = response.path;
+
+      return {
+        success: response.success,
+        post_id: response.post_id ?? postId,
+        name: response.name ?? saved?.block_name,
+        ...(resolvedRef !== undefined ? { ref: resolvedRef } : {}),
+        flat_index: response.flat_index ?? saved?.flat_index,
+        ...(path !== undefined ? { path } : {}),
+        attributes: response.attributes ?? saved?.attributes,
+        inner_html: response.inner_html ?? saved?.inner_html,
+        is_dynamic: response.is_dynamic ?? saved?.is_dynamic,
+        // Back-compat alias — pre-2.3 callers read saved.inner_html.
+        saved,
+      };
     }
 
     default:

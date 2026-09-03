@@ -126,6 +126,7 @@ All routes under `gk-block-api/v1`.
 |---|---|---|
 | GET | `/block-types` · `/block-types/{namespace}` | block types + preference scores |
 | GET | `/posts/{id}/blocks` | page blocks (params: `fields`, `search`, `block_name`, `render`) |
+| GET | `/posts/{id}/block` | `get_block` single fetch (`ref` or `flat_index`) — flat self-describing block + `saved` alias |
 | GET | `/resolve?url=` · `/post-info` · `/find-posts` | URL→post resolution, post metadata, post search |
 | GET | `/patterns` · `/patterns/search` · `/patterns/{id}` | pattern listing/search/detail |
 | GET | `/site-usage` | block/pattern usage stats |

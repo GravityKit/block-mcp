@@ -40,7 +40,7 @@ import { restRouteUrl } from './rest-url.js';
  */
 export const BASELINE = `Block-level WordPress CRUD. URL → post_id is resolved server-side — pass URLs directly to get_page_blocks / resolve_url; never shell out to curl or wp-json.
 
-After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification — do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) — same shape, no extra plumbing.
+After a write, the response already includes the canonical post-save snapshot (\`saved.inner_html\` + \`saved.attributes\` on update_block; \`saved\` per result on update_blocks with \`verbose:true\`). Use that for verification — do not fetch the public page to confirm edits. If you need a single-block re-read later, call get_block(ref) — it returns the block flat at the top level (\`name\`, \`ref\`, \`attributes\`, \`inner_html\`) plus the same \`saved\` snapshot as an alias.
 
 Tier policy is per-site config, surfaced inline (block.preference) and via list_block_types. Read block-mcp://agent-guide for the editing workflow.`;
 

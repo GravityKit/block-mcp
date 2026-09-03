@@ -739,9 +739,11 @@ export class WordPressBlockClient {
   }
 
   /**
-   * Fetch a single block by stable ref or flat index. Returns the canonical
-   * `saved` snapshot — same shape that write endpoints echo, so verification
-   * reads use the identical contract as the writes that produced them.
+   * Fetch a single block by stable ref or flat index. Returns a flat,
+   * self-describing block (`name`, `ref`, `attributes`, `inner_html`, ...)
+   * plus a `saved` alias — the snapshot shape that write endpoints echo, so
+   * verification reads use the identical contract as the writes that
+   * produced them. Older plugin versions send only `{ success, saved }`.
    *
    * Lighter than getPageBlocks() when you only need one block. Use this when
    * you want to confirm the current state of a known ref before chaining an
@@ -749,7 +751,7 @@ export class WordPressBlockClient {
    *
    * @param postId  WordPress post/page ID.
    * @param target  Either `{ ref }` or `{ flatIndex }`. Exactly one required.
-   * @returns       { success, saved } where `saved` mirrors update_block's saved.
+   * @returns       Flat block fields + `saved` alias (mirrors update_block's saved).
    */
   async getBlock(
     postId: number,

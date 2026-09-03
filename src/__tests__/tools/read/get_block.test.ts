@@ -7,7 +7,11 @@
  *   - Routing: ref → client.getBlock(postId, {ref})
  *   - Routing: flat_index → client.getBlock(postId, {flatIndex})
  *   - flat_index:0 is valid (Number.isFinite check, not truthy)
- *   - Response shape: { success, saved } via assertSavedBlock
+ *   - Response shape: flat self-describing block at the top level
+ *     ({ success, post_id, name, ref?, flat_index, path?, attributes,
+ *     inner_html, is_dynamic }) + `saved` back-compat alias
+ *   - Flat fields derived from `saved` when the plugin sends only the
+ *     legacy { success, saved } envelope
  *   - Empty string ref treated as missing (XOR with flat_index)
  *   - Non-finite flat_index (NaN/Infinity) treated as missing
  */
@@ -121,11 +125,84 @@ describe('get_block — response shape', () => {
     client.getBlock.mockResolvedValue(getBlockResponse);
   });
 
-  it('returns { success, saved } with a valid saved block', async () => {
+  it('returns the block flat at the top level (name, ref, attributes, inner_html)', async () => {
+    // The regression this pins: the tool returned only { success, saved },
+    // so a caller reading result.inner_html or result.name got undefined and
+    // had to discover the `saved` envelope by dumping keys.
+    const result = await handleReadTool('get_block', { post_id: 1, ref: 'blk_para0001' }, client as any) as Record<string, unknown>;
+    expect(result.success).toBe(true);
+    expect(result.post_id).toBe(1);
+    expect(result.name).toBe('core/paragraph');
+    expect(result.ref).toBe('blk_para0001');
+    expect(result.flat_index).toBe(0);
+    expect(result.attributes).toEqual({ content: 'Hello world.' });
+    expect(result.inner_html).toBe('<p>Hello world.</p>');
+    expect(result.is_dynamic).toBe(false);
+  });
+
+  it('keeps `saved` as a back-compat alias with a valid saved block', async () => {
     const result = await handleReadTool('get_block', { post_id: 1, ref: 'blk_a' }, client as any) as {
       success: boolean; saved: unknown;
     };
     expect(result.success).toBe(true);
     assertSavedBlock(result.saved);
+  });
+
+  it('derives the flat fields from `saved` when the plugin sends only the legacy envelope', async () => {
+    // getBlockResponse is exactly the legacy { success, saved } envelope —
+    // no flat fields — which is what pre-2.3 plugins return.
+    expect(Object.keys(getBlockResponse).sort()).toEqual(['saved', 'success']);
+    const result = await handleReadTool('get_block', { post_id: 7, flat_index: 0 }, client as any) as Record<string, unknown>;
+    const saved = getBlockResponse.saved;
+    expect(result.post_id).toBe(7);
+    expect(result.name).toBe(saved.block_name);
+    expect(result.ref).toBe(saved.ref);
+    expect(result.flat_index).toBe(saved.flat_index);
+    expect(result.attributes).toEqual(saved.attributes);
+    expect(result.inner_html).toBe(saved.inner_html);
+    expect(result.is_dynamic).toBe(saved.is_dynamic);
+  });
+
+  it('passes through flat fields and path when the plugin sends them', async () => {
+    client.getBlock.mockResolvedValue({
+      success: true,
+      post_id: 9,
+      name: 'core/heading',
+      ref: 'blk_head0001',
+      flat_index: 3,
+      path: [2, 0],
+      attributes: { level: 2 },
+      inner_html: '<h2>Hi</h2>',
+      is_dynamic: false,
+      saved: {
+        flat_index: 3,
+        block_name: 'core/heading',
+        attributes: { level: 2 },
+        inner_html: '<h2>Hi</h2>',
+        is_dynamic: false,
+        ref: 'blk_head0001',
+      },
+    });
+    const result = await handleReadTool('get_block', { post_id: 9, ref: 'blk_head0001' }, client as any) as Record<string, unknown>;
+    expect(result.name).toBe('core/heading');
+    expect(result.path).toEqual([2, 0]);
+    expect(result.post_id).toBe(9);
+    expect(result.inner_html).toBe('<h2>Hi</h2>');
+  });
+
+  it('omits `ref` when the block has none', async () => {
+    client.getBlock.mockResolvedValue({
+      success: true,
+      saved: {
+        flat_index: 2,
+        block_name: 'core/separator',
+        attributes: {},
+        inner_html: '<hr class="wp-block-separator"/>',
+        is_dynamic: false,
+      },
+    });
+    const result = await handleReadTool('get_block', { post_id: 1, flat_index: 2 }, client as any) as Record<string, unknown>;
+    expect('ref' in result).toBe(false);
+    expect(result.name).toBe('core/separator');
   });
 });

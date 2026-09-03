@@ -2,7 +2,7 @@
 /**
  * Tests for the Block_CRUD class.
  *
- * Covers format_blocks, validate_block_def, get_blocks, update_block,
+ * Covers format_blocks, validate_block_def, get_blocks, get_block, update_block,
  * insert_blocks, delete_blocks, replace_all_blocks, save_post_content,
  * and rate limiting.
  *
@@ -335,6 +335,87 @@ class BlockCrudTest extends BlockApiTestCase {
 		) );
 		$result = $this->crud->get_blocks( $empty_id );
 		$this->assertEquals( array(), $result );
+	}
+
+	// ── get_block (single fetch) ───────────────────────────────────
+
+	/**
+	 * get_block() must return a flat, self-describing block at the top level.
+	 *
+	 * The tool originally returned only a `{ success, saved }` envelope, so a
+	 * caller reading `inner_html` / `name` off the result got nothing and had
+	 * to discover the `saved` nesting by dumping keys. The response now
+	 * carries `name`, `ref`, `flat_index`, `path`, `attributes`,
+	 * `inner_html`, and `is_dynamic` directly, with `saved` kept as a
+	 * back-compat alias of the same snapshot.
+	 */
+	public function test_get_block_returns_flat_self_describing_shape() {
+		$this->make_post( array(
+			$this->block(
+				'core/paragraph',
+				array(
+					'align'    => 'left',
+					'metadata' => array( 'gk_ref' => 'blk_flat0001' ),
+				),
+				'<p>Flat shape</p>'
+			),
+		) );
+
+		$result = $this->crud->get_block( $this->post_id, 'blk_flat0001', null );
+
+		$this->assertIsArray( $result );
+		$this->assertTrue( $result['success'] );
+		$this->assertSame( $this->post_id, $result['post_id'] );
+		$this->assertSame( 'core/paragraph', $result['name'] );
+		$this->assertSame( 'blk_flat0001', $result['ref'] );
+		$this->assertSame( 0, $result['flat_index'] );
+		$this->assertSame( array( 0 ), $result['path'] );
+		$this->assertSame( '<p>Flat shape</p>', $result['inner_html'] );
+		$this->assertSame( 'left', $result['attributes']['align'] );
+		$this->assertFalse( $result['is_dynamic'] );
+	}
+
+	/**
+	 * The `saved` alias must survive the flattening unchanged.
+	 *
+	 * Pre-2.3 callers (and the write-echo verification contract) read
+	 * `saved.inner_html` / `saved.attributes` / `saved.block_name`; the alias
+	 * must stay byte-identical to format_saved_block() output.
+	 */
+	public function test_get_block_keeps_saved_alias_matching_flat_fields() {
+		$this->make_post( array(
+			$this->block( 'core/paragraph', array(), '<p>A</p>' ),
+			$this->block( 'core/heading', array( 'level' => 2 ), '<h2>B</h2>' ),
+		) );
+
+		$result = $this->crud->get_block( $this->post_id, null, 1 );
+
+		$this->assertIsArray( $result );
+		$this->assertArrayHasKey( 'saved', $result );
+		$this->assertSame( 'core/heading', $result['saved']['block_name'] );
+		$this->assertSame( $result['name'], $result['saved']['block_name'] );
+		$this->assertSame( $result['flat_index'], $result['saved']['flat_index'] );
+		$this->assertSame( $result['inner_html'], $result['saved']['inner_html'] );
+		$this->assertSame( $result['attributes'], $result['saved']['attributes'] );
+		$this->assertSame( $result['is_dynamic'], $result['saved']['is_dynamic'] );
+	}
+
+	/**
+	 * A block without a gk_ref must omit `ref` entirely, not emit null.
+	 *
+	 * Matches format_saved_block(): `ref` is conditional, and an absent key
+	 * is the contract for "this block has no stable ref yet".
+	 */
+	public function test_get_block_omits_ref_when_block_has_none() {
+		$this->make_post( array(
+			$this->block( 'core/separator', array(), '<hr class="wp-block-separator"/>' ),
+		) );
+
+		$result = $this->crud->get_block( $this->post_id, null, 0 );
+
+		$this->assertIsArray( $result );
+		$this->assertArrayNotHasKey( 'ref', $result );
+		$this->assertArrayNotHasKey( 'ref', $result['saved'] );
 	}
 
 	// ── update_block ───────────────────────────────────────────────

@@ -61,7 +61,7 @@ Every write echoes the canonical post-save snapshot. Use it. Do not fetch the pu
 
 - \`update_block\` always returns \`saved.inner_html\` + \`saved.attributes\` — the exact content that just landed in post_content. The write call IS the verification round-trip.
 - \`update_blocks\` returns per-result \`saved\` only when called with \`verbose: true\` (default false to keep batch responses compact). Pass \`verbose: true\` if you need to confirm each item without a re-read.
-- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` — returns the same \`saved\` shape, lighter than \`get_page_blocks\`.
+- For after-the-fact re-reads of a single known block, use \`get_block({ post_id, ref })\` — returns the block flat at the top level (\`name\`, \`ref\`, \`attributes\`, \`inner_html\`, \`is_dynamic\`) plus the same \`saved\` snapshot as a back-compat alias; lighter than \`get_page_blocks\`.
 
 For dynamic blocks (\`saved.is_dynamic: true\`, e.g. shortcodes, query loops, latest-posts), \`saved.inner_html\` is the stored template that runs at render time — not the rendered HTML the visitor sees. That's expected; the canonical state is the template.
 

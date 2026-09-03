@@ -249,10 +249,33 @@ export interface BlockUpdateResponse {
   revision_id: number;
 }
 
-/** Response from `get_block` — single-block fetch by ref or flat_index. */
+/**
+ * Response from `get_block` — single-block fetch by ref or flat_index.
+ *
+ * Since 2.3 the plugin returns a flat, self-describing block at the top level
+ * alongside the `saved` alias. The flat fields are optional here because older
+ * plugin versions send only the `{ success, saved }` envelope — the tool
+ * handler derives the flat shape from `saved` in that case.
+ */
 export interface GetBlockResponse {
   success: boolean;
-  /** Canonical snapshot — same shape as `BlockUpdateResponse.saved`. */
+  /** Post ID the block belongs to. */
+  post_id?: number;
+  /** Fully-qualified block name (e.g. `core/paragraph`). */
+  name?: string;
+  /** Stable gk_ref (present when the block has one). */
+  ref?: string;
+  /** Flat index of this block in the post. */
+  flat_index?: number;
+  /** Nested path (raw parse_blocks indices), consumable by edit_block_tree. */
+  path?: number[];
+  /** Current attributes (matches what's in post_content). */
+  attributes?: Record<string, unknown>;
+  /** Current innerHTML as stored in post_content. */
+  inner_html?: string;
+  /** True when the block renders via a PHP callback. */
+  is_dynamic?: boolean;
+  /** Back-compat alias — same snapshot in write-echo shape (`BlockUpdateResponse.saved`). */
   saved: SavedBlock;
 }
 

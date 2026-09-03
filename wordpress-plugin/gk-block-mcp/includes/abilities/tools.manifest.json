@@ -428,7 +428,7 @@
       "name": "get_block",
       "ability": "gk-block-mcp/get-block",
       "label": "Get one block",
-      "description": "Fetch one block by stable ref OR flat_index — returns the canonical `saved` snapshot (inner_html + attributes) from the database. Same shape that update_block / update_blocks (with `verbose:true`) echo back, so verification reads use the identical contract as the writes that produced them. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`saved.is_dynamic`), `inner_html` is the stored template, not rendered output.",
+      "description": "Fetch one block by stable ref OR flat_index. Returns a flat, self-describing block at the top level: `{success, post_id, name, ref?, flat_index, path?, attributes, inner_html, is_dynamic}` — read `inner_html` / `attributes` directly off the result. A `saved` key carries the same snapshot in the shape update_block / update_blocks (with `verbose:true`) echo back (`block_name` instead of `name`), kept as a back-compat alias. Lighter than get_page_blocks when you only need to confirm one known block. For dynamic blocks (`is_dynamic: true`), `inner_html` is the stored template, not rendered output.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -455,8 +455,39 @@
           "success": {
             "type": "boolean"
           },
+          "post_id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string",
+            "description": "Fully-qualified block name (e.g. core/paragraph)."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Stable gk_ref (present when the block has one)."
+          },
+          "flat_index": {
+            "type": "number"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Nested path (raw parse_blocks indices); present when the plugin returns it."
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "inner_html": {
+            "type": "string"
+          },
+          "is_dynamic": {
+            "type": "boolean"
+          },
           "saved": {
             "type": "object",
+            "description": "Back-compat alias: the same snapshot in write-echo shape (block_name, flat_index, attributes, inner_html, is_dynamic, ref?).",
             "properties": {
               "flat_index": {
                 "type": "number"
