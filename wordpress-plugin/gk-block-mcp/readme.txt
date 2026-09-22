@@ -1,9 +1,9 @@
 === GK Block API ===
 Contributors: gravitykit, katzwebservices
 Tags: blocks, rest-api, gutenberg, mcp, ai
-Requires at least: 6.0
+Requires at least: 6.5
 Tested up to: 7.1
-Requires PHP: 7.4
+Requires PHP: 7.4.0
 Stable tag: 2.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -119,6 +119,11 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 `uninstall.php` deletes all plugin options and transients (`gk_block_api_preferences`, `gk_block_api_post_types_allowlist`, `gk_block_api_storage_modes`, the manual dual-storage list, the inventory cache, and per-post rate-limit transients). Post content and revisions are not touched.
 
 == Changelog ==
+
+= develop =
+
+#### 🔧 Updated
+* The minimum required WordPress version is now 6.5 and the minimum PHP version is 7.4.
 
 = 2.2.1 on August 20, 2026 =
 
