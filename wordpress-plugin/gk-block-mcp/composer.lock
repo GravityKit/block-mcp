@@ -82,12 +82,12 @@
             "source": {
                 "type": "git",
                 "url": "git@github.com:GravityKit/Foundation.git",
-                "reference": "a4bef615c05bca926bbb6c456620021db5a4f8ef"
+                "reference": "566dd2b70f5c064a3c3a931740d822fc1fda9197"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/GravityKit/Foundation/zipball/a4bef615c05bca926bbb6c456620021db5a4f8ef",
-                "reference": "a4bef615c05bca926bbb6c456620021db5a4f8ef",
+                "url": "https://api.github.com/repos/GravityKit/Foundation/zipball/566dd2b70f5c064a3c3a931740d822fc1fda9197",
+                "reference": "566dd2b70f5c064a3c3a931740d822fc1fda9197",
                 "shasum": ""
             },
             "require": {
@@ -195,10 +195,10 @@
                 }
             ],
             "support": {
-                "source": "https://github.com/GravityKit/Foundation/tree/v1.32.1",
+                "source": "https://github.com/GravityKit/Foundation/tree/v1.33.0",
                 "issues": "https://github.com/GravityKit/Foundation/issues"
             },
-            "time": "2026-09-10T15:30:25+00:00"
+            "time": "2026-09-24T20:45:58+00:00"
         },
         {
             "name": "illuminate/container",
@@ -983,16 +983,16 @@
         },
         {
             "name": "trustedlogin/client",
-            "version": "v1.10.1",
+            "version": "v1.11.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/trustedlogin/client.git",
-                "reference": "eb0a19213cafc0e28ae183b510369d3ae71a6b79"
+                "reference": "e5e4ba6eacc6f8809a00ab9735c086c21ce7996e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/trustedlogin/client/zipball/eb0a19213cafc0e28ae183b510369d3ae71a6b79",
-                "reference": "eb0a19213cafc0e28ae183b510369d3ae71a6b79",
+                "url": "https://api.github.com/repos/trustedlogin/client/zipball/e5e4ba6eacc6f8809a00ab9735c086c21ce7996e",
+                "reference": "e5e4ba6eacc6f8809a00ab9735c086c21ce7996e",
                 "shasum": ""
             },
             "require": {
@@ -1043,9 +1043,9 @@
             ],
             "support": {
                 "issues": "https://github.com/trustedlogin/client/issues",
-                "source": "https://github.com/trustedlogin/client/tree/v1.10.1"
+                "source": "https://github.com/trustedlogin/client/tree/v1.11.0"
             },
-            "time": "2026-05-13T03:36:55+00:00"
+            "time": "2026-09-24T20:09:16+00:00"
         },
         {
             "name": "woocommerce/action-scheduler",
