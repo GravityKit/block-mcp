@@ -79,18 +79,31 @@ function gk_block_api_uninstall_blog() {
 	// any pre-release build that used transients.
 	global $wpdb;
 	$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		"DELETE FROM {$wpdb->options}
-			WHERE option_name LIKE '_transient_gk_block_api_rate_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_rate_%'
-			   OR option_name LIKE '_transient_gk_block_api_instr_rl_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_instr_rl_%'
-			   OR option_name LIKE 'gk_block_api_paste_pw_%'
-			   OR option_name LIKE 'gk_block_api_xchg_%'
+		$wpdb->prepare(
+			"DELETE FROM %i
+			WHERE option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
 			   OR option_name = 'gk_block_api_cred_gc_at'
-			   OR option_name LIKE '_transient_gk_block_api_paste_pw_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_paste_pw_%'
-			   OR option_name LIKE '_transient_gk_block_api_xchg_%'
-			   OR option_name LIKE '_transient_timeout_gk_block_api_xchg_%'"
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s
+			   OR option_name LIKE %s",
+			$wpdb->options,
+			'_transient_gk_block_api_rate_%',
+			'_transient_timeout_gk_block_api_rate_%',
+			'_transient_gk_block_api_instr_rl_%',
+			'_transient_timeout_gk_block_api_instr_rl_%',
+			'gk_block_api_paste_pw_%',
+			'gk_block_api_xchg_%',
+			'_transient_gk_block_api_paste_pw_%',
+			'_transient_timeout_gk_block_api_paste_pw_%',
+			'_transient_gk_block_api_xchg_%',
+			'_transient_timeout_gk_block_api_xchg_%'
+		)
 	);
 }
 

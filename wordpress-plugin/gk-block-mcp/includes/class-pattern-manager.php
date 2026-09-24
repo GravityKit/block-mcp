@@ -590,11 +590,12 @@ class Pattern_Manager {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 			$rows = (array) $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT post_content FROM {$wpdb->posts}
+					"SELECT post_content FROM %i
 						WHERE post_status = 'publish'
 						AND post_content LIKE %s
 						ORDER BY ID
 						LIMIT %d OFFSET %d",
+					$wpdb->posts,
 					$like_pattern,
 					$batch_size,
 					$offset

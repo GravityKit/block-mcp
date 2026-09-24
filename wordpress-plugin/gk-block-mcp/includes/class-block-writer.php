@@ -443,12 +443,12 @@ class Block_Writer {
 			// A write routes the verify + swap below to the primary, off any
 			// replica still lagging behind the snapshot.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+			$wpdb->query( $wpdb->prepare( 'UPDATE %i SET post_modified = post_modified WHERE ID = %d', $wpdb->posts, $post_id ) );
 
 			// Byte-exact: the swap's collation WHERE would treat a case/accent-only
 			// concurrent change as identical and overwrite it.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			$current = $wpdb->get_var( $wpdb->prepare( 'SELECT post_content FROM %i WHERE ID = %d', $wpdb->posts, $post_id ) );
 			if ( (string) $current !== (string) $expected ) {
 				return new \WP_Error(
 					'edit_conflict',
@@ -467,7 +467,8 @@ class Block_Writer {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$swapped = $wpdb->query(
 				$wpdb->prepare(
-					"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+					'UPDATE %i SET post_content = %s WHERE ID = %d AND post_content = %s',
+					$wpdb->posts,
 					$new_content,
 					$post_id,
 					$expected
@@ -544,7 +545,8 @@ class Block_Writer {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 				$wpdb->query(
 					$wpdb->prepare(
-						"UPDATE {$wpdb->posts} SET post_content = %s WHERE ID = %d AND post_content = %s",
+						'UPDATE %i SET post_content = %s WHERE ID = %d AND post_content = %s',
+						$wpdb->posts,
 						$expected,
 						$post_id,
 						$new_content

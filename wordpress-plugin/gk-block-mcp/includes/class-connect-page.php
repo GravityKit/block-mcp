@@ -1454,7 +1454,8 @@ class Connect_Page {
 		foreach ( array( self::EXCHANGE_OPTION_PREFIX, self::PASTE_OPTION_PREFIX ) as $prefix ) {
 			$names = $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+					'SELECT option_name FROM %i WHERE option_name LIKE %s',
+					$wpdb->options,
 					$wpdb->esc_like( $prefix ) . '%'
 				)
 			);

@@ -1018,9 +1018,9 @@ class Block_CRUD {
 			// the primary. The WHERE snapshot stays as an atomic backstop for the
 			// verify-to-update window.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->posts} SET post_modified = post_modified WHERE ID = %d", $post_id ) );
+			$wpdb->query( $wpdb->prepare( 'UPDATE %i SET post_modified = post_modified WHERE ID = %d', $wpdb->posts, $post_id ) );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$current = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+			$current = $wpdb->get_var( $wpdb->prepare( 'SELECT post_content FROM %i WHERE ID = %d', $wpdb->posts, $post_id ) );
 			if ( (string) $current !== (string) $expected ) {
 				clean_post_cache( (int) $post_id );
 				return false;

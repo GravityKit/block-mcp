@@ -246,7 +246,8 @@ class Connections {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no caching layer covers a LIKE.
 			return (array) $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT meta_key FROM {$wpdb->sitemeta} WHERE site_id = %d AND meta_key LIKE %s",
+					'SELECT meta_key FROM %i WHERE site_id = %d AND meta_key LIKE %s',
+					$wpdb->sitemeta,
 					get_current_network_id(),
 					$like
 				)
@@ -255,7 +256,8 @@ class Connections {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no caching layer covers a LIKE.
 		return (array) $wpdb->get_col(
 			$wpdb->prepare(
-				"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+				'SELECT option_name FROM %i WHERE option_name LIKE %s',
+				$wpdb->options,
 				$like
 			)
 		);
