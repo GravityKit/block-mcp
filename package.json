@@ -73,6 +73,7 @@
     "access": "public"
   },
   "overrides": {
-    "esbuild": "$esbuild"
+    "esbuild": "$esbuild",
+    "fast-uri": "4.1.2"
   }
 }
