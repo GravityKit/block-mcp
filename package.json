@@ -73,6 +73,7 @@
     "access": "public"
   },
   "overrides": {
-    "esbuild": "$esbuild"
+    "esbuild": "$esbuild",
+    "ip-address": "10.3.1"
   }
 }
