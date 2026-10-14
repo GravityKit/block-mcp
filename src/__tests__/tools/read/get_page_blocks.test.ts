@@ -134,13 +134,13 @@ describe('get_page_blocks — summary_only short-circuit', () => {
     client.getPageBlocks.mockResolvedValue(pageBlocksResponse);
   });
 
-  it('returns only post_id + summary when summary_only:true', async () => {
+  it('returns only post_id, summary and notices when summary_only:true', async () => {
     const result = await handleReadTool(
       'get_page_blocks',
       { post_id: 1, summary_only: true },
       client as any
     ) as Record<string, unknown>;
-    expect(Object.keys(result).sort()).toEqual(['post_id', 'summary']);
+    expect(Object.keys(result).sort()).toEqual(['notices', 'post_id', 'summary']);
     expect(result.post_id).toBe(1);
     expect(result.summary).toBeDefined();
   });
