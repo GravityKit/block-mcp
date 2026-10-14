@@ -130,7 +130,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 💻 Developer Updates
 * Added the `gk/block-mcp/post/notices` filter: notes returned as `notices` on `get_page_blocks`, `get_post_info` and `resolve_url`.
-* Added the `gk/block-mcp/post/pre-write` filter: return a `WP_Error` to refuse a block edit, `update_post` or Yoast SEO write to a post. A callback that throws refuses the write.
+* Added the `gk/block-mcp/post/pre-write` action: add an error to the `WP_Error` it passes to refuse a block edit, `update_post` or Yoast SEO write to a post. A later callback cannot undo an earlier refusal, and a callback that throws refuses the write. Saving block refs during a read is skipped while writes to the post are refused.
 
 = 2.2.1 on August 20, 2026 =
 

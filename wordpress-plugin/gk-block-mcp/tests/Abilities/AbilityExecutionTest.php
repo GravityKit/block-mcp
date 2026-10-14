@@ -177,10 +177,12 @@ class AbilityExecutionTest extends RestControllerTestCase {
 	 */
 	public function test_pre_write_refusal_holds_through_abilities() {
 		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Live text</p>' ) ) );
-		add_filter(
+		add_action(
 			'gk/block-mcp/post/pre-write',
-			static function ( $result, $id ) use ( $post_id ) {
-				return $id === $post_id ? new \WP_Error( 'staged_copy_waiting', 'Edit the staged copy #42 instead.' ) : $result;
+			static function ( $refusals, $id ) use ( $post_id ) {
+				if ( $id === $post_id ) {
+					$refusals->add( 'staged_copy_waiting', 'Edit the staged copy #42 instead.' );
+				}
 			},
 			10,
 			2

@@ -309,7 +309,7 @@ class Yoast_Bridge {
 	 * @return true|\WP_Error
 	 */
 	protected function write_fields( $post_id, array $fields ) {
-		$post_id     = (int) $post_id;
+		$post_id     = absint( $post_id );
 		$write_check = Post_Extensions::check_write( $post_id, 'seo' );
 		if ( is_wp_error( $write_check ) ) {
 			return $write_check;

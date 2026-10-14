@@ -565,10 +565,12 @@ class YoastBridgeTest extends WP_UnitTestCase {
 	 * post also keeps an agent from changing its search title or description.
 	 */
 	public function test_write_is_refused_when_pre_write_refuses() {
-		add_filter(
+		add_action(
 			'gk/block-mcp/post/pre-write',
-			static function ( $result, $id, $operation ) {
-				return 'seo' === $operation ? new \WP_Error( 'protected', 'Protected.' ) : $result;
+			static function ( $refusals, $id, $operation ) {
+				if ( 'seo' === $operation ) {
+					$refusals->add( 'protected', 'Protected.' );
+				}
 			},
 			10,
 			3

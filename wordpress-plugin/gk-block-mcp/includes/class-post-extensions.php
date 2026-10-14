@@ -85,7 +85,7 @@ class Post_Extensions {
 	/**
 	 * Ask other plugins whether an agent may write to a post.
 	 *
-	 * Runs after the capability check, before anything is written. A filter
+	 * Runs after the capability check, before anything is written. A callback
 	 * that throws is treated as a refusal, so a broken guard fails closed.
 	 *
 	 * @since 2.3.0
@@ -98,30 +98,33 @@ class Post_Extensions {
 	 * @return true|\WP_Error True to allow, or the refusal to return to the agent.
 	 */
 	public static function check_write( $post_id, $operation ) {
+		$refusals = new \WP_Error();
+
 		try {
 			/**
 			 * Stop an agent's write to a post before it happens.
 			 *
-			 * Return a WP_Error to refuse the write; its message is what the
-			 * agent sees, so say what to do instead. Without a status in the
-			 * error data, the response is HTTP 409. Return null to allow.
+			 * Add an error to `$refusals` to refuse the write; its message is
+			 * what the agent sees, so say what to do instead. Without a status
+			 * in the error data, the response is HTTP 409. Every callback gets
+			 * the same object, so a later callback cannot undo an earlier
+			 * refusal by returning a different value.
 			 *
 			 * @since 2.3.0
 			 *
 			 * @example
 			 * // Keep agents off pages that are frozen for review.
-			 * add_filter( 'gk/block-mcp/post/pre-write', function ( $result, $post_id ) {
+			 * add_action( 'gk/block-mcp/post/pre-write', function ( $refusals, $post_id ) {
 			 *     if ( get_post_meta( $post_id, 'frozen_for_review', true ) ) {
-			 *         return new WP_Error( 'frozen', 'This page is frozen for legal review. Do not edit it.' );
+			 *         $refusals->add( 'frozen', 'This page is frozen for legal review. Do not edit it.' );
 			 *     }
-			 *     return $result;
 			 * }, 10, 2 );
 			 *
-			 * @param null|\WP_Error $result    Null to allow, or a refusal.
-			 * @param int            $post_id   Post about to be written.
-			 * @param string         $operation `blocks`, `post` or `seo`.
+			 * @param \WP_Error $refusals  Add an error to refuse the write.
+			 * @param int       $post_id   Post about to be written.
+			 * @param string    $operation `blocks`, `post` or `seo`.
 			 */
-			$result = apply_filters( 'gk/block-mcp/post/pre-write', null, (int) $post_id, (string) $operation );
+			do_action( 'gk/block-mcp/post/pre-write', $refusals, (int) $post_id, (string) $operation );
 		} catch ( \Throwable $e ) {
 			self::log( 'gk/block-mcp/post/pre-write', $e );
 
@@ -132,16 +135,16 @@ class Post_Extensions {
 			);
 		}
 
-		if ( ! is_wp_error( $result ) ) {
+		if ( ! $refusals->has_errors() ) {
 			return true;
 		}
 
-		$data = $result->get_error_data();
+		$data = $refusals->get_error_data();
 		if ( ! is_array( $data ) || ! isset( $data['status'] ) ) {
-			$result->add_data( array_merge( is_array( $data ) ? $data : array(), array( 'status' => 409 ) ) );
+			$refusals->add_data( array_merge( is_array( $data ) ? $data : array(), array( 'status' => 409 ) ) );
 		}
 
-		return $result;
+		return $refusals;
 	}
 
 	/**

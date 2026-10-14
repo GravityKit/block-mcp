@@ -17,7 +17,7 @@ class PostExtensionsTest extends RestControllerTestCase {
 	/** @var int Editor — holds edit_post on the fixture posts. */
 	private $editor_id;
 
-	/** @var array<int, array{int, string}> Calls the pre-write filter saw. */
+	/** @var array<int, array{int, string}> Calls the pre-write action saw. */
 	private $write_calls = array();
 
 	public function set_up(): void {
@@ -50,7 +50,9 @@ class PostExtensionsTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * Dispatch a request through the REST server.
+	 * Dispatch a request through the REST server. The server fills the URL
+	 * parameters (`id`, `ref`) from the matched route, so `$params` holds
+	 * only body and query arguments.
 	 *
 	 * @param string $method HTTP method.
 	 * @param string $route  Route under the plugin namespace.
@@ -97,14 +99,13 @@ class PostExtensionsTest extends RestControllerTestCase {
 	 * @return void
 	 */
 	private function refuse_writes_to( int $post_id ): void {
-		add_filter(
+		add_action(
 			'gk/block-mcp/post/pre-write',
-			function ( $result, $id, $operation ) use ( $post_id ) {
+			function ( $refusals, $id, $operation ) use ( $post_id ) {
 				$this->write_calls[] = array( $id, $operation );
 				if ( $id === $post_id ) {
-					return new \WP_Error( 'staged_copy_waiting', 'Edit the staged copy #42 instead.' );
+					$refusals->add( 'staged_copy_waiting', 'Edit the staged copy #42 instead.' );
 				}
-				return $result;
 			},
 			10,
 			3
@@ -124,8 +125,8 @@ class PostExtensionsTest extends RestControllerTestCase {
 		$this->notice_for( $post_id, 'Edit the staged copy #42 instead.' );
 
 		$responses = array(
-			'blocks'       => $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks', array( 'id' => $post_id ) ),
-			'summary_only' => $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks', array( 'id' => $post_id, 'summary_only' => true ) ),
+			'blocks'       => $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks' ),
+			'summary_only' => $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks', array( 'summary_only' => true ) ),
 			'post_info'    => $this->dispatch( 'GET', '/post-info', array( 'post_id' => $post_id ) ),
 			'resolve_url'  => $this->dispatch( 'GET', '/resolve', array( 'url' => get_permalink( $post_id ) ) ),
 		);
@@ -178,7 +179,7 @@ class PostExtensionsTest extends RestControllerTestCase {
 			}
 		);
 
-		$response = $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks', array( 'id' => $post_id ) );
+		$response = $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks' );
 
 		$this->assertSame( 200, $response->get_status() );
 		$this->assertSame( array(), $response->get_data()['notices'] );
@@ -197,7 +198,7 @@ class PostExtensionsTest extends RestControllerTestCase {
 		$response = $this->dispatch(
 			'PATCH',
 			'/posts/' . $post_id . '/blocks/by-ref/blk_aaaa1111',
-			array( 'id' => $post_id, 'ref' => 'blk_aaaa1111', 'innerHTML' => '<p>Agent text</p>' )
+			array( 'innerHTML' => '<p>Agent text</p>' )
 		);
 
 		$this->assertSame( 409, $response->get_status() );
@@ -214,7 +215,7 @@ class PostExtensionsTest extends RestControllerTestCase {
 		$post_id = $this->make_block_post( array( $this->paragraph( 'Body' ) ), array( 'post_title' => 'Original' ) );
 		$this->refuse_writes_to( $post_id );
 
-		$response = $this->dispatch( 'PATCH', '/posts/' . $post_id, array( 'id' => $post_id, 'title' => 'Changed' ) );
+		$response = $this->dispatch( 'PATCH', '/posts/' . $post_id, array( 'title' => 'Changed' ) );
 
 		$this->assertSame( 409, $response->get_status() );
 		$this->assertSame( 'Original', get_post_field( 'post_title', $post_id ) );
@@ -232,7 +233,7 @@ class PostExtensionsTest extends RestControllerTestCase {
 		$response = $this->dispatch(
 			'PATCH',
 			'/posts/' . $open . '/blocks/by-ref/blk_aaaa1111',
-			array( 'id' => $open, 'ref' => 'blk_aaaa1111', 'innerHTML' => '<p>Edited</p>' )
+			array( 'innerHTML' => '<p>Edited</p>' )
 		);
 
 		$this->assertSame( 200, $response->get_status() );
@@ -244,25 +245,25 @@ class PostExtensionsTest extends RestControllerTestCase {
 	 */
 	public function test_pre_write_refusal_keeps_its_own_status() {
 		$post_id = $this->make_block_post( array( $this->paragraph( 'Body' ) ) );
-		add_filter(
+		add_action(
 			'gk/block-mcp/post/pre-write',
-			static function () {
-				return new \WP_Error( 'locked', 'Locked.', array( 'status' => 423 ) );
+			static function ( $refusals ) {
+				$refusals->add( 'locked', 'Locked.', array( 'status' => 423 ) );
 			}
 		);
 
-		$response = $this->dispatch( 'PATCH', '/posts/' . $post_id, array( 'id' => $post_id, 'title' => 'X' ) );
+		$response = $this->dispatch( 'PATCH', '/posts/' . $post_id, array( 'title' => 'X' ) );
 
 		$this->assertSame( 423, $response->get_status() );
 	}
 
 	/**
-	 * A pre-write filter that throws fails closed: the write is not made and
+	 * A pre-write callback that throws fails closed: the write is not made and
 	 * the agent is told why, instead of the guard being silently skipped.
 	 */
 	public function test_pre_write_filter_that_throws_fails_closed() {
 		$post_id = $this->make_block_post( array( $this->paragraph( 'Live text' ) ) );
-		add_filter(
+		add_action(
 			'gk/block-mcp/post/pre-write',
 			static function () {
 				throw new \RuntimeException( 'broken guard' );
@@ -272,11 +273,87 @@ class PostExtensionsTest extends RestControllerTestCase {
 		$response = $this->dispatch(
 			'PATCH',
 			'/posts/' . $post_id . '/blocks/by-ref/blk_aaaa1111',
-			array( 'id' => $post_id, 'ref' => 'blk_aaaa1111', 'innerHTML' => '<p>Agent text</p>' )
+			array( 'innerHTML' => '<p>Agent text</p>' )
 		);
 
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( 'write_check_failed', $response->get_data()['code'] );
 		$this->assertStringContainsString( 'Live text', get_post_field( 'post_content', $post_id ) );
+	}
+
+	/**
+	 * A later callback cannot undo an earlier refusal. With a filter, a
+	 * callback that returned null would have erased it and let the write
+	 * through.
+	 */
+	public function test_pre_write_refusal_cannot_be_undone_by_a_later_callback() {
+		$post_id = $this->make_block_post( array( $this->paragraph( 'Body' ) ), array( 'post_title' => 'Original' ) );
+		$this->refuse_writes_to( $post_id );
+		add_action(
+			'gk/block-mcp/post/pre-write',
+			static function () {
+				return null;
+			},
+			20
+		);
+
+		$response = $this->dispatch( 'PATCH', '/posts/' . $post_id, array( 'title' => 'Changed' ) );
+
+		$this->assertSame( 409, $response->get_status() );
+		$this->assertSame( 'Original', get_post_field( 'post_title', $post_id ) );
+	}
+
+	/**
+	 * Reading a post whose blocks have no refs normally saves fresh refs into
+	 * post_content. That is a write, so a refused post is left untouched and
+	 * the read still returns blocks with in-memory refs.
+	 */
+	public function test_read_does_not_save_refs_to_a_refused_post() {
+		$html    = '<p>Refused, no ref yet</p>';
+		$post_id = $this->make_block_post(
+			array(
+				array(
+					'blockName'    => 'core/paragraph',
+					'attrs'        => array(),
+					'innerHTML'    => $html,
+					'innerContent' => array( $html ),
+					'innerBlocks'  => array(),
+				),
+			)
+		);
+		$before = get_post_field( 'post_content', $post_id );
+		$this->refuse_writes_to( $post_id );
+
+		$response = $this->dispatch( 'GET', '/posts/' . $post_id . '/blocks' );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertNotEmpty( $response->get_data()['blocks'][0]['ref'] );
+		clean_post_cache( $post_id );
+		$this->assertSame( $before, get_post_field( 'post_content', $post_id ) );
+	}
+
+	/**
+	 * Without a refusal, a read saves the refs as before. The text differs
+	 * from the refused case: the reader caches parsed blocks by post ID and
+	 * content, and post IDs are reused between tests.
+	 */
+	public function test_read_saves_refs_when_writes_are_allowed() {
+		$html    = '<p>Allowed, no ref yet</p>';
+		$post_id = $this->make_block_post(
+			array(
+				array(
+					'blockName'    => 'core/paragraph',
+					'attrs'        => array(),
+					'innerHTML'    => $html,
+					'innerContent' => array( $html ),
+					'innerBlocks'  => array(),
+				),
+			)
+		);
+
+		$this->dispatch( 'GET', '/posts/' . $post_id . '/blocks' );
+
+		clean_post_cache( $post_id );
+		$this->assertStringContainsString( 'gk_ref', get_post_field( 'post_content', $post_id ) );
 	}
 }
