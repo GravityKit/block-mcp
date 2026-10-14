@@ -305,6 +305,11 @@ class Post_Manager {
 			);
 		}
 
+		$write_check = Post_Extensions::check_write( $post_id, 'post' );
+		if ( is_wp_error( $write_check ) ) {
+			return $write_check;
+		}
+
 		// Per-post writes bucket (10/min). Shared with the existing block-level
 		// write tools so updating a post and editing its blocks share the budget.
 		$rate_check = $this->block_crud->check_rate_limit( $post_id, 'write' );

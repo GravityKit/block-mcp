@@ -557,4 +557,26 @@ class YoastBridgeTest extends WP_UnitTestCase {
 
 		wp_set_current_user( 0 );
 	}
+
+	// ── pre-write ──────────────────────────────────────────────────
+
+	/**
+	 * SEO writes go through the pre-write check, so a plugin that protects a
+	 * post also keeps an agent from changing its search title or description.
+	 */
+	public function test_write_is_refused_when_pre_write_refuses() {
+		add_filter(
+			'gk/block-mcp/post/pre-write',
+			static function ( $result, $id, $operation ) {
+				return 'seo' === $operation ? new \WP_Error( 'protected', 'Protected.' ) : $result;
+			},
+			10,
+			3
+		);
+
+		$result = $this->bridge->write_fields_public( $this->post_id, array( 'title' => 'Agent SEO title' ) );
+
+		$this->assertWPError( $result );
+		$this->assertSame( '', get_post_meta( $this->post_id, '_yoast_wpseo_title', true ) );
+	}
 }

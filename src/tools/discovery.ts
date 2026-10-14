@@ -100,7 +100,7 @@ export const DISCOVERY_TOOLS = [
   },
   {
     name: 'resolve_url',
-    description: 'URL or path → post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL.',
+    description: 'URL or path → post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL. Read the returned `notices` before editing.',
     annotations: { ...READ_ANNOT, title: 'Resolve URL to post' },
     inputSchema: {
       type: 'object' as const,
@@ -127,7 +127,7 @@ export const DISCOVERY_TOOLS = [
   },
   {
     name: 'get_post_info',
-    description: 'Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count}`. Replaces wp eval / get_permalink() shell-outs.',
+    description: 'Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count, notices}`. Read `notices` before editing. Replaces wp eval / get_permalink() shell-outs.',
     annotations: { ...READ_ANNOT, title: 'Get post info' },
     inputSchema: {
       type: 'object' as const,

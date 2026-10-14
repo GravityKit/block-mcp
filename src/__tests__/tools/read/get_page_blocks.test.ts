@@ -200,3 +200,26 @@ describe('get_page_blocks — enrichment with legacy blocks', () => {
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 });
+
+describe('get_page_blocks — notices from site plugins', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => { client = makeMockClient(); });
+
+  it('passes the server notices through to the agent', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ ...pageBlocksResponse, notices: ['Edit the staged copy #42 instead.'] });
+    const result = await handleReadTool('get_page_blocks', { post_id: 1 }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual(['Edit the staged copy #42 instead.']);
+  });
+
+  it('passes notices through in summary_only mode', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ summary: pageBlocksResponse.summary, notices: ['Edit #42 instead.'] } as any);
+    const result = await handleReadTool('get_page_blocks', { post_id: 1, summary_only: true }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual(['Edit #42 instead.']);
+  });
+
+  it('returns an empty list from a server that sends no notices', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ ...pageBlocksResponse });
+    const result = await handleReadTool('get_page_blocks', { post_id: 1 }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual([]);
+  });
+});

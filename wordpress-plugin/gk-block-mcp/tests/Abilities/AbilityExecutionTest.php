@@ -168,6 +168,39 @@ class AbilityExecutionTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A pre-write refusal holds on the Abilities API path too.
+	 *
+	 * Abilities call the controller without the REST server, so a check wired
+	 * only into REST dispatch would let an agent on the MCP Adapter write a
+	 * post another plugin protects. The agent gets the plugin's message and
+	 * the post is unchanged.
+	 */
+	public function test_pre_write_refusal_holds_through_abilities() {
+		$post_id = $this->make_block_post( array( $this->paragraph( '<p>Live text</p>' ) ) );
+		add_filter(
+			'gk/block-mcp/post/pre-write',
+			static function ( $result, $id ) use ( $post_id ) {
+				return $id === $post_id ? new \WP_Error( 'staged_copy_waiting', 'Edit the staged copy #42 instead.' ) : $result;
+			},
+			10,
+			2
+		);
+
+		$result = wp_get_ability( 'gk-block-mcp/update-blocks' )->execute(
+			array(
+				'post_id' => $post_id,
+				'updates' => array(
+					array( 'flat_index' => 0, 'innerHTML' => '<p>Agent text</p>' ),
+				),
+			)
+		);
+
+		$this->assertWPError( $result );
+		$this->assertStringContainsString( 'Edit the staged copy #42 instead.', $result->get_error_message() );
+		$this->assertStringContainsString( 'Live text', $this->block_tree( $post_id )[0]['innerHTML'] );
+	}
+
+	/**
 	 * update-post changes post fields (title) without touching block content.
 	 */
 	public function test_update_post_persists_title() {

@@ -20,6 +20,10 @@ The MCP does this for you:
 
 If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` — not a shell command.
 
+## Notices: read them before editing
+
+\`get_page_blocks\`, \`get_post_info\` and \`resolve_url\` return \`notices\`: notes from this site's plugins about the post. A URL always resolves to the published page, so a notice may tell you the change belongs somewhere else, such as "a staged copy of this page is waiting; edit #123 instead". Follow it. A write a plugin refuses comes back as an error that says what to do instead.
+
 ## Moving / reordering blocks
 
 NEVER do a move as separate \`insert_blocks\` + \`delete_block\` calls — if the delete is skipped or fails, the page ends up with an orphaned clone of the original. The atomic primitive is the \`move\` op on \`edit_block_tree\`:
