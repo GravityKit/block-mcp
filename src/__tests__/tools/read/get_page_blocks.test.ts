@@ -134,13 +134,13 @@ describe('get_page_blocks — summary_only short-circuit', () => {
     client.getPageBlocks.mockResolvedValue(pageBlocksResponse);
   });
 
-  it('returns only post_id + summary when summary_only:true', async () => {
+  it('returns only post_id, summary and notices when summary_only:true', async () => {
     const result = await handleReadTool(
       'get_page_blocks',
       { post_id: 1, summary_only: true },
       client as any
     ) as Record<string, unknown>;
-    expect(Object.keys(result).sort()).toEqual(['post_id', 'summary']);
+    expect(Object.keys(result).sort()).toEqual(['notices', 'post_id', 'summary']);
     expect(result.post_id).toBe(1);
     expect(result.summary).toBeDefined();
   });
@@ -198,5 +198,28 @@ describe('get_page_blocks — enrichment with legacy blocks', () => {
     client.getPageBlocks.mockResolvedValueOnce({ blocks: legacyPageBlocks, summary: {} });
     const result = await handleReadTool('get_page_blocks', { post_id: 1 }, client as any) as { warnings: unknown[] };
     expect(result.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('get_page_blocks — notices from site plugins', () => {
+  let client: ReturnType<typeof makeMockClient>;
+  beforeEach(() => { client = makeMockClient(); });
+
+  it('passes the server notices through to the agent', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ ...pageBlocksResponse, notices: ['Edit the staged copy #42 instead.'] });
+    const result = await handleReadTool('get_page_blocks', { post_id: 1 }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual(['Edit the staged copy #42 instead.']);
+  });
+
+  it('passes notices through in summary_only mode', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ summary: pageBlocksResponse.summary, notices: ['Edit #42 instead.'] } as any);
+    const result = await handleReadTool('get_page_blocks', { post_id: 1, summary_only: true }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual(['Edit #42 instead.']);
+  });
+
+  it('returns an empty list from a server that sends no notices', async () => {
+    client.getPageBlocks.mockResolvedValueOnce({ ...pageBlocksResponse });
+    const result = await handleReadTool('get_page_blocks', { post_id: 1 }, client as any) as { notices: string[] };
+    expect(result.notices).toEqual([]);
   });
 });

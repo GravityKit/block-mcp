@@ -1819,6 +1819,7 @@ class REST_Controller {
 					'status'    => $post->post_status,
 					'slug'      => $post->post_name,
 					'edit_url'  => get_edit_post_link( $post_id, 'raw' ),
+					'notices'   => Post_Extensions::notices( $post_id, 'resolve_url' ),
 				),
 				200
 			);
@@ -2061,6 +2062,7 @@ class REST_Controller {
 					),
 					'mime_type'     => $post->post_mime_type,
 					'comment_count' => (int) $post->comment_count,
+					'notices'       => Post_Extensions::notices( $post->ID, 'post_info' ),
 				),
 				200
 			);
@@ -2124,7 +2126,13 @@ class REST_Controller {
 			// Summary-only mode: skip the blocks payload entirely.
 			$summary_only = (bool) $request->get_param( 'summary_only' );
 			if ( $summary_only ) {
-				return new \WP_REST_Response( array( 'summary' => $summary ), 200 );
+				return new \WP_REST_Response(
+					array(
+						'summary' => $summary,
+						'notices' => Post_Extensions::notices( $post_id, 'blocks' ),
+					),
+					200
+				);
 			}
 
 			// Fields filter runs AFTER search to strip unneeded data.
@@ -2168,6 +2176,7 @@ class REST_Controller {
 			$response = array(
 				'summary' => $summary,
 				'blocks'  => $blocks,
+				'notices' => Post_Extensions::notices( $post_id, 'blocks' ),
 			);
 			if ( $is_search ) {
 				$response['match_count'] = count( $blocks );
@@ -2899,6 +2908,11 @@ class REST_Controller {
 			$perm_check = $this->check_post_edit_permission( $post_id );
 			if ( is_wp_error( $perm_check ) ) {
 				return $perm_check;
+			}
+
+			$write_check = Post_Extensions::check_write( $post_id, 'blocks' );
+			if ( is_wp_error( $write_check ) ) {
+				return $write_check;
 			}
 
 			$if_match = $this->check_if_match_for_post( $post_id, $request );

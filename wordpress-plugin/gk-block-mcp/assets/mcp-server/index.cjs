@@ -41285,7 +41285,7 @@ var DISCOVERY_TOOLS = [
   },
   {
     name: "resolve_url",
-    description: "URL or path \u2192 post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL.",
+    description: "URL or path \u2192 post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL. Read the returned `notices` before editing.",
     annotations: { ...READ_ANNOT, title: "Resolve URL to post" },
     inputSchema: {
       type: "object",
@@ -41312,7 +41312,7 @@ var DISCOVERY_TOOLS = [
   },
   {
     name: "get_post_info",
-    description: "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count}`. Replaces wp eval / get_permalink() shell-outs.",
+    description: "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count, notices}`. Read `notices` before editing. Replaces wp eval / get_permalink() shell-outs.",
     annotations: { ...READ_ANNOT, title: "Get post info" },
     inputSchema: {
       type: "object",
@@ -41428,7 +41428,7 @@ async function handleDiscoveryTool(toolName, args, client) {
 var READ_TOOLS = [
   {
     name: "get_page_blocks",
-    description: 'Get a post\'s blocks. Pass post_id OR url (server resolves URL \u2014 don\'t shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode ("static"|"dynamic"|"dual"), preference? (when non-preferred)}`. Refs survive sibling shifts \u2014 pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.',
+    description: 'Get a post\'s blocks. Pass post_id OR url (server resolves URL \u2014 don\'t shell out). Returns `{post_id, summary, blocks[], block_count, warnings, notices}`. Read `notices` before editing: site plugins use them for facts like "edit the staged copy #123 instead". Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode ("static"|"dynamic"|"dual"), preference? (when non-preferred)}`. Refs survive sibling shifts \u2014 pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Get post blocks" },
     outputSchema: {
       type: "object",
@@ -41437,7 +41437,8 @@ var READ_TOOLS = [
         summary: { type: "object" },
         blocks: { type: "array" },
         block_count: { type: "number" },
-        warnings: { type: "array" }
+        warnings: { type: "array" },
+        notices: { type: "array", items: { type: "string" } }
       }
     },
     inputSchema: {
@@ -41569,7 +41570,8 @@ async function handleReadTool(toolName, args, client) {
       if (summaryOnly) {
         return {
           post_id: postId,
-          summary: response.summary
+          summary: response.summary,
+          notices: response.notices ?? []
         };
       }
       const enriched = enrichBlockList(response.blocks || []);
@@ -41580,6 +41582,7 @@ async function handleReadTool(toolName, args, client) {
         blocks: enriched.blocks,
         block_count: enriched.blocks.length,
         warnings: enriched.warnings,
+        notices: response.notices ?? [],
         ...pagination !== void 0 ? { pagination } : {}
       };
     }
@@ -53905,6 +53908,10 @@ The MCP does this for you:
 - For explicit resolution (title, post_type, edit_url before editing), call \`resolve_url\`.
 
 If the user says "change X on https://example.com/some-page/", your first tool call should be \`get_page_blocks({ url: "...", search: "keyword" })\` or \`resolve_url({ url: "..." })\` \u2014 not a shell command.
+
+## Notices: read them before editing
+
+\`get_page_blocks\`, \`get_post_info\` and \`resolve_url\` return \`notices\`: notes from this site's plugins about the post. A URL always resolves to the published page, so a notice may tell you the change belongs somewhere else, such as "a staged copy of this page is waiting; edit #123 instead". Follow it. A write a plugin refuses comes back as an error that says what to do instead.
 
 ## Moving / reordering blocks
 

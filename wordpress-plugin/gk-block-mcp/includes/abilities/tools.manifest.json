@@ -240,7 +240,7 @@
       "name": "resolve_url",
       "ability": "gk-block-mcp/resolve-url",
       "label": "Resolve URL to post",
-      "description": "URL or path → post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL.",
+      "description": "URL or path → post ID. Accepts full URLs or site-relative paths. Run this before get_page_blocks / update_block / edit_block_tree when you only have a URL. Read the returned `notices` before editing.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -307,7 +307,7 @@
       "name": "get_post_info",
       "ability": "gk-block-mcp/get-post-info",
       "label": "Get post info",
-      "description": "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count}`. Replaces wp eval / get_permalink() shell-outs.",
+      "description": "Post metadata by post_id, url, or slug+post_type. Returns `{post_id, title, status, post_url, edit_url, modified, created, parent_id, author, mime_type, comment_count, notices}`. Read `notices` before editing. Replaces wp eval / get_permalink() shell-outs.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -343,7 +343,7 @@
       "name": "get_page_blocks",
       "ability": "gk-block-mcp/get-page-blocks",
       "label": "Get post blocks",
-      "description": "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
+      "description": "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings, notices}`. Read `notices` before editing: site plugins use them for facts like \"edit the staged copy #123 instead\". Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -414,6 +414,12 @@
           },
           "warnings": {
             "type": "array"
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

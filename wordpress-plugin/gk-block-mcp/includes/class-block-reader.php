@@ -240,7 +240,13 @@ class Block_Reader {
 			// silently (no revision) so the refs survive across reads/writes.
 			// When false, refs are still surfaced in-memory via the cache reference above
 			// so a second read in the same request sees the same ephemeral refs.
+			// Saving refs changes post_content, so it obeys the same pre-write
+			// check as an edit. When a plugin refuses, the read still works with
+			// in-memory refs and the post is left as it is.
 			$dirty = $this->crud->assign_missing_refs_recursive( $blocks );
+			if ( $dirty && $persist_refs && true !== Post_Extensions::check_write( $post_id, 'blocks' ) ) {
+				$persist_refs = false;
+			}
 			if ( $dirty && $persist_refs ) {
 				// Concurrency guard. Two readers landing on a fresh post could both
 				// generate random refs and both call persist_ref_assignments(); the

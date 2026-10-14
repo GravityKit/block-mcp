@@ -17,7 +17,7 @@ export const READ_TOOLS = [
   {
     name: 'get_page_blocks',
     description:
-      "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings}`. Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
+      "Get a post's blocks. Pass post_id OR url (server resolves URL — don't shell out). Returns `{post_id, summary, blocks[], block_count, warnings, notices}`. Read `notices` before editing: site plugins use them for facts like \"edit the staged copy #123 instead\". Each block: `{index (flat), top_level_counter? (top-level only), path, ref (stable gk_ref), name, attributes, innerHTML?, dynamic, storage_mode (\"static\"|\"dynamic\"|\"dual\"), preference? (when non-preferred)}`. Refs survive sibling shifts — pass them to update_block / delete_block / edit_block_tree to chain mutations without re-fetching. Use outline:true or summary_only:true for cheap inspection.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: 'Get post blocks' },
     outputSchema: {
       type: 'object',
@@ -27,6 +27,7 @@ export const READ_TOOLS = [
         blocks:      { type: 'array' },
         block_count: { type: 'number' },
         warnings:    { type: 'array' },
+        notices:     { type: 'array', items: { type: 'string' } },
       },
     },
     inputSchema: {
@@ -174,6 +175,7 @@ export async function handleReadTool(
         return {
           post_id: postId,
           summary: (response as { summary?: unknown }).summary,
+          notices: (response as { notices?: string[] }).notices ?? [],
         };
       }
 
@@ -188,6 +190,7 @@ export async function handleReadTool(
         blocks: enriched.blocks,
         block_count: enriched.blocks.length,
         warnings: enriched.warnings,
+        notices: (response as { notices?: string[] }).notices ?? [],
         ...(pagination !== undefined ? { pagination } : {}),
       };
     }

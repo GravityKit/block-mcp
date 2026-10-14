@@ -122,8 +122,15 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 = develop =
 
+#### 🚀 Added
+* Other plugins can now show the assistant notes about a page, such as "a staged copy of this page is waiting; edit that instead", and can stop the assistant's edit to a page before it happens, with a message that says what to do instead.
+
 #### 🔧 Updated
 * The minimum required WordPress version is now 6.5 and the minimum PHP version is 7.4.
+
+#### 💻 Developer Updates
+* Added the `gk/block-mcp/post/notices` filter: notes returned as `notices` on `get_page_blocks`, `get_post_info` and `resolve_url`.
+* Added the `gk/block-mcp/post/pre-write` action: add an error to the `WP_Error` it passes to refuse a block edit, `update_post` or Yoast SEO write to a post. A later callback cannot undo an earlier refusal, and a callback that throws refuses the write. Saving block refs during a read is skipped while writes to the post are refused.
 
 = 2.2.1 on August 20, 2026 =
 
