@@ -40336,7 +40336,8 @@ var WordPressBlockClient = class {
         code = isGatewayPage ? "gateway_page" : void 0;
       }
       if (isGatewayRefusal(status, body3)) {
-        detail = GATEWAY_PAGE_MESSAGE;
+        const hasOwnReason = detail !== "Unknown error" && detail !== GATEWAY_PAGE_MESSAGE && detail.trim() !== "";
+        detail = hasOwnReason ? `${detail} (${GATEWAY_PAGE_MESSAGE})` : GATEWAY_PAGE_MESSAGE;
         code = "gateway_page";
       }
       const hint = translateWpError(code, wpData);

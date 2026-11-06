@@ -417,7 +417,34 @@ describe('an HTML page answering a REST call', () => {
     const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
 
     expect(error.message).toContain('Block API Error (403)');
+    expect(error.message).toContain("Forbidden. You don't have permission");
     expect(error.message).toContain('Service Auth');
+    expect(error.wpCode).toBe('gateway_page');
+  });
+
+  it('keeps the reason from a plain-text refusal', async () => {
+    const site = await serve((_req, res) => {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('Token expired');
+    });
+
+    const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
+
+    expect(error.message).toContain('Token expired');
+    expect(error.message).toContain('Service Auth');
+    expect(error.wpCode).toBe('gateway_page');
+  });
+
+  it('gives only the guidance for an empty refusal', async () => {
+    const site = await serve((_req, res) => {
+      res.writeHead(403);
+      res.end();
+    });
+
+    const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
+
+    expect(error.message).toContain('Service Auth');
+    expect(error.message).not.toContain('Unknown error');
     expect(error.wpCode).toBe('gateway_page');
   });
 

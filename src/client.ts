@@ -361,7 +361,9 @@ export class WordPressBlockClient {
       }
 
       if (isGatewayRefusal(status, body)) {
-        detail = GATEWAY_PAGE_MESSAGE;
+        // Keep the gateway's own reason when it gave one. HTML pages were already replaced above.
+        const hasOwnReason = detail !== 'Unknown error' && detail !== GATEWAY_PAGE_MESSAGE && detail.trim() !== '';
+        detail = hasOwnReason ? `${detail} (${GATEWAY_PAGE_MESSAGE})` : GATEWAY_PAGE_MESSAGE;
         code = 'gateway_page';
       }
 

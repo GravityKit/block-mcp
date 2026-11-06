@@ -279,9 +279,11 @@ To keep the secret out of your shell history, paste the JSON at the prompt, then
 
 ```bash
 read -rs WORDPRESS_CUSTOM_HEADERS && export WORDPRESS_CUSTOM_HEADERS
-npx -y @gravitykit/block-mcp connect --site https://staging.example.com
+npx -y @gravitykit/block-mcp connect --site https://staging.example.com --client cursor
 unset WORDPRESS_CUSTOM_HEADERS
 ```
+
+Use `--client` to name your client (`cursor`, `claude-code` or `claude-desktop`). Without it, `connect` only prints the config, with the password hidden.
 
 The JSON looks like this:
 
