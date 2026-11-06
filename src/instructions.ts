@@ -184,7 +184,10 @@ export function combineInstructions(baseline: string, addendum: string): string 
  * @param wordpressUrl  Base URL of the WordPress site (no trailing slash
  *                      enforced — the function normalizes both forms).
  */
-export async function fetchAddendum(wordpressUrl: string): Promise<string> {
+export async function fetchAddendum(
+  wordpressUrl: string,
+  customHeaders: Record<string, string> = {}
+): Promise<string> {
   if (process.env[OFF_ENV_VAR] === '1') {
     return '';
   }
@@ -213,6 +216,7 @@ export async function fetchAddendum(wordpressUrl: string): Promise<string> {
       maxContentLength: FETCH_MAX_BYTES,
       // Lower-case Accept so caches see a stable Vary key.
       headers: {
+        ...customHeaders,
         Accept: 'application/json',
       },
       // We treat 2xx as success; 3xx (any redirect) and 4xx/5xx fall
@@ -240,8 +244,11 @@ export async function fetchAddendum(wordpressUrl: string): Promise<string> {
  * Convenience helper: fetch + combine in one call. The default entry
  * point used by `src/index.ts`.
  */
-export async function getInstructions(wordpressUrl: string): Promise<string> {
-  const addendum = await fetchAddendum(wordpressUrl);
+export async function getInstructions(
+  wordpressUrl: string,
+  customHeaders: Record<string, string> = {}
+): Promise<string> {
+  const addendum = await fetchAddendum(wordpressUrl, customHeaders);
   return combineInstructions(BASELINE, addendum);
 }
 

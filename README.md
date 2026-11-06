@@ -265,6 +265,38 @@ Register the server in your MCP client. Example for Claude Code's `~/.claude.jso
 
 Restart your MCP client. Run `npm run inspect` to test the tools interactively.
 
+### Sites behind Cloudflare Access or another login gateway
+
+A login gateway checks every request before WordPress sees it. Set
+`WORDPRESS_CUSTOM_HEADERS` to a JSON object of the headers it requires, and Block MCP
+sends them with every request to the site.
+
+For Cloudflare Access, ask your IT team for a service token and a policy that uses the
+**Service Auth** action. An **Allow** policy still sends requests to the login page. Set the
+variable when you run the connector, and it saves the headers in your client's config:
+
+```bash
+WORDPRESS_CUSTOM_HEADERS='{"CF-Access-Client-Id":"<client id>","CF-Access-Client-Secret":"<client secret>"}' \
+  npx -y @gravitykit/block-mcp connect --site https://staging.example.com
+```
+
+For manual setup, add it to the `env` block with the other variables, with the quotes
+escaped:
+
+```json
+"WORDPRESS_CUSTOM_HEADERS": "{\"CF-Access-Client-Id\":\"<client id>\",\"CF-Access-Client-Secret\":\"<client secret>\"}"
+```
+
+- Block MCP removes these headers from any request that a redirect sends to another site.
+- You can't use this setting to replace headers Block MCP sets itself, such as
+  `Authorization`, `Host` or `Content-Type`.
+- Printing the config hides the header values, like the password, unless you pass `--reveal` or `--client print`.
+- The Claude Desktop `.mcpb` installer has no field for this setting. Use
+  `connect --client claude-desktop` instead.
+
+If a tool call returns `gateway_page`, the site answered with an HTML page instead of a REST
+API response. The gateway blocked the request, or the headers are missing or wrong.
+
 ### 4. (Optional) Tune the settings
 
 When the plugin is active, an admin page appears at **Settings → Block MCP**. The defaults work out of the box, but it's worth a look — this is where you decide which blocks AI agents are allowed to write, what to suggest as replacements, and which post types `create_post` can target.

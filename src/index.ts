@@ -386,6 +386,7 @@ async function main(): Promise<void> {
       username: cfg.config.user,
       application_password: cfg.config.password,
     },
+    custom_headers: cfg.config.customHeaders,
   });
 
   // Fetch the per-site instructions addendum BEFORE constructing the
@@ -393,7 +394,7 @@ async function main(): Promise<void> {
   // from the start — no post-construction mutation of SDK internals.
   // `getInstructions` never throws: on any failure it logs to stderr
   // and returns the baseline only.
-  const instructions = await getInstructions(cfg.config.url);
+  const instructions = await getInstructions(cfg.config.url, cfg.config.customHeaders);
 
   const server = new McpServer(
     {

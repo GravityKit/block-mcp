@@ -35,7 +35,7 @@ describe('resolveWordPressConfig', () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('unreachable');
-    expect(r.config).toEqual({ url: 'https://example.com', user: 'block-mcp', password: 'abcd efgh' });
+    expect(r.config).toEqual({ url: 'https://example.com', user: 'block-mcp', password: 'abcd efgh', customHeaders: {} });
   });
 
   it('accepts the legacy GK_* env var names', () => {

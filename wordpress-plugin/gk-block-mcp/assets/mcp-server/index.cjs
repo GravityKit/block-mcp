@@ -40060,7 +40060,91 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value !== "";
 }
 
+// src/custom-headers.ts
+var CUSTOM_HEADERS_ENV = "WORDPRESS_CUSTOM_HEADERS";
+var RESERVED_HEADERS = /* @__PURE__ */ new Set([
+  "accept",
+  "authorization",
+  "connection",
+  "content-length",
+  "content-type",
+  "host",
+  "transfer-encoding",
+  "x-http-method-override"
+]);
+var VALID_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+var VALID_HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]+$/;
+function parseCustomHeaders(raw2) {
+  const isUnset = raw2 === void 0 || raw2.trim() === "";
+  if (isUnset) {
+    return { ok: true, headers: {} };
+  }
+  const fail = (reason) => ({
+    ok: false,
+    message: `${CUSTOM_HEADERS_ENV} ${reason} Expected a JSON object, such as {"CF-Access-Client-Id":"\u2026","CF-Access-Client-Secret":"\u2026"}.`
+  });
+  let parsed;
+  try {
+    parsed = JSON.parse(raw2);
+  } catch {
+    return fail("is not valid JSON.");
+  }
+  const isPlainObject4 = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  if (!isPlainObject4) {
+    return fail("is not a JSON object.");
+  }
+  const headers = {};
+  for (const [name, value] of Object.entries(parsed)) {
+    if (!VALID_HEADER_NAME.test(name)) {
+      return fail("has a header name with characters a header name cannot contain.");
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      return fail(`cannot set "${name}", because Block MCP sets that header itself.`);
+    }
+    const isUsableValue = typeof value === "string" && VALID_HEADER_VALUE.test(value);
+    if (!isUsableValue) {
+      return fail(`has an empty or invalid value for "${name}".`);
+    }
+    headers[name] = value;
+  }
+  return { ok: true, headers };
+}
+function isSameSiteRedirect(current, next) {
+  const usesStandardHttpsPort = next.port === "" || next.port === "443";
+  const isHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && usesStandardHttpsPort;
+  return next.origin === current.origin || isHttpsUpgrade;
+}
+function redirectStaysOnSite(options, siteUrl) {
+  const hostname3 = options.hostname ?? "";
+  const host = hostname3.includes(":") ? `[${hostname3}]` : hostname3;
+  const portSuffix = options.port ? `:${options.port}` : "";
+  try {
+    return isSameSiteRedirect(new URL(siteUrl), new URL(`${options.protocol}//${host}${portSuffix}`));
+  } catch {
+    return false;
+  }
+}
+function stripHeadersOffSite(options, siteUrl, customHeaders) {
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  if (!hasCustomHeaders || !options.headers) {
+    return;
+  }
+  if (redirectStaysOnSite(options, siteUrl)) {
+    return;
+  }
+  const names = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
+  for (const name of Object.keys(options.headers)) {
+    if (names.has(name.toLowerCase())) {
+      delete options.headers[name];
+    }
+  }
+}
+
 // src/client.ts
+var GATEWAY_PAGE_MESSAGE = `the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config.`;
+function isHtmlPage(data, contentType) {
+  return typeof data === "string" && /text\/html/i.test(String(contentType ?? ""));
+}
 function mimeForFilename(filename) {
   const ext = filename.toLowerCase().split(".").pop() ?? "";
   const map2 = {
@@ -40122,7 +40206,7 @@ var WordPressBlockClient = class {
    * @param config - MCP server configuration with URL and credentials
    */
   constructor(config2) {
-    const { wordpress_url, auth } = config2;
+    const { wordpress_url, auth, custom_headers: customHeaders = {} } = config2;
     if (!wordpress_url) {
       throw new Error("WordPress site URL is required (WORDPRESS_URL)");
     }
@@ -40142,12 +40226,14 @@ var WordPressBlockClient = class {
     this.client = axios_default.create({
       baseURL,
       headers: {
+        ...customHeaders,
         Authorization: `Basic ${credentials}`,
         Accept: "application/json",
         "Content-Type": "application/json",
         "User-Agent": "GravityKit Block MCP Server (https://github.com/GravityKit/block-mcp)"
       },
-      timeout: 3e4
+      timeout: 3e4,
+      beforeRedirect: (options) => stripHeadersOffSite(options, baseURL, customHeaders)
     });
     this.client.interceptors.request.use((config3) => {
       const method = (config3.method ?? "get").toLowerCase();
@@ -40160,7 +40246,16 @@ var WordPressBlockClient = class {
       return config3;
     });
     this.client.interceptors.response.use(
-      (r4) => r4,
+      (r4) => {
+        const isGatewayPage = isHtmlPage(r4.data, r4.headers?.["content-type"]);
+        if (!isGatewayPage) {
+          return r4;
+        }
+        const err = new Error(`Block API Error (${r4.status}): ${GATEWAY_PAGE_MESSAGE}`);
+        err.wpCode = "gateway_page";
+        err.wpStatus = r4.status;
+        throw err;
+      },
       async (error2) => {
         const config3 = error2.config;
         const method = (config3?.method ?? "get").toLowerCase();
@@ -40213,7 +40308,9 @@ var WordPressBlockClient = class {
         if ("code" in body3 && typeof body3.code === "string") code = body3.code;
         if ("data" in body3) wpData = body3.data;
       } else if (typeof body3 === "string") {
-        detail = body3;
+        const isGatewayPage = isHtmlPage(body3, error2.response.headers?.["content-type"]);
+        detail = isGatewayPage ? GATEWAY_PAGE_MESSAGE : body3;
+        code = isGatewayPage ? "gateway_page" : void 0;
       }
       const hint = translateWpError(code, wpData);
       const message = hint ? `Block API Error (${status}): ${hint}${code ? ` (${code})` : ""}` : `Block API Error (${status}): ${detail}`;
@@ -40951,7 +41048,19 @@ function resolveWordPressConfig(env) {
     const message = `Block MCP is not configured: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Set them in the "env" block of the block-mcp server entry in your MCP client config. Your site's Settings \u2192 Block MCP \u2192 Connect generates a ready-made config for you.`;
     return { ok: false, missing, message };
   }
-  return { ok: true, config: { url: url3, user, password } };
+  const headers = parseCustomHeaders(env[CUSTOM_HEADERS_ENV]);
+  if (!headers.ok) {
+    return { ok: false, missing: [], message: `Block MCP is not configured: ${headers.message}` };
+  }
+  return {
+    ok: true,
+    config: {
+      url: url3,
+      user,
+      password,
+      customHeaders: headers.headers
+    }
+  };
 }
 function buildNotConfiguredResult(message) {
   return {
@@ -40999,7 +41108,7 @@ function combineInstructions(baseline, addendum) {
 
 ${clean}`;
 }
-async function fetchAddendum(wordpressUrl) {
+async function fetchAddendum(wordpressUrl, customHeaders = {}) {
   if (process.env[OFF_ENV_VAR] === "1") {
     return "";
   }
@@ -41025,6 +41134,7 @@ async function fetchAddendum(wordpressUrl) {
       maxContentLength: FETCH_MAX_BYTES,
       // Lower-case Accept so caches see a stable Vary key.
       headers: {
+        ...customHeaders,
         Accept: "application/json"
       },
       // We treat 2xx as success; 3xx (any redirect) and 4xx/5xx fall
@@ -41044,8 +41154,8 @@ async function fetchAddendum(wordpressUrl) {
     return "";
   }
 }
-async function getInstructions(wordpressUrl) {
-  const addendum = await fetchAddendum(wordpressUrl);
+async function getInstructions(wordpressUrl, customHeaders = {}) {
+  const addendum = await fetchAddendum(wordpressUrl, customHeaders);
   return combineInstructions(BASELINE, addendum);
 }
 function formatFetchError(err) {
@@ -54162,7 +54272,8 @@ function describeExchangeFetchError(url3, err) {
   const hint = isTrustFailure ? ` ${CA_TRUST_HINT}` : "";
   return `Exchange failed: could not reach ${url3} (${reason}).${hint}`;
 }
-async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS) {
+var GATEWAY_HINT = `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again.`;
+async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS, customHeaders = {}) {
   let url3 = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -54172,7 +54283,7 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
       try {
         res = await fetchFn(url3, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          headers: { ...customHeaders, "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ code }),
           redirect: "manual",
           signal: controller.signal
@@ -54191,11 +54302,9 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
       }
       const current = new URL(url3);
       const next = new URL(location, url3);
-      const upgradesToStandardHttpsPort = next.port === "" || next.port === "443";
-      const sameHostHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && upgradesToStandardHttpsPort;
-      if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
+      if (!isSameSiteRedirect(current, next)) {
         throw new Error(
-          `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
+          `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site. ${GATEWAY_HINT}`
         );
       }
       url3 = next.toString();
@@ -54207,11 +54316,11 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
   try {
     json2 = await res.json();
   } catch {
-    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}).`);
+    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
   return parseExchangeResponse(json2);
 }
-function buildMcpEntry(creds, extraCaCerts = process.env.NODE_EXTRA_CA_CERTS) {
+function buildMcpEntry(creds, extraCaCerts = process.env.NODE_EXTRA_CA_CERTS, customHeaders = process.env[CUSTOM_HEADERS_ENV]) {
   const env = {
     WORDPRESS_URL: creds.site,
     WORDPRESS_USER: creds.user,
@@ -54220,6 +54329,10 @@ function buildMcpEntry(creds, extraCaCerts = process.env.NODE_EXTRA_CA_CERTS) {
   const hasCaCerts = typeof extraCaCerts === "string" && extraCaCerts.trim() !== "";
   if (hasCaCerts) {
     env.NODE_EXTRA_CA_CERTS = extraCaCerts;
+  }
+  const hasCustomHeaders = typeof customHeaders === "string" && customHeaders.trim() !== "";
+  if (hasCustomHeaders) {
+    env[CUSTOM_HEADERS_ENV] = customHeaders;
   }
   return {
     command: "npx",
@@ -54257,7 +54370,7 @@ function claudeDesktopConfigPath(platform) {
 function cursorConfigPath() {
   return path.join(os.homedir(), ".cursor", "mcp.json");
 }
-function claudeCodeAddArgs(creds, name = "block-mcp", extraCaCerts = process.env.NODE_EXTRA_CA_CERTS) {
+function claudeCodeAddArgs(creds, name = "block-mcp", extraCaCerts = process.env.NODE_EXTRA_CA_CERTS, customHeaders = process.env[CUSTOM_HEADERS_ENV]) {
   const envArgs = [
     "--env",
     `WORDPRESS_URL=${creds.site}`,
@@ -54269,6 +54382,10 @@ function claudeCodeAddArgs(creds, name = "block-mcp", extraCaCerts = process.env
   const hasCaCerts = typeof extraCaCerts === "string" && extraCaCerts.trim() !== "";
   if (hasCaCerts) {
     envArgs.push("--env", `NODE_EXTRA_CA_CERTS=${extraCaCerts}`);
+  }
+  const hasCustomHeaders = typeof customHeaders === "string" && customHeaders.trim() !== "";
+  if (hasCustomHeaders) {
+    envArgs.push("--env", `${CUSTOM_HEADERS_ENV}=${customHeaders}`);
   }
   return ["mcp", "add", name, "--scope", "user", ...envArgs, "--", "npx", "-y", "@gravitykit/block-mcp"];
 }
@@ -54332,6 +54449,9 @@ function runClaudeCodeAdd(creds, name = "block-mcp") {
 function printConfig(creds, reveal, name = "block-mcp") {
   const shown = reveal ? creds : { ...creds, password: "<hidden \u2014 re-run with --reveal to print it>" };
   const entry = buildMcpEntry(shown);
+  if (!reveal && entry.env[CUSTOM_HEADERS_ENV]) {
+    entry.env[CUSTOM_HEADERS_ENV] = "<hidden \u2014 re-run with --reveal to print it>";
+  }
   const block = { mcpServers: { [name]: entry } };
   console.log("\nAdd this to your MCP client config:\n");
   console.log(JSON.stringify(block, null, 2));
@@ -54395,6 +54515,11 @@ async function runConnect(argv, opts = {}) {
     args = { ...args, site: normalizeSite(args.site) };
   } catch (err) {
     console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+  const parsedHeaders = parseCustomHeaders(process.env[CUSTOM_HEADERS_ENV]);
+  if (!parsedHeaders.ok) {
+    console.error(`Error: ${parsedHeaders.message}`);
     process.exit(1);
   }
   const state = crypto2.randomUUID();
@@ -54465,7 +54590,7 @@ Open this URL in your browser to authorize:
   console.error(`Approved. Retrieving credentials\u2026`);
   let creds;
   try {
-    creds = await exchangeCode(args.site, code);
+    creds = await exchangeCode(args.site, code, fetch, EXCHANGE_FETCH_TIMEOUT_MS, parsedHeaders.headers);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
@@ -54704,9 +54829,10 @@ async function main() {
     auth: {
       username: cfg.config.user,
       application_password: cfg.config.password
-    }
+    },
+    custom_headers: cfg.config.customHeaders
   });
-  const instructions = await getInstructions(cfg.config.url);
+  const instructions = await getInstructions(cfg.config.url, cfg.config.customHeaders);
   const server = new McpServer(
     {
       name: "block-mcp",

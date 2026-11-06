@@ -19,6 +19,8 @@ export interface BlockMCPConfig {
     /** WordPress Application Password (space-separated groups) */
     application_password: string;
   };
+  /** Extra headers sent with every request to the site, such as a gateway's service token. */
+  custom_headers?: Record<string, string>;
 }
 
 // ============================================
