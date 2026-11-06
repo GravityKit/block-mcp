@@ -7,10 +7,14 @@
  * only as an opaque -32000 with the real reason stranded on stderr.
  */
 
+import { CUSTOM_HEADERS_ENV, parseCustomHeaders, type CustomHeaders } from './custom-headers.js';
+
 export interface WordPressConfig {
   url: string;
   user: string;
   password: string;
+  /** Extra headers sent with every request to the site, such as a gateway's service token. */
+  customHeaders: CustomHeaders;
 }
 
 export type ConfigResult =
@@ -38,8 +42,10 @@ function readEnv(env: NodeJS.ProcessEnv, primary: string, legacy: string): strin
  * Resolve the WordPress connection config from the process environment.
  *
  * Returns `{ ok: false, missing, message }` when any of the three required
- * values is absent — the caller starts the server in a degraded mode and
- * surfaces `message` on tool calls, rather than exiting.
+ * values is absent, or when the optional custom headers can't be used — the
+ * caller starts the server in a degraded mode and surfaces `message` on tool
+ * calls, rather than exiting. Bad headers stop the server instead of being
+ * ignored: without them every request would just hit the gateway's login page.
  */
 export function resolveWordPressConfig(env: NodeJS.ProcessEnv): ConfigResult {
   const url = readEnv(env, 'WORDPRESS_URL', 'GK_SITE_URL');
@@ -65,7 +71,20 @@ export function resolveWordPressConfig(env: NodeJS.ProcessEnv): ConfigResult {
     return { ok: false, missing, message };
   }
 
-  return { ok: true, config: { url: url as string, user: user as string, password: password as string } };
+  const headers = parseCustomHeaders(env[CUSTOM_HEADERS_ENV]);
+  if (!headers.ok) {
+    return { ok: false, missing: [], message: `Block MCP is not configured: ${headers.message}` };
+  }
+
+  return {
+    ok: true,
+    config: {
+      url: url as string,
+      user: user as string,
+      password: password as string,
+      customHeaders: headers.headers,
+    },
+  };
 }
 
 /**

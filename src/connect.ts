@@ -21,6 +21,15 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as cp from 'node:child_process';
+import {
+  CUSTOM_HEADERS_ENV,
+  isSameSiteRedirect,
+  isGatewayRefusal,
+  isSameSiteOrWww,
+  parseCustomHeaders,
+  warnIfHeadersUnencrypted,
+  type CustomHeaders,
+} from './custom-headers.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -379,6 +388,11 @@ function describeExchangeFetchError(url: string, err: unknown): string {
   return `Exchange failed: could not reach ${url} (${reason}).${hint}`;
 }
 
+/** Points someone whose site sits behind an access gateway at the setting that gets through it. */
+const GATEWAY_HINT =
+  `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again. ` +
+  'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
+
 /**
  * Exchange a single-use code for the credential set.
  *
@@ -406,7 +420,8 @@ export async function exchangeCode(
   site: string,
   code: string,
   fetchFn: typeof fetch = fetch,
-  timeoutMs: number = EXCHANGE_FETCH_TIMEOUT_MS
+  timeoutMs: number = EXCHANGE_FETCH_TIMEOUT_MS,
+  customHeaders: CustomHeaders = {}
 ): Promise<Credentials> {
   let url = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
 
@@ -419,7 +434,7 @@ export async function exchangeCode(
       try {
         res = await fetchFn(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { ...customHeaders, 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ code }),
           redirect: 'manual',
           signal: controller.signal,
@@ -447,18 +462,9 @@ export async function exchangeCode(
       }
       const current = new URL(url);
       const next = new URL(location, url);
-      // Only the standard HTTPS port counts as a "force HTTPS" upgrade. A
-      // redirect to https on a non-standard port is not ordinary HSTS behavior,
-      // so the credential must not follow it even when the host matches.
-      const upgradesToStandardHttpsPort = next.port === '' || next.port === '443';
-      const sameHostHttpsUpgrade =
-        current.protocol === 'http:' &&
-        next.protocol === 'https:' &&
-        next.hostname === current.hostname &&
-        upgradesToStandardHttpsPort;
-      if (next.origin !== current.origin && !sameHostHttpsUpgrade) {
+      if (!isSameSiteRedirect(current, next)) {
         throw new Error(
-          `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site.`
+          `Exchange failed: the site redirected to a different origin (${next.origin}); refusing to send the credential off-site. ${GATEWAY_HINT}`
         );
       }
       url = next.toString();
@@ -471,10 +477,22 @@ export async function exchangeCode(
   try {
     json = await res.json();
   } catch {
-    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}).`);
+    throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
 
-  return parseExchangeResponse(json);
+  if (isGatewayRefusal(res.status, json)) {
+    throw new Error(`Exchange failed: something in front of WordPress refused the request (HTTP ${res.status}). ${GATEWAY_HINT}`);
+  }
+
+  const creds = parseExchangeResponse(json);
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  if (hasCustomHeaders && !isSameSiteOrWww(new URL(site), new URL(creds.site))) {
+    throw new Error(
+      `Exchange failed: the site reports its address as ${new URL(creds.site).origin}, not ${new URL(site).origin}, so ${CUSTOM_HEADERS_ENV} was not saved for it. If that address is correct, run connect again with --site ${new URL(creds.site).origin}.`
+    );
+  }
+
+  return creds;
 }
 
 // ── MCP config builders ───────────────────────────────────────────────────────
@@ -489,7 +507,8 @@ export async function exchangeCode(
  */
 export function buildMcpEntry(
   creds: Credentials,
-  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS
+  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS,
+  customHeaders: string | undefined = process.env[CUSTOM_HEADERS_ENV]
 ): McpServerEntry {
   const env: Record<string, string> = {
     WORDPRESS_URL: creds.site,
@@ -499,6 +518,11 @@ export function buildMcpEntry(
   const hasCaCerts = typeof extraCaCerts === 'string' && extraCaCerts.trim() !== '';
   if (hasCaCerts) {
     env.NODE_EXTRA_CA_CERTS = extraCaCerts;
+  }
+  // The server sits behind the same gateway the connector just got through.
+  const hasCustomHeaders = typeof customHeaders === 'string' && customHeaders.trim() !== '';
+  if (hasCustomHeaders) {
+    env[CUSTOM_HEADERS_ENV] = customHeaders;
   }
   return {
     command: 'npx',
@@ -581,7 +605,8 @@ export function cursorConfigPath(): string {
 export function claudeCodeAddArgs(
   creds: Credentials,
   name: string = 'block-mcp',
-  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS
+  extraCaCerts: string | undefined = process.env.NODE_EXTRA_CA_CERTS,
+  customHeaders: string | undefined = process.env[CUSTOM_HEADERS_ENV]
 ): string[] {
   const envArgs = [
     '--env',
@@ -596,6 +621,10 @@ export function claudeCodeAddArgs(
   const hasCaCerts = typeof extraCaCerts === 'string' && extraCaCerts.trim() !== '';
   if (hasCaCerts) {
     envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${extraCaCerts}`);
+  }
+  const hasCustomHeaders = typeof customHeaders === 'string' && customHeaders.trim() !== '';
+  if (hasCustomHeaders) {
+    envArgs.push('--env', `${CUSTOM_HEADERS_ENV}=${customHeaders}`);
   }
   return ['mcp', 'add', name, '--scope', 'user', ...envArgs, '--', 'npx', '-y', '@gravitykit/block-mcp'];
 }
@@ -704,11 +733,20 @@ export function runClaudeCodeAdd(
  * `--reveal` / `--client print`). Otherwise it is replaced with a placeholder
  * so the secret never lands in stdout / shell scrollback / CI logs.
  */
-export function printConfig(creds: Credentials, reveal: boolean, name: string = 'block-mcp'): void {
+export function printConfig(
+  creds: Credentials,
+  reveal: boolean,
+  name: string = 'block-mcp',
+  revealHeaders: boolean = reveal
+): void {
   const shown: Credentials = reveal
     ? creds
     : { ...creds, password: '<hidden — re-run with --reveal to print it>' };
   const entry = buildMcpEntry(shown);
+  // Gateway headers usually hold a secret, so they get the same redaction as the password.
+  if (!revealHeaders && entry.env[CUSTOM_HEADERS_ENV]) {
+    entry.env[CUSTOM_HEADERS_ENV] = `<hidden: use the ${CUSTOM_HEADERS_ENV} value you set>`;
+  }
   const block: McpConfig = { mcpServers: { [name]: entry } };
   console.log('\nAdd this to your MCP client config:\n');
   console.log(JSON.stringify(block, null, 2));
@@ -718,7 +756,7 @@ export function printConfig(creds: Credentials, reveal: boolean, name: string = 
   console.log('For Cursor: paste into ~/.cursor/mcp.json\n');
   if (!reveal) {
     console.log(
-      'The app password was hidden. Re-run with --reveal (or --client print) to print it.\n'
+      'The app password and any custom headers were hidden. Re-run with --reveal (or --client print) to print them.\n'
     );
   }
 }
@@ -820,6 +858,14 @@ export async function runConnect(
     process.exit(1);
   }
 
+  // Checked here, not at the exchange, so a typo fails before the browser step.
+  const parsedHeaders = parseCustomHeaders(process.env[CUSTOM_HEADERS_ENV]);
+  if (!parsedHeaders.ok) {
+    console.error(`Error: ${parsedHeaders.message}`);
+    process.exit(1);
+  }
+  warnIfHeadersUnencrypted(args.site, parsedHeaders.headers);
+
   // ── 2. Generate state ──────────────────────────────────────────────────
   const state = crypto.randomUUID();
 
@@ -911,7 +957,7 @@ export async function runConnect(
   console.error(`Approved. Retrieving credentials…`);
   let creds: Credentials;
   try {
-    creds = await exchangeCode(args.site, code);
+    creds = await exchangeCode(args.site, code, fetch, EXCHANGE_FETCH_TIMEOUT_MS, parsedHeaders.headers);
   } catch (err) {
     console.error(`Error: ${(err as Error).message}`);
     process.exit(1);
@@ -944,8 +990,9 @@ export async function runConnect(
             `\nWarning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`\nFall back — add this to your Claude Code MCP config manually:`);
-          // Explicit fallback for a client the user chose: the secret is needed.
-          printConfig(creds, true, args.name);
+          // The password is minted once, so it must be shown here. The person
+          // already has the header values, so those stay hidden unless asked for.
+          printConfig(creds, true, args.name, args.reveal);
         }
         break;
       }

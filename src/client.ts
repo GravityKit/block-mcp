@@ -10,6 +10,32 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 import { restRouteUrl } from './rest-url.js';
 import { coercePostId, isNonEmptyArray, isNonEmptyString } from './coerce.js';
+import { CUSTOM_HEADERS_ENV, isGatewayRefusal, stripHeadersOffSite } from './custom-headers.js';
+
+/**
+ * What to tell an agent when something in front of WordPress answered a REST
+ * call. The REST API only speaks JSON, so an HTML page means WordPress never saw
+ * the request.
+ */
+const GATEWAY_PAGE_MESSAGE =
+  'something in front of WordPress answered this request, not the REST API. ' +
+  'A login gateway such as Cloudflare Access or a security plugin is probably blocking it. ' +
+  `If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. ` +
+  'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
+
+/**
+ * True when a response body is an unparsed HTML page rather than REST API JSON. JSON
+ * has already been parsed by this point, even when a host labels it text/html. The
+ * body is checked as well because a gateway can send a page with the wrong type or none.
+ */
+function isHtmlPage(data: unknown, contentType: unknown): boolean {
+  if (typeof data !== 'string') {
+    return false;
+  }
+  const isLabeledHtml = /text\/html/i.test(String(contentType ?? ''));
+  const startsLikeHtml = /^\s*<(!doctype\s+html|html)[\s>]/i.test(data);
+  return isLabeledHtml || startsLikeHtml;
+}
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */
 function mimeForFilename(filename: string): string {
@@ -204,7 +230,7 @@ export class WordPressBlockClient {
    * @param config - MCP server configuration with URL and credentials
    */
   constructor(config: BlockMCPConfig) {
-    const { wordpress_url, auth } = config;
+    const { wordpress_url, auth, custom_headers: customHeaders = {} } = config;
 
     if (!wordpress_url) {
       throw new Error('WordPress site URL is required (WORDPRESS_URL)');
@@ -231,12 +257,14 @@ export class WordPressBlockClient {
     this.client = axios.create({
       baseURL,
       headers: {
+        ...customHeaders,
         Authorization: `Basic ${credentials}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
         'User-Agent': 'GravityKit Block MCP Server (https://github.com/GravityKit/block-mcp)',
       },
       timeout: 30000,
+      beforeRedirect: (options) => stripHeadersOffSite(options, baseURL, customHeaders),
     });
 
     // Request interceptor: once a host is known to reject real verbs, send the
@@ -256,7 +284,19 @@ export class WordPressBlockClient {
     // then format any final error so it carries wpCode/wpData/wpStatus for
     // the server-level catch in src/index.ts.
     this.client.interceptors.response.use(
-      (r) => r,
+      (r) => {
+        const isGatewayPage = isHtmlPage(r.data, r.headers?.['content-type']);
+        if (!isGatewayPage) {
+          return r;
+        }
+        const err = new Error(`Block API Error (${r.status}): ${GATEWAY_PAGE_MESSAGE}`) as Error & {
+          wpCode?: string;
+          wpStatus?: number;
+        };
+        err.wpCode = 'gateway_page';
+        err.wpStatus = r.status;
+        throw err;
+      },
       async (error: AxiosError) => {
         const config = error.config as
           | (AxiosRequestConfig & { __retryCount?: number; __overrideMethod?: boolean })
@@ -323,7 +363,17 @@ export class WordPressBlockClient {
         if ('code' in body && typeof body.code === 'string') code = body.code;
         if ('data' in body) wpData = body.data;
       } else if (typeof body === 'string') {
-        detail = body;
+        // A gateway refusing a bad token answers 401/403 with a full HTML page.
+        const isGatewayPage = isHtmlPage(body, error.response.headers?.['content-type']);
+        detail = isGatewayPage ? GATEWAY_PAGE_MESSAGE : body;
+        code = isGatewayPage ? 'gateway_page' : undefined;
+      }
+
+      if (isGatewayRefusal(status, body)) {
+        // Keep the gateway's own reason when it gave one. HTML pages were already replaced above.
+        const hasOwnReason = detail !== 'Unknown error' && detail !== GATEWAY_PAGE_MESSAGE && detail.trim() !== '';
+        detail = hasOwnReason ? `${detail} (${GATEWAY_PAGE_MESSAGE})` : GATEWAY_PAGE_MESSAGE;
+        code = 'gateway_page';
       }
 
       // Replace HTTP-shaped detail with an agent-actionable hint when we

@@ -53,6 +53,7 @@ import { TEMPLATE_TOOLS, handleTemplateTool } from './tools/templates.js';
 import { validateToolArgs } from './validate-args.js';
 import { AGENT_GUIDE_CONTENT } from './agent-guide.js';
 import { runConnect } from './connect.js';
+import { warnIfHeadersUnencrypted } from './custom-headers.js';
 
 // Environment variables are passed by the parent process (Claude Code, Hermes, etc.)
 // No dotenv.config() needed — it breaks esbuild ESM bundles due to CJS dynamic require('fs').
@@ -380,12 +381,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  warnIfHeadersUnencrypted(cfg.config.url, cfg.config.customHeaders);
+
   const client = new WordPressBlockClient({
     wordpress_url: cfg.config.url,
     auth: {
       username: cfg.config.user,
       application_password: cfg.config.password,
     },
+    custom_headers: cfg.config.customHeaders,
   });
 
   // Fetch the per-site instructions addendum BEFORE constructing the
@@ -393,7 +397,7 @@ async function main(): Promise<void> {
   // from the start — no post-construction mutation of SDK internals.
   // `getInstructions` never throws: on any failure it logs to stderr
   // and returns the baseline only.
-  const instructions = await getInstructions(cfg.config.url);
+  const instructions = await getInstructions(cfg.config.url, cfg.config.customHeaders);
 
   const server = new McpServer(
     {

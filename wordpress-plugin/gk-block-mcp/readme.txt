@@ -2,7 +2,7 @@
 Contributors: gravitykit, katzwebservices
 Tags: blocks, rest-api, gutenberg, mcp, ai
 Requires at least: 6.5
-Tested up to: 7.1
+Tested up to: 7.1.4
 Requires PHP: 7.4.0
 Stable tag: 2.2.1
 License: GPL-2.0-or-later
@@ -121,6 +121,14 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 == Changelog ==
 
 = develop =
+
+#### 🚀 Added
+
+* Block MCP can now reach sites behind Cloudflare Access or another login gateway. Set `WORDPRESS_CUSTOM_HEADERS` to the headers the gateway requires, and they are sent with connecting and every tool call.
+
+#### 🐛 Fixed
+
+* Tool calls now return a clear error when a login gateway or security plugin answers in place of WordPress.
 
 #### 🔧 Updated
 * The minimum required WordPress version is now 6.5 and the minimum PHP version is 7.4.
