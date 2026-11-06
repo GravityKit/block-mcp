@@ -205,33 +205,126 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * The rollback must match what the row actually holds when a filter changed
-	 * the content before a later hook threw.
+	 * Run a guarded save that is expected to throw, with the given hooks attached.
+	 *
+	 * @param int      $post_id Post.
+	 * @param string   $snapshot Snapshot the save is based on.
+	 * @param callable $attach  Attaches hooks, and returns a callable that removes them.
+	 * @return void
 	 */
-	public function test_rollback_matches_content_changed_by_a_filter() {
-		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
-		$snapshot = $this->persisted_content( $post_id );
-		$change   = static function ( $data ) {
-			$data['post_content'] .= wp_slash( '<!-- added "by" a filter -->' );
-			return $data;
-		};
-		$throw    = static function () {
-			throw new \RuntimeException( 'hook failed' );
-		};
-		add_filter( 'wp_insert_post_data', $change, 10 );
-		add_action( 'save_post', $throw );
-
+	private function save_expecting_exception( $post_id, $snapshot, callable $attach ) {
+		$detach = $attach();
 		$caught = false;
 		try {
 			$this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
 		} catch ( \RuntimeException $error ) {
 			$caught = true;
 		}
-		remove_filter( 'wp_insert_post_data', $change, 10 );
-		remove_action( 'save_post', $throw );
+		$detach();
+		$this->assertTrue( $caught, 'the exception must still reach the caller' );
+	}
 
-		$this->assertTrue( $caught );
+	/**
+	 * A filter changed the content, then a hook threw before the database write. The
+	 * row still holds the swap's bytes, so it rolls back.
+	 */
+	public function test_throw_before_the_write_rolls_back_even_when_a_filter_changed_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () {
+				$change = static function ( $data ) {
+					$data['post_content'] .= wp_slash( '<!-- added -->' );
+					return $data;
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_filter( 'wp_insert_post_data', $change );
+				add_action( 'pre_post_update', $throw );
+				return static function () use ( $change, $throw ) {
+					remove_filter( 'wp_insert_post_data', $change );
+					remove_action( 'pre_post_update', $throw );
+				};
+			}
+		);
+
 		$this->assertSame( $snapshot, $this->persisted_content( $post_id ) );
+	}
+
+	/**
+	 * A hook made its own successful save, then a later hook threw. The rollback must
+	 * not overwrite that nested edit with the old snapshot.
+	 */
+	public function test_throw_after_a_nested_save_keeps_the_nested_edit() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () use ( $post_id ) {
+				$nested = static function ( $id ) use ( $post_id, &$nested ) {
+					if ( $id !== $post_id ) {
+						return;
+					}
+					remove_action( 'save_post', $nested, 10 );
+					wp_update_post(
+						array(
+							'ID'           => $post_id,
+							'post_content' => '<p>NESTED</p>',
+						)
+					);
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_action( 'save_post', $nested, 10 );
+				add_action( 'save_post', $throw, 20 );
+				return static function () use ( $nested, $throw ) {
+					remove_action( 'save_post', $nested, 10 );
+					remove_action( 'save_post', $throw, 20 );
+				};
+			}
+		);
+
+		$this->assertSame( '<p>NESTED</p>', $this->persisted_content( $post_id ) );
+	}
+
+	/**
+	 * A filtered save finished, with its revision, before a later hook threw. That
+	 * content stays, and the caller still sees the exception.
+	 */
+	public function test_throw_after_a_finished_filtered_save_keeps_the_saved_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () {
+				$change = static function ( $data ) {
+					$data['post_content'] .= wp_slash( '<!-- added -->' );
+					return $data;
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_filter( 'wp_insert_post_data', $change );
+				add_action( 'save_post', $throw );
+				return static function () use ( $change, $throw ) {
+					remove_filter( 'wp_insert_post_data', $change );
+					remove_action( 'save_post', $throw );
+				};
+			}
+		);
+
+		$content = $this->persisted_content( $post_id );
+		$this->assertStringContainsString( 'NEW', $content );
+		$this->assertStringContainsString( '<!-- added -->', $content );
 	}
 
 	/**
