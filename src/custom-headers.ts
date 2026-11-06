@@ -93,22 +93,17 @@ export function isSameSiteRedirect(current: URL, next: URL): boolean {
   return next.origin === current.origin || isHttpsUpgrade;
 }
 
-/** The parts of a redirect target the HTTP client passes to its redirect hook. */
+/** The parts of a redirect the HTTP client passes to its redirect hook. */
 export interface RedirectOptions {
-  protocol?: string | null;
-  hostname?: string | null;
-  port?: string | number | null;
+  /** The real destination. With an HTTP proxy, `hostname` and `port` hold the proxy's address instead. */
+  href?: string;
   headers?: Record<string, unknown>;
 }
 
 /** Whether a redirect target stays on the site. A target that can't be read counts as leaving it. */
 function redirectStaysOnSite(options: RedirectOptions, siteUrl: string): boolean {
-  const hostname = options.hostname ?? '';
-  // The HTTP client strips the brackets from an IPv6 address, and URL needs them back.
-  const host = hostname.includes(':') ? `[${hostname}]` : hostname;
-  const portSuffix = options.port ? `:${options.port}` : '';
   try {
-    return isSameSiteRedirect(new URL(siteUrl), new URL(`${options.protocol}//${host}${portSuffix}`));
+    return isSameSiteRedirect(new URL(siteUrl), new URL(options.href ?? ''));
   } catch {
     return false;
   }

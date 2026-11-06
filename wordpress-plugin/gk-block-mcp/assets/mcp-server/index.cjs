@@ -40115,11 +40115,8 @@ function isSameSiteRedirect(current, next) {
   return next.origin === current.origin || isHttpsUpgrade;
 }
 function redirectStaysOnSite(options, siteUrl) {
-  const hostname3 = options.hostname ?? "";
-  const host = hostname3.includes(":") ? `[${hostname3}]` : hostname3;
-  const portSuffix = options.port ? `:${options.port}` : "";
   try {
-    return isSameSiteRedirect(new URL(siteUrl), new URL(`${options.protocol}//${host}${portSuffix}`));
+    return isSameSiteRedirect(new URL(siteUrl), new URL(options.href ?? ""));
   } catch {
     return false;
   }

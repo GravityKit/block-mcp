@@ -122,28 +122,26 @@ describe('parseCustomHeaders', () => {
 });
 
 describe('stripHeadersOffSite', () => {
-  const redirect = (hostname: string | null) => ({
-    protocol: 'http:',
-    hostname,
-    port: '8080',
+  const redirect = (href: string | undefined) => ({
+    href,
     headers: { 'cf-access-client-secret': 'probe-secret', accept: 'application/json' } as Record<string, unknown>,
   });
 
   it('keeps the headers when an IPv6 site redirects within itself', () => {
-    const options = redirect('::1');
+    const options = redirect('http://[::1]:8080/moved');
     stripHeadersOffSite(options, 'http://[::1]:8080', TOKEN);
     expect(options.headers['cf-access-client-secret']).toBe('probe-secret');
   });
 
-  it('removes only the custom headers when it cannot read the target', () => {
-    const options = redirect('bad host');
+  it.each([undefined, 'not a url'])('removes only the custom headers when the target is %s', (href) => {
+    const options = redirect(href);
     stripHeadersOffSite(options, 'http://site.test:8080', TOKEN);
     expect(options.headers['cf-access-client-secret']).toBeUndefined();
     expect(options.headers.accept).toBe('application/json');
   });
 
   it('does nothing on a site with no custom headers, even if it cannot read the target', () => {
-    const options = redirect('bad host');
+    const options = redirect('not a url');
     expect(() => stripHeadersOffSite(options, 'http://site.test:8080', {})).not.toThrow();
     expect(options.headers.accept).toBe('application/json');
   });
@@ -219,6 +217,76 @@ describe('client requests through a gateway', () => {
 
     expect(site.seen).toHaveLength(2);
     expect(site.seen[1].headers['cf-access-client-secret']).toBe('probe-secret');
+  });
+});
+
+describe('redirects through an HTTP proxy', () => {
+  /** A forward proxy: it receives the full URL and repeats the request to that target. */
+  async function serveProxy() {
+    return serve((req, res) => {
+      const target = new URL(req.url as string);
+      const headers = { ...req.headers, host: target.host };
+      const upstream = http.request(target, { method: req.method, headers }, (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+        upstreamRes.pipe(res);
+      });
+      upstream.end();
+    });
+  }
+
+  /** The proxy skips loopback hosts by default, so clear NO_PROXY for the test. */
+  async function withProxy<T>(proxyUrl: string, run: () => Promise<T>): Promise<T> {
+    const saved = { http: process.env.http_proxy, no: process.env.no_proxy, NO: process.env.NO_PROXY };
+    process.env.http_proxy = proxyUrl;
+    delete process.env.no_proxy;
+    delete process.env.NO_PROXY;
+    try {
+      return await run();
+    } finally {
+      const restore = (name: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      };
+      restore('http_proxy', saved.http);
+      restore('no_proxy', saved.no);
+      restore('NO_PROXY', saved.NO);
+    }
+  }
+
+  it('keeps the headers on a redirect within the same site', async () => {
+    const site = await serve((req, res) => {
+      if (!req.url?.startsWith('/moved')) {
+        res.writeHead(302, { Location: '/moved' });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"posts":[]}');
+    });
+    const proxy = await serveProxy();
+
+    await withProxy(proxy.url, () => makeClient(site.url, TOKEN).findPosts());
+
+    expect(proxy.seen).toHaveLength(2);
+    expect(site.seen).toHaveLength(2);
+    expect(site.seen[1].headers['cf-access-client-secret']).toBe('probe-secret');
+  });
+
+  it('still removes the headers on a redirect to another site', async () => {
+    const elsewhere = await serve((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"posts":[]}');
+    });
+    const site = await serve((_req, res) => {
+      res.writeHead(302, { Location: `${elsewhere.url}/steal` });
+      res.end();
+    });
+    const proxy = await serveProxy();
+
+    await withProxy(proxy.url, () => makeClient(site.url, TOKEN).findPosts());
+
+    expect(elsewhere.seen).toHaveLength(1);
+    expect(elsewhere.seen[0].headers['cf-access-client-secret']).toBeUndefined();
   });
 });
 
