@@ -71,6 +71,12 @@ function loginPage(_req: http.IncomingMessage, res: http.ServerResponse): void {
   res.end('<html>Sign in with Cloudflare Access</html>');
 }
 
+/** The body and status real Cloudflare Access returns to a request that asks for JSON. */
+function accessRefusal(_req: http.IncomingMessage, res: http.ServerResponse): void {
+  res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', 'cf-access-domain': 'site.test' });
+  res.end(`{"message":"Forbidden. You don't have permission to view this. Please contact your system administrator.","status_code":403}`);
+}
+
 function makeClient(url: string, customHeaders?: Record<string, string>): WordPressBlockClient {
   return new WordPressBlockClient({
     wordpress_url: url,
@@ -315,7 +321,7 @@ describe('an HTML page answering a REST call', () => {
     const error = await makeClient(site.url).findPosts().catch((e) => e);
 
     expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain('HTML page');
+    expect(error.message).toContain('in front of WordPress');
     expect(error.message).toContain(CUSTOM_HEADERS_ENV);
     expect(error.message).toContain('Service Auth');
     expect(error.message).not.toContain('Sign in');
@@ -331,9 +337,31 @@ describe('an HTML page answering a REST call', () => {
     const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
 
     expect(error.message).toContain('Block API Error (403)');
-    expect(error.message).toContain('HTML page');
+    expect(error.message).toContain('in front of WordPress');
     expect(error.message).not.toContain('very long gateway page');
     expect(error.wpCode).toBe('gateway_page');
+  });
+
+  it('explains a refusal from Cloudflare Access, which answers JSON requests in JSON', async () => {
+    const site = await serve(accessRefusal);
+
+    const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
+
+    expect(error.message).toContain('Block API Error (403)');
+    expect(error.message).toContain('Service Auth');
+    expect(error.wpCode).toBe('gateway_page');
+  });
+
+  it('keeps WordPress 401 and 403 errors that pass through a gateway', async () => {
+    const site = await serve((_req, res) => {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'cf-access-domain': 'site.test' });
+      res.end('{"code":"incorrect_password","message":"The provided password is an invalid application password.","data":{"status":401}}');
+    });
+
+    const error = await makeClient(site.url, TOKEN).findPosts().catch((e) => e);
+
+    expect(error.wpCode).toBe('incorrect_password');
+    expect(error.message).toContain('invalid application password');
   });
 
   it('still accepts JSON from a host that labels it text/html', async () => {
@@ -356,7 +384,7 @@ describe('an HTML page answering a REST call', () => {
     const error = await makeClient(site.url).findPosts().catch((e) => e);
 
     expect(error.wpCode).toBe('rest_post_invalid_id');
-    expect(error.message).not.toContain('HTML page');
+    expect(error.message).not.toContain('in front of WordPress');
   });
 });
 
@@ -394,6 +422,21 @@ describe('credential exchange through a gateway', () => {
     expect(creds.password).toBe('pw');
     expect(site.seen[0].headers['cf-access-client-secret']).toBe('probe-secret');
     expect(login.seen).toHaveLength(0);
+  });
+
+  it('says a gateway refused the request when Access answers in JSON', async () => {
+    const site = await serve(accessRefusal);
+
+    await expect(exchangeCode(site.url, 'code123')).rejects.toThrow(/in front of WordPress refused.*Service Auth/);
+  });
+
+  it('still reports a WordPress error from the exchange as an invalid response', async () => {
+    const site = await serve((_req, res) => {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end('{"code":"invalid_code","message":"Invalid code."}');
+    });
+
+    await expect(exchangeCode(site.url, 'code123')).rejects.not.toThrow(/in front of WordPress/);
   });
 
   it('refuses the login redirect without headers, and says how to fix it', async () => {

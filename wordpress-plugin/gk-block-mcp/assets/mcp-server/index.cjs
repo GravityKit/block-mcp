@@ -40109,6 +40109,11 @@ function parseCustomHeaders(raw2) {
   }
   return { ok: true, headers };
 }
+function isGatewayRefusal(status, body3) {
+  const isRefusal = status === 401 || status === 403;
+  const hasWordPressCode = typeof body3 === "object" && body3 !== null && typeof body3.code === "string";
+  return isRefusal && !hasWordPressCode;
+}
 function warnIfHeadersUnencrypted(siteUrl, customHeaders) {
   const hasCustomHeaders = Object.keys(customHeaders).length > 0;
   let isUnencrypted = false;
@@ -40154,7 +40159,7 @@ function stripHeadersOffSite(options, siteUrl, customHeaders) {
 }
 
 // src/client.ts
-var GATEWAY_PAGE_MESSAGE = `the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.`;
+var GATEWAY_PAGE_MESSAGE = `something in front of WordPress answered this request, not the REST API. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.`;
 function isHtmlPage(data, contentType) {
   return typeof data === "string" && /text\/html/i.test(String(contentType ?? ""));
 }
@@ -40324,6 +40329,10 @@ var WordPressBlockClient = class {
         const isGatewayPage = isHtmlPage(body3, error2.response.headers?.["content-type"]);
         detail = isGatewayPage ? GATEWAY_PAGE_MESSAGE : body3;
         code = isGatewayPage ? "gateway_page" : void 0;
+      }
+      if (isGatewayRefusal(status, body3)) {
+        detail = GATEWAY_PAGE_MESSAGE;
+        code = "gateway_page";
       }
       const hint = translateWpError(code, wpData);
       const message = hint ? `Block API Error (${status}): ${hint}${code ? ` (${code})` : ""}` : `Block API Error (${status}): ${detail}`;
@@ -54330,6 +54339,9 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
     json2 = await res.json();
   } catch {
     throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}). ${GATEWAY_HINT}`);
+  }
+  if (isGatewayRefusal(res.status, json2)) {
+    throw new Error(`Exchange failed: something in front of WordPress refused the request (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
   return parseExchangeResponse(json2);
 }

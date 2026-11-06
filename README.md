@@ -294,8 +294,8 @@ escaped:
 - The Claude Desktop `.mcpb` installer has no field for this setting. Use
   `connect --client claude-desktop` instead.
 
-If a tool call returns `gateway_page`, the site answered with an HTML page instead of a REST
-API response. The gateway blocked the request, or the headers are missing or wrong.
+If a tool call returns `gateway_page`, something in front of WordPress answered the request. The
+gateway blocked it, or the headers are missing, wrong or not allowed by its policy.
 
 ### 4. (Optional) Tune the settings
 

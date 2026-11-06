@@ -78,6 +78,19 @@ export function parseCustomHeaders(raw: string | undefined): CustomHeadersResult
 }
 
 /**
+ * Whether a 401 or 403 came from a gateway in front of WordPress. WordPress REST
+ * errors always have a string `code`, including ones that pass through a gateway,
+ * so a refusal without one never reached WordPress. Cloudflare Access answers this
+ * way when a request asks for JSON.
+ */
+export function isGatewayRefusal(status: number, body: unknown): boolean {
+  const isRefusal = status === 401 || status === 403;
+  const hasWordPressCode =
+    typeof body === 'object' && body !== null && typeof (body as { code?: unknown }).code === 'string';
+  return isRefusal && !hasWordPressCode;
+}
+
+/**
  * Warn when a secret header would cross the network in clear text. Stays quiet for
  * the local machine, which never leaves it, and returns whether it warned.
  */

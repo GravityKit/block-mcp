@@ -10,7 +10,7 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { translateWpError } from './error-translator.js';
 import { restRouteUrl } from './rest-url.js';
 import { coercePostId, isNonEmptyArray, isNonEmptyString } from './coerce.js';
-import { CUSTOM_HEADERS_ENV, stripHeadersOffSite } from './custom-headers.js';
+import { CUSTOM_HEADERS_ENV, isGatewayRefusal, stripHeadersOffSite } from './custom-headers.js';
 
 /**
  * What to tell an agent when something in front of WordPress answered a REST
@@ -18,7 +18,7 @@ import { CUSTOM_HEADERS_ENV, stripHeadersOffSite } from './custom-headers.js';
  * the request.
  */
 const GATEWAY_PAGE_MESSAGE =
-  'the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. ' +
+  'something in front of WordPress answered this request, not the REST API. ' +
   'A login gateway such as Cloudflare Access or a security plugin is probably blocking it. ' +
   `If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. ` +
   'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
@@ -358,6 +358,11 @@ export class WordPressBlockClient {
         const isGatewayPage = isHtmlPage(body, error.response.headers?.['content-type']);
         detail = isGatewayPage ? GATEWAY_PAGE_MESSAGE : body;
         code = isGatewayPage ? 'gateway_page' : undefined;
+      }
+
+      if (isGatewayRefusal(status, body)) {
+        detail = GATEWAY_PAGE_MESSAGE;
+        code = 'gateway_page';
       }
 
       // Replace HTTP-shaped detail with an agent-actionable hint when we

@@ -24,6 +24,7 @@ import * as cp from 'node:child_process';
 import {
   CUSTOM_HEADERS_ENV,
   isSameSiteRedirect,
+  isGatewayRefusal,
   parseCustomHeaders,
   warnIfHeadersUnencrypted,
   type CustomHeaders,
@@ -476,6 +477,10 @@ export async function exchangeCode(
     json = await res.json();
   } catch {
     throw new Error(`Exchange failed: the site returned a non-JSON response (HTTP ${res.status}). ${GATEWAY_HINT}`);
+  }
+
+  if (isGatewayRefusal(res.status, json)) {
+    throw new Error(`Exchange failed: something in front of WordPress refused the request (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
 
   return parseExchangeResponse(json);
