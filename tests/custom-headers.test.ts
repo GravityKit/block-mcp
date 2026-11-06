@@ -661,7 +661,9 @@ describe('saving the headers to the client config', () => {
   it('connect gets through the gateway and writes the headers to the config', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gk-custom-headers-'));
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     process.env[CUSTOM_HEADERS_ENV] = TOKEN_JSON;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -686,7 +688,10 @@ describe('saving the headers to the client config', () => {
       expect(login.seen).toHaveLength(0);
       expect(config.mcpServers.gated.env[CUSTOM_HEADERS_ENV]).toBe(TOKEN_JSON);
     } finally {
-      process.env.HOME = originalHome;
+      for (const [name, value] of [['HOME', originalHome], ['USERPROFILE', originalUserProfile]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
