@@ -54471,11 +54471,11 @@ function runClaudeCodeAdd(creds, name = "block-mcp") {
     return { success: false, error: err.message };
   }
 }
-function printConfig(creds, reveal, name = "block-mcp") {
+function printConfig(creds, reveal, name = "block-mcp", revealHeaders = reveal) {
   const shown = reveal ? creds : { ...creds, password: "<hidden \u2014 re-run with --reveal to print it>" };
   const entry = buildMcpEntry(shown);
-  if (!reveal && entry.env[CUSTOM_HEADERS_ENV]) {
-    entry.env[CUSTOM_HEADERS_ENV] = "<hidden \u2014 re-run with --reveal to print it>";
+  if (!revealHeaders && entry.env[CUSTOM_HEADERS_ENV]) {
+    entry.env[CUSTOM_HEADERS_ENV] = `<hidden: use the ${CUSTOM_HEADERS_ENV} value you set>`;
   }
   const block = { mcpServers: { [name]: entry } };
   console.log("\nAdd this to your MCP client config:\n");
@@ -54653,7 +54653,7 @@ Warning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`
 Fall back \u2014 add this to your Claude Code MCP config manually:`);
-          printConfig(creds, true, args.name);
+          printConfig(creds, true, args.name, args.reveal);
         }
         break;
       }

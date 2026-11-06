@@ -724,14 +724,19 @@ export function runClaudeCodeAdd(
  * `--reveal` / `--client print`). Otherwise it is replaced with a placeholder
  * so the secret never lands in stdout / shell scrollback / CI logs.
  */
-export function printConfig(creds: Credentials, reveal: boolean, name: string = 'block-mcp'): void {
+export function printConfig(
+  creds: Credentials,
+  reveal: boolean,
+  name: string = 'block-mcp',
+  revealHeaders: boolean = reveal
+): void {
   const shown: Credentials = reveal
     ? creds
     : { ...creds, password: '<hidden — re-run with --reveal to print it>' };
   const entry = buildMcpEntry(shown);
   // Gateway headers usually hold a secret, so they get the same redaction as the password.
-  if (!reveal && entry.env[CUSTOM_HEADERS_ENV]) {
-    entry.env[CUSTOM_HEADERS_ENV] = '<hidden — re-run with --reveal to print it>';
+  if (!revealHeaders && entry.env[CUSTOM_HEADERS_ENV]) {
+    entry.env[CUSTOM_HEADERS_ENV] = `<hidden: use the ${CUSTOM_HEADERS_ENV} value you set>`;
   }
   const block: McpConfig = { mcpServers: { [name]: entry } };
   console.log('\nAdd this to your MCP client config:\n');
@@ -976,8 +981,9 @@ export async function runConnect(
             `\nWarning: 'claude' binary not found or failed (${result.error}).`
           );
           console.log(`\nFall back — add this to your Claude Code MCP config manually:`);
-          // Explicit fallback for a client the user chose: the secret is needed.
-          printConfig(creds, true, args.name);
+          // The password is minted once, so it must be shown here. The person
+          // already has the header values, so those stay hidden unless asked for.
+          printConfig(creds, true, args.name, args.reveal);
         }
         break;
       }

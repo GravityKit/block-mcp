@@ -475,6 +475,37 @@ describe('saving the headers to the client config', () => {
     expect(log.mock.calls.flat().join('\n')).toContain('probe-secret');
   });
 
+  it('shows the password but hides the headers when claude mcp add is unavailable', async () => {
+    const originalPath = process.env.PATH;
+    process.env[CUSTOM_HEADERS_ENV] = TOKEN_JSON;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const site = await serve((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"success":true,"data":{"site":"https://example.com","user":"block-mcp","password":"minted-once"}}');
+    });
+    const openBrowserFn = (authorizeUrl: string): void => {
+      const authorize = new URL(authorizeUrl);
+      const callback = new URL(authorize.searchParams.get('callback') as string);
+      callback.searchParams.set('code', 'deadbeefcafef00d1122334455667788');
+      callback.searchParams.set('state', authorize.searchParams.get('state') as string);
+      http.get(callback.toString(), (res) => res.resume()).on('error', () => {});
+      process.env.PATH = '/nonexistent';
+    };
+
+    try {
+      await runConnect(['--site', site.url, '--client', 'claude-code', '--name', 'gated'], { openBrowserFn });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+
+    const printed = log.mock.calls.flat().join('\n');
+    expect(printed).toContain('minted-once');
+    expect(printed).toContain(CUSTOM_HEADERS_ENV);
+    expect(printed).not.toContain('probe-secret');
+  });
+
   it('connect gets through the gateway and writes the headers to the config', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gk-custom-headers-'));
     const originalHome = process.env.HOME;
