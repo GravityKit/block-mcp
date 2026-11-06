@@ -25,6 +25,7 @@ import {
   CUSTOM_HEADERS_ENV,
   isSameSiteRedirect,
   parseCustomHeaders,
+  warnIfHeadersUnencrypted,
   type CustomHeaders,
 } from './custom-headers.js';
 
@@ -387,7 +388,8 @@ function describeExchangeFetchError(url: string, err: unknown): string {
 
 /** Points someone whose site sits behind an access gateway at the setting that gets through it. */
 const GATEWAY_HINT =
-  `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again.`;
+  `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again. ` +
+  'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
 
 /**
  * Exchange a single-use code for the credential set.
@@ -735,7 +737,7 @@ export function printConfig(creds: Credentials, reveal: boolean, name: string = 
   console.log('For Cursor: paste into ~/.cursor/mcp.json\n');
   if (!reveal) {
     console.log(
-      'The app password was hidden. Re-run with --reveal (or --client print) to print it.\n'
+      'The app password and any custom headers were hidden. Re-run with --reveal (or --client print) to print them.\n'
     );
   }
 }
@@ -843,6 +845,7 @@ export async function runConnect(
     console.error(`Error: ${parsedHeaders.message}`);
     process.exit(1);
   }
+  warnIfHeadersUnencrypted(args.site, parsedHeaders.headers);
 
   // ── 2. Generate state ──────────────────────────────────────────────────
   const state = crypto.randomUUID();

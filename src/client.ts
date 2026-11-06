@@ -20,7 +20,8 @@ import { CUSTOM_HEADERS_ENV, stripHeadersOffSite } from './custom-headers.js';
 const GATEWAY_PAGE_MESSAGE =
   'the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. ' +
   'A login gateway such as Cloudflare Access or a security plugin is probably blocking it. ' +
-  `If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config.`;
+  `If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. ` +
+  'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
 
 /** True when a response body is an unparsed HTML page rather than REST API JSON. */
 function isHtmlPage(data: unknown, contentType: unknown): boolean {

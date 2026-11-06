@@ -40109,6 +40109,22 @@ function parseCustomHeaders(raw2) {
   }
   return { ok: true, headers };
 }
+function warnIfHeadersUnencrypted(siteUrl, customHeaders) {
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  let isUnencrypted = false;
+  try {
+    const { protocol, hostname: hostname3 } = new URL(siteUrl);
+    const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(hostname3) || hostname3.endsWith(".local");
+    isUnencrypted = protocol === "http:" && !isLocal;
+  } catch {
+    return false;
+  }
+  const shouldWarn = hasCustomHeaders && isUnencrypted;
+  if (shouldWarn) {
+    console.error(`[block-mcp] ${CUSTOM_HEADERS_ENV} is set, but ${siteUrl} uses http://, so these headers are sent unencrypted. Use https://.`);
+  }
+  return shouldWarn;
+}
 function isSameSiteRedirect(current, next) {
   const usesStandardHttpsPort = next.port === "" || next.port === "443";
   const isHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && usesStandardHttpsPort;
@@ -40138,7 +40154,7 @@ function stripHeadersOffSite(options, siteUrl, customHeaders) {
 }
 
 // src/client.ts
-var GATEWAY_PAGE_MESSAGE = `the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config.`;
+var GATEWAY_PAGE_MESSAGE = `the site returned an HTML page instead of a REST API response, so WordPress did not answer this request. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.`;
 function isHtmlPage(data, contentType) {
   return typeof data === "string" && /text\/html/i.test(String(contentType ?? ""));
 }
@@ -54269,7 +54285,7 @@ function describeExchangeFetchError(url3, err) {
   const hint = isTrustFailure ? ` ${CA_TRUST_HINT}` : "";
   return `Exchange failed: could not reach ${url3} (${reason}).${hint}`;
 }
-var GATEWAY_HINT = `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again.`;
+var GATEWAY_HINT = `If the site is behind a login gateway such as Cloudflare Access, set ${CUSTOM_HEADERS_ENV} to the headers it requires and run connect again. If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.`;
 async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FETCH_TIMEOUT_MS, customHeaders = {}) {
   let url3 = `${site}/?rest_route=/gk-block-api/v1/connect/exchange`;
   const controller = new AbortController();
@@ -54458,7 +54474,7 @@ function printConfig(creds, reveal, name = "block-mcp") {
   console.log("For Cursor: paste into ~/.cursor/mcp.json\n");
   if (!reveal) {
     console.log(
-      "The app password was hidden. Re-run with --reveal (or --client print) to print it.\n"
+      "The app password and any custom headers were hidden. Re-run with --reveal (or --client print) to print them.\n"
     );
   }
 }
@@ -54519,6 +54535,7 @@ async function runConnect(argv, opts = {}) {
     console.error(`Error: ${parsedHeaders.message}`);
     process.exit(1);
   }
+  warnIfHeadersUnencrypted(args.site, parsedHeaders.headers);
   const state = crypto2.randomUUID();
   let resolveCallback;
   const callbackPromise = new Promise((resolve) => {
@@ -54821,6 +54838,7 @@ async function main() {
     );
     return;
   }
+  warnIfHeadersUnencrypted(cfg.config.url, cfg.config.customHeaders);
   const client = new WordPressBlockClient({
     wordpress_url: cfg.config.url,
     auth: {

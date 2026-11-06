@@ -19,7 +19,7 @@ import {
   printConfig,
   runConnect,
 } from '../src/connect.js';
-import { CUSTOM_HEADERS_ENV, parseCustomHeaders, stripHeadersOffSite } from '../src/custom-headers.js';
+import { CUSTOM_HEADERS_ENV, parseCustomHeaders, stripHeadersOffSite, warnIfHeadersUnencrypted } from '../src/custom-headers.js';
 import { fetchAddendum } from '../src/instructions.js';
 
 const TOKEN = { 'CF-Access-Client-Id': 'probe-id', 'CF-Access-Client-Secret': 'probe-secret' };
@@ -119,6 +119,23 @@ describe('parseCustomHeaders', () => {
       expect(result.ok).toBe(false);
     }
   );
+});
+
+describe('warnIfHeadersUnencrypted', () => {
+  it.each([
+    ['http://site.test', TOKEN, true],
+    ['https://site.test', TOKEN, false],
+    ['http://localhost:8080', TOKEN, false],
+    ['http://127.0.0.1:8080', TOKEN, false],
+    ['http://[::1]:8080', TOKEN, false],
+    ['http://dev.local', TOKEN, false],
+    ['http://site.test', {}, false],
+  ])('for %s with headers %j returns %s', (url, headers, expected) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(warnIfHeadersUnencrypted(url, headers)).toBe(expected);
+    expect(error).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(error.mock.calls.flat().join(' ')).not.toContain('probe-secret');
+  });
 });
 
 describe('stripHeadersOffSite', () => {
@@ -300,6 +317,7 @@ describe('an HTML page answering a REST call', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('HTML page');
     expect(error.message).toContain(CUSTOM_HEADERS_ENV);
+    expect(error.message).toContain('Service Auth');
     expect(error.message).not.toContain('Sign in');
     expect(error.wpCode).toBe('gateway_page');
   });

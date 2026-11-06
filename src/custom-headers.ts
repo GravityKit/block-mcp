@@ -78,6 +78,27 @@ export function parseCustomHeaders(raw: string | undefined): CustomHeadersResult
 }
 
 /**
+ * Warn when a secret header would cross the network in clear text. Stays quiet for
+ * the local machine, which never leaves it, and returns whether it warned.
+ */
+export function warnIfHeadersUnencrypted(siteUrl: string, customHeaders: CustomHeaders): boolean {
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  let isUnencrypted = false;
+  try {
+    const { protocol, hostname } = new URL(siteUrl);
+    const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(hostname) || hostname.endsWith('.local');
+    isUnencrypted = protocol === 'http:' && !isLocal;
+  } catch {
+    return false;
+  }
+  const shouldWarn = hasCustomHeaders && isUnencrypted;
+  if (shouldWarn) {
+    console.error(`[block-mcp] ${CUSTOM_HEADERS_ENV} is set, but ${siteUrl} uses http://, so these headers are sent unencrypted. Use https://.`);
+  }
+  return shouldWarn;
+}
+
+/**
  * Whether a redirect stays on the site: the same origin, or the same host moving
  * from http to https on the standard port. A site that forces HTTPS is a security
  * upgrade, not an off-site leak. Any other change, including an https to http
