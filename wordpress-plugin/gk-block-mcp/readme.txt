@@ -124,14 +124,21 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 #### 🚀 Added
 
-* Block MCP can now reach sites behind Cloudflare Access or another login gateway. Set `WORDPRESS_CUSTOM_HEADERS` to the headers the gateway requires, and they are sent with connecting and every tool call.
+* Block MCP can now reach sites behind Cloudflare Access or another login gateway. Set `WORDPRESS_CUSTOM_HEADERS` to the headers the gateway requires, and they are sent when connecting and with every tool call.
 
 #### 🐛 Fixed
 
 * Tool calls now return a clear error when a login gateway or security plugin answers in place of WordPress.
+* WordPress credentials are no longer sent when a site redirects a request to another subdomain.
+
+#### 💻 Developer Updates
+
+* Tool errors now use the `gateway_page` code when something in front of WordPress answers a request.
 
 #### 🔧 Updated
-* The minimum required WordPress version is now 6.5 and the minimum PHP version is 7.4.
+
+* The minimum required WordPress version is now 6.5.
+* [Foundation](https://www.gravitykit.com/foundation/) to version 1.35.0.
 
 = 2.2.1 on August 20, 2026 =
 
