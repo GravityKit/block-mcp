@@ -341,8 +341,11 @@ class ConnectionsTest extends WP_UnitTestCase {
 	 */
 	public function test_purge_removes_connection_rows_and_prefix_delete_escapes_underscores() {
 		update_network_option( null, Connections::META_ROW_PREFIX . 'row-1', array( 'user_id' => 0 ) );
+		update_network_option( null, 'gkXblockXapiXconnXmetaXother', 'x' );
 		Connections::purge_all_recorded();
 		$this->assertNull( get_network_option( null, Connections::META_ROW_PREFIX . 'row-1', null ) );
+		$this->assertSame( 'x', get_network_option( null, 'gkXblockXapiXconnXmetaXother', null ) );
+		delete_network_option( null, 'gkXblockXapiXconnXmetaXother' );
 
 		update_option( 'gk_block_api_xchg_mine', 'x', false );
 		update_option( 'gkXblockXapi_xchg_other', 'x', false );

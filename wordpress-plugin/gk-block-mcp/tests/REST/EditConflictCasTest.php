@@ -205,6 +205,36 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * The rollback must match what the row actually holds when a filter changed
+	 * the content before a later hook threw.
+	 */
+	public function test_rollback_matches_content_changed_by_a_filter() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$change   = static function ( $data ) {
+			$data['post_content'] .= wp_slash( '<!-- added "by" a filter -->' );
+			return $data;
+		};
+		$throw    = static function () {
+			throw new \RuntimeException( 'hook failed' );
+		};
+		add_filter( 'wp_insert_post_data', $change, 10 );
+		add_action( 'save_post', $throw );
+
+		$caught = false;
+		try {
+			$this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} catch ( \RuntimeException $error ) {
+			$caught = true;
+		}
+		remove_filter( 'wp_insert_post_data', $change, 10 );
+		remove_action( 'save_post', $throw );
+
+		$this->assertTrue( $caught );
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ) );
+	}
+
+	/**
 	 * While another save holds the post's lock, a guarded save fails closed and
 	 * writes nothing. GET_LOCK is scripted because the SQLite harness has none.
 	 */

@@ -243,8 +243,8 @@ class Connections {
 		global $wpdb;
 		$like = $wpdb->esc_like( self::META_ROW_PREFIX ) . '%';
 		if ( is_multisite() ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no caching layer covers a LIKE.
-			return (array) $wpdb->get_col(
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no core API lists them.
+			$names = (array) $wpdb->get_col(
 				$wpdb->prepare(
 					'SELECT meta_key FROM %i WHERE site_id = %d AND meta_key LIKE %s',
 					$wpdb->sitemeta,
@@ -252,14 +252,36 @@ class Connections {
 					$like
 				)
 			);
+		} else {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no core API lists them.
+			$names = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					'SELECT option_name FROM %i WHERE option_name LIKE %s',
+					$wpdb->options,
+					$like
+				)
+			);
 		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no caching layer covers a LIKE.
-		return (array) $wpdb->get_col(
-			$wpdb->prepare(
-				'SELECT option_name FROM %i WHERE option_name LIKE %s',
-				$wpdb->options,
-				$like
-			)
+
+		return array_values( self::names_with_prefix( $names, self::META_ROW_PREFIX ) );
+	}
+
+	/**
+	 * Keep only names that really start with a prefix. Some database layers, such as
+	 * the SQLite drop-in, still treat an escaped `_` in LIKE as a wildcard.
+	 *
+	 * @since $ver$
+	 *
+	 * @param array  $names  Names returned by a LIKE query.
+	 * @param string $prefix Exact prefix.
+	 * @return string[]
+	 */
+	public static function names_with_prefix( array $names, $prefix ) {
+		return array_filter(
+			array_map( 'strval', $names ),
+			static function ( $name ) use ( $prefix ) {
+				return 0 === strpos( $name, $prefix );
+			}
 		);
 	}
 
@@ -462,13 +484,8 @@ class Connections {
 					$wpdb->esc_like( $prefix ) . '%'
 				)
 			);
-			foreach ( $names as $name ) {
-				// Some database layers, such as the SQLite drop-in, still treat an
-				// escaped `_` as a wildcard, so confirm the prefix here too.
-				$has_prefix = 0 === strpos( (string) $name, $prefix );
-				if ( $has_prefix ) {
-					delete_option( (string) $name );
-				}
+			foreach ( self::names_with_prefix( $names, $prefix ) as $name ) {
+				delete_option( $name );
 			}
 		}
 	}

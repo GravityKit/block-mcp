@@ -609,6 +609,19 @@ class Block_Writer {
 		// Get the current latest revision as the "before" snapshot.
 		$before_revision_id = $this->get_latest_revision_id( $post_id );
 
+		// A filter can change the content wp_update_post stores, and a rollback has
+		// to match the bytes actually in the row. Revisions go through this filter
+		// too, so only this post counts.
+		$stored_content = $new_content;
+		$track_stored   = static function ( $data, $postarr ) use ( &$stored_content, $post_id ) {
+			$is_this_post = isset( $postarr['ID'] ) && (int) $postarr['ID'] === (int) $post_id;
+			if ( $is_this_post && isset( $data['post_content'] ) ) {
+				$stored_content = wp_unslash( $data['post_content'] );
+			}
+			return $data;
+		};
+		add_filter( 'wp_insert_post_data', $track_stored, PHP_INT_MAX, 2 );
+
 		try {
 			// wp_update_post() runs wp_unslash() on post_content (it expects $_POST-shaped
 			// input). serialize_blocks() output is unslashed JSON, so without wp_slash()
@@ -625,10 +638,12 @@ class Block_Writer {
 			// A hook threw partway through the save. Without this the swapped content
 			// would stay with no revision and no completed save hooks.
 			if ( $did_cas_swap ) {
-				$this->roll_back_swap( $post_id, $expected, $new_content );
+				$this->roll_back_swap( $post_id, $expected, $stored_content );
 			}
 			throw $error;
 		} finally {
+			remove_filter( 'wp_insert_post_data', $track_stored, PHP_INT_MAX );
+
 			// Restore content_save_pre via finally so a downstream throw inside
 			// wp_update_post (e.g. a save_post hook handler that errors) doesn't
 			// leave the filter stripped for every subsequent save in this
@@ -644,7 +659,7 @@ class Block_Writer {
 				// rejected the save (e.g. WP core refuses to empty a title-less
 				// post). Restore the pre-swap content so a failed save never
 				// destroys the post.
-				$this->roll_back_swap( $post_id, $expected, $new_content );
+				$this->roll_back_swap( $post_id, $expected, $stored_content );
 			}
 			return $result;
 		}
