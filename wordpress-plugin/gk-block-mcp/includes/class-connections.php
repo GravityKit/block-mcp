@@ -243,8 +243,8 @@ class Connections {
 		global $wpdb;
 		$like = $wpdb->esc_like( self::META_ROW_PREFIX ) . '%';
 		if ( is_multisite() ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no caching layer covers a LIKE.
-			return (array) $wpdb->get_col(
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of network options; no core API lists them.
+			$names = (array) $wpdb->get_col(
 				$wpdb->prepare(
 					'SELECT meta_key FROM %i WHERE site_id = %d AND meta_key LIKE %s',
 					$wpdb->sitemeta,
@@ -252,14 +252,36 @@ class Connections {
 					$like
 				)
 			);
+		} else {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no core API lists them.
+			$names = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					'SELECT option_name FROM %i WHERE option_name LIKE %s',
+					$wpdb->options,
+					$like
+				)
+			);
 		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prefix scan of options; no caching layer covers a LIKE.
-		return (array) $wpdb->get_col(
-			$wpdb->prepare(
-				'SELECT option_name FROM %i WHERE option_name LIKE %s',
-				$wpdb->options,
-				$like
-			)
+
+		return array_values( self::names_with_prefix( $names, self::META_ROW_PREFIX ) );
+	}
+
+	/**
+	 * Keep only names that really start with a prefix. Some database layers, such as
+	 * the SQLite drop-in, still treat an escaped `_` in LIKE as a wildcard.
+	 *
+	 * @since $ver$
+	 *
+	 * @param array  $names  Names returned by a LIKE query.
+	 * @param string $prefix Exact prefix.
+	 * @return string[]
+	 */
+	public static function names_with_prefix( array $names, $prefix ) {
+		return array_filter(
+			array_map( 'strval', $names ),
+			static function ( $name ) use ( $prefix ) {
+				return 0 === strpos( $name, $prefix );
+			}
 		);
 	}
 
@@ -432,6 +454,38 @@ class Connections {
 			$is_managed = is_array( $item ) && isset( $item['name'] ) && strpos( $item['name'], self::NAME_PREFIX ) === 0;
 			if ( $is_managed ) {
 				\WP_Application_Passwords::delete_application_password( $host, (string) $uuid );
+			}
+		}
+
+		foreach ( self::meta_row_names() as $name ) {
+			delete_network_option( null, (string) $name );
+		}
+	}
+
+	/**
+	 * Delete every option whose name starts with one of the given prefixes.
+	 *
+	 * Uses delete_option() so a persistent object cache drops the row too, and
+	 * escapes the prefix because `_` in a LIKE pattern matches any character.
+	 *
+	 * @since $ver$
+	 *
+	 * @param string[] $prefixes Option name prefixes.
+	 * @return void
+	 */
+	public static function delete_options_by_prefix( array $prefixes ) {
+		global $wpdb;
+		foreach ( $prefixes as $prefix ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- no core API lists options by prefix.
+			$names = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					'SELECT option_name FROM %i WHERE option_name LIKE %s',
+					$wpdb->options,
+					$wpdb->esc_like( $prefix ) . '%'
+				)
+			);
+			foreach ( self::names_with_prefix( $names, $prefix ) as $name ) {
+				delete_option( $name );
 			}
 		}
 	}

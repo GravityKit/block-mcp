@@ -336,6 +336,38 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Uninstall removes the rows recording each connection, and keeps a name that
+	 * only matches if `_` were a wildcard.
+	 */
+	public function test_purge_all_recorded_removes_connection_meta_rows() {
+		update_network_option( null, Connections::META_ROW_PREFIX . 'row-1', array( 'user_id' => 0 ) );
+		update_network_option( null, 'gkXblockXapiXconnXmetaXother', 'x' );
+
+		Connections::purge_all_recorded();
+
+		$this->assertNull( get_network_option( null, Connections::META_ROW_PREFIX . 'row-1', null ) );
+		$this->assertSame( 'x', get_network_option( null, 'gkXblockXapiXconnXmetaXother', null ) );
+		delete_network_option( null, 'gkXblockXapiXconnXmetaXother' );
+	}
+
+	/**
+	 * A prefix delete removes every option under the prefix, and keeps a name that
+	 * only matches if `_` were a wildcard.
+	 */
+	public function test_delete_options_by_prefix_treats_underscore_literally() {
+		update_option( 'gk_block_api_xchg_mine', 'x', false );
+		update_option( 'gkXblockXapi_xchg_other', 'x', false );
+		update_option( 'gk_block_api_xchgXother', 'x', false );
+		Connections::delete_options_by_prefix( array( 'gk_block_api_xchg_' ) );
+
+		$this->assertFalse( get_option( 'gk_block_api_xchg_mine' ) );
+		$this->assertSame( 'x', get_option( 'gkXblockXapi_xchg_other' ) );
+		$this->assertSame( 'x', get_option( 'gk_block_api_xchgXother' ) );
+		delete_option( 'gkXblockXapi_xchg_other' );
+		delete_option( 'gk_block_api_xchgXother' );
+	}
+
+	/**
 	 * purge_all_recorded() deletes every credential the meta store knows about,
 	 * from whichever user holds it — the uninstall path for own-account
 	 * credentials that the agent teardown can't reach.

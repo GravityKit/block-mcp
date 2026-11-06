@@ -181,6 +181,277 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A hook that throws inside wp_update_post must not leave the swapped content
+	 * in place with no revision and no completed save hooks.
+	 */
+	public function test_hook_that_throws_after_swap_restores_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$throw    = static function () {
+			throw new \RuntimeException( 'hook failed' );
+		};
+		add_filter( 'wp_insert_post_data', $throw );
+
+		$caught = false;
+		try {
+			$this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} catch ( \RuntimeException $error ) {
+			$caught = true;
+		}
+		remove_filter( 'wp_insert_post_data', $throw );
+
+		$this->assertTrue( $caught, 'the exception must still reach the caller' );
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ), 'the pre-swap content must be restored' );
+	}
+
+	/**
+	 * Run a guarded save that is expected to throw, with the given hooks attached.
+	 *
+	 * @param int      $post_id Post.
+	 * @param string   $snapshot Snapshot the save is based on.
+	 * @param callable $attach  Attaches hooks, and returns a callable that removes them.
+	 * @return void
+	 */
+	private function save_expecting_exception( $post_id, $snapshot, callable $attach ) {
+		$detach = $attach();
+		$caught = false;
+		try {
+			$this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} catch ( \RuntimeException $error ) {
+			$caught = true;
+		}
+		$detach();
+		$this->assertTrue( $caught, 'the exception must still reach the caller' );
+	}
+
+	/**
+	 * A filter changed the content, then a hook threw before the database write. The
+	 * row still holds the swap's bytes, so it rolls back.
+	 */
+	public function test_throw_before_the_write_rolls_back_even_when_a_filter_changed_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () {
+				$change = static function ( $data ) {
+					$data['post_content'] .= wp_slash( '<!-- added -->' );
+					return $data;
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_filter( 'wp_insert_post_data', $change );
+				add_action( 'pre_post_update', $throw );
+				return static function () use ( $change, $throw ) {
+					remove_filter( 'wp_insert_post_data', $change );
+					remove_action( 'pre_post_update', $throw );
+				};
+			}
+		);
+
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ) );
+	}
+
+	/**
+	 * A nested save changed only the letter case, then a later hook threw. Case-
+	 * insensitive collations see those bytes as equal, so the rollback compares bytes.
+	 */
+	public function test_throw_after_a_case_only_nested_save_keeps_the_nested_edit() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () use ( $post_id ) {
+				$nested = static function ( $id ) use ( $post_id, &$nested ) {
+					if ( $id !== $post_id ) {
+						return;
+					}
+					remove_action( 'save_post', $nested, 10 );
+					$saved = get_post_field( 'post_content', $post_id, 'raw' );
+					wp_update_post(
+						array(
+							'ID'           => $post_id,
+							'post_content' => wp_slash( str_replace( 'NEW', 'new', $saved ) ),
+						)
+					);
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_action( 'save_post', $nested, 10 );
+				add_action( 'save_post', $throw, 20 );
+				return static function () use ( $nested, $throw ) {
+					remove_action( 'save_post', $nested, 10 );
+					remove_action( 'save_post', $throw, 20 );
+				};
+			}
+		);
+
+		$this->assertStringContainsString( 'new', $this->persisted_content( $post_id ) );
+		$this->assertStringNotContainsString( 'KEEP', $this->persisted_content( $post_id ) );
+	}
+
+	/**
+	 * A hook made its own successful save, then a later hook threw. The rollback must
+	 * not overwrite that nested edit with the old snapshot.
+	 */
+	public function test_throw_after_a_nested_save_keeps_the_nested_edit() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () use ( $post_id ) {
+				$nested = static function ( $id ) use ( $post_id, &$nested ) {
+					if ( $id !== $post_id ) {
+						return;
+					}
+					remove_action( 'save_post', $nested, 10 );
+					wp_update_post(
+						array(
+							'ID'           => $post_id,
+							'post_content' => '<p>NESTED</p>',
+						)
+					);
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_action( 'save_post', $nested, 10 );
+				add_action( 'save_post', $throw, 20 );
+				return static function () use ( $nested, $throw ) {
+					remove_action( 'save_post', $nested, 10 );
+					remove_action( 'save_post', $throw, 20 );
+				};
+			}
+		);
+
+		$this->assertSame( '<p>NESTED</p>', $this->persisted_content( $post_id ) );
+	}
+
+	/**
+	 * A filtered save reached the database before a later hook threw. That content
+	 * stays, because undoing it safely would need the tracking that can undo a nested
+	 * edit. Core only saves the revision after save_post, so none exists for this save.
+	 */
+	public function test_throw_after_a_finished_filtered_save_keeps_the_saved_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () {
+				$change = static function ( $data ) {
+					$data['post_content'] .= wp_slash( '<!-- added -->' );
+					return $data;
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_filter( 'wp_insert_post_data', $change );
+				add_action( 'save_post', $throw );
+				return static function () use ( $change, $throw ) {
+					remove_filter( 'wp_insert_post_data', $change );
+					remove_action( 'save_post', $throw );
+				};
+			}
+		);
+
+		$content = $this->persisted_content( $post_id );
+		$this->assertStringContainsString( 'NEW', $content );
+		$this->assertStringContainsString( '<!-- added -->', $content );
+	}
+
+	/**
+	 * While another save holds the post's lock, a guarded save fails closed and
+	 * writes nothing. GET_LOCK is scripted because the SQLite harness has none.
+	 */
+	public function test_save_fails_closed_when_another_save_holds_the_lock() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+
+		$GLOBALS['wpdb'] = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 0 );
+		try {
+			$result = $this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'edit_conflict', $result->get_error_code() );
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ), 'a refused save must write nothing' );
+	}
+
+	/**
+	 * A guarded save takes the lock, writes, and releases the lock it took.
+	 */
+	public function test_save_takes_and_releases_the_lock() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+		$double   = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'NEW', $this->persisted_content( $post_id ) );
+		$statements = implode( "\n", $double->captured );
+		$this->assertStringContainsString( 'GET_LOCK', $statements );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $statements );
+	}
+
+	/**
+	 * A hook that throws during a guarded save still releases the lock. A leaked lock
+	 * stays on the connection, so on a persistent connection every later save of the
+	 * post would wait 5 seconds and return a 409.
+	 */
+	public function test_save_releases_the_lock_when_a_hook_throws() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+		$double   = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$this->save_expecting_exception(
+				$post_id,
+				$snapshot,
+				static function () {
+					$throw = static function () {
+						throw new \RuntimeException( 'hook failed' );
+					};
+					add_filter( 'wp_insert_post_data', $throw );
+					return static function () use ( $throw ) {
+						remove_filter( 'wp_insert_post_data', $throw );
+					};
+				}
+			);
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$statements = implode( "\n", $double->captured );
+		$this->assertStringContainsString( 'GET_LOCK', $statements );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $statements );
+	}
+
+	/**
 	 * The lazy gk_ref persist writes straight to post_content via $wpdb,
 	 * bypassing wp_update_post. With a snapshot it must compare-and-swap: a
 	 * concurrent content edit that landed after the ref walk read the post

@@ -1459,7 +1459,7 @@ class Connect_Page {
 					$wpdb->esc_like( $prefix ) . '%'
 				)
 			);
-			foreach ( (array) $names as $name ) {
+			foreach ( Connections::names_with_prefix( (array) $names, $prefix ) as $name ) {
 				$record  = get_option( $name );
 				$expires = is_array( $record ) && isset( $record['expires_at'] ) ? (int) $record['expires_at'] : 0;
 				if ( ! is_array( $record ) || $now > $expires ) {
