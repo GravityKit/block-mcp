@@ -434,5 +434,42 @@ class Connections {
 				\WP_Application_Passwords::delete_application_password( $host, (string) $uuid );
 			}
 		}
+
+		foreach ( self::meta_row_names() as $name ) {
+			delete_network_option( null, (string) $name );
+		}
+	}
+
+	/**
+	 * Delete every option whose name starts with one of the given prefixes.
+	 *
+	 * Uses delete_option() so a persistent object cache drops the row too, and
+	 * escapes the prefix because `_` in a LIKE pattern matches any character.
+	 *
+	 * @since $ver$
+	 *
+	 * @param string[] $prefixes Option name prefixes.
+	 * @return void
+	 */
+	public static function delete_options_by_prefix( array $prefixes ) {
+		global $wpdb;
+		foreach ( $prefixes as $prefix ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- no core API lists options by prefix.
+			$names = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					'SELECT option_name FROM %i WHERE option_name LIKE %s',
+					$wpdb->options,
+					$wpdb->esc_like( $prefix ) . '%'
+				)
+			);
+			foreach ( $names as $name ) {
+				// Some database layers, such as the SQLite drop-in, still treat an
+				// escaped `_` as a wildcard, so confirm the prefix here too.
+				$has_prefix = 0 === strpos( (string) $name, $prefix );
+				if ( $has_prefix ) {
+					delete_option( (string) $name );
+				}
+			}
+		}
 	}
 }

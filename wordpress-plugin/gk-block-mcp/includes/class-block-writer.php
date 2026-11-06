@@ -434,6 +434,104 @@ class Block_Writer {
 	 * @return array|\WP_Error
 	 */
 	public function save_post_content( $post_id, $new_content, $expected = null ) {
+		global $wpdb;
+
+		// The guarded save is two writes: the swap, then wp_update_post. Another
+		// writer landing between them would pass its own compare-and-swap and then
+		// be overwritten by the second write, with both reporting success. The lock
+		// keeps those two writes together. SQLite has no GET_LOCK, so it goes unlocked.
+		$needs_lock = null !== $expected && ! empty( $wpdb->is_mysql );
+		if ( ! $needs_lock ) {
+			return $this->write_post_content( $post_id, $new_content, $expected );
+		}
+
+		if ( ! $this->save_lock_acquire( $post_id ) ) {
+			return new \WP_Error(
+				'edit_conflict',
+				__( 'Another save of this post is still running. Re-fetch the page and retry.', 'gk-block-mcp' ),
+				array( 'status' => 409 )
+			);
+		}
+
+		try {
+			return $this->write_post_content( $post_id, $new_content, $expected );
+		} finally {
+			$this->save_lock_release( $post_id );
+		}
+	}
+
+	/**
+	 * Name of the per-post advisory lock that keeps a guarded save's writes together.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string
+	 */
+	private function save_lock_name( $post_id ) {
+		global $wpdb;
+		$db     = defined( 'DB_NAME' ) ? DB_NAME : '';
+		$prefix = isset( $wpdb->prefix ) ? $wpdb->prefix : '';
+		return 'gkbmsave_' . md5( $db . ':' . $prefix . ':' . (int) $post_id );
+	}
+
+	/**
+	 * Take the per-post save lock. Waits at most 5 seconds so a slow save becomes
+	 * a retryable conflict, never a hung request.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool True when the lock is held (and must be released).
+	 */
+	private function save_lock_acquire( $post_id ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- server-side advisory lock, no API exists.
+		return 1 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $this->save_lock_name( $post_id ), 5 ) );
+	}
+
+	/**
+	 * Release the per-post save lock.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private function save_lock_release( $post_id ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- releasing the advisory lock taken above.
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $this->save_lock_name( $post_id ) ) );
+	}
+
+	/**
+	 * Restore the pre-swap content after a save that failed partway. The WHERE pins
+	 * our own bytes so a writer that already moved the row on is not clobbered.
+	 *
+	 * @param int    $post_id     Post ID.
+	 * @param string $expected    Content before the swap.
+	 * @param string $new_content Content the swap wrote.
+	 * @return void
+	 */
+	private function roll_back_swap( $post_id, $expected, $new_content ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query(
+			$wpdb->prepare(
+				'UPDATE %i SET post_content = %s WHERE ID = %d AND post_content = %s',
+				$wpdb->posts,
+				$expected,
+				$post_id,
+				$new_content
+			)
+		);
+		clean_post_cache( $post_id );
+	}
+
+	/**
+	 * Write the content, with the compare-and-swap guard when a snapshot is given.
+	 *
+	 * @param int         $post_id     Post ID.
+	 * @param string      $new_content Serialized block markup to save.
+	 * @param string|null $expected    Snapshot the mutation was based on.
+	 * @return array|\WP_Error
+	 * @throws \Throwable When a hook throws during the save, after rolling back the swap.
+	 */
+	private function write_post_content( $post_id, $new_content, $expected ) {
 		// Optimistic-concurrency guard: when the caller passes the snapshot its
 		// mutation was based on, persist via a portable compare-and-swap so a
 		// concurrent edit is never silently clobbered.
@@ -523,6 +621,13 @@ class Block_Writer {
 				),
 				true
 			);
+		} catch ( \Throwable $error ) {
+			// A hook threw partway through the save. Without this the swapped content
+			// would stay with no revision and no completed save hooks.
+			if ( $did_cas_swap ) {
+				$this->roll_back_swap( $post_id, $expected, $new_content );
+			}
+			throw $error;
 		} finally {
 			// Restore content_save_pre via finally so a downstream throw inside
 			// wp_update_post (e.g. a save_post hook handler that errors) doesn't
@@ -538,21 +643,8 @@ class Block_Writer {
 				// The raw swap already wrote $new_content, but wp_update_post
 				// rejected the save (e.g. WP core refuses to empty a title-less
 				// post). Restore the pre-swap content so a failed save never
-				// destroys the post, and drop the primed cache so readers do not
-				// serve the rolled-back value. The WHERE pins our own bytes so a
-				// writer that already moved the row on is not clobbered.
-				global $wpdb;
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-				$wpdb->query(
-					$wpdb->prepare(
-						'UPDATE %i SET post_content = %s WHERE ID = %d AND post_content = %s',
-						$wpdb->posts,
-						$expected,
-						$post_id,
-						$new_content
-					)
-				);
-				clean_post_cache( $post_id );
+				// destroys the post.
+				$this->roll_back_swap( $post_id, $expected, $new_content );
 			}
 			return $result;
 		}

@@ -737,19 +737,12 @@ class Settings_Page {
 
 		// Per-post rate-limit transients accumulate per write activity. Sweep
 		// them too so reset is a true clean slate.
-		global $wpdb;
-		$wpdb->query(
-			$wpdb->prepare(
-				'DELETE FROM %i
-				WHERE option_name LIKE %s
-				   OR option_name LIKE %s
-				   OR option_name LIKE %s
-				   OR option_name LIKE %s',
-				$wpdb->options,
-				'_transient_gk_block_api_rate_%',
-				'_transient_timeout_gk_block_api_rate_%',
-				'_transient_gk_block_api_instr_rl_%',
-				'_transient_timeout_gk_block_api_instr_rl_%'
+		Connections::delete_options_by_prefix(
+			array(
+				'_transient_gk_block_api_rate_',
+				'_transient_timeout_gk_block_api_rate_',
+				'_transient_gk_block_api_instr_rl_',
+				'_transient_timeout_gk_block_api_instr_rl_',
 			)
 		);
 

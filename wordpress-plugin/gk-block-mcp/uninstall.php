@@ -5,8 +5,8 @@
  * Cleans up plugin data when the plugin is deleted through the WordPress admin.
  *
  * Multisite-aware: when the plugin is network-active, every blog's option
- * scope is swept. Per-post rate-limit transients are also removed via a
- * direct DELETE (there's no `delete_transients_with_prefix` in core).
+ * scope is swept. Per-post rate-limit transients are also removed by prefix
+ * (there's no `delete_transients_with_prefix` in core).
  *
  * @package GravityKit\BlockMCP
  */
@@ -67,9 +67,8 @@ function gk_block_api_uninstall_blog() {
 	// Pattern reference-count cache (Pattern_Manager::REF_COUNT_CACHE_KEY).
 	delete_transient( 'gk_block_api_pattern_ref_counts' );
 
-	// Per-post rate-limit transients accumulate per write activity. Sweep the
-	// option table directly — there's no core helper for prefixed transient
-	// deletion. Also sweeps the per-IP `instr_rl_` rate-limit transients written
+	// Per-post rate-limit transients accumulate per write activity, and core has
+	// no helper for prefixed transient deletion. Also sweeps the per-IP `instr_rl_` rate-limit transients written
 	// by the public /instructions endpoint, plus the paste-mode passwords and
 	// single-use credential-exchange records stashed by Connect_Page — stored as
 	// non-autoloaded `gk_block_api_paste_pw_*` / `gk_block_api_xchg_*` options,
@@ -77,34 +76,21 @@ function gk_block_api_uninstall_blog() {
 	// so they must not survive uninstall — and the GC throttle marker. The
 	// `_transient_*` xchg/paste patterns are a defensive backstop for rows left by
 	// any pre-release build that used transients.
-	global $wpdb;
-	$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		$wpdb->prepare(
-			"DELETE FROM %i
-			WHERE option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name = 'gk_block_api_cred_gc_at'
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s
-			   OR option_name LIKE %s",
-			$wpdb->options,
-			'_transient_gk_block_api_rate_%',
-			'_transient_timeout_gk_block_api_rate_%',
-			'_transient_gk_block_api_instr_rl_%',
-			'_transient_timeout_gk_block_api_instr_rl_%',
-			'gk_block_api_paste_pw_%',
-			'gk_block_api_xchg_%',
-			'_transient_gk_block_api_paste_pw_%',
-			'_transient_timeout_gk_block_api_paste_pw_%',
-			'_transient_gk_block_api_xchg_%',
-			'_transient_timeout_gk_block_api_xchg_%'
+	GravityKit\BlockMCP\Connections::delete_options_by_prefix(
+		array(
+			'_transient_gk_block_api_rate_',
+			'_transient_timeout_gk_block_api_rate_',
+			'_transient_gk_block_api_instr_rl_',
+			'_transient_timeout_gk_block_api_instr_rl_',
+			'gk_block_api_paste_pw_',
+			'gk_block_api_xchg_',
+			'_transient_gk_block_api_paste_pw_',
+			'_transient_timeout_gk_block_api_paste_pw_',
+			'_transient_gk_block_api_xchg_',
+			'_transient_timeout_gk_block_api_xchg_',
 		)
 	);
+	delete_option( 'gk_block_api_cred_gc_at' );
 }
 
 if ( is_multisite() ) {

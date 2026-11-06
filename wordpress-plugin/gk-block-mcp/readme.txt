@@ -130,6 +130,9 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 
 * Tool calls now return a clear error when a login gateway or security plugin answers in place of WordPress.
 * WordPress credentials are no longer sent when a site redirects a request to another subdomain.
+* Two saves of the same post at the same time no longer lose one of the edits.
+* A plugin error during a save no longer leaves the new content in place without a revision.
+* Uninstalling now removes the saved connection records, and uninstalling or resetting settings can no longer delete a similarly named option from another plugin.
 
 #### 💻 Developer Updates
 

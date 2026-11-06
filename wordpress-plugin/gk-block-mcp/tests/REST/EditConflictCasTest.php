@@ -181,6 +181,76 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A hook that throws inside wp_update_post must not leave the swapped content
+	 * in place with no revision and no completed save hooks.
+	 */
+	public function test_hook_that_throws_after_swap_restores_content() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$throw    = static function () {
+			throw new \RuntimeException( 'hook failed' );
+		};
+		add_filter( 'wp_insert_post_data', $throw );
+
+		$caught = false;
+		try {
+			$this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} catch ( \RuntimeException $error ) {
+			$caught = true;
+		}
+		remove_filter( 'wp_insert_post_data', $throw );
+
+		$this->assertTrue( $caught, 'the exception must still reach the caller' );
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ), 'the pre-swap content must be restored' );
+	}
+
+	/**
+	 * While another save holds the post's lock, a guarded save fails closed and
+	 * writes nothing. GET_LOCK is scripted because the SQLite harness has none.
+	 */
+	public function test_save_fails_closed_when_another_save_holds_the_lock() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+
+		$GLOBALS['wpdb'] = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 0 );
+		try {
+			$result = $this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'edit_conflict', $result->get_error_code() );
+		$this->assertSame( $snapshot, $this->persisted_content( $post_id ), 'a refused save must write nothing' );
+	}
+
+	/**
+	 * A guarded save takes the lock, writes, and releases the lock it took.
+	 */
+	public function test_save_takes_and_releases_the_lock() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+		$double   = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$result = $this->crud->save_blocks( $post_id, array( $this->block( 'core/paragraph', array(), '<p>NEW</p>' ) ), $snapshot );
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$this->assertNotWPError( $result );
+		$this->assertStringContainsString( 'NEW', $this->persisted_content( $post_id ) );
+		$statements = implode( "\n", $double->captured );
+		$this->assertStringContainsString( 'GET_LOCK', $statements );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $statements );
+	}
+
+	/**
 	 * The lazy gk_ref persist writes straight to post_content via $wpdb,
 	 * bypassing wp_update_post. With a snapshot it must compare-and-swap: a
 	 * concurrent content edit that landed after the ref walk read the post

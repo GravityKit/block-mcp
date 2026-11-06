@@ -336,6 +336,27 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Uninstall removes the rows recording each connection, and every row under a
+	 * prefix, without touching a name that only matches if `_` were a wildcard.
+	 */
+	public function test_purge_removes_connection_rows_and_prefix_delete_escapes_underscores() {
+		update_network_option( null, Connections::META_ROW_PREFIX . 'row-1', array( 'user_id' => 0 ) );
+		Connections::purge_all_recorded();
+		$this->assertNull( get_network_option( null, Connections::META_ROW_PREFIX . 'row-1', null ) );
+
+		update_option( 'gk_block_api_xchg_mine', 'x', false );
+		update_option( 'gkXblockXapi_xchg_other', 'x', false );
+		update_option( 'gk_block_api_xchgXother', 'x', false );
+		Connections::delete_options_by_prefix( array( 'gk_block_api_xchg_' ) );
+
+		$this->assertFalse( get_option( 'gk_block_api_xchg_mine' ) );
+		$this->assertSame( 'x', get_option( 'gkXblockXapi_xchg_other' ) );
+		$this->assertSame( 'x', get_option( 'gk_block_api_xchgXother' ) );
+		delete_option( 'gkXblockXapi_xchg_other' );
+		delete_option( 'gk_block_api_xchgXother' );
+	}
+
+	/**
 	 * purge_all_recorded() deletes every credential the meta store knows about,
 	 * from whichever user holds it — the uninstall path for own-account
 	 * credentials that the agent teardown can't reach.
