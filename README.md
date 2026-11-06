@@ -273,11 +273,20 @@ sends them with every request to the site.
 
 For Cloudflare Access, ask your IT team for a service token and a policy that uses the
 **Service Auth** action. An **Allow** policy still sends requests to the login page. Set the
-variable when you run the connector, and it saves the headers in your client's config:
+variable when you run the connector, and it saves the headers in your client's config.
+
+To keep the secret out of your shell history, paste the JSON at the prompt, then press Enter:
 
 ```bash
-WORDPRESS_CUSTOM_HEADERS='{"CF-Access-Client-Id":"<client id>","CF-Access-Client-Secret":"<client secret>"}' \
-  npx -y @gravitykit/block-mcp connect --site https://staging.example.com
+read -rs WORDPRESS_CUSTOM_HEADERS && export WORDPRESS_CUSTOM_HEADERS
+npx -y @gravitykit/block-mcp connect --site https://staging.example.com
+unset WORDPRESS_CUSTOM_HEADERS
+```
+
+The JSON looks like this:
+
+```json
+{"CF-Access-Client-Id":"<client id>","CF-Access-Client-Secret":"<client secret>"}
 ```
 
 For manual setup, add it to the `env` block with the other variables, with the quotes
@@ -287,7 +296,8 @@ escaped:
 "WORDPRESS_CUSTOM_HEADERS": "{\"CF-Access-Client-Id\":\"<client id>\",\"CF-Access-Client-Secret\":\"<client secret>\"}"
 ```
 
-- Block MCP removes these headers from any request that a redirect sends to another site.
+- Block MCP removes these headers and your WordPress credentials from any request that a redirect sends to another site. A site's `www.` and apex addresses count as the same site.
+- `connect` won't save these headers if the site reports a different address from `--site`.
 - You can't use this setting to replace headers Block MCP sets itself, such as
   `Authorization`, `Host` or `Content-Type`.
 - Printing the config hides the header values, like the password, unless you pass `--reveal` or `--client print`.

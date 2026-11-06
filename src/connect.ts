@@ -25,6 +25,7 @@ import {
   CUSTOM_HEADERS_ENV,
   isSameSiteRedirect,
   isGatewayRefusal,
+  isSameSiteOrWww,
   parseCustomHeaders,
   warnIfHeadersUnencrypted,
   type CustomHeaders,
@@ -483,7 +484,15 @@ export async function exchangeCode(
     throw new Error(`Exchange failed: something in front of WordPress refused the request (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
 
-  return parseExchangeResponse(json);
+  const creds = parseExchangeResponse(json);
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  if (hasCustomHeaders && !isSameSiteOrWww(new URL(site), new URL(creds.site))) {
+    throw new Error(
+      `Exchange failed: the site reports its address as ${new URL(creds.site).origin}, not ${new URL(site).origin}, so ${CUSTOM_HEADERS_ENV} was not saved for it. If that address is correct, run connect again with --site ${new URL(creds.site).origin}.`
+    );
+  }
+
+  return creds;
 }
 
 // ── MCP config builders ───────────────────────────────────────────────────────

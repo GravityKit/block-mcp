@@ -134,36 +134,50 @@ export interface RedirectOptions {
   headers?: Record<string, unknown>;
 }
 
+/** Whether two hosts are the same apart from a leading `www.`. */
+function isWwwVariant(current: URL, next: URL): boolean {
+  const strip = (hostname: string) => hostname.replace(/^www\./, '');
+  return current.hostname !== next.hostname && strip(current.hostname) === strip(next.hostname);
+}
+
+/**
+ * Whether a credential or custom header may go to `next`: the same site, or the
+ * same site's `www.` or apex form. A secure connection must stay secure, and the
+ * port must not change.
+ */
+export function isSameSiteOrWww(current: URL, next: URL): boolean {
+  const keepsSecurity = current.protocol === 'http:' || next.protocol === 'https:';
+  const keepsPort = current.port === next.port;
+  return isSameSiteRedirect(current, next) || (isWwwVariant(current, next) && keepsSecurity && keepsPort);
+}
+
 /** Whether a redirect target stays on the site. A target that can't be read counts as leaving it. */
 function redirectStaysOnSite(options: RedirectOptions, siteUrl: string): boolean {
   try {
-    return isSameSiteRedirect(new URL(siteUrl), new URL(options.href ?? ''));
+    return isSameSiteOrWww(new URL(siteUrl), new URL(options.href ?? ''));
   } catch {
     return false;
   }
 }
 
 /**
- * Remove custom headers from a redirected request that is leaving the site.
+ * Remove credentials and custom headers from a redirected request that is leaving
+ * the site.
  *
- * The HTTP client drops Authorization and Cookie on its own when a redirect
- * changes domain, but it keeps every other header. Without this, a site or
- * gateway that redirects elsewhere would receive the service token.
+ * The HTTP client only drops Authorization when a redirect changes domain, and it
+ * keeps Authorization for any subdomain and every other header for any host. Without
+ * this, a redirect could send the application password or the service token elsewhere.
  */
 export function stripHeadersOffSite(
   options: RedirectOptions,
   siteUrl: string,
   customHeaders: CustomHeaders
 ): void {
-  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
-  if (!hasCustomHeaders || !options.headers) {
-    return;
-  }
-  if (redirectStaysOnSite(options, siteUrl)) {
+  if (!options.headers || redirectStaysOnSite(options, siteUrl)) {
     return;
   }
 
-  const names = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
+  const names = new Set(['authorization', ...Object.keys(customHeaders).map((name) => name.toLowerCase())]);
   for (const name of Object.keys(options.headers)) {
     if (names.has(name.toLowerCase())) {
       delete options.headers[name];

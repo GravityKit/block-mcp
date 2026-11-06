@@ -40135,22 +40135,27 @@ function isSameSiteRedirect(current, next) {
   const isHttpsUpgrade = current.protocol === "http:" && next.protocol === "https:" && next.hostname === current.hostname && usesStandardHttpsPort;
   return next.origin === current.origin || isHttpsUpgrade;
 }
+function isWwwVariant(current, next) {
+  const strip = (hostname3) => hostname3.replace(/^www\./, "");
+  return current.hostname !== next.hostname && strip(current.hostname) === strip(next.hostname);
+}
+function isSameSiteOrWww(current, next) {
+  const keepsSecurity = current.protocol === "http:" || next.protocol === "https:";
+  const keepsPort = current.port === next.port;
+  return isSameSiteRedirect(current, next) || isWwwVariant(current, next) && keepsSecurity && keepsPort;
+}
 function redirectStaysOnSite(options, siteUrl) {
   try {
-    return isSameSiteRedirect(new URL(siteUrl), new URL(options.href ?? ""));
+    return isSameSiteOrWww(new URL(siteUrl), new URL(options.href ?? ""));
   } catch {
     return false;
   }
 }
 function stripHeadersOffSite(options, siteUrl, customHeaders) {
-  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
-  if (!hasCustomHeaders || !options.headers) {
+  if (!options.headers || redirectStaysOnSite(options, siteUrl)) {
     return;
   }
-  if (redirectStaysOnSite(options, siteUrl)) {
-    return;
-  }
-  const names = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
+  const names = /* @__PURE__ */ new Set(["authorization", ...Object.keys(customHeaders).map((name) => name.toLowerCase())]);
   for (const name of Object.keys(options.headers)) {
     if (names.has(name.toLowerCase())) {
       delete options.headers[name];
@@ -54343,7 +54348,14 @@ async function exchangeCode(site, code, fetchFn = fetch, timeoutMs = EXCHANGE_FE
   if (isGatewayRefusal(res.status, json2)) {
     throw new Error(`Exchange failed: something in front of WordPress refused the request (HTTP ${res.status}). ${GATEWAY_HINT}`);
   }
-  return parseExchangeResponse(json2);
+  const creds = parseExchangeResponse(json2);
+  const hasCustomHeaders = Object.keys(customHeaders).length > 0;
+  if (hasCustomHeaders && !isSameSiteOrWww(new URL(site), new URL(creds.site))) {
+    throw new Error(
+      `Exchange failed: the site reports its address as ${new URL(creds.site).origin}, not ${new URL(site).origin}, so ${CUSTOM_HEADERS_ENV} was not saved for it. If that address is correct, run connect again with --site ${new URL(creds.site).origin}.`
+    );
+  }
+  return creds;
 }
 function buildMcpEntry(creds, extraCaCerts = process.env.NODE_EXTRA_CA_CERTS, customHeaders = process.env[CUSTOM_HEADERS_ENV]) {
   const env = {

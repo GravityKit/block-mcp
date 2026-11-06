@@ -62,7 +62,7 @@ function gateway(loginUrl: string, respond = '{"posts":[],"addendum":""}') {
       return;
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(respond);
+    res.end(respond.replace('{{HOST}}', req.headers.host ?? ''));
   };
 }
 
@@ -75,6 +75,14 @@ function loginPage(_req: http.IncomingMessage, res: http.ServerResponse): void {
 function accessRefusal(_req: http.IncomingMessage, res: http.ServerResponse): void {
   res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', 'cf-access-domain': 'site.test' });
   res.end(`{"message":"Forbidden. You don't have permission to view this. Please contact your system administrator.","status_code":403}`);
+}
+
+/** Sends a request for one address to a local server, so a test can use an address it can't serve. */
+function mockFetch(actualUrl: string): typeof fetch {
+  return ((url: string, init: RequestInit) => {
+    const { pathname, search } = new URL(url);
+    return fetch(`${actualUrl}${pathname}${search}`, init);
+  }) as typeof fetch;
 }
 
 function makeClient(url: string, customHeaders?: Record<string, string>): WordPressBlockClient {
@@ -163,9 +171,13 @@ describe('stripHeadersOffSite', () => {
     expect(options.headers.accept).toBe('application/json');
   });
 
-  it('does nothing on a site with no custom headers, even if it cannot read the target', () => {
-    const options = redirect('not a url');
-    expect(() => stripHeadersOffSite(options, 'http://site.test:8080', {})).not.toThrow();
+  it('removes the password from a site with no custom headers when it cannot read the target', () => {
+    const options = {
+      href: 'not a url',
+      headers: { Authorization: 'Basic abc', accept: 'application/json' } as Record<string, unknown>,
+    };
+    stripHeadersOffSite(options, 'http://site.test:8080', {});
+    expect(options.headers.Authorization).toBeUndefined();
     expect(options.headers.accept).toBe('application/json');
   });
 });
@@ -313,6 +325,63 @@ describe('redirects through an HTTP proxy', () => {
   });
 });
 
+describe('redirects to a subdomain, which the HTTP client treats as trusted', () => {
+  /** Hostnames don't need DNS through a forward proxy, so this test can use real subdomains. */
+  async function serveFakeHosts(redirectTo: string) {
+    const destinations: Seen[] = [];
+    const proxy = await serve((req, res) => {
+      const target = new URL(req.url as string);
+      if (target.hostname === 'site.test') {
+        res.writeHead(302, { Location: redirectTo });
+        res.end();
+        return;
+      }
+      destinations.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body: '' });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"posts":[]}');
+    });
+    return { proxy, destinations };
+  }
+
+  async function viaProxy(proxyUrl: string, customHeaders?: Record<string, string>): Promise<void> {
+    const saved = { http: process.env.http_proxy, no: process.env.no_proxy, NO: process.env.NO_PROXY };
+    process.env.http_proxy = proxyUrl;
+    delete process.env.no_proxy;
+    delete process.env.NO_PROXY;
+    try {
+      await makeClient('http://site.test', customHeaders).findPosts();
+    } finally {
+      for (const [name, value] of [['http_proxy', saved.http], ['no_proxy', saved.no], ['NO_PROXY', saved.NO]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+
+  it.each([
+    ['with custom headers', TOKEN],
+    ['without custom headers', undefined],
+  ])('removes the password and headers on a redirect to another subdomain, %s', async (_label, headers) => {
+    const { proxy, destinations } = await serveFakeHosts('http://untrusted.site.test/steal');
+
+    await viaProxy(proxy.url, headers);
+
+    expect(destinations).toHaveLength(1);
+    expect(destinations[0].headers.authorization).toBeUndefined();
+    expect(destinations[0].headers['cf-access-client-secret']).toBeUndefined();
+  });
+
+  it('keeps the password and headers on a redirect to the www address', async () => {
+    const { proxy, destinations } = await serveFakeHosts('http://www.site.test/moved');
+
+    await viaProxy(proxy.url, TOKEN);
+
+    expect(destinations).toHaveLength(1);
+    expect(destinations[0].headers.authorization).toMatch(/^Basic /);
+    expect(destinations[0].headers['cf-access-client-secret']).toBe('probe-secret');
+  });
+});
+
 describe('an HTML page answering a REST call', () => {
   it('returns an error when a redirect lands on a login page', async () => {
     const login = await serve(loginPage);
@@ -411,7 +480,7 @@ describe('instructions fetch through a gateway', () => {
 });
 
 describe('credential exchange through a gateway', () => {
-  const exchanged = '{"success":true,"data":{"site":"https://example.com","user":"block-mcp","password":"pw"}}';
+  const exchanged = '{"success":true,"data":{"site":"http://{{HOST}}","user":"block-mcp","password":"pw"}}';
 
   it('sends the headers and receives the credential', async () => {
     const login = await serve(loginPage);
@@ -437,6 +506,36 @@ describe('credential exchange through a gateway', () => {
     });
 
     await expect(exchangeCode(site.url, 'code123')).rejects.not.toThrow(/in front of WordPress/);
+  });
+
+  const reportingSite = (site: string) =>
+    serve((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, data: { site, user: 'block-mcp', password: 'pw' } }));
+    });
+
+  it('refuses to save headers when the site reports a different address', async () => {
+    const site = await reportingSite('https://other.example.com');
+
+    await expect(exchangeCode(site.url, 'code123', fetch, 5000, TOKEN)).rejects.toThrow(
+      /other\.example\.com.*WORDPRESS_CUSTOM_HEADERS was not saved/
+    );
+  });
+
+  it('still connects to a site reporting a different address when no headers are set', async () => {
+    const site = await reportingSite('https://other.example.com');
+
+    const creds = await exchangeCode(site.url, 'code123');
+
+    expect(creds.site).toBe('https://other.example.com');
+  });
+
+  it('accepts an HTTPS or www form of the same address with headers set', async () => {
+    const httpsSite = await reportingSite('https://127.0.0.1');
+    expect((await exchangeCode(httpsSite.url.replace(/:\d+$/, ''), 'x', mockFetch(httpsSite.url), 5000, TOKEN)).password).toBe('pw');
+
+    const wwwSite = await reportingSite('https://www.site.test');
+    expect((await exchangeCode('http://site.test', 'x', mockFetch(wwwSite.url), 5000, TOKEN)).password).toBe('pw');
   });
 
   it('refuses the login redirect without headers, and says how to fix it', async () => {
@@ -481,9 +580,9 @@ describe('saving the headers to the client config', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const site = await serve((_req, res) => {
+    const site = await serve((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end('{"success":true,"data":{"site":"https://example.com","user":"block-mcp","password":"minted-once"}}');
+      res.end(`{"success":true,"data":{"site":"http://${req.headers.host}","user":"block-mcp","password":"minted-once"}}`);
     });
     const openBrowserFn = (authorizeUrl: string): void => {
       const authorize = new URL(authorizeUrl);
@@ -516,7 +615,7 @@ describe('saving the headers to the client config', () => {
 
     const login = await serve(loginPage);
     const site = await serve(
-      gateway(login.url, '{"success":true,"data":{"site":"https://example.com","user":"block-mcp","password":"pw"}}')
+      gateway(login.url, '{"success":true,"data":{"site":"http://{{HOST}}","user":"block-mcp","password":"pw"}}')
     );
 
     const openBrowserFn = (authorizeUrl: string): void => {
