@@ -509,6 +509,16 @@ class Block_Writer {
 	 */
 	private function roll_back_swap( $post_id, $expected, $new_content ) {
 		global $wpdb;
+
+		// Byte-exact: the WHERE below uses the column's collation, which would treat
+		// a case-only nested edit as the swap's own bytes and overwrite it.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$current = $wpdb->get_var( $wpdb->prepare( 'SELECT post_content FROM %i WHERE ID = %d', $wpdb->posts, $post_id ) );
+		if ( (string) $current !== (string) $new_content ) {
+			clean_post_cache( $post_id );
+			return;
+		}
+
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		$wpdb->query(
 			$wpdb->prepare(

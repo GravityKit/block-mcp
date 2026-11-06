@@ -256,6 +256,47 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A nested save changed only the letter case, then a later hook threw. Case-
+	 * insensitive collations see those bytes as equal, so the rollback compares bytes.
+	 */
+	public function test_throw_after_a_case_only_nested_save_keeps_the_nested_edit() {
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+
+		$this->save_expecting_exception(
+			$post_id,
+			$snapshot,
+			static function () use ( $post_id ) {
+				$nested = static function ( $id ) use ( $post_id, &$nested ) {
+					if ( $id !== $post_id ) {
+						return;
+					}
+					remove_action( 'save_post', $nested, 10 );
+					$saved = get_post_field( 'post_content', $post_id, 'raw' );
+					wp_update_post(
+						array(
+							'ID'           => $post_id,
+							'post_content' => wp_slash( str_replace( 'NEW', 'new', $saved ) ),
+						)
+					);
+				};
+				$throw  = static function () {
+					throw new \RuntimeException( 'hook failed' );
+				};
+				add_action( 'save_post', $nested, 10 );
+				add_action( 'save_post', $throw, 20 );
+				return static function () use ( $nested, $throw ) {
+					remove_action( 'save_post', $nested, 10 );
+					remove_action( 'save_post', $throw, 20 );
+				};
+			}
+		);
+
+		$this->assertStringContainsString( 'new', $this->persisted_content( $post_id ) );
+		$this->assertStringNotContainsString( 'KEEP', $this->persisted_content( $post_id ) );
+	}
+
+	/**
 	 * A hook made its own successful save, then a later hook threw. The rollback must
 	 * not overwrite that nested edit with the old snapshot.
 	 */
@@ -295,8 +336,9 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
-	 * A filtered save finished, with its revision, before a later hook threw. That
-	 * content stays, and the caller still sees the exception.
+	 * A filtered save reached the database before a later hook threw. That content
+	 * stays, because undoing it safely would need the tracking that can undo a nested
+	 * edit. Core only saves the revision after save_post, so none exists for this save.
 	 */
 	public function test_throw_after_a_finished_filtered_save_keeps_the_saved_content() {
 		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
