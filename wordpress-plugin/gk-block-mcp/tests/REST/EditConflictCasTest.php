@@ -416,6 +416,42 @@ class EditConflictCasTest extends RestControllerTestCase {
 	}
 
 	/**
+	 * A hook that throws during a guarded save still releases the lock. A leaked lock
+	 * stays on the connection, so on a persistent connection every later save of the
+	 * post would wait 5 seconds and return a 409.
+	 */
+	public function test_save_releases_the_lock_when_a_hook_throws() {
+		require_once dirname( __DIR__ ) . '/Block/RateLimitLockWpdbDouble.php';
+		$post_id  = $this->make_block_post( array( $this->block( 'core/paragraph', array(), '<p>KEEP</p>' ) ) );
+		$snapshot = $this->persisted_content( $post_id );
+		$real     = $GLOBALS['wpdb'];
+		$double   = new \GravityKit\BlockMCP\Tests\RateLimitLockWpdbDouble( $real, 1 );
+
+		$GLOBALS['wpdb'] = $double;
+		try {
+			$this->save_expecting_exception(
+				$post_id,
+				$snapshot,
+				static function () {
+					$throw = static function () {
+						throw new \RuntimeException( 'hook failed' );
+					};
+					add_filter( 'wp_insert_post_data', $throw );
+					return static function () use ( $throw ) {
+						remove_filter( 'wp_insert_post_data', $throw );
+					};
+				}
+			);
+		} finally {
+			$GLOBALS['wpdb'] = $real;
+		}
+
+		$statements = implode( "\n", $double->captured );
+		$this->assertStringContainsString( 'GET_LOCK', $statements );
+		$this->assertStringContainsString( 'RELEASE_LOCK', $statements );
+	}
+
+	/**
 	 * The lazy gk_ref persist writes straight to post_content via $wpdb,
 	 * bypassing wp_update_post. With a snapshot it must compare-and-swap: a
 	 * concurrent content edit that landed after the ref walk read the post

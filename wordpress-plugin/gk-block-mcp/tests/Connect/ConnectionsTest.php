@@ -336,17 +336,25 @@ class ConnectionsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Uninstall removes the rows recording each connection, and every row under a
-	 * prefix, without touching a name that only matches if `_` were a wildcard.
+	 * Uninstall removes the rows recording each connection, and keeps a name that
+	 * only matches if `_` were a wildcard.
 	 */
-	public function test_purge_removes_connection_rows_and_prefix_delete_escapes_underscores() {
+	public function test_purge_all_recorded_removes_connection_meta_rows() {
 		update_network_option( null, Connections::META_ROW_PREFIX . 'row-1', array( 'user_id' => 0 ) );
 		update_network_option( null, 'gkXblockXapiXconnXmetaXother', 'x' );
+
 		Connections::purge_all_recorded();
+
 		$this->assertNull( get_network_option( null, Connections::META_ROW_PREFIX . 'row-1', null ) );
 		$this->assertSame( 'x', get_network_option( null, 'gkXblockXapiXconnXmetaXother', null ) );
 		delete_network_option( null, 'gkXblockXapiXconnXmetaXother' );
+	}
 
+	/**
+	 * A prefix delete removes every option under the prefix, and keeps a name that
+	 * only matches if `_` were a wildcard.
+	 */
+	public function test_delete_options_by_prefix_treats_underscore_literally() {
 		update_option( 'gk_block_api_xchg_mine', 'x', false );
 		update_option( 'gkXblockXapi_xchg_other', 'x', false );
 		update_option( 'gk_block_api_xchgXother', 'x', false );
