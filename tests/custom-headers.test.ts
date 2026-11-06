@@ -480,7 +480,7 @@ describe('an HTML page answering a REST call', () => {
   it('still returns a plain-text body that is not a page', async () => {
     const site = await serve((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('<html is mentioned here, but this is plain text');
+      res.end('This plain text mentions <html> in the middle.');
     });
 
     await expect(makeClient(site.url).findPosts()).resolves.toContain('plain text');
