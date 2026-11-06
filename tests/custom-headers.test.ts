@@ -142,7 +142,8 @@ describe('warnIfHeadersUnencrypted', () => {
     ['http://localhost:8080', TOKEN, false],
     ['http://127.0.0.1:8080', TOKEN, false],
     ['http://[::1]:8080', TOKEN, false],
-    ['http://dev.local', TOKEN, false],
+    ['http://site.localhost', TOKEN, false],
+    ['http://dev.local', TOKEN, true],
     ['http://site.test', {}, false],
   ])('for %s with headers %j returns %s', (url, headers, expected) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -458,6 +459,31 @@ describe('an HTML page answering a REST call', () => {
 
     expect(error.wpCode).toBe('incorrect_password');
     expect(error.message).toContain('invalid application password');
+  });
+
+  it.each([
+    ['text/plain', '<!DOCTYPE html><html>Sign in</html>'],
+    ['application/octet-stream', '  <html lang="en">Sign in</html>'],
+    [undefined, '<html>Sign in</html>'],
+  ])('returns an error for a login page labeled %s', async (contentType, page) => {
+    const site = await serve((_req, res) => {
+      res.writeHead(200, contentType ? { 'Content-Type': contentType } : {});
+      res.end(page);
+    });
+
+    const error = await makeClient(site.url).findPosts().catch((e) => e);
+
+    expect(error.wpCode).toBe('gateway_page');
+    expect(error.message).not.toContain('Sign in');
+  });
+
+  it('still returns a plain-text body that is not a page', async () => {
+    const site = await serve((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('<html is mentioned here, but this is plain text');
+    });
+
+    await expect(makeClient(site.url).findPosts()).resolves.toContain('plain text');
   });
 
   it('still accepts JSON from a host that labels it text/html', async () => {

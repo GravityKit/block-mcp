@@ -40119,8 +40119,8 @@ function warnIfHeadersUnencrypted(siteUrl, customHeaders) {
   let isUnencrypted = false;
   try {
     const { protocol, hostname: hostname3 } = new URL(siteUrl);
-    const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(hostname3) || hostname3.endsWith(".local");
-    isUnencrypted = protocol === "http:" && !isLocal;
+    const isLoopback2 = ["localhost", "127.0.0.1", "[::1]"].includes(hostname3) || hostname3.endsWith(".localhost");
+    isUnencrypted = protocol === "http:" && !isLoopback2;
   } catch {
     return false;
   }
@@ -40166,7 +40166,12 @@ function stripHeadersOffSite(options, siteUrl, customHeaders) {
 // src/client.ts
 var GATEWAY_PAGE_MESSAGE = `something in front of WordPress answered this request, not the REST API. A login gateway such as Cloudflare Access or a security plugin is probably blocking it. If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.`;
 function isHtmlPage(data, contentType) {
-  return typeof data === "string" && /text\/html/i.test(String(contentType ?? ""));
+  if (typeof data !== "string") {
+    return false;
+  }
+  const isLabeledHtml = /text\/html/i.test(String(contentType ?? ""));
+  const startsLikeHtml = /^\s*<(!doctype\s+html|html)[\s>]/i.test(data);
+  return isLabeledHtml || startsLikeHtml;
 }
 function mimeForFilename(filename) {
   const ext = filename.toLowerCase().split(".").pop() ?? "";

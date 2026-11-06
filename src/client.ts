@@ -23,9 +23,18 @@ const GATEWAY_PAGE_MESSAGE =
   `If the gateway needs extra headers, set ${CUSTOM_HEADERS_ENV} in the MCP client config. ` +
   'If they are already set, check that the gateway accepts them: a Cloudflare Access policy must use the Service Auth action and include this service token.';
 
-/** True when a response body is an unparsed HTML page rather than REST API JSON. */
+/**
+ * True when a response body is an unparsed HTML page rather than REST API JSON. JSON
+ * has already been parsed by this point, even when a host labels it text/html. The
+ * body is checked as well because a gateway can send a page with the wrong type or none.
+ */
 function isHtmlPage(data: unknown, contentType: unknown): boolean {
-  return typeof data === 'string' && /text\/html/i.test(String(contentType ?? ''));
+  if (typeof data !== 'string') {
+    return false;
+  }
+  const isLabeledHtml = /text\/html/i.test(String(contentType ?? ''));
+  const startsLikeHtml = /^\s*<(!doctype\s+html|html)[\s>]/i.test(data);
+  return isLabeledHtml || startsLikeHtml;
 }
 
 /** Best-effort MIME type from a filename extension, for multipart uploads. */

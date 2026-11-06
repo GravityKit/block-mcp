@@ -91,16 +91,17 @@ export function isGatewayRefusal(status: number, body: unknown): boolean {
 }
 
 /**
- * Warn when a secret header would cross the network in clear text. Stays quiet for
- * the local machine, which never leaves it, and returns whether it warned.
+ * Warn when a secret header would cross the network in clear text, and return whether
+ * it warned. Only loopback addresses are exempt, because a `.local` name can be another
+ * device on the network.
  */
 export function warnIfHeadersUnencrypted(siteUrl: string, customHeaders: CustomHeaders): boolean {
   const hasCustomHeaders = Object.keys(customHeaders).length > 0;
   let isUnencrypted = false;
   try {
     const { protocol, hostname } = new URL(siteUrl);
-    const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(hostname) || hostname.endsWith('.local');
-    isUnencrypted = protocol === 'http:' && !isLocal;
+    const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(hostname) || hostname.endsWith('.localhost');
+    isUnencrypted = protocol === 'http:' && !isLoopback;
   } catch {
     return false;
   }
