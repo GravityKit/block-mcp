@@ -52453,6 +52453,7 @@ async function shikiHighlight(code, language, themeName) {
   const { hl, langs } = await getHighlighter();
   const lang29 = langs.has(language) ? language : "plaintext";
   let html5 = hl.codeToHtml(code, { lang: lang29, theme: "css-variables" }).replace(/var\(--shiki-foreground\)/g, "var(--shiki-color-text)").replace(/var\(--shiki-background\)/g, "var(--shiki-color-background)");
+  html5 = html5.replace(/<span>/g, '<span style="color: var(--shiki-color-text)">');
   if (themeName && themeName !== "css-variables") {
     html5 = html5.replace(/(<pre[^>]*class="shiki) css-variables(")/, (_m, p1, p2) => `${p1} ${themeName}${p2}`);
   }
@@ -52529,10 +52530,13 @@ function syncWrapperFontFamily(innerHTML, fontFamily) {
   } else {
     tag = tag.replace(/>$/, () => ` style="font-family:${nextFont}">`);
   }
-  tag = tag.replace(
-    /data-code-block-pro-font-family="[^"]*"/,
-    () => `data-code-block-pro-font-family="${nextFont}"`
-  );
+  if (attrFont !== null) {
+    const dataFont = escapeAttr(attrFont.trim());
+    tag = tag.replace(
+      /data-code-block-pro-font-family="[^"]*"/,
+      () => `data-code-block-pro-font-family="${dataFont}"`
+    );
+  }
   return innerHTML.replace(openTagPattern, () => tag);
 }
 registerBlockEnricher("kevinbatdorf/code-block-pro", async (block) => {

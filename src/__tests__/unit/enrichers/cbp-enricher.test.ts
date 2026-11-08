@@ -700,3 +700,48 @@ describe('CBP enricher — wrapper font-family sync', () => {
     expect(second).toBe(unchanged);
   });
 });
+
+describe('CBP enricher — front-end rendering contract', () => {
+  /**
+   * CBP's front-end script loads `build/fonts/<data attribute>.woff2`. With the
+   * fallback stack in the attribute it requests a file that does not exist, the
+   * webfont never loads, and the wider fallback font wraps two-digit line numbers.
+   */
+  it('writes the bare font name to the webfont data attribute', async () => {
+    const result = await enrichBlock({
+      name: 'kevinbatdorf/code-block-pro',
+      attributes: { code: 'const a = 1;', language: 'javascript', fontFamily: 'Code-Pro-JetBrains-Mono' },
+      innerHTML:
+        '<div class="wp-block-kevinbatdorf-code-block-pro" ' +
+        'data-code-block-pro-font-family="Code-Pro-JetBrains-Mono" ' +
+        'style="font-family:Code-Pro-JetBrains-Mono;font-size:1rem">' +
+        '<pre class="shiki gravitykit-dark"><code>stale</code></pre></div>',
+    });
+    expect(result.innerHTML).toContain('data-code-block-pro-font-family="Code-Pro-JetBrains-Mono"');
+    expect(result.innerHTML).toContain(
+      'font-family:Code-Pro-JetBrains-Mono,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
+    );
+  });
+
+  /**
+   * A token span without its own color inherits the page's `pre`/`code` color,
+   * which on BetterDocs docs is dark gray on the navy code background.
+   */
+  it('gives every token span an explicit color', async () => {
+    for (const [code, language] of [
+      ['// plain text\nadd_filter( "a", "b" );', 'plaintext'],
+      ["add_filter( 'a', '__return_false' );", 'php'],
+    ]) {
+      const result = await enrichBlock({
+        name: 'kevinbatdorf/code-block-pro',
+        attributes: { code, language, theme: 'gravitykit-dark' },
+      });
+      const codeHTML = result.attributes?.codeHTML as string;
+      expect(codeHTML).not.toMatch(/<span>/);
+      if (language === 'plaintext') {
+        expect(codeHTML).toContain('<span style="color: var(--shiki-color-text)">');
+      }
+      expect(result.innerHTML).not.toMatch(/<span>/);
+    }
+  });
+});

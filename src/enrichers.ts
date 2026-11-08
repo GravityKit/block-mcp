@@ -179,6 +179,9 @@ export async function shikiHighlight(code: string, language: string, themeName?:
   let html = hl.codeToHtml(code, { lang, theme: 'css-variables' })
     .replace(/var\(--shiki-foreground\)/g, 'var(--shiki-color-text)')
     .replace(/var\(--shiki-background\)/g, 'var(--shiki-color-background)');
+  // Shiki leaves default-color tokens as bare <span>s, which inherit theme colors
+  // (dark gray on BetterDocs). CBP's own output colors every token span.
+  html = html.replace(/<span>/g, '<span style="color: var(--shiki-color-text)">');
   if (themeName && themeName !== 'css-variables') {
     // Replacer function so a `$` in themeName is not read as a replacement token.
     html = html.replace(/(<pre[^>]*class="shiki) css-variables(")/, (_m, p1, p2) => `${p1} ${themeName}${p2}`);
@@ -339,11 +342,15 @@ function syncWrapperFontFamily(innerHTML: string, fontFamily: unknown): string {
     tag = tag.replace(/>$/, () => ` style="font-family:${nextFont}">`);
   }
 
-  // CBP's front-end script reads this attribute to decide which webfont to load.
-  tag = tag.replace(
-    /data-code-block-pro-font-family="[^"]*"/,
-    () => `data-code-block-pro-font-family="${nextFont}"`,
-  );
+  // CBP's front-end script loads `build/fonts/<this value>.woff2`, so this takes
+  // the bare attribute. A fallback stack here names a file that does not exist.
+  if (attrFont !== null) {
+    const dataFont = escapeAttr(attrFont.trim());
+    tag = tag.replace(
+      /data-code-block-pro-font-family="[^"]*"/,
+      () => `data-code-block-pro-font-family="${dataFont}"`,
+    );
+  }
 
   return innerHTML.replace(openTagPattern, () => tag);
 }
