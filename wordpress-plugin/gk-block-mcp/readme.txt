@@ -129,6 +129,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🐛 Fixed
 
 * Tool calls now return a clear error when a login gateway or security plugin answers in place of WordPress.
+* After you approve `connect` in the browser, the tab no longer says "Connected" before the connection finishes. It now asks you to check the terminal, which shows whether the connection succeeded.
 * WordPress credentials are no longer sent when a site redirects a request to another subdomain.
 * Code Block Pro blocks written through Block MCP now show their text in the theme's code color. Before, plain text in them could take the page's own text color, such as dark gray on a navy code background.
 * Code Block Pro blocks written through Block MCP now load their code font. Before, they showed in a wider fallback font, and line numbers 10 and up broke onto two lines.
