@@ -54537,11 +54537,11 @@ function openBrowser(url3) {
 }
 var SUCCESS_HTML = `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Connected</title>
+<head><meta charset="utf-8"><title>Approved</title>
 <style>body{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;text-align:center}
 h1{color:#2d6a4f}p{color:#555}</style></head>
-<body><h1>&#x2713; Connected</h1>
-<p>You can close this tab and return to your terminal.</p></body>
+<body><h1>&#x2713; Approved</h1>
+<p>Return to your terminal to finish connecting. It shows whether the connection succeeded.</p></body>
 </html>`;
 var ERROR_HTML = (msg) => `<!DOCTYPE html>
 <html lang="en">

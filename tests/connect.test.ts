@@ -18,6 +18,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
+  SUCCESS_HTML,
   parseConnectArgs,
   normalizeSite,
   buildAuthorizeUrl,
@@ -780,5 +781,17 @@ describe('NODE_EXTRA_CA_CERTS propagation', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe('SUCCESS_HTML (browser tab after approval)', () => {
+  // The tab is served before the credential exchange runs, so it must not
+  // claim the connection succeeded: the exchange can still fail.
+  it('does not claim the connection succeeded', () => {
+    expect(SUCCESS_HTML).not.toMatch(/Connected/);
+  });
+
+  it('sends the user to the terminal for the result', () => {
+    expect(SUCCESS_HTML).toMatch(/Return to your terminal to finish connecting/);
   });
 });
