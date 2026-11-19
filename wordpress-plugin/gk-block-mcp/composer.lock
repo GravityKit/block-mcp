@@ -82,12 +82,12 @@
             "source": {
                 "type": "git",
                 "url": "git@github.com:GravityKit/Foundation.git",
-                "reference": "c5487a0812ac857e760526aa50cea3fb37cc7d2e"
+                "reference": "5a299f5ee099cd09e576ac9994911b797b633e5e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/GravityKit/Foundation/zipball/c5487a0812ac857e760526aa50cea3fb37cc7d2e",
-                "reference": "c5487a0812ac857e760526aa50cea3fb37cc7d2e",
+                "url": "https://api.github.com/repos/GravityKit/Foundation/zipball/5a299f5ee099cd09e576ac9994911b797b633e5e",
+                "reference": "5a299f5ee099cd09e576ac9994911b797b633e5e",
                 "shasum": ""
             },
             "require": {
@@ -151,7 +151,8 @@
                     "GravityKit\\Foundation\\": "src"
                 },
                 "files": [
-                    "src/Scheduler/Loader.php"
+                    "src/Scheduler/Loader.php",
+                    "src/Autoload/moved-classes.php"
                 ]
             },
             "scripts": {
@@ -168,8 +169,9 @@
                     "@php tools/strauss.phar"
                 ],
                 "test:unit": [
-                    "@php vendor/bin/pest --group=unit --no-coverage --exclude-group=abilities",
-                    "@php vendor/bin/pest --group=abilities --no-coverage"
+                    "@php vendor/bin/pest --group=unit --no-coverage --exclude-group=abilities,logger-framework",
+                    "@php vendor/bin/pest --group=abilities --no-coverage",
+                    "@php vendor/bin/pest tests/Unit/Logger/FrameworkLogStorageTest.php --no-coverage"
                 ],
                 "post_update_install": [
                     "@php scripts/post-install.php"
@@ -195,10 +197,10 @@
                 }
             ],
             "support": {
-                "source": "https://github.com/GravityKit/Foundation/tree/v1.35.0",
+                "source": "https://github.com/GravityKit/Foundation/tree/v1.42.0",
                 "issues": "https://github.com/GravityKit/Foundation/issues"
             },
-            "time": "2026-10-01T18:51:01+00:00"
+            "time": "2026-11-19T17:05:38+00:00"
         },
         {
             "name": "illuminate/container",
@@ -830,16 +832,16 @@
         },
         {
             "name": "symfony/polyfill-mbstring",
-            "version": "v1.43.0",
+            "version": "v1.43.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/polyfill-mbstring.git",
-                "reference": "4d5d331bf731e0aedbc6b2f5e61135b7b7996a72"
+                "reference": "122889ed24dc000165bcbfd77ec412f15cbdfc6a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/polyfill-mbstring/zipball/4d5d331bf731e0aedbc6b2f5e61135b7b7996a72",
-                "reference": "4d5d331bf731e0aedbc6b2f5e61135b7b7996a72",
+                "url": "https://api.github.com/repos/symfony/polyfill-mbstring/zipball/122889ed24dc000165bcbfd77ec412f15cbdfc6a",
+                "reference": "122889ed24dc000165bcbfd77ec412f15cbdfc6a",
                 "shasum": ""
             },
             "require": {
@@ -891,7 +893,7 @@
                 "shim"
             ],
             "support": {
-                "source": "https://github.com/symfony/polyfill-mbstring/tree/v1.43.0"
+                "source": "https://github.com/symfony/polyfill-mbstring/tree/v1.43.3"
             },
             "funding": [
                 {
@@ -911,7 +913,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-24T15:19:04+00:00"
+            "time": "2026-10-28T09:35:49+00:00"
         },
         {
             "name": "symfony/polyfill-php70",

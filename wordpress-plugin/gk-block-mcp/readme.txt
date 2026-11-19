@@ -141,7 +141,7 @@ Visit Settings → Block MCP. Set the score for a namespace to less than 10 to m
 #### 🔧 Updated
 
 * The minimum required WordPress version is now 6.5.
-* [Foundation](https://www.gravitykit.com/foundation/) to version 1.35.0.
+* [Foundation](https://www.gravitykit.com/foundation/) to version 1.42.0.
 
 = 2.2.1 on August 20, 2026 =
 
